@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""开发门禁：暂存快照、前端风格、提交范围与 PR 标题；只检查，不代替审阅。"""
+"""开发门禁：暂存快照、前端风格、提交消息及推送范围；只检查，不修改待提交内容。"""
 from __future__ import annotations
 
 import argparse
@@ -143,7 +143,7 @@ def main() -> int:
     """执行明确检查模式，所有失败返回非零；钩子不格式化、不暂存、不安装。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=[
-        "lint", "format", "format-check", "staged", "message", "commits", "push", "pr-title",
+        "lint", "format", "format-check", "staged", "message", "commits", "push",
     ])
     parser.add_argument("--file", type=Path)
     parser.add_argument("--base", default="origin/main")
@@ -166,11 +166,6 @@ def main() -> int:
             check_commits(commit_revisions(args.base, args.head))
         elif args.command == "push":
             check_commits(repository.pre_push_revisions(), include_frontend=True)
-        else:
-            title = sys.stdin.read().rstrip("\n")
-            if "\n" in title or "\r" in title:
-                raise RuntimeError("PR 标题必须是单行文本")
-            check_message(title, "PR 标题")
         return 0
     except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as error:
         print(str(error), file=sys.stderr)

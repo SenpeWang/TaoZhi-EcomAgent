@@ -6,9 +6,9 @@
 
 | 目录 | 职责 |
 | --- | --- |
-| `.github/` | GitHub 协作与检查 |
+| `.github/` | GitHub 检查及中文问题反馈，不使用 PR 模板 |
 | `.github/ISSUE_TEMPLATE/` | 中文 Bug、功能、文档与使用问题表单 |
-| `.github/workflows/` | 最小权限 CI，不自动部署 |
+| `.github/workflows/` | main 推送触发的最小权限 CI，不自动部署 |
 | `.githooks/` | 每份克隆主动启用的提交与推送门禁 |
 | `docs/` | 公开的软件架构、部署和贡献说明 |
 | `migrations/` | Alembic 环境 |

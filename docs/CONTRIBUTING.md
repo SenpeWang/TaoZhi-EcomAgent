@@ -1,6 +1,6 @@
 # 企业工作台开发与贡献规范
 
-本文件是仓库公开的开发与协作规范。维护者本机的 AGENTS.md 仅供本地维护，不进入 Git；克隆仓库不依赖该文件即可开发。目标仓库为 `https://github.com/SenpeWang/test.git`。维护者在本仓库创建工作分支；外部贡献者先 Fork。采用单人维护、工作分支与 PR、维护者审阅和 Squash 合并。
+本文件是仓库公开的开发与协作规范。维护者本机的 AGENTS.md 仅供本地维护，不进入 Git；克隆仓库不依赖该文件即可开发。目标仓库为 `https://github.com/SenpeWang/test.git`。本仓库由仓库所有人维护，完成本地检查后直接向 main 提交和推送，不要求工作分支、PR 或 Squash。外部使用者通过 Issue 反馈问题和建议。
 
 ## 环境与前端风格
 
@@ -64,39 +64,33 @@ BREAKING CHANGE: 移除旧字段，客户端须使用新接口；部署前完成
 
 破坏性变更可用 ! 或 BREAKING CHANGE:，正文必须说明兼容影响和迁移办法。历史初始化提交保留，不为规范重写已发布历史。一个提交处理一个可解释的主题；正文写原因、影响和验证。参考 [Conventional Commits 规范](https://www.conventionalcommits.org/zh-hans/v1.0.0/)。
 
-## 工作分支、PR 与 Squash
+## 维护者直接提交主分支
 
 ~~~bash
 git status --short
 git remote -v
 git fetch origin --prune
-git switch --no-overwrite-ignore -c feat/document-history origin/main
+git switch --no-overwrite-ignore main
+git merge --ff-only origin/main
 # 修改代码、说明并完成必要验证
 git add web/src/DocumentHistory.vue docs/STRUCTURE.md README.md
 # 上面只是选择文件的例子，须按实际差异明确暂存；不盲目 git add .
 python3 scripts/check_development.py staged
 git diff --cached --stat
 git commit -m "feat(documents): 增加资料版本对比"
-git push -u origin HEAD
-# 在 GitHub 创建 PR，按模板填写，等待 CI 和维护者审阅
-~~~
-
-维护者审阅后使用 **Squash and merge**；PR 标题需符合提交规范，作为最终 squash 提交标题。禁止强推、覆盖已发布历史、使用 --no-verify 或 git add -f 绕过检查。非快进先 fetch 并理解变化，整合后重新验证，再正常推送。
-
-合并后：
-
-~~~bash
+# 推送前重新获取远端历史，检查所有尚未发布的提交
 git fetch origin --prune
-# 从工作分支更新本机 main，只接受正常快进，不强推或重写历史
-git fetch origin main:main
-git switch --no-overwrite-ignore main
-git merge --ff-only origin/main
+make check-commits
+git push origin main
+git fetch origin
 git rev-parse HEAD
 git rev-parse origin/main
 git ls-remote origin refs/heads/main
 ~~~
 
-比较的是同一分支本地 HEAD、远端跟踪引用与 GitHub 引用。Squash 后工作分支与 main 的哈希通常不同，这是正常现象。未合并 PR 时核验工作分支与 origin/工作分支一致。代码推送不等于部署。
+维护者直接提交 main，使用标准 Conventional Commits 标题；提交和推送钩子必须通过，推送后等待该提交的 CI。比较本机 main、origin/main 和 GitHub main 的 SHA，三者应一致。代码推送不等于部署。
+
+禁止强推、覆盖已发布历史、使用 --no-verify 或 git add -f 绕过检查。非快进时先 fetch 并阅读远端变化：远端仅领先则正常快进；双方都有提交则使用 git merge --no-commit origin/main，解决冲突并验证后创建符合规范的合并提交，保留双方历史，再正常推送，不覆盖并发更新。目标分支仍跟踪本机维护文件时不得直接切换，按文末规则先检查和正常快进。
 
 用户已经授权推送时直接完成所需门禁、提交和推送，不重复索取确认；没有发布授权则完成本地维护，不擅自发布。连接器或网页创建提交也须先执行同等检查，并保留父提交、核验预期远端 SHA。认证使用连接器、SSH Agent 或系统凭据管理，不在 URL 中放令牌。
 
@@ -105,15 +99,15 @@ git ls-remote origin refs/heads/main
 - pre-commit：先检查 **完整 Git 索引** 的公开边界，再从 Git blob 导出暂存快照，对该快照执行组件、ESLint 与 Prettier；最后检查暂存 diff 空白。未暂存修复不参与结果。临时目录成功和失败均清理。
 - commit-msg：检查消息中的秘密与 Conventional Commits，不回显原始标题、正文或秘密。
 - pre-push：限定目标仓库，逐次检查全部新增提交的文件树、目录、秘密、提交消息及前端快照。中间提交的资料或密钥即使最后删除也拒绝。
-- CI：独立执行公开内容、目录、提交范围、PR 标题、ESLint、Prettier、组件命名、TypeScript 构建、Alembic 与 PostgreSQL 18 独立测试库回归；不读取真实资料、调用付费模型或自动部署。
-- PR 标题经环境变量和标准输入传入校验，不拼入 shell。CI 最小权限 contents: read；动作固定提交。
+- CI：由 main 的 push 触发，独立执行公开内容、目录、真实提交范围及消息、ESLint、Prettier、组件命名、TypeScript 构建、Alembic 与 PostgreSQL 18 独立测试库回归；不读取真实资料、调用付费模型或自动部署。
+- 提交消息按数据和文件参数处理，不拼入 shell。CI 最小权限 contents: read；动作固定提交。
 - 每份克隆须 make install-hooks，Git 不会自动启用仓库钩子。文档与 CI 不能替代 GitHub 服务端保护设置；只有实际配置才可宣称强制启用。本期保持已有仓库设置。
 
 ## 公开资料与反馈边界
 
 整个 data/、任意目录和大小写的 AGENTS.md、项目说明.md、私有 .env、老板初始化身份、凭据、数据库、附件、备份、运行日志、依赖和构建产物禁止提交。业务文件不得搬到源码、公开说明或测试中绕过检查。测试只能自行构造最小合成事实。已跟踪私有文件用 git rm --cached 移出 Git，保留本机原件；仅修改 .gitignore 不会停止跟踪已有文件。发现历史秘密停止推送并安排凭据轮换，删除现文件不能清除历史，不自行强推。
 
-PR 模板记录问题、改动、影响、验证、文档同步及迁移风险。Issue 提供 Bug、功能、文档和使用问题四类表单。反馈前移除密码、API Key、Cookie、客户资料与机密正文，截图也要脱敏。
+提交正文和交付说明记录问题、改动、影响、验证、文档同步及迁移风险。Issue 提供 Bug、功能、文档和使用问题四类表单。反馈前移除密码、API Key、Cookie、客户资料与机密正文，截图也要脱敏。
 
 ## 发布与恢复
 
@@ -125,4 +119,4 @@ AGENTS.md 已改为本机文件，名称大小写和所在目录均不影响禁�
 
 切换前已经发布的提交 `5018289`、`2b071e5` 保留原历史；检查仅对这两个确定提交兼容旧维护文件路径，仍检查其秘密、其他禁传资料和目录登记。该兼容不适用于任何新提交或暂存内容，不允许扩大历史名单来放行未发布内容。删除跟踪不会清除旧提交中的文件，也不会自动改动尚未合并的其他分支。
 
-维护主机切换分支使用 git switch --no-overwrite-ignore，避免旧分支覆写被忽略的 AGENTS.md。合入修正后，在工作分支先用 git fetch origin main:main 正常快进本机 main，再切换；若目标仍跟踪维护文件、分支分叉或无法快进，停止切换并检查，不能覆盖本机规则。
+日常维护在 main 进行。需要切换已有分支时使用 git switch --no-overwrite-ignore，避免旧分支覆写被忽略的 AGENTS.md。从旧工作分支转回 main 时，只能在检查目标内容后通过 git fetch . HEAD:main 或 git fetch origin main:main 正常快进尚未检出的本机 main，再安全切换；若目标仍跟踪维护文件、分支分叉或无法快进，停止切换并检查，不能覆盖本机规则。

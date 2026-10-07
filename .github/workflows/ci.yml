@@ -1,10 +1,7 @@
 name: 企业工作台检查
 on:
   push:
-    branches: ['**']
-  pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, edited, ready_for_review]
 permissions:
   contents: read
 concurrency:
@@ -42,7 +39,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: 公开内容与目录检查
         run: python3 scripts/check_repository.py --tracked
@@ -65,26 +62,13 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: 提交范围检查
         env:
-          CHECK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          CHECK_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          CHECK_BASE: ${{ github.event.before }}
+          CHECK_HEAD: ${{ github.sha }}
         run: |
           if [ -z "$CHECK_BASE" ] || [ "$CHECK_BASE" = "0000000000000000000000000000000000000000" ]; then
             CHECK_BASE="$(git merge-base origin/main "$CHECK_HEAD")"
           fi
           python3 scripts/check_development.py commits --base "$CHECK_BASE" --head "$CHECK_HEAD"
-      - name: PR 标题检查
-        if: github.event_name == 'pull_request'
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          python3 - <<'PY'
-          import os
-          import subprocess
-          subprocess.run(
-              ["python3", "scripts/check_development.py", "pr-title"],
-              input=os.environ["PR_TITLE"], text=True, check=True,
-          )
-          PY
       - name: ESLint、组件命名与 Prettier
         run: |
           make lint-web

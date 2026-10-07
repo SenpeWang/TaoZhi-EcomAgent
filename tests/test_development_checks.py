@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib.util
-import io
 import shutil
 import subprocess
 import sys
@@ -73,21 +72,24 @@ def test_secret_in_message_is_not_echoed(workspace):
     assert "秘密" in str(error.value)
 
 
-def test_invalid_and_multiline_pr_titles(workspace, monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["check_development.py", "pr-title"])
-    monkeypatch.setattr(sys, "stdin", io.StringIO("invalid PR title"))
+def test_message_cli_rejects_invalid_and_missing_input(workspace, monkeypatch):
+    """主分支提交的真实文件参数必须接受校验；无效消息和缺失参数都拒绝。"""
+    root, _ = workspace
+    message = root / "commit-message.txt"
+    message.write_text("invalid commit title")
+    monkeypatch.setattr(sys, "argv", ["check_development.py", "message", "--file", str(message)])
     assert development.main() == 1
-    monkeypatch.setattr(sys, "stdin", io.StringIO("feat: 修改页面\n$(touch ignored)"))
+    monkeypatch.setattr(sys, "argv", ["check_development.py", "message"])
     assert development.main() == 1
 
 
-def test_pr_title_remains_data(workspace, monkeypatch):
+def test_commit_message_file_remains_data(workspace, monkeypatch):
+    """消息文件中的 Shell 语法始终是数据，不能产生额外文件。"""
     root, _ = workspace
     marker = root / "executed"
-    # 使用相对短标记避免标题长度影响测试，只把内容经 stdin 传给真实 CLI。
-    title = "docs: 示例标题 $(touch executed)"
-    monkeypatch.setattr(sys, "argv", ["check_development.py", "pr-title"])
-    monkeypatch.setattr(sys, "stdin", io.StringIO(title))
+    message = root / "commit-message.txt"
+    message.write_text("docs: 示例标题 $(touch executed)")
+    monkeypatch.setattr(sys, "argv", ["check_development.py", "message", "--file", str(message)])
     assert development.main() == 0
     assert not marker.exists() and not (root / "web/executed").exists()
 

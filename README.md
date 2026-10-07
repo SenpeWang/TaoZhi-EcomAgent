@@ -54,7 +54,7 @@ flowchart LR
 src/ecom_copilot/enterprise/   在线业务、权限与工作流
 src/ecom_copilot/             共享能力和隔离的离线模块
 web/src/                     中文工作台、类型与同源 API
-.github/workflows/           CI 与 PR 标题、提交范围检查
+.github/workflows/           main 推送的 CI 与提交范围检查
 .github/ISSUE_TEMPLATE/      四类中文反馈表单
 .githooks/                   提交快照、消息和推送门禁
 migrations/                  数据库迁移
@@ -107,7 +107,7 @@ make build-web        # TypeScript 检查与生产构建
 make verify-browser   # 演示入口四身份浏览器验收
 ~~~
 
-依赖锁为 `requirements.v3.lock.txt` 和 `web/package-lock.json`。CI 验证提交范围、PR 标题、仓库边界、目录登记、ESLint、Prettier、组件命名、类型构建、数据库迁移和独立测试库的离线回归；不读取真实资料或调用付费模型。权限与泄漏边界的验收范围见 [验证说明](docs/VALIDATION.md)。
+依赖锁为 `requirements.v3.lock.txt` 和 `web/package-lock.json`。CI 在 main 推送后验证真实提交及消息、仓库边界、目录登记、ESLint、Prettier、组件命名、类型构建、数据库迁移和独立测试库的离线回归；不读取真实资料或调用付费模型。权限与泄漏边界的验收范围见 [验证说明](docs/VALIDATION.md)。
 
 ## 当前边界
 
@@ -117,6 +117,6 @@ make verify-browser   # 演示入口四身份浏览器验收
 
 前端采用 ESLint Flat Config 和 Prettier 的统一基线，组件使用 PascalCase，关键业务函数写中文 JSDoc。提交遵循 Conventional Commits：`类型(可选模块): 中文说明`，标题最多 100 字符。
 
-维护者建立工作分支，外部贡献者先 Fork；完成检查、规范提交和推送后创建 PR。CI 通过，由维护者审阅并 Squash 合并，PR 标题作为最终提交标题。Squash 后工作分支与 main 哈希不同是正常现象，一致性核验针对同一分支。具体命令与同步矩阵见 [贡献规范](docs/CONTRIBUTING.md)。
+仓库所有人完成检查后直接向 main 提交和推送，不要求 PR 或 Squash。提交与推送钩子检查实际 Git 内容，推送后核验本机 main、origin/main、GitHub main 的提交一致并等待 CI；禁止强推和绕过检查。问题与建议使用中文 Issue 表单，具体命令与同步矩阵见 [开发规范](docs/CONTRIBUTING.md)。
 
 反馈表单包括 Bug、功能建议、文档改进和使用问题；请提供场景、复现或预期结果，并去除凭据、客户信息及机密正文。仓库钩子需要主动安装，服务端保护以 GitHub 实际设置为准。
