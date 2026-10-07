@@ -266,7 +266,8 @@ def system_status(p=Depends(identity)):
         workers=fetch_one(c,"SELECT count(*) AS count FROM worker_heartbeats WHERE updated_at>now()-interval '30 seconds'")["count"]
     from ..config import get_settings
     s=get_settings()
-    return dict(database=True,worker_available=workers>0,counts=counts,model_configured=bool(s.api_key),business_configured=bool(s.business_api_url and s.business_api_token),mode=load_config().mode)
+    from .embedding import available as embed_available
+    return dict(database=True,worker_available=workers>0,counts=counts,model_configured=bool(s.api_key),business_configured=bool(s.business_api_url and s.business_api_token),semantic_retrieval=embed_available(),mode=load_config().mode)
 
 @app.get("/api/v2/documents/{doc_id}/grants")
 def grants(doc_id:str,p=Depends(identity)):
@@ -378,7 +379,11 @@ async def events(task_id:str,request:Request,after:int=Query(0,ge=0),p=Depends(i
                     rows=fetch_all(c,"SELECT id,stage,progress,status FROM task_events WHERE tenant_id=%s AND job_id=%s AND id>%s ORDER BY id",(current.tenant_id,task_id,cursor))
                     for row in rows:
                         cursor=row["id"];yield "id: "+str(cursor)+"\ndata: "+json.dumps(row,ensure_ascii=False)+"\n\n"
-                    if job["state"] in ("completed","review","failed","cancelled","rejected"):return
+                    if job["state"] in ("completed","review","failed","cancelled","rejected"):
+                        # 终态只推摘要；正文与引用由客户端经 GET /tasks/{id} 另行获取，
+                        # 该请求走完整权限与来源有效性判定，事件流不承载问题原文与证据
+                        yield "event: done\ndata: "+json.dumps({k:job[k] for k in ("id","state","stage","progress","error")},default=str,ensure_ascii=False)+"\n\n"
+                        return
             except Denied:return
             yield ": 心跳\n\n";await asyncio.sleep(1)
     return StreamingResponse(stream(),media_type="text/event-stream")

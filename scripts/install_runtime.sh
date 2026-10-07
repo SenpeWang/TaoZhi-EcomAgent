@@ -30,9 +30,9 @@ if [ ! -x "$RUNTIME/postgres/bin/postgres" ]; then
  make install
 fi
 cd "$ROOT"
-if ! .venv-v3/bin/python -m pip --version >/dev/null 2>&1; then
+if ! .venv/bin/python -m pip --version >/dev/null 2>&1; then
  python3 -m pip install --target "$BUILD_DIR/python_tools" virtualenv
- PYTHONPATH="$BUILD_DIR/python_tools" python3 -m virtualenv .venv-v3
+ PYTHONPATH="$BUILD_DIR/python_tools" python3 -m virtualenv .venv
 fi
-.venv-v3/bin/python -m pip install -r requirements.v3.lock.txt
+.venv/bin/python -m pip install -r requirements.lock.txt
 printf '%s\n' RUNTIME_READY

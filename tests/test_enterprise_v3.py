@@ -305,7 +305,7 @@ def test_model_budget_is_shared_across_retry_attempts(monkeypatch,clients):
     assert not seen
     with database_connection() as c:assert fetch_one(c,"SELECT count(*) AS n FROM model_calls WHERE job_id=%s",(tid,))["n"]==6
 def test_production_forbids_demo_password(monkeypatch,clients):
-    monkeypatch.setenv("V3_MODE","production")
+    monkeypatch.setenv("ECOM_MODE","production")
     r=clients["staff"].post("/api/v2/auth/login",json={"username":"staff","password":"123456"})
     assert r.status_code==403 and "演示口令" in r.text
 def test_canonical_api_cannot_use_legacy_identity(monkeypatch,clients):
@@ -378,3 +378,36 @@ def test_business_nested_fields_cannot_smuggle_private_payload(monkeypatch,clien
             assert not result["available"] and "998877" not in json.dumps(result)
         result=lookup(c,employee,"orders","ORDER01",httpx.MockTransport(lambda req:httpx.Response(200,json=base)))
         assert result["available"] and result["source"]["assigned_user_ids"]==[users["staff"]]
+
+def _principal():
+    with database_connection() as c:
+        return load_principal(c,fetch_one(c,"SELECT id FROM users WHERE username='staff'")["id"])
+
+def test_semantic_retrieval_degrades_to_lexical(monkeypatch,clients):
+    """嵌入服务不可用时检索自动降级为词法两路：仍能命中、分数降序、不抛错。"""
+    import ecom_copilot.enterprise.embedding as emb
+    from ecom_copilot.enterprise.retriever import search_documents
+    monkeypatch.setenv("ECOM_EMBED_SERVICE_URL","http://127.0.0.1:9")
+    monkeypatch.setattr(emb,"_state",{"checked_at":0.0,"ok":False})
+    assert not emb.available()
+    p=_principal()
+    with database_connection() as c:
+        rows=search_documents(c,p,"切幅",hyde_vector=None)
+    assert rows and rows[0]["kind"]=="document" and "切幅" in rows[0]["quote"]
+    assert all(rows[i]["score"]>=rows[i+1]["score"] for i in range(len(rows)-1))
+
+def test_semantic_retrieval_backfills_and_scores(monkeypatch,clients):
+    """嵌入服务在线时：语义路参与融合，存量切片向量被惰性补算，未授权内容不出现。"""
+    import ecom_copilot.enterprise.embedding as emb
+    from ecom_copilot.enterprise.retriever import search_documents
+    monkeypatch.delenv("ECOM_EMBED_SERVICE_URL",raising=False)
+    monkeypatch.setattr(emb,"_state",{"checked_at":0.0,"ok":False})
+    if not emb.available():pytest.skip("本地嵌入服务未运行")
+    p=_principal()
+    with database_connection() as c:
+        rows=search_documents(c,p,"MC-500 膜切机",hyde_vector=None)
+    assert rows and all(rows[i]["score"]>=rows[i+1]["score"] for i in range(len(rows)-1))
+    with database_connection() as c:
+        # 命中的切片必须已完成向量补算；无权文档不参与检索，不在此断言范围
+        hit=fetch_one(c,"SELECT embedding FROM chunks WHERE id=%s",(rows[0]["chunk_id"],))["embedding"]
+    assert hit is not None and len(hit)==2048

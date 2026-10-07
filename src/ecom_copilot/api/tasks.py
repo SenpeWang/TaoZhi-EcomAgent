@@ -47,7 +47,7 @@ class TaskManager:
     def __init__(self, workflow=None, db_path: Optional[Path] = None, settings=None):
         self.settings = settings or get_settings()
         self.workflow = workflow
-        self.db_path = Path(db_path or self.settings.data_dir / "state" / "tasks.sqlite")
+        self.db_path = Path(db_path or self.settings.data_dir / "archive" / "tasks.sqlite")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lockfile = self.db_path.with_suffix(".owner").open("a+")
         try:

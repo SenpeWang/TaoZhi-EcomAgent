@@ -52,11 +52,11 @@ def _cmd_research(args: argparse.Namespace) -> int:
 def _enterprise_serve(args: argparse.Namespace, mode: str) -> int:
     import os
     project=Path(__file__).resolve().parents[2]
-    python=project/".venv-v3/bin/python"
+    python=project/".venv/bin/python"
     if not python.exists():
-        print("请先运行 scripts/bootstrap_v3_runtime.sh 准备企业运行环境",file=sys.stderr)
+        print("请先运行 scripts/install_runtime.sh 准备企业运行环境",file=sys.stderr)
         return 1
-    env={**os.environ,"ECOM_V3_CONFIG":str(project/(".env.v3-"+mode)),"PYTHONPATH":str(project/"src")}
+    env={**os.environ,"ECOM_ENV_FILE":str(project/(".env."+mode)),"PYTHONPATH":str(project/"src")}
     cmd=[str(python),"-m","uvicorn","ecom_copilot.enterprise.api:app","--host",args.host,"--port",str(args.port),"--no-access-log"]
     os.execve(str(python),cmd,env)
     return 0

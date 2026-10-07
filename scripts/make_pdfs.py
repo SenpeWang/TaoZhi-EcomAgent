@@ -1,4 +1,4 @@
-"""从 data/corpus/ 下的企业知识语料批量渲染 8 份企业 PDF（data/corpus/pdf/）。
+"""从 data/corpus/ 下的企业知识语料批量渲染 8 份企业 PDF（data/corpus/documents/）。
 
 轻量 Markdown→PDF 渲染器：基于 PyMuPDF（fitz）内置 CJK 字体 china-ss。
 支持 #~#### 标题、段落（CJK 逐字换行）、无序/有序列表、| 表格 |（自适应
@@ -7,7 +7,7 @@
 之间插入分隔页（注明来源文档名与文档编号）。
 
 运行（语料更新后可重复执行，幂等覆盖旧 PDF）：
-    .venv-v3/bin/python scripts/make_pdfs.py
+    .venv/bin/python scripts/make_pdfs.py
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import fitz  # PyMuPDF
 
 ROOT = Path(__file__).resolve().parents[1]
 CORPUS = ROOT / "data" / "corpus"
-OUT_DIR = CORPUS / "pdf"
+OUT_DIR = CORPUS / "documents"
 
 PAGE_W, PAGE_H = 595.0, 842.0  # A4
 MARGIN = 46.0

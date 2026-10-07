@@ -3,7 +3,7 @@ from pathlib import Path
 import shutil
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-EXCLUDED_DIRECTORIES = {".venv-v3", ".venv", "node_modules", ".git"}
+EXCLUDED_DIRECTORIES = {".venv", ".venv", "node_modules", ".git"}
 
 def clean_project_cache():
     import os

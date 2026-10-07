@@ -17,14 +17,18 @@ class Config:
     max_attempts: int = 3
     max_model_calls: int = 6
     max_pending: int = 50
+    embed_service_url: str = ""
+    hyde_enabled: bool = True
 
 def load_config() -> Config:
-    source = Path(os.environ.get("ECOM_V3_CONFIG", ROOT / ".env.v3-demo"))
+    source = Path(os.environ.get("ECOM_ENV_FILE", ROOT / ".env.demo"))
     values = {**dotenv_values(source), **os.environ}
-    mode = values.get("V3_MODE", "production")
-    dsn = values.get("V3_DATABASE_URL", "")
+    mode = values.get("ECOM_MODE", "production")
+    dsn = values.get("ECOM_DATABASE_URL", "")
     if not dsn or mode not in ("demo", "production", "test"):
         raise RuntimeError("企业数据库或运行环境未配置")
-    private = Path(values.get("V3_PRIVATE_DIR", ROOT / "data/v3" / mode / "private"))
+    private = Path(values.get("ECOM_PRIVATE_DIR", ROOT / "data/private" / mode / "private"))
     private.mkdir(parents=True,exist_ok=True,mode=0o700)
-    return Config(dsn, mode, private, values.get("V3_TENANT_CODE","mofa"), values.get("V3_COOKIE_SECURE","false")=="true")
+    return Config(dsn, mode, private, values.get("ECOM_TENANT_CODE","mofa"), values.get("ECOM_COOKIE_SECURE","false")=="true",
+      embed_service_url=values.get("ECOM_EMBED_SERVICE_URL","http://127.0.0.1:18555"),
+      hyde_enabled=values.get("ECOM_HYDE_ENABLED","true")=="true")

@@ -168,11 +168,11 @@ def provision():
             if not c.execute("SELECT 1 FROM pg_roles WHERE rolname=%s",(role,)).fetchone():c.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(sql.Identifier(role),sql.Literal(secrets_data[mode])))
             if not c.execute("SELECT 1 FROM pg_database WHERE datname=%s",(dbname,)).fetchone():c.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(dbname),sql.Identifier(role)))
             c.execute(sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(sql.Identifier(dbname)))
-            env=ROOT/(".env.v3-"+mode)
+            env=ROOT/(".env."+mode)
             if not env.exists():
-                env.write_text("V3_MODE="+mode+"\nV3_DATABASE_URL=postgresql://"+role+":"+secrets_data[mode]+"@127.0.0.1:15432/"+dbname+"\nV3_TENANT_CODE=mofa\nV3_COOKIE_SECURE=false\n")
+                env.write_text("ECOM_MODE="+mode+"\nECOM_DATABASE_URL=postgresql://"+role+":"+secrets_data[mode]+"@127.0.0.1:15432/"+dbname+"\nECOM_TENANT_CODE=mofa\nECOM_COOKIE_SECURE=false\n")
                 env.chmod(0o600)
-            subprocess.run([str(ROOT/".venv-v3/bin/python"),"-m","alembic","-c","alembic.ini","upgrade","head"],cwd=ROOT,env={**os.environ,"ECOM_V3_CONFIG":str(env),"PYTHONPATH":str(ROOT/"src")},check=True)
+            subprocess.run([str(ROOT/".venv/bin/python"),"-m","alembic","-c","alembic.ini","upgrade","head"],cwd=ROOT,env={**os.environ,"ECOM_ENV_FILE":str(env),"PYTHONPATH":str(ROOT/"src")},check=True)
     print("私有 PostgreSQL 演示库、正式库和独立测试库已就绪")
 if __name__ == "__main__":
     import argparse

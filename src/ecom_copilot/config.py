@@ -14,7 +14,7 @@ from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# <...>/00_base/muti-agent
+# <...>/00_base/multi-agent
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 # <...>/00_base/.env
 DEFAULT_ENV_FILE: Path = PROJECT_ROOT.parent / ".env"
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
 
     data_dir: Path = PROJECT_ROOT / "data"
     reports_dir: Path = PROJECT_ROOT / "data" / "reports"
-    checkpoint_db: Path = PROJECT_ROOT / "data" / "state" / "langgraph.sqlite"
+    checkpoint_db: Path = PROJECT_ROOT / "data" / "archive" / "langgraph.sqlite"
 
     # ───────────────────── LLM 服务层（模型分级路由） ─────────────────────
     base_url: str = Field(default="https://token.sensenova.cn/v1", alias="BASE_URL")

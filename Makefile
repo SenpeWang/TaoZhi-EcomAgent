@@ -1,4 +1,4 @@
-PYTHON := .venv-v3/bin/python
+PYTHON := .venv/bin/python
 PROJECT_ROOT := $(CURDIR)
 SUPERVISOR_CONFIG := $(HOME)/.local/share/ecom-v3/supervisor.conf
 
@@ -31,7 +31,7 @@ status:
 	$(PYTHON) -m supervisor.supervisorctl -c "$(SUPERVISOR_CONFIG)" status
 
 test:
-	ECOM_V3_CONFIG="$(PROJECT_ROOT)/.env.v3-test" PYTHONPATH=src $(PYTHON) -m pytest tests -m 'not slow' -q --disable-warnings
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.test" PYTHONPATH=src $(PYTHON) -m pytest tests -m 'not slow' -q --disable-warnings
 
 check:
 	$(PYTHON) -m compileall -q src scripts migrations tests
@@ -40,7 +40,7 @@ build-web:
 	bash scripts/build_frontend.sh
 
 verify-browser:
-	V3_BROWSER_URL=http://127.0.0.1:18501 V3_BROWSER_SKIP_MODEL=true $(PYTHON) scripts/verify_browser.py
+	ECOM_BROWSER_URL=http://127.0.0.1:18501 ECOM_BROWSER_SKIP_MODEL=true $(PYTHON) scripts/verify_browser.py
 
 clean:
 	$(PYTHON) scripts/clean_cache.py

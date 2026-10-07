@@ -57,11 +57,36 @@ def plan_node(state):
     if not route or re.search("规格|尺寸|型号|参数|幅宽|切幅|材质",q):route.insert(0,"product")
     route=list(dict.fromkeys(route))[:3]
     return dict(question=q,route=route or ["product"],model_calls=0,missing=[],findings=[],sources=[],business=[],usage=[],input_level=job["input_level"])
+_HYDE_SYSTEM="你是商品资料检索助手。根据用户问题，写一段可能出现在商品资料库中的正文段落：陈述句、含型号、参数或步骤等具体细节。允许内容与事实不符，禁止任何解释、前言或标题，只输出段落正文。"
+def _hyde_vector(c,p,job,state):
+    """HyDE：脱敏后生成假设性答案并编码为检索向量。
+
+    合规边界：老板级问题（input_level>=3）或未允许外部模型时不调用；
+    记入模型调用预算；任何失败返回 None，检索自动降级为三路。
+    """
+    try:
+        from .config import load_config
+        if not load_config().hyde_enabled:return None
+        if not job["payload"].get("allow_external",True) or job["input_level"]>=3:return None
+        if fetch_one(c,"SELECT count(*) AS n FROM model_calls WHERE job_id=%s",(job["id"],))["n"]>=load_config().max_model_calls:return None
+        from ..llm.client import LLMClient,ModelTier
+        from .privacy import redact
+        started=time.time()
+        text=LLMClient().chat(redact(state["question"]),tier=ModelTier.FAST,system=_HYDE_SYSTEM,max_tokens=220)
+        c.execute("INSERT INTO model_calls(tenant_id,job_id,role,elapsed_ms,outcome) VALUES(%s,%s,'hyde',%s,'ok')",
+          (p.tenant_id,job["id"],int((time.time()-started)*1000)))
+        if not text or len(text.strip())<20:return None
+        from .embedding import available as embed_available,encode_passages
+        if not embed_available():return None
+        return encode_passages([text.strip()[:800]])[0]
+    except Exception:
+        return None
 def retrieval_node(state):
     p,job=validate_task_execution(state,"检索授权资料",25)
     with database_connection() as c:
         from ..ingestion.guard import detect_injection
-        evidence=[e for e in search_documents(c,p,state["question"],10) if not detect_injection(e["quote"])[0]]
+        hyde_vector=_hyde_vector(c,p,job,state)
+        evidence=[e for e in search_documents(c,p,state["question"],10,hyde_vector=hyde_vector) if not detect_injection(e["quote"])[0]]
         from .memory import get_followup_context
         recalled,recalled_sources=get_followup_context(c,p,state["question"],job["input_level"])
         if recalled:

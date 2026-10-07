@@ -54,7 +54,7 @@ CREATE TABLE document_versions (
 );
 CREATE TABLE chunks (
  id text PRIMARY KEY, tenant_id text NOT NULL, document_id text NOT NULL, version integer NOT NULL,
- ordinal integer NOT NULL, page integer NOT NULL DEFAULT 0, text text NOT NULL,
+ ordinal integer NOT NULL, page integer NOT NULL DEFAULT 0, text text NOT NULL, embedding bytea,
  FOREIGN KEY(tenant_id,document_id) REFERENCES documents(tenant_id,id),
  FOREIGN KEY(document_id,version) REFERENCES document_versions(document_id,version),
  UNIQUE(document_id,version,ordinal)

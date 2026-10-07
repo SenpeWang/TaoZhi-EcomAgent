@@ -21,6 +21,17 @@ def renew_job_lease(job,done):
                 c.execute("INSERT INTO worker_heartbeats(id) VALUES(%s) ON CONFLICT(id) DO UPDATE SET updated_at=now()",(WORKER,))
                 c.execute("UPDATE jobs SET lease_until=now()+(%s*interval '1 second') WHERE id=%s AND run_version=%s AND worker_id=%s AND state='running'",(load_config().lease_seconds,job["id"],job["run_version"],WORKER))
         except Exception:pass
+def _embed_chunks(texts):
+    """入库时计算语义向量；嵌入服务不可用时不阻断解析，留待检索侧惰性补算。"""
+    if not texts:
+        return None
+    try:
+        from .embedding import available as embed_available, encode_passages
+        if not embed_available():
+            return None
+        return encode_passages(texts)
+    except Exception:
+        return None
 def process_ingestion_job(job):
     from .ingest import parse,split
     from .pipeline import validate_task_execution
@@ -33,6 +44,7 @@ def process_ingestion_job(job):
     if v["blob_name"]:body,pages=parse(load_config().private_dir/p.tenant_id/v["blob_name"],v["mime_type"])
     else:body,pages=v["body"],[(0,v["body"])]
     chunks=split(pages,d["id"],d["current_version"])
+    vectors=_embed_chunks([ch["text"] for ch in chunks])
     validate_task_execution(state,"建立版本索引与发布申请",75)
     with database_connection() as c:
         locked=fetch_one(c,"SELECT * FROM jobs WHERE id=%s FOR UPDATE",(job["id"],))
@@ -41,8 +53,10 @@ def process_ingestion_job(job):
         c.execute("UPDATE document_versions SET body=%s,content_hash=%s WHERE document_id=%s AND version=%s",(body,hashlib.sha256(body.encode()).hexdigest(),d["id"],v["version"]))
         c.execute("DELETE FROM knowledge_mentions WHERE document_id=%s AND version=%s",(d["id"],v["version"]))
         c.execute("DELETE FROM chunks WHERE document_id=%s AND version=%s",(d["id"],v["version"]))
-        for ch in chunks:
-            c.execute("INSERT INTO chunks(id,tenant_id,document_id,version,ordinal,page,text) VALUES(%s,%s,%s,%s,%s,%s,%s)",(ch["id"],p.tenant_id,d["id"],v["version"],ch["ordinal"],ch["page"],ch["text"]))
+        for i,ch in enumerate(chunks):
+            c.execute("INSERT INTO chunks(id,tenant_id,document_id,version,ordinal,page,text,embedding) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
+              (ch["id"],p.tenant_id,d["id"],v["version"],ch["ordinal"],ch["page"],ch["text"],
+               None if vectors is None else vectors[i].tobytes()))
         from .facts import index_mentions
         index_mentions(c,p.tenant_id,d["id"],v["version"],chunks)
         c.execute("UPDATE documents SET state='review',error='' WHERE id=%s",(d["id"],))

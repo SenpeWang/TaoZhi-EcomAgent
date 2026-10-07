@@ -305,7 +305,7 @@ def _corpus_doctype(path: Path) -> DocType:
     优先按相对 data/corpus/ 的子目录映射（product/compatibility/quality → 参数表口径，
     sku → 参数表（价格/政策 → 政策口径），manuals → 教程（话术 → 手册），
     after_sales → FAQ（政策细则/规范 → 政策口径），notices → 政策口径，training → 手册）；
-    子目录外（如 data/corpus/pdf/）回退按文件名关键词推断。
+    子目录外（如 data/corpus/documents/）回退按文件名关键词推断。
     """
     name = path.stem
     lowered = name.lower()
@@ -355,7 +355,7 @@ def _corpus_doc(path: Path, text: str) -> SourceDocument:
 
 class LocalCorpusAdapter(SourceAdapter):
     """本地商品知识语料库（data/corpus 下商品手册 / 参数表 / SKU 与配件指南 /
-    使用教程 / 售后 FAQ / 保修政策等 md 文档，及 data/corpus/pdf 下的 PDF）。"""
+    使用教程 / 售后 FAQ / 保修政策等 md 文档，及 data/corpus/documents 下的 PDF）。"""
 
     name = "local_corpus"
     label = "本地商品知识库语料"

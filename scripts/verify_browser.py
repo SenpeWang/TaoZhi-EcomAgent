@@ -5,7 +5,7 @@ from playwright.sync_api import sync_playwright
 ROOT=Path(__file__).resolve().parents[1]
 out=ROOT/"data/runtime/browser"
 out.mkdir(parents=True,exist_ok=True,mode=0o700)
-base=os.environ.get("V3_BROWSER_URL","http://127.0.0.1:18502")
+base=os.environ.get("ECOM_BROWSER_URL","http://127.0.0.1:18502")
 with sync_playwright() as p:
  browser=p.chromium.launch(headless=True,args=["--no-sandbox"])
  summary=[]
@@ -27,7 +27,7 @@ with sync_playwright() as p:
   if role=="leader":assert "demo_doc_leader" in visible and "demo_doc_procurement" not in visible
   if role=="boss":assert "demo_doc_boss" in visible
   assert ("组织与人员" in page.locator("nav").inner_text())==(role in ("admin","boss"))
-  if role=="staff" and os.environ.get("V3_BROWSER_SKIP_MODEL")!="true":
+  if role=="staff" and os.environ.get("ECOM_BROWSER_SKIP_MODEL")!="true":
    page.locator("nav button",has_text="智能问答").click()
    page.get_by_placeholder("请说明商品型号、适配机型或需要核对的业务事项").fill("MC-500 的切幅是多少？")
    page.get_by_role("button",name="提交问题",exact=True).click()

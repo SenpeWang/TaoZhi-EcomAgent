@@ -1,6 +1,6 @@
 """FAQ 语义缓存（长期记忆）：问题向量 + 答案 + 引用，embedding 相似度命中直接返回。
 
-存储：data/state/faq_cache.sqlite（vec 为 numpy float32 tobytes，dim 记录向量维度）。
+存储：data/archive/faq_cache.sqlite（vec 为 numpy float32 tobytes，dim 记录向量维度）。
 初始化失败时全部方法静默降级（永远未命中 / 不写入），绝不抛错影响主流程。
 """
 
@@ -39,7 +39,7 @@ class FaqCache:
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         settings = get_settings()
-        self.db_path = Path(db_path) if db_path else settings.data_dir / "state" / "faq_cache.sqlite"
+        self.db_path = Path(db_path) if db_path else settings.data_dir / "archive" / "faq_cache.sqlite"
         self.sim_threshold = settings.faq_cache_sim_threshold
         self._lock = threading.RLock()
         self._enabled = self._init_sqlite()

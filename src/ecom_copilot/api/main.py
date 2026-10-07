@@ -4,7 +4,7 @@ from pathlib import Path
 
 def create_app():
     project = Path(__file__).resolve().parents[3]
-    os.environ.setdefault("ECOM_V3_CONFIG", str(project / ".env.v3-production"))
+    os.environ.setdefault("ECOM_ENV_FILE", str(project / ".env.production"))
     from ..enterprise.api import app
     return app
 

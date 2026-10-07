@@ -13,7 +13,7 @@ spec.loader.exec_module(guard)
 
 
 @pytest.mark.parametrize("path", [
-    "data/corpus/产品.md", "data/README.md", "项目说明.md", ".env.v3-production",
+    "data/corpus/产品.md", "data/README.md", "项目说明.md", ".env.production",
     "web/node_modules/a.js", "web/dist/index.html", "database-secrets.json",
     "plan.bak.20261007", "customer.docx",
     "AGENTS.md", "agents.md", "docs/AGENTS.md", "web/aGeNtS.Md",

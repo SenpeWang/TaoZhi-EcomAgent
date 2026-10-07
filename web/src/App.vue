@@ -407,9 +407,48 @@ async function submitQuestion() {
     const r = await api<CreatedResource>('/tasks', 'POST', askForm)
     activeTask.value = await api<Task>('/tasks/' + r.id)
     taskOpen.value = true
+    streamTask(r.id)
     ElMessage.success('任务已提交')
     await load()
   })
+}
+let taskStream: EventSource | null = null
+/**
+ * 订阅任务事件流（SSE）：阶段与进度实时推送，终态一次性携带完整结果。
+ * 核验完成前服务端只发阶段状态；连接失败时静默降级为既有轮询。
+ * @param id - 任务编号；权限由服务端在事件流中持续核验。
+ */
+function streamTask(id: string) {
+  taskStream?.close()
+  taskStream = new EventSource('/api/v2/tasks/' + id + '/events')
+  /**
+   * 接收进度事件；只更新当前任务，忽略其他任务的事件。
+   * @param ev - 服务端推送的进度事件，载荷为阶段与进度字段。
+   */
+  taskStream.onmessage = (ev) => {
+    try {
+      const row = JSON.parse(ev.data) as { stage?: string; progress?: number }
+      if (!activeTask.value || activeTask.value.id !== id) return
+      if (row.stage) activeTask.value.stage = row.stage
+      if (typeof row.progress === 'number') activeTask.value.progress = row.progress
+    } catch {}
+  }
+  taskStream.addEventListener('done', (ev) => {
+    taskStream?.close()
+    taskStream = null
+    try {
+      const done = JSON.parse((ev as MessageEvent).data) as { id: string }
+      if (activeTask.value?.id === done.id)
+        api<Task>('/tasks/' + done.id).then((t) => {
+          if (activeTask.value?.id === done.id) activeTask.value = t
+        })
+    } catch {}
+  })
+  /** 连接失败时静默关闭事件流，既有轮询继续兜底刷新进度。 */
+  taskStream.onerror = () => {
+    taskStream?.close()
+    taskStream = null
+  }
 }
 /**
  * 重新读取指定任务；权限或来源失效由服务端拒绝，不沿用历史答案。
@@ -860,7 +899,10 @@ onMounted(async () => {
     } catch {}
   }, 2500)
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  taskStream?.close()
+})
 </script>
 
 <template>

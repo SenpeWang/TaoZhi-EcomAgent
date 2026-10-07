@@ -1,7 +1,7 @@
 """会话记忆存储（SessionStore）与历史注入器（HistoryInjector）。
 
-- SQLite 主存储：data/state/sessions.sqlite，每轮 Q-A 一行；
-- 初始化失败自动降级 JSONL：data/state/sessions.jsonl（一行一条记录，读取时倒序截取）；
+- SQLite 主存储：data/archive/sessions.sqlite，每轮 Q-A 一行；
+- 初始化失败自动降级 JSONL：data/archive/sessions.jsonl（一行一条记录，读取时倒序截取）；
 - HistoryInjector：把近 N 轮历史（超阈值时先经 Summarizer 压缩）渲染为
   「【会话历史】」文本块，供 Supervisor 规划与答案生成做指代消解。
 
@@ -43,8 +43,8 @@ class SessionStore:
     def __init__(self, db_path: Optional[Path] = None,
                  jsonl_path: Optional[Path] = None) -> None:
         settings = get_settings()
-        self.db_path = Path(db_path) if db_path else settings.data_dir / "state" / "sessions.sqlite"
-        self.jsonl_path = Path(jsonl_path) if jsonl_path else settings.data_dir / "state" / "sessions.jsonl"
+        self.db_path = Path(db_path) if db_path else settings.data_dir / "archive" / "sessions.sqlite"
+        self.jsonl_path = Path(jsonl_path) if jsonl_path else settings.data_dir / "archive" / "sessions.jsonl"
         self._lock = threading.RLock()
         self._use_sqlite = self._init_sqlite()
 
