@@ -24,9 +24,9 @@ jobs:
           --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       PYTHONPATH: src
-      V3_MODE: test
-      V3_TENANT_CODE: mofa
-      V3_DATABASE_URL: postgresql://ecom_v3_test@127.0.0.1:5432/ecom_v3_test
+      ECOM_MODE: test
+      ECOM_TENANT_CODE: mofa
+      ECOM_DATABASE_URL: postgresql://ecom_v3_test@127.0.0.1:5432/ecom_v3_test
       PGPASSWORD: ci-only-placeholder
       APP_ENV: dev
       AUTH_ENABLED: 'false'
