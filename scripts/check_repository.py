@@ -18,7 +18,7 @@ PRE_LOCAL_AGENT_POLICY_COMMITS = frozenset({
     "2b071e5b087099cd0a4683c4394a4b972282b652",
 })
 FORBIDDEN_DIRECTORIES = {
-    "data", "node_modules", "__pycache__", ".venv", ".venv-v3", "venv",
+    "data", "node_modules", "__pycache__", ".venv", ".venv", "venv",
     ".pytest_cache", ".mypy_cache", ".ruff_cache", ".idea", ".vscode",
 }
 FORBIDDEN_SUFFIXES = {
@@ -118,13 +118,13 @@ def inspect_tree(revision: str | None) -> list[str]:
         if legacy_agent_policy and PurePosixPath(path).name.casefold() == "agents.md":
             reasons = [reason for reason in reasons if reason != LOCAL_AGENT_POLICY_REASON]
         problems.extend(f"{path}: {reason}" for reason in reasons)
-    structure = blobs.get("docs/STRUCTURE.md", b"").decode("utf-8", errors="replace")
+    structure = blobs.get("STRUCTURE.md", b"").decode("utf-8", errors="replace")
     registered = set(re.findall(r"\x60([^\x60\n]+/)\x60", structure))
     directories = set()
     for path, _, _ in entries:
         directories.update(str(parent) + "/" for parent in PurePosixPath(path).parents if str(parent) != ".")
     for directory in sorted(directories - registered):
-        problems.append(f"{directory}: 未在 docs/STRUCTURE.md 登记职责")
+        problems.append(f"{directory}: 未在 STRUCTURE.md 登记职责")
     for directory in sorted(registered - directories):
         problems.append(f"{directory}: 没有跟踪文件；删除或移动目录后须同步登记")
     return problems

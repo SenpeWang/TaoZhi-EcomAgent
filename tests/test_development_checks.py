@@ -27,9 +27,9 @@ def workspace(tmp_path, monkeypatch):
     (root / "web/package.json").write_text('{\n  "type": "module"\n}\n')
     (root / "web/node_modules").symlink_to(PROJECT / "web/node_modules", target_is_directory=True)
     (root / "web/src/App.vue").write_text("<template>\n  <div>中文界面</div>\n</template>\n")
-    (root / "docs/STRUCTURE.md").write_text(
+    (root / "STRUCTURE.md").write_text(
         "| 目录 | 职责 |\n| --- | --- |\n"
-        "| `docs/` | 说明 |\n| `web/` | 前端 |\n| `web/src/` | 源码 |\n"
+        "| `web/` | 前端 |\n| `web/src/` | 源码 |\n"
     )
     monkeypatch.setattr(development, "ROOT", root)
     monkeypatch.setattr(development.repository, "ROOT", root)
@@ -40,7 +40,7 @@ def workspace(tmp_path, monkeypatch):
     git("config", "user.email", "boundary@example.invalid")
     git("config", "core.hooksPath", "/dev/null")
     git("add", "web/src/App.vue", "web/package.json", "web/eslint.config.js",
-        "web/.prettierrc.json", "web/.prettierignore", "web/commitlint.config.cjs", "docs/STRUCTURE.md")
+        "web/.prettierrc.json", "web/.prettierignore", "web/commitlint.config.cjs", "STRUCTURE.md")
     # 工具配置来自项目；其格式也先真实校验，不能让 fixture 躲过门禁。
     return root, git
 

@@ -1,6 +1,7 @@
 # 业务资料、个人说明和本机维护约束永不提交
 /data/
 /项目说明.md
+/面试文档.md
 # 任意目录和大小写的 AGENTS.md 都只保留在维护主机
 [Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
 
@@ -32,7 +33,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
-.venv-v3/
 venv/
 node_modules/
 web/dist/
@@ -51,3 +51,4 @@ Thumbs.db
 *.orig
 *.swp
 .maintenance-*
+/docs/

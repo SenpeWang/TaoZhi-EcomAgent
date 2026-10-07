@@ -20,7 +20,7 @@
 | 老板 | 本公司业务资料，包括老板级机密 | 公司业务读写、机密及关键权限审批 |
 | 管理员 | 公司共享资料、另外获得授权的资料 | 组织、账号、配置和系统审计 |
 
-管理员不能自行取得业务机密；组长不能因任职而管理其他组；审核不会把审核人的权限借给提问者。完整规则见 [权限说明](docs/ACCESS_CONTROL.md)。
+管理员不能自行取得业务机密；组长不能因任职而管理其他组；审核不会把审核人的权限借给提问者。
 
 ## 工作流
 
@@ -35,7 +35,7 @@ flowchart LR
   G --> H[中文答案与可访问引用]
 ~~~
 
-入库流程独立完成上传校验、解析、归属与密级确认、切片、来源登记、索引和发布审核。检索先限定授权候选再排序；切片、关系和记忆继承来源版本及权限。进度只输出中文阶段，核验完成前不流出正文。
+入库流程独立完成上传校验、解析、归属与密级确认、切片、来源登记、索引和发布审核。检索先限定授权候选，再由 BM25、本地 TF-IDF 和本地语义向量三路信号融合排序；嵌入由仅监听回环地址的独立本地服务提供，服务不可用时自动降级为词法两路。切片、关系和记忆继承来源版本及权限。进度只输出中文阶段，核验完成前不流出正文。
 
 老板级资料默认禁止外部模型；经老板明确允许 AI 处理并允许本次问题使用外部 AI 后才能调用。Sensenova 使用 OpenAI 兼容接口并保持直连，密钥只保存在部署环境。
 
@@ -60,15 +60,14 @@ web/src/                     中文工作台、类型与同源 API
 migrations/                  数据库迁移
 scripts/                     部署、检查和维护命令
 tests/                       单元测试与企业边界验收
-docs/                        公开架构、部署与贡献说明
 data/                        本机业务资料和运行产物（忽略）
 ~~~
 
-新增目录、接口、配置、迁移或脚本必须同步说明和验证。详细目录职责见 [项目结构](docs/STRUCTURE.md)，开发提交流程见 [贡献约定](docs/CONTRIBUTING.md)。本机维护约束和个人学习说明由维护者在部署主机保留，不作为公开仓库依赖。
+新增目录、接口、配置、迁移或脚本必须同步说明和验证。详细目录职责见 [项目结构](STRUCTURE.md)。本机维护约束和个人学习说明由维护者在部署主机保留，不作为公开仓库依赖。
 
 ## 本地部署
 
-当前验证环境为 Linux x86_64、Python 3.10、Node.js 24、PostgreSQL 18。不需要服务器 Docker 权限，安装脚本在用户目录准备运行时；主机需提供编译工具和 Python。首次安装步骤与正式初始化见 [部署说明](docs/ENTERPRISE_V3.md)。
+当前验证环境为 Linux x86_64、Python 3.10、Node.js 24、PostgreSQL 18。不需要服务器 Docker 权限，安装脚本在用户目录准备运行时；主机需提供编译工具和 Python。
 
 ~~~bash
 git clone https://github.com/SenpeWang/test.git
@@ -76,9 +75,9 @@ cd test
 bash scripts/install_runtime.sh
 cp .env.example .env
 # 在本机 .env 中填写模型配置；不要提交密钥
-.venv-v3/bin/python scripts/manage_database.py provision
-ECOM_V3_CONFIG="$PWD/.env.v3-demo" .venv-v3/bin/python scripts/manage_database.py demo
-.venv-v3/bin/python scripts/configure_services.py
+.venv/bin/python scripts/manage_database.py provision
+ECOM_ENV_FILE="$PWD/.env.demo" .venv/bin/python scripts/manage_database.py demo
+.venv/bin/python scripts/configure_services.py
 make build-web
 make start
 ~~~
@@ -107,7 +106,7 @@ make build-web        # TypeScript 检查与生产构建
 make verify-browser   # 演示入口四身份浏览器验收
 ~~~
 
-依赖锁为 `requirements.v3.lock.txt` 和 `web/package-lock.json`。CI 在 main 推送后验证真实提交及消息、仓库边界、目录登记、ESLint、Prettier、组件命名、类型构建、数据库迁移和独立测试库的离线回归；不读取真实资料或调用付费模型。权限与泄漏边界的验收范围见 [验证说明](docs/VALIDATION.md)。
+依赖锁为 `requirements.lock.txt` 和 `web/package-lock.json`。CI 在 main 推送后验证真实提交及消息、仓库边界、目录登记、ESLint、Prettier、组件命名、类型构建、数据库迁移和独立测试库的离线回归；不读取真实资料或调用付费模型。
 
 ## 当前边界
 
@@ -117,6 +116,6 @@ make verify-browser   # 演示入口四身份浏览器验收
 
 前端采用 ESLint Flat Config 和 Prettier 的统一基线，组件使用 PascalCase，关键业务函数写中文 JSDoc。提交遵循 Conventional Commits：`类型(可选模块): 中文说明`，标题最多 100 字符。
 
-仓库所有人完成检查后直接向 main 提交和推送，不要求 PR 或 Squash。提交与推送钩子检查实际 Git 内容，推送后核验本机 main、origin/main、GitHub main 的提交一致并等待 CI；禁止强推和绕过检查。问题与建议使用中文 Issue 表单，具体命令与同步矩阵见 [开发规范](docs/CONTRIBUTING.md)。
+仓库所有人完成检查后直接向 main 提交和推送，不要求 PR 或 Squash。提交与推送钩子检查实际 Git 内容，推送后核验本机 main、origin/main、GitHub main 的提交一致并等待 CI；禁止强推和绕过检查。问题与建议使用中文 Issue 表单。
 
 反馈表单包括 Bug、功能建议、文档改进和使用问题；请提供场景、复现或预期结果，并去除凭据、客户信息及机密正文。仓库钩子需要主动安装，服务端保护以 GitHub 实际设置为准。

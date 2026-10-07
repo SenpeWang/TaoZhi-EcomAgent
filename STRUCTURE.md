@@ -10,7 +10,6 @@
 | `.github/ISSUE_TEMPLATE/` | 中文 Bug、功能、文档与使用问题表单 |
 | `.github/workflows/` | main 推送触发的最小权限 CI，不自动部署 |
 | `.githooks/` | 每份克隆主动启用的提交与推送门禁 |
-| `docs/` | 公开的软件架构、部署和贡献说明 |
 | `migrations/` | Alembic 环境 |
 | `migrations/versions/` | 只追加已验证的数据库升级版本 |
 | `scripts/` | 部署、数据管理、构建、验收与提交检查 |
@@ -23,7 +22,6 @@
 | `src/ecom_copilot/context/` | 上下文构造 |
 | `src/ecom_copilot/debate/` | 离线证据讨论 |
 | `src/ecom_copilot/enterprise/` | 在线权限、会话、文档、业务服务、工作流及 Worker |
-| `src/ecom_copilot/evaluation/` | 质量评估 |
 | `src/ecom_copilot/graph/` | 本地图谱与共享图能力 |
 | `src/ecom_copilot/hypothesis/` | 离线假设管理 |
 | `src/ecom_copilot/ingestion/` | 资料来源与入库共享工具 |
@@ -31,20 +29,18 @@
 | `src/ecom_copilot/memory/` | 旧离线记忆；在线来源权限由 enterprise 管理 |
 | `src/ecom_copilot/observability/` | 脱敏追踪与可观测性 |
 | `src/ecom_copilot/parsing/` | 文档格式解析 |
-| `src/ecom_copilot/reporting/` | 离线报告与私有导出 |
 | `src/ecom_copilot/retrieval/` | 共享本地检索与排序 |
 | `src/ecom_copilot/safety/` | 输入与证据安全 |
 | `src/ecom_copilot/schemas/` | 共享结构和类型 |
 | `src/ecom_copilot/security/` | 旧鉴权隔离回归，不作为在线入口 |
 | `src/ecom_copilot/storage/` | 离线持久化，不用于在线权限和队列 |
-| `src/ecom_copilot/ui/` | 旧界面离线代码，不是生产入口 |
 | `tests/` | 单元与企业边界验收，测试事实自行构造 |
 | `web/` | 前端依赖、锁与构建配置 |
 | `web/src/` | Vue 页面、类型、样式与 API 调用 |
 
 ## 根文件
 
-README.md 为 GitHub 项目介绍，docs/CONTRIBUTING.md 为公开开发规范。Makefile 是统一维护命令，alembic.ini 配置迁移，requirements.txt 声明依赖，requirements.v3.lock.txt 锁定验证版本，.env.example 仅无秘密占位，.gitignore 阻止私有和生成物。.editorconfig 统一编辑器换行和缩进；web/eslint.config.js、.prettierrc.json、commitlint.config.cjs 分别定义代码、格式和消息检查，scripts/check_development.py 调度实际快照门禁。
+README.md 为 GitHub 项目介绍。Makefile 是统一维护命令，alembic.ini 配置迁移，requirements.txt 声明依赖，requirements.lock.txt 锁定验证版本，.env.example 仅无秘密占位，.gitignore 阻止私有和生成物。.editorconfig 统一编辑器换行和缩进；web/eslint.config.js、.prettierrc.json、commitlint.config.cjs 分别定义代码、格式和消息检查，scripts/check_development.py 调度实际快照门禁。
 
 AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；两者都不跟踪或提交，公开文档不链接或依赖它们。维护者在本机维护这些文件，克隆仓库无需取得它们。
 
@@ -54,11 +50,11 @@ AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；
 | --- | --- |
 | 待授权入库资料 | data/incoming/<tenant_id>/ |
 | 本机演示语料 | data/corpus/<category>/ |
-| 已入库私有原件 | data/v3/<mode>/private/ |
+| 已入库私有原件 | data/private/<mode>/ |
 | 日志、验证截图与任务证据 | data/runtime/ |
 | 授权业务导出 | data/reports/<tenant_id>/ |
 | 检索、向量及图谱 | data/index/、data/embeddings/、data/graph/ |
-| 旧业务数据库迁移来源 | data/state/ |
+| 旧业务数据库迁移来源 | data/archive/ |
 | 明确请求的备份 | data/backups/ |
 
 无需提前创建空目录。企业文档和生成物统一进入 data/；放入目录不自动授予阅读、发布、下载或模型处理权限。不得把资料移到源码、测试、软件说明或静态公开目录来逃避忽略规则。
