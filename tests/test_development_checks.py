@@ -176,3 +176,87 @@ def test_range_scans_secret_deleted_in_later_commit(workspace):
     assert not any("API" in item for item in development.repository.inspect_tree("HEAD"))
     with pytest.raises(RuntimeError, match="API"):
         development.check_commits(development.commit_revisions(base, "HEAD"))
+
+
+@pytest.mark.parametrize("name", ["AGENTS.md", "agents.md", "docs/AGENTS.md"])
+def test_local_agent_policy_cannot_enter_snapshot(workspace, name):
+    """强制暂存也必须拒绝维护文件；检查不删除本机规则。"""
+    root, git = workspace
+    policy = root / name
+    policy.write_text("仅供维护者使用的合成规则\n")
+    git("add", "-f", name)
+    with pytest.raises(RuntimeError, match="本机维护约束文件"):
+        development.check_snapshot(None)
+    assert policy.read_text() == "仅供维护者使用的合成规则\n"
+    assert not list((root / "data/runtime").glob("development-check-*"))
+
+
+def test_published_agent_policy_cutover_is_limited(workspace, monkeypatch):
+    """已发布路径兼容不允许未来重新跟踪，也不豁免历史秘密。"""
+    root, git = workspace
+    policy = root / "AGENTS.md"
+    policy.write_text("合成的旧维护规则\n")
+    git("add", "AGENTS.md")
+    git("commit", "-m", "chore: 发布旧维护规则")
+    published = git("rev-parse", "HEAD")
+    monkeypatch.setattr(
+        development.repository, "PRE_LOCAL_AGENT_POLICY_COMMITS", frozenset({published}),
+    )
+    assert development.repository.inspect_tree(published) == []
+    assert any("本机维护约束文件" in item for item in development.repository.inspect_tree(None))
+    (root / "README.md").write_text("新提交仍携带旧文件也必须拒绝\n")
+    git("add", "README.md")
+    git("commit", "-m", "docs: 更新合成介绍")
+    assert any("本机维护约束文件" in item for item in development.repository.inspect_tree("HEAD"))
+    git("rm", "--cached", "AGENTS.md")
+    git("commit", "-m", "fix: 仅保留本机维护规则")
+    assert policy.exists()
+    assert development.repository.inspect_tree("HEAD") == []
+    policy.write_text('TOKEN="sk-' + "E" * 32 + '"\n')
+    git("add", "-f", "AGENTS.md")
+    git("commit", "-m", "test: 构造历史检测边界")
+    secret_commit = git("rev-parse", "HEAD")
+    monkeypatch.setattr(
+        development.repository, "PRE_LOCAL_AGENT_POLICY_COMMITS", frozenset({secret_commit}),
+    )
+    assert any("API" in item for item in development.repository.inspect_tree(secret_commit))
+    git("rm", "--cached", "AGENTS.md")
+    (root / "data").mkdir(exist_ok=True)
+    (root / "data/AGENTS.md").write_text("私有目录的合成资料\n")
+    git("add", "-f", "data/AGENTS.md")
+    git("commit", "-m", "test: 构造私有目录边界")
+    private_commit = git("rev-parse", "HEAD")
+    monkeypatch.setattr(
+        development.repository, "PRE_LOCAL_AGENT_POLICY_COMMITS", frozenset({private_commit}),
+    )
+    assert any("私有数据" in item for item in development.repository.inspect_tree(private_commit))
+
+
+def test_gitignore_excludes_agent_policy_variants(workspace):
+    """实际 Git 忽略规则覆盖根目录、嵌套目录和大小写变化。"""
+    root, git = workspace
+    (root / ".gitignore").write_text((PROJECT / ".gitignore").read_text())
+    for name in ["AGENTS.md", "agents.md", "docs/AGENTS.md", "web/aGeNtS.Md"]:
+        assert git("check-ignore", "--no-index", name) == name
+
+
+def test_branch_switch_preserves_ignored_local_policy(workspace):
+    """从旧跟踪方式切换后，拒绝覆写，并验证正常快进后本机文件保留。"""
+    root, git = workspace
+    policy = root / "AGENTS.md"
+    policy.write_text("旧合成规则\n")
+    git("add", "AGENTS.md")
+    git("commit", "-m", "chore: 初始化旧分支")
+    git("switch", "-c", "chore/local-policy")
+    (root / ".gitignore").write_text((PROJECT / ".gitignore").read_text())
+    git("rm", "--cached", "AGENTS.md")
+    policy.write_text("新本机合成规则\n")
+    git("add", ".gitignore")
+    git("commit", "-m", "fix: 移出维护文件")
+    with pytest.raises(subprocess.CalledProcessError):
+        git("switch", "--no-overwrite-ignore", "main")
+    assert policy.read_text() == "新本机合成规则\n"
+    git("fetch", ".", "HEAD:main")
+    git("switch", "--no-overwrite-ignore", "main")
+    assert policy.read_text() == "新本机合成规则\n"
+    assert git("ls-files", "AGENTS.md") == ""

@@ -1,6 +1,6 @@
 # 企业工作台开发与贡献规范
 
-约束适用于本仓库全部代码与协作流程，根目录 [AGENTS.md](../AGENTS.md) 同样必须阅读。目标仓库为 `https://github.com/SenpeWang/test.git`。维护者在本仓库创建工作分支；外部贡献者先 Fork。采用单人维护、工作分支与 PR、维护者审阅和 Squash 合并。
+本文件是仓库公开的开发与协作规范。维护者本机的 AGENTS.md 仅供本地维护，不进入 Git；克隆仓库不依赖该文件即可开发。目标仓库为 `https://github.com/SenpeWang/test.git`。维护者在本仓库创建工作分支；外部贡献者先 Fork。采用单人维护、工作分支与 PR、维护者审阅和 Squash 合并。
 
 ## 环境与前端风格
 
@@ -45,7 +45,7 @@ make verify-browser   # 四种身份及同浏览器换人后的残留检查
 | Agent、队列与来源 | 预算、重试、取消、租约、执行版本及权限变化后的恢复检查 |
 | 脚本、命名与端口 | 所有调用、Makefile、Supervisor、启动项和使用说明 |
 
-本机项目说明.md 同步维护，但不进入 Git。目录必须有单一职责，不建 temp/new/final 平行业务目录。页面和 API 承接输入输出，统一业务与授权服务负责状态变化；新功能不得另建身份或权限旁路。事务、并发版本、资源上限、超时、幂等和有限重试是业务设计的一部分。
+本机 AGENTS.md 与项目说明.md 同步维护，但不进入 Git；公开规范和文档不链接或依赖这些本机文件。目录必须有单一职责，不建 temp/new/final 平行业务目录。页面和 API 承接输入输出，统一业务与授权服务负责状态变化；新功能不得另建身份或权限旁路。事务、并发版本、资源上限、超时、幂等和有限重试是业务设计的一部分。
 
 ## 提交规范
 
@@ -70,7 +70,7 @@ BREAKING CHANGE: 移除旧字段，客户端须使用新接口；部署前完成
 git status --short
 git remote -v
 git fetch origin --prune
-git switch -c feat/document-history origin/main
+git switch --no-overwrite-ignore -c feat/document-history origin/main
 # 修改代码、说明并完成必要验证
 git add web/src/DocumentHistory.vue docs/STRUCTURE.md README.md
 # 上面只是选择文件的例子，须按实际差异明确暂存；不盲目 git add .
@@ -87,7 +87,9 @@ git push -u origin HEAD
 
 ~~~bash
 git fetch origin --prune
-git switch main
+# 从工作分支更新本机 main，只接受正常快进，不强推或重写历史
+git fetch origin main:main
+git switch --no-overwrite-ignore main
 git merge --ff-only origin/main
 git rev-parse HEAD
 git rev-parse origin/main
@@ -109,10 +111,18 @@ git ls-remote origin refs/heads/main
 
 ## 公开资料与反馈边界
 
-整个 data/、项目说明.md、私有 .env、老板初始化身份、凭据、数据库、附件、备份、运行日志、依赖和构建产物禁止提交。业务文件不得搬到源码、公开说明或测试中绕过检查。测试只能自行构造最小合成事实。已跟踪私有文件用 git rm --cached 移出 Git，保留本机原件；发现历史秘密停止推送并安排凭据轮换，删除现文件不能清除历史，不自行强推。
+整个 data/、任意目录和大小写的 AGENTS.md、项目说明.md、私有 .env、老板初始化身份、凭据、数据库、附件、备份、运行日志、依赖和构建产物禁止提交。业务文件不得搬到源码、公开说明或测试中绕过检查。测试只能自行构造最小合成事实。已跟踪私有文件用 git rm --cached 移出 Git，保留本机原件；仅修改 .gitignore 不会停止跟踪已有文件。发现历史秘密停止推送并安排凭据轮换，删除现文件不能清除历史，不自行强推。
 
 PR 模板记录问题、改动、影响、验证、文档同步及迁移风险。Issue 提供 Bug、功能、文档和使用问题四类表单。反馈前移除密码、API Key、Cookie、客户资料与机密正文，截图也要脱敏。
 
 ## 发布与恢复
 
 数据库结构只追加迁移，不改已应用版本。发布记录提交、依赖锁、迁移、维护窗口和验证；恢复需考虑新业务写入及旧代码兼容，不能假定旧库可无损覆盖。默认不生成 bak、源码副本或自动快照。业务数据备份按用户明确安排执行，Git 只保存公开代码历史。当前单机多进程部署不宣称高可用。
+
+### 本机维护文件的规则切换
+
+AGENTS.md 已改为本机文件，名称大小写和所在目录均不影响禁传规则。Git 忽略、暂存检查、新增提交检查及 CI 都拒绝重新加入此文件。
+
+切换前已经发布的提交 `5018289`、`2b071e5` 保留原历史；检查仅对这两个确定提交兼容旧维护文件路径，仍检查其秘密、其他禁传资料和目录登记。该兼容不适用于任何新提交或暂存内容，不允许扩大历史名单来放行未发布内容。删除跟踪不会清除旧提交中的文件，也不会自动改动尚未合并的其他分支。
+
+维护主机切换分支使用 git switch --no-overwrite-ignore，避免旧分支覆写被忽略的 AGENTS.md。合入修正后，在工作分支先用 git fetch origin main:main 正常快进本机 main，再切换；若目标仍跟踪维护文件、分支分叉或无法快进，停止切换并检查，不能覆盖本机规则。
