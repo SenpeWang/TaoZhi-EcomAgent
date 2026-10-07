@@ -1,0 +1,57 @@
+# 手机配件企业工作台 —— 项目依赖声明（安装已验证版本使用 requirements.v3.lock.txt）
+# 安装： pip install -r requirements.txt
+
+# ─── Agent 编排（LangGraph 1.0 / LangChain 1.0） ───
+langchain>=1.4.2
+langchain-core>=1.6.0
+langchain-openai>=1.6.0
+langgraph>=1.2.12
+langgraph-checkpoint>=4.2.0
+langgraph-checkpoint-sqlite>=3.0.0
+langsmith>=0.12.0
+
+# ─── 数据模型 / Web ───
+pydantic>=2.13.0
+pydantic-settings>=2.15.0
+fastapi>=0.141.0
+uvicorn[standard]>=0.34.0
+sse-starlette>=3.4.0
+python-multipart>=0.0.20
+httpx>=0.28.0
+PyJWT>=2.8.0
+
+# ─── 检索 / 向量 / 图 ───
+numpy>=2.0.0
+scikit-learn>=1.5.0
+joblib>=1.3.0
+rank-bm25>=0.2.2
+jieba>=0.42.1
+networkx>=3.2
+
+# ─── 文档解析（多模态） ───
+pymupdf>=1.24.0
+python-docx>=1.1.0
+reportlab>=4.0.0
+
+# ─── 基础设施客户端（可选，未启用时自动降级为本地实现） ───
+elasticsearch>=9.0.0
+neo4j>=5.20.0
+redis>=5.0.0
+kafka-python>=2.0.2
+minio>=7.2.0
+# pymilvus>=2.6.0            # 需要 gRPC 依赖，仅在启用 Milvus 时安装
+
+# ─── Embedding（可选，本地兜底无需安装） ───
+# sentence-transformers>=5.0.0
+
+# ─── 界面 / 测试 ───
+streamlit>=1.38.0
+pytest>=8.0.0
+
+# 企业在线持久化、进程与浏览器验收
+psycopg[binary]>=3.3,<4
+alembic>=1.20,<2
+supervisor>=4.3,<5
+langgraph-checkpoint-postgres>=3,<4
+playwright>=1.50,<2
+python-dotenv>=1,<2

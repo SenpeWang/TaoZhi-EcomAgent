@@ -1,0 +1,51 @@
+# 业务资料与个人学习说明永不提交（含演示文档和整个目录）
+/data/
+/项目说明.md
+
+# 私有配置，只保留无秘密的示例
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.token
+database-secrets.json
+bootstrap-owner-*.json
+
+# 数据库、归档、运行日志
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.log
+*.pid
+
+# 依赖、缓存、构建产物
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.venv-v3/
+venv/
+node_modules/
+web/dist/
+web/.build-*/
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 不生成源码副本或自动备份
+*.bak
+*.bak.*
+*.old
+*.orig
+*.swp
+.maintenance-*
