@@ -24,6 +24,8 @@
 | 前端源码 | web/src/ | 页面与组件全中文，沿用 Vue/Element Plus |
 | 运维与数据管理工具 | scripts/ | 使用明确职责的名称，避免版本和临时后缀 |
 | 数据库结构变更 | migrations/versions/ | 新增迁移，不能修改已部署迁移冒充新版本 |
+| GitHub CI、PR 和反馈表单 | .github/ | 工作流与 Issue 子目录同步 STRUCTURE.md 和 README，最小权限、不自动部署 |
+| Git 客户端门禁 | .githooks/ | 只检查暂存快照、消息与推送，每份克隆主动安装 |
 | 自动化验收 | tests/ | 业务边界和权限测试与业务修改一起维护 |
 | 软件使用、接口、架构说明 | docs/ | 与 项目说明.md、README.md 保持一致 |
 | 待入库的真实企业文档 | data/incoming/<tenant_id>/ | 默认私有，保留企业隔离，禁止提交仓库 |
@@ -48,7 +50,12 @@
 ## 命名与代码风格
 
 - Python 模块、函数、变量用 snake_case；类用 PascalCase；常量用 UPPER_SNAKE_CASE。
-- TypeScript 函数和变量用 camelCase；Vue 组件用 PascalCase。
+- TypeScript 函数和变量用 camelCase，类型用 PascalCase，业务常量用 UPPER_SNAKE_CASE；自建 Vue 文件和声明用 PascalCase，根组件允许 App.vue。
+- ESLint Flat Config 使用 Vue/TypeScript 推荐规则，Prettier 统一前端：两空格、单引号、无 JS 分号、尾随逗号、100 字符行宽、LF；eslint-config-prettier 消除冲突。
+- 锁定 ESLint 9.39.5、Prettier 3.9.9、commitlint 21.2.3；插件和传递依赖写入 web/package-lock.json，升级需运行类型构建与权限回归。
+- 具名业务函数和导出函数必须有中文 JSDoc；会话、CSRF、API、权限、文档和任务审核解释输入、结果、异常和拒绝边界。Python 关键业务用 docstring 和类型注解。
+- API 网络响应用 unknown 接收、边界校验与明确 DTO，不能用 any 或全局关规则掩盖问题。接口字段保留服务端命名。
+- 本次前端作为统一格式基线；后端不全量格式重排。格式整理不得改变中文交互及业务权限。
 - 技术目录和脚本用简洁、明确的英文用途名称；企业文档允许准确的中文标题。
 - 函数名表达动作和对象，例如 fetch_one、load_principal、require_document_read、invalidate_authorization、process_next_job。
 - 不新增 one、many、j、tmp、test2 等含糊业务函数名；短循环下标限于小范围使用。
@@ -128,6 +135,11 @@ make verify-browser
 
 # 前端类型检查与构建
 make build-web
+make lint-web
+make format-web
+make check-format
+make check-commits
+make install-hooks
 ~~~
 
 新主机运行时准备：scripts/install_runtime.sh；数据库工具：scripts/manage_database.py；进程配置：scripts/configure_services.py；浏览器验收：scripts/verify_browser.py；手动数据库备份：scripts/backup_database.py。
@@ -162,11 +174,11 @@ make build-web
 1. 修改前阅读本文件，检查 git status、当前分支、用户已有差异和 origin。保留其他工作，不 reset --hard、不清理未确认内容。
 2. 已有远端先 fetch，阅读变更；普通功能使用 feat/、fix/、refactor/、docs/、chore/ 工作分支，经过 PR、验证和审阅合入 main。用户已明确授权当前分支推送时按其范围执行，不额外要求确认。
 3. 初次导入空仓库可以建立 main；远端非空时保留原历史与不相关文件，禁止覆盖导入或强推。
-4. 每份克隆执行 make install-hooks，启用 .githooks/pre-commit 与 pre-push。连接器和网页操作也需运行同等检查，不因绕过 Git 客户端而跳过门禁。
+4. 每份克隆执行 make install-hooks，启用 .githooks/pre-commit、commit-msg 与 pre-push。连接器和网页操作也需运行同等检查，不因绕过 Git 客户端而跳过门禁。
 5. 按实际变更明确 git add 文件；不要盲目暂存工作区，不 git add -f，不 --no-verify。
-6. 运行 python3 scripts/check_repository.py --staged、git diff --cached --check，检查暂存清单及 diff；按风险完成测试、迁移和构建。
-7. 提交格式“类型(模块): 中文说明”。允许 feat、fix、refactor、docs、test、build、ci、chore；一个提交一个可解释主题，正文写原因、影响、验证和迁移条件。
-8. 推送前重新 fetch，核验最新远端、目标分支与 URL；正常 git push -u origin HEAD。pre-push 检查全部新增提交，曾经提交后删除的敏感内容仍须拦截。
+6. 运行 python3 scripts/check_development.py staged（导出实际暂存快照，检查组件、ESLint、Prettier 和公开边界），检查暂存清单及 diff；按风险完成测试、迁移和构建。
+7. 提交格式“类型(模块): 中文说明”。允许 feat、fix、refactor、docs、test、build、ci、chore、style、perf、revert；标题最多 100 字符，破坏性变更用 ! 或 BREAKING CHANGE: 并说明兼容和迁移；一个提交一个可解释主题，正文写原因、影响、验证和迁移条件。
+8. 推送前重新 fetch，核验最新远端、目标分支与 URL；正常 git push -u origin HEAD。pre-push 检查全部新增提交的文件、消息和前端快照，曾经提交后删除的敏感内容仍须拦截。
 9. 非快进或并发更新先阅读远端新变化并合理整合，再验证推送。禁止强推、删除远端分支、重写已发布历史。
 10. GitHub API 推送需保留父提交，并按预期远端 SHA 更新引用；租约失败先重新检查，不能盲目覆盖。
 11. 推送后核验远端 SHA，检查对应 CI，交付仓库、分支、提交、实际验证及 CI 状态。代码推送不等同于生产部署。
@@ -210,3 +222,14 @@ make build-web
 - 公开交付必须注明未接入服务与实际验证范围，提交数量和检查结果来自当前日志或 CI。
 
 完整操作与同步矩阵见 docs/CONTRIBUTING.md；公开目录职责见 docs/STRUCTURE.md。
+
+## 开发门禁与协作执行要求
+
+- 默认单人维护：维护者在本仓库建工作分支，外部贡献者先 Fork。工作分支推送后创建 PR，CI 通过并由维护者审阅，使用 Squash 合入 main；PR 标题作为最终提交标题。不得自动合并或为了格式重写历史初始化提交。
+- Squash 后工作分支和 main 的哈希通常不同；一致性比较同一分支的本地 HEAD、远端跟踪引用及 GitHub 引用。合并后 fetch、main 快进并核验三处 SHA。
+- 钩子只检查：不自动格式化、暂存、stash 或联网安装。缺少 Node 24 或前端依赖明确失败，维护者先执行 npm ci。
+- pre-commit 使用完整 Git 索引 blob 导出快照，未暂存修复不能掩盖错误；临时目录成功失败都清理。commit-msg 校验秘密和提交格式，原始消息不回显。pre-push 逐次检查新增提交，最后删除过的秘密也拦截。
+- CI 独立执行 lint、format、组件命名、提交范围、PR 标题、类型构建、迁移及独立测试库；标题经环境变量/标准输入传入，禁止拼入 shell 命令。CI 不使用生产配置、真实资料或模型密钥，不自动部署。
+- PR 按中文模板记录问题、改动、影响、验证、结构和文档同步、迁移恢复条件；Issue 使用 Bug、功能、文档、使用问题四类表单。提交反馈需去除凭据、客户信息和机密正文。
+- 验收必须覆盖非法命名、格式、消息、PR 标题、缺失关键中文注释、部分暂存、历史秘密、目录漏登记和资料上传阻断；正常提交也要证明通过。
+- 本期保持现有 GitHub 仓库保护设置。钩子需每份克隆主动启用，CI 与文档不等于已开启服务端强制保护。

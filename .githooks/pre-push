@@ -5,4 +5,4 @@ if [ "$2" != "https://github.com/SenpeWang/test.git" ] && [ "$2" != "git@github.
     echo "推送目标与项目约定不符" >&2
     exit 1
 fi
-python3 scripts/check_repository.py --pre-push
+python3 scripts/check_development.py push

@@ -7,6 +7,7 @@
 | 目录 | 职责 |
 | --- | --- |
 | `.github/` | GitHub 协作与检查 |
+| `.github/ISSUE_TEMPLATE/` | 中文 Bug、功能、文档与使用问题表单 |
 | `.github/workflows/` | 最小权限 CI，不自动部署 |
 | `.githooks/` | 每份克隆主动启用的提交与推送门禁 |
 | `docs/` | 公开的软件架构、部署和贡献说明 |
@@ -43,7 +44,7 @@
 
 ## 根文件
 
-README.md 为 GitHub 项目介绍，AGENTS.md 为维护约束。Makefile 是统一维护命令，alembic.ini 配置迁移，requirements.txt 声明依赖，requirements.v3.lock.txt 锁定验证版本，.env.example 仅无秘密占位，.gitignore 阻止私有和生成物。
+README.md 为 GitHub 项目介绍，AGENTS.md 为维护约束。Makefile 是统一维护命令，alembic.ini 配置迁移，requirements.txt 声明依赖，requirements.v3.lock.txt 锁定验证版本，.env.example 仅无秘密占位，.gitignore 阻止私有和生成物。.editorconfig 统一编辑器换行和缩进；web/eslint.config.js、.prettierrc.json、commitlint.config.cjs 分别定义代码、格式和消息检查，scripts/check_development.py 调度实际快照门禁。
 
 项目说明.md 是本机个人学习文档，不提交；公开文档不能依赖它。
 

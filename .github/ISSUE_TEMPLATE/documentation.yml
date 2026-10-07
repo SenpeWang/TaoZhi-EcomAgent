@@ -1,0 +1,28 @@
+name: "📖 文档改进"
+description: "指出公开文档的不准确或缺失内容"
+title: "[文档] "
+body:
+  - type: markdown
+    attributes:
+      value: "反馈前请移除密码、API Key、Cookie、客户信息、内部地址和机密正文，截图也需脱敏。"
+  - type: textarea
+    id: location
+    attributes:
+      label: "文档位置"
+      description: "填写公开文件路径、章节或链接。"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: "不准确或缺失内容"
+      description: "说明哪里难以理解或与实际不符。"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: "建议修改"
+      description: "说明建议表达或需要补充的内容。"
+    validations:
+      required: true

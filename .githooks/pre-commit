@@ -1,5 +1,4 @@
 #!/bin/sh
 set -eu
 cd "$(git rev-parse --show-toplevel)"
-python3 scripts/check_repository.py --staged
-git diff --cached --check
+python3 scripts/check_development.py staged

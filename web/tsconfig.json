@@ -6,16 +6,8 @@
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "lib": [
-      "ES2022",
-      "DOM"
-    ],
-    "types": [
-      "vite/client"
-    ]
+    "lib": ["ES2022", "DOM"],
+    "types": ["vite/client"]
   },
-  "include": [
-    "src/**/*.ts",
-    "src/**/*.vue"
-  ]
+  "include": ["src/**/*.ts", "src/**/*.vue"]
 }

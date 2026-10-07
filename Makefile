@@ -2,9 +2,14 @@ PYTHON := .venv-v3/bin/python
 PROJECT_ROOT := $(CURDIR)
 SUPERVISOR_CONFIG := $(HOME)/.local/share/ecom-v3/supervisor.conf
 
-.PHONY: help start stop status test check build-web verify-browser clean install-hooks check-repository
+.PHONY: help start stop status test check build-web verify-browser clean install-hooks check-repository lint-web format-web check-format check-commits
+
+COMMIT_BASE ?= origin/main
+COMMIT_HEAD ?= HEAD
 
 help:
+	@echo "make lint-web / format-web / check-format 前端检查与格式整理"
+	@echo "make check-commits  检查指定基准到 HEAD 的新增提交"
 	@echo "make install-hooks  启用 Git 提交和推送检查"
 	@echo "make check-repository 检查已提交公开文件和目录登记"
 	@echo "make start          启动企业工作台与独立任务进程"
@@ -42,7 +47,19 @@ clean:
 
 install-hooks:
 	git config --local core.hooksPath .githooks
-	chmod +x .githooks/pre-commit .githooks/pre-push
+	chmod +x .githooks/pre-commit .githooks/commit-msg .githooks/pre-push
 
 check-repository:
 	python3 scripts/check_repository.py --tracked
+
+lint-web:
+	python3 scripts/check_development.py lint
+
+format-web:
+	python3 scripts/check_development.py format
+
+check-format:
+	python3 scripts/check_development.py format-check
+
+check-commits:
+	python3 scripts/check_development.py commits --base "$(COMMIT_BASE)" --head "$(COMMIT_HEAD)"

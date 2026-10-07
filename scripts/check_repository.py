@@ -109,6 +109,8 @@ def inspect_tree(revision: str | None) -> list[str]:
         directories.update(str(parent) + "/" for parent in PurePosixPath(path).parents if str(parent) != ".")
     for directory in sorted(directories - registered):
         problems.append(f"{directory}: 未在 docs/STRUCTURE.md 登记职责")
+    for directory in sorted(registered - directories):
+        problems.append(f"{directory}: 没有跟踪文件；删除或移动目录后须同步登记")
     return problems
 
 

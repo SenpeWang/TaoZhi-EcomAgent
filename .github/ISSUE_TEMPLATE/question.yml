@@ -1,0 +1,28 @@
+name: "❓ 使用问题"
+description: "描述场景、操作及已尝试的方法"
+title: "[使用] "
+body:
+  - type: markdown
+    attributes:
+      value: "反馈前请移除密码、API Key、Cookie、客户信息、内部地址和机密正文，截图也需脱敏。"
+  - type: textarea
+    id: scenario
+    attributes:
+      label: "使用场景"
+      description: "说明身份和功能，不提供真实客户或企业资料。"
+    validations:
+      required: true
+  - type: textarea
+    id: operation
+    attributes:
+      label: "操作与问题"
+      description: "说明具体步骤、期望结果及问题。"
+    validations:
+      required: true
+  - type: textarea
+    id: attempts
+    attributes:
+      label: "已尝试的方法"
+      description: "列出已经查阅的公开文档和排查方法。"
+    validations:
+      required: true

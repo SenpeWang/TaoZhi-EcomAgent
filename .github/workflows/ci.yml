@@ -1,9 +1,10 @@
 name: 企业工作台检查
 on:
   push:
-    branches: [main, 'feat/**', 'fix/**', 'refactor/**', 'docs/**', 'chore/**']
+    branches: ['**']
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
 permissions:
   contents: read
 concurrency:
@@ -37,11 +38,13 @@ jobs:
       BUSINESS_API_URL: ''
       BUSINESS_API_TOKEN: ''
     steps:
-      - name: 读取源码
+      - name: 读取完整分支历史
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: 提交内容与目录检查
+      - name: 公开内容与目录检查
         run: python3 scripts/check_repository.py --tracked
       - name: Python 环境
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -59,7 +62,33 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: 安装锁定前端依赖
         working-directory: web
-        run: npm ci
+        run: npm ci --no-audit --no-fund
+      - name: 提交范围检查
+        env:
+          CHECK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CHECK_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -z "$CHECK_BASE" ] || [ "$CHECK_BASE" = "0000000000000000000000000000000000000000" ]; then
+            CHECK_BASE="$(git merge-base origin/main "$CHECK_HEAD")"
+          fi
+          python3 scripts/check_development.py commits --base "$CHECK_BASE" --head "$CHECK_HEAD"
+      - name: PR 标题检查
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+          subprocess.run(
+              ["python3", "scripts/check_development.py", "pr-title"],
+              input=os.environ["PR_TITLE"], text=True, check=True,
+          )
+          PY
+      - name: ESLint、组件命名与 Prettier
+        run: |
+          make lint-web
+          make check-format
       - name: 类型检查与前端构建
         working-directory: web
         run: npm run build
@@ -67,5 +96,5 @@ jobs:
         run: |
           python -m compileall -q src scripts migrations tests
           python -m alembic -c alembic.ini upgrade head
-      - name: 离线权限与流程回归
+      - name: 离线权限、流程与开发门禁回归
         run: python -m pytest tests -m 'not slow' -q --disable-warnings

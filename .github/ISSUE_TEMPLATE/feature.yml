@@ -1,0 +1,28 @@
+name: "💡 功能建议"
+description: "说明需求场景和预期效果"
+title: "[功能] "
+body:
+  - type: markdown
+    attributes:
+      value: "反馈前请移除密码、API Key、Cookie、客户信息、内部地址和机密正文，截图也需脱敏。"
+  - type: textarea
+    id: scenario
+    attributes:
+      label: "使用场景"
+      description: "谁在什么场景遇到什么需求？"
+    validations:
+      required: true
+  - type: textarea
+    id: requirements
+    attributes:
+      label: "需求与权限边界"
+      description: "涉及哪些身份、组织和资料密级？"
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: "预期效果"
+      description: "说明可验收的结果及替代方案。"
+    validations:
+      required: true

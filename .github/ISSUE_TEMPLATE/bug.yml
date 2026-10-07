@@ -1,0 +1,35 @@
+name: "🐛 Bug 报告"
+description: "描述可复现的问题及环境"
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: "反馈前请移除密码、API Key、Cookie、客户信息、内部地址和机密正文，截图也需脱敏。"
+  - type: textarea
+    id: environment
+    attributes:
+      label: "环境与版本"
+      description: "系统、浏览器、项目分支及提交；不要填写内部地址。"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: "复现步骤"
+      description: "给出可以复现的操作顺序和前置条件。"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: "预期结果"
+      description: "说明应当发生的结果。"
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: "实际结果"
+      description: "说明实际表现，附脱敏截图或错误编号。"
+    validations:
+      required: true

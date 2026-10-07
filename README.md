@@ -53,7 +53,10 @@ flowchart LR
 ~~~text
 src/ecom_copilot/enterprise/   在线业务、权限与工作流
 src/ecom_copilot/             共享能力和隔离的离线模块
-web/src/                     中文工作台
+web/src/                     中文工作台、类型与同源 API
+.github/workflows/           CI 与 PR 标题、提交范围检查
+.github/ISSUE_TEMPLATE/      四类中文反馈表单
+.githooks/                   提交快照、消息和推送门禁
 migrations/                  数据库迁移
 scripts/                     部署、检查和维护命令
 tests/                       单元测试与企业边界验收
@@ -97,13 +100,25 @@ ssh -N -L 18501:127.0.0.1:18501 用户名@服务器地址
 ~~~bash
 make install-hooks    # 启用提交与推送门禁，每份克隆执行一次
 make check-repository # 检查已跟踪文件、秘密及目录登记
+make lint-web         # ESLint、组件命名与格式检查
+make format-web       # 显式整理前端，不自动暂存
+make check-format     # 格式检查
+make check-commits    # 新增提交的格式和公开内容
 make test             # 独立测试库的离线回归
 make build-web        # TypeScript 检查与生产构建
 make verify-browser   # 演示入口四身份浏览器验收
 ~~~
 
-依赖锁为 `requirements.v3.lock.txt` 和 `web/package-lock.json`。CI 验证仓库边界、前端构建、数据库迁移和独立测试库的离线回归；不读取真实资料或调用付费模型。权限与泄漏边界的验收范围见 [验证说明](docs/VALIDATION.md)。
+依赖锁为 `requirements.v3.lock.txt` 和 `web/package-lock.json`。CI 验证提交范围、PR 标题、仓库边界、目录登记、ESLint、Prettier、组件命名、类型构建、数据库迁移和独立测试库的离线回归；不读取真实资料或调用付费模型。权限与泄漏边界的验收范围见 [验证说明](docs/VALIDATION.md)。
 
 ## 当前边界
 
 真实订单、库存和财务系统尚未接入，显示“未接入”；连接器只读，不自动退款、改价或修改订单。单机多进程已实现，多机高可用、企业 SSO、真实业务接入与异机备份需要单独部署验收。演示或测试事实不能作为经营数据。
+
+## 贡献与反馈
+
+前端采用 ESLint Flat Config 和 Prettier 的统一基线，组件使用 PascalCase，关键业务函数写中文 JSDoc。提交遵循 Conventional Commits：`类型(可选模块): 中文说明`，标题最多 100 字符。
+
+维护者建立工作分支，外部贡献者先 Fork；完成检查、规范提交和推送后创建 PR。CI 通过，由维护者审阅并 Squash 合并，PR 标题作为最终提交标题。Squash 后工作分支与 main 哈希不同是正常现象，一致性核验针对同一分支。具体命令与同步矩阵见 [贡献规范](docs/CONTRIBUTING.md)。
+
+反馈表单包括 Bug、功能建议、文档改进和使用问题；请提供场景、复现或预期结果，并去除凭据、客户信息及机密正文。仓库钩子需要主动安装，服务端保护以 GitHub 实际设置为准。
