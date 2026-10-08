@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 077
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-STATE="$HOME/.local/share/ecom-v3"
+STATE="$HOME/.local/share/ecom-agent"
 cd "$ROOT"
 mkdir -p "$STATE" data/runtime
 exec 9>"$STATE/start.lock"

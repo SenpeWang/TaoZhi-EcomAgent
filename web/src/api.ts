@@ -74,7 +74,7 @@ function readCsrf(mode: string): string {
 }
 
 /**
- * 调用同源 /api/v2，并以未知值解析响应；写请求带 CSRF，401 清除页面资料。
+ * 调用同源 /api，并以未知值解析响应；写请求带 CSRF，401 清除页面资料。
  * @param path - 业务路径，身份、企业及权限由后端会话决定。
  * @param mode - Cookie 所属环境。
  * @param onUnauthorized - 旧会话失效时清除内存中的答案、资料和表单。
@@ -95,7 +95,7 @@ export async function requestApi<T>(
   if (payload && !(payload instanceof FormData)) headers['Content-Type'] = 'application/json'
   let response: Response
   try {
-    response = await fetch('/api/v2' + path, {
+    response = await fetch('/api' + path, {
       method,
       credentials: 'same-origin',
       headers,

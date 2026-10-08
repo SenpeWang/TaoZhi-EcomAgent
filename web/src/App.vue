@@ -420,7 +420,7 @@ let taskStream: EventSource | null = null
  */
 function streamTask(id: string) {
   taskStream?.close()
-  taskStream = new EventSource('/api/v2/tasks/' + id + '/events')
+  taskStream = new EventSource('/api/tasks/' + id + '/events')
   /**
    * 接收进度事件；只更新当前任务，忽略其他任务的事件。
    * @param ev - 服务端推送的进度事件，载荷为阶段与进度字段。
@@ -1277,7 +1277,7 @@ onUnmounted(() => {
                     v-if="row.can_download"
                     text
                     tag="a"
-                    :href="'/api/v2/documents/' + row.id + '/download'"
+                    :href="'/api/documents/' + row.id + '/download'"
                     >下载</el-button
                   ></template
                 ></el-table-column
@@ -1492,7 +1492,7 @@ onUnmounted(() => {
           ><el-button
             v-if="detail.can_download"
             tag="a"
-            :href="'/api/v2/documents/' + detail.id + '/download'"
+            :href="'/api/documents/' + detail.id + '/download'"
             >下载</el-button
           ><el-button v-if="detail.can_write" type="danger" plain @click="deleteDoc"
             >删除</el-button

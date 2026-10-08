@@ -10,7 +10,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 
 def test_session_csrf_and_unknown_response_contracts():
     """验证写请求、畸形身份、失效会话和网络失败的可观察行为。"""
-    runtime = Path.home() / ".local/share/ecom-v3/runtime/node/bin/node"
+    runtime = Path.home() / ".local/share/ecom-agent/runtime/node/bin/node"
     executable = str(runtime) if runtime.is_file() else "node"
     module = (PROJECT / "web/src/api.ts").as_uri()
     source = """
@@ -25,7 +25,7 @@ globalThis.fetch = async (url, options) => {
   return new Response(JSON.stringify({ items: [] }), { status: 200 })
 }
 await requestApi('/documents', 'demo', clear)
-assert.equal(calls[0].url, '/api/v2/documents')
+assert.equal(calls[0].url, '/api/documents')
 assert.equal(calls[0].options.credentials, 'same-origin')
 assert.equal(calls[0].options.headers['X-CSRF-Token'], undefined)
 await requestApi('/documents', 'demo', clear, 'POST', { title: '合成资料' })

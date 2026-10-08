@@ -54,6 +54,6 @@ def identity(request:Request):
             expected=str(request.base_url).rstrip("/")
             if not token or not hmac.compare_digest(hash_token(token),s["csrf_hash"]) or (origin and origin!=expected):
                 raise Denied("请求校验失败，请刷新页面重试","CSRF_INVALID",403)
-        if p.must_change and request.url.path not in ("/api/v2/auth/me","/api/v2/auth/password","/api/v2/auth/logout"):
+        if p.must_change and request.url.path not in ("/api/auth/me","/api/auth/password","/api/auth/logout"):
             raise Denied("请先修改初始密码","PASSWORD_CHANGE_REQUIRED",403)
         return p

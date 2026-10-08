@@ -22,7 +22,7 @@ class ToolCheckFailed(RuntimeError):
 
 def node_executable() -> str:
     """使用用户安装的 Node 或 PATH；依赖不足直接报错，绝不联网安装。"""
-    local = Path.home() / ".local/share/ecom-v3/runtime/node/bin/node"
+    local = Path.home() / ".local/share/ecom-agent/runtime/node/bin/node"
     executable = str(local) if local.is_file() else shutil.which("node")
     if not executable:
         raise RuntimeError("缺少 Node.js，请先按部署说明安装 Node 24 与前端锁定依赖")

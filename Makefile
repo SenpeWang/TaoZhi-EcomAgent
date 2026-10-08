@@ -1,6 +1,6 @@
 PYTHON := .venv/bin/python
 PROJECT_ROOT := $(CURDIR)
-SUPERVISOR_CONFIG := $(HOME)/.local/share/ecom-v3/supervisor.conf
+SUPERVISOR_CONFIG := $(HOME)/.local/share/ecom-agent/supervisor.conf
 
 .PHONY: help start stop status test check build-web verify-browser clean install-hooks check-repository lint-web format-web check-format check-commits
 

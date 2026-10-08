@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 077
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-RUNTIME="$HOME/.local/share/ecom-v3/runtime"
+RUNTIME="$HOME/.local/share/ecom-agent/runtime"
 mkdir -p "$RUNTIME"
 BUILD_DIR="$(mktemp -d "$RUNTIME/.build-XXXXXX")"
 trap 'rm -rf "$BUILD_DIR"' EXIT

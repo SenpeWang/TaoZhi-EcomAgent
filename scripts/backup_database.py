@@ -6,7 +6,7 @@ from ecom_copilot.enterprise.config import load_config
 import psycopg
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
-STATE=Path.home()/".local/share/ecom-v3"
+STATE=Path.home()/".local/share/ecom-agent"
 BIN=STATE/"runtime/postgres/bin"
 def client_env(database=None):
     parts=conninfo_to_dict(load_config().dsn)
@@ -33,7 +33,7 @@ def signatures(dsn):
     return result
 def verify_restore():
     path=create_database_backup();parts=conninfo_to_dict(load_config().dsn)
-    target="ecom_v3_restore_"+datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    target="ecom_restore_"+datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     with psycopg.connect(host=str(STATE/"socket"),port=15432,dbname="postgres",autocommit=True) as admin:
         admin.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(target),sql.Identifier(parts["user"])))
         admin.execute(sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(sql.Identifier(target)))

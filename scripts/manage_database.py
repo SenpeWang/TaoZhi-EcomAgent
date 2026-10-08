@@ -7,8 +7,8 @@ from ecom_copilot.enterprise.db import database_connection,fetch_one,fetch_all,a
 from ecom_copilot.enterprise.services import generate_id
 from ecom_copilot.enterprise.passwords import hash_password
 from ecom_copilot.enterprise.ingest import split
-RUNTIME=Path.home()/".local/share/ecom-v3/runtime"
-STATE=Path.home()/".local/share/ecom-v3"
+RUNTIME=Path.home()/".local/share/ecom-agent/runtime"
+STATE=Path.home()/".local/share/ecom-agent"
 TEMPLATE=[
  ("商品产品部",["商品资料组","产品适配组"]),("电商运营部",["店铺运营组","内容营销组"]),
  ("客服售后部",["售前客服组","售后服务组"]),("采购供应链部",["采购组","仓储物流组"]),
@@ -164,7 +164,7 @@ def provision():
         subprocess.run([str(bin/"pg_ctl"),"-D",str(data),"-l",str(STATE/"postgres.log"),"start","-w"],check=True,stdout=subprocess.DEVNULL)
     with psycopg.connect(host=str(STATE/"socket"),port=15432,dbname="postgres",autocommit=True) as c:
         for mode in ("demo","production","test"):
-            role="ecom_v3_"+mode;dbname="ecom_v3_"+mode
+            role="ecom_"+mode;dbname="ecom_"+mode
             if not c.execute("SELECT 1 FROM pg_roles WHERE rolname=%s",(role,)).fetchone():c.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(sql.Identifier(role),sql.Literal(secrets_data[mode])))
             if not c.execute("SELECT 1 FROM pg_database WHERE datname=%s",(dbname,)).fetchone():c.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(dbname),sql.Identifier(role)))
             c.execute(sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(sql.Identifier(dbname)))

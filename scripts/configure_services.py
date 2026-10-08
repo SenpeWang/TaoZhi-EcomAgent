@@ -1,6 +1,6 @@
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-state=Path.home()/".local/share/ecom-v3"
+state=Path.home()/".local/share/ecom-agent"
 state.mkdir(parents=True,exist_ok=True,mode=0o700)
 python=ROOT/".venv/bin/python"
 def find_sp_llm_python():

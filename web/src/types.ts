@@ -1,4 +1,4 @@
-/** 前后端 /api/v2 契约；字段保留服务端命名，界面变量采用 camelCase。 */
+/** 前后端 /api 契约；字段保留服务端命名，界面变量采用 camelCase。 */
 export interface Capabilities {
   system: boolean
   write: boolean

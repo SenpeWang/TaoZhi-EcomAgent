@@ -20,7 +20,7 @@ with sync_playwright() as p:
   page.get_by_role("button",name="登录",exact=True).click()
   page.get_by_role("heading",name="把知识与协作，放在同一个工作台").wait_for(timeout=30000)
   page.wait_for_timeout(500)
-  data=context.request.get(base+"/api/v2/documents").json()
+  data=context.request.get(base+"/api/documents").json()
   visible={d["id"] for d in data["items"]}
   if role in ("admin","staff","leader"):assert "demo_doc_boss" not in visible
   if role=="staff":assert "demo_doc_leader" not in visible
@@ -34,9 +34,9 @@ with sync_playwright() as p:
    page.get_by_text("任务详情",exact=True).wait_for()
    deadline=time.time()+150;result=None
    while time.time()<deadline:
-    listing=context.request.get(base+"/api/v2/tasks").json()["items"]
+    listing=context.request.get(base+"/api/tasks").json()["items"]
     if listing:
-     job=context.request.get(base+"/api/v2/tasks/"+listing[0]["id"]).json()
+     job=context.request.get(base+"/api/tasks/"+listing[0]["id"]).json()
      if job["state"] in ("completed","failed"):result=job;break
     page.wait_for_timeout(2000)
    assert result and result["state"]=="completed",result

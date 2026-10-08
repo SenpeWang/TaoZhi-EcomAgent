@@ -44,7 +44,7 @@ flowchart LR
 | 部分 | 实现 |
 | --- | --- |
 | 前端 | Vue 3、TypeScript、Element Plus（简体中文） |
-| 后端 | FastAPI，`/api/v2`，统一会话和权限 |
+| 后端 | FastAPI，`/api`，统一会话和权限 |
 | Agent | LangGraph，按需专家、证据核验、审核门禁 |
 | 持久化 | PostgreSQL，Alembic 迁移 |
 | 任务 | 独立 Worker，租约、心跳、执行版本与有限重试 |

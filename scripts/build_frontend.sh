@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export PATH="$HOME/.local/share/ecom-v3/runtime/node/bin:$PATH"
+export PATH="$HOME/.local/share/ecom-agent/runtime/node/bin:$PATH"
 cd "$ROOT/web"
 mkdir -p "$ROOT/data/runtime"
 STAGING="$(mktemp -d "$ROOT/web/.build-XXXXXX")"

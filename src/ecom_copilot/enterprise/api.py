@@ -106,34 +106,34 @@ async def invalid(request,exc):
 async def unexpected(request,exc):
     return JSONResponse({"code":"INTERNAL_ERROR","message":"服务暂时无法处理请求，请稍后重试","request_id":getattr(request.state,"request_id","")},status_code=500)
 @app.get("/api/health")
-@app.get("/api/v2/health")
+@app.get("/api/health")
 def health():
     with database_connection() as c:
         fetch_one(c,"SELECT 1")
         worker=fetch_one(c,"SELECT count(*) AS n FROM jobs WHERE state='running' AND lease_until>now()")
     return dict(status="ok",version="3.0",message="服务正常")
-@app.get("/api/v2/info")
+@app.get("/api/info")
 def info():
     with database_connection() as c:t=fetch_one(c,"SELECT name FROM tenants WHERE code=%s",(load_config().tenant_code,))
     return dict(name=t["name"] if t else "企业智能协作工作台",mode=load_config().mode,demo=load_config().mode=="demo",tenant_code=load_config().tenant_code)
 @app.post("/api/auth/login")
-@app.post("/api/v2/auth/login")
+@app.post("/api/auth/login")
 def signin(payload:Login,request:Request,response:Response):
     p,sid,csrf,expires=login(payload.username,payload.password,request.client.host if request.client else "local",payload.tenant_code or load_config().tenant_code)
     response.set_cookie(SESSION_COOKIE,sid,httponly=True,secure=load_config().cookie_secure,samesite="strict",max_age=7200,path="/")
     response.set_cookie(CSRF_COOKIE,csrf,httponly=False,secure=load_config().cookie_secure,samesite="strict",max_age=7200,path="/")
     return dict(user=p.public(),csrf_token=csrf,expires_at=expires,message="登录成功")
 @app.get("/api/auth/me")
-@app.get("/api/v2/auth/me")
+@app.get("/api/auth/me")
 def me(p=Depends(identity)):return p.public()
 @app.post("/api/auth/logout")
-@app.post("/api/v2/auth/logout")
+@app.post("/api/auth/logout")
 def logout(request:Request,response:Response,p=Depends(identity)):
     with database_connection() as c:
         c.execute("UPDATE sessions SET revoked=true WHERE id=%s",(hash_token(request.cookies.get(SESSION_COOKIE,"")),));audit(c,p,"退出登录",system=True)
     response.delete_cookie(SESSION_COOKIE);response.delete_cookie(CSRF_COOKIE)
     return {"message":"已退出登录"}
-@app.post("/api/v2/auth/password")
+@app.post("/api/auth/password")
 def password(payload:Password,p=Depends(identity)):
     with database_connection() as c:
         row=fetch_one(c,"SELECT * FROM users WHERE id=%s FOR UPDATE",(p.id,))
@@ -141,15 +141,15 @@ def password(payload:Password,p=Depends(identity)):
         if verify_password(payload.new_password,row["password_hash"]):raise Denied("新密码不能与原密码相同","INVALID_PASSWORD",400)
         c.execute("UPDATE users SET password_hash=%s,must_change=false WHERE id=%s",(hash_password(payload.new_password,load_config().mode),p.id))
         invalidate_authorization(c,p.tenant_id,p.id);audit(c,p,"修改本人密码",p.id,system=True)
-    for folder in (Path.home()/".local/share/ecom-copilot",Path.home()/".local/share/ecom-v3"):
+    for folder in (Path.home()/".local/share/ecom-copilot",Path.home()/".local/share/ecom-agent"):
         for private in folder.glob("bootstrap-*.json"):
             try:
                 if json.loads(private.read_text()).get("user_id")==p.id:private.unlink()
             except (OSError,ValueError):pass
     return {"message":"密码已修改，请重新登录"}
-@app.get("/api/v2/organizations")
+@app.get("/api/organizations")
 def organizations(p=Depends(identity)):return {"items":list(p.nodes.values())}
-@app.post("/api/v2/organizations",status_code=201)
+@app.post("/api/organizations",status_code=201)
 def add_org(payload:Org,p=Depends(identity)):
     require_system(p)
     parent=p.nodes.get(payload.parent_id)
@@ -159,12 +159,12 @@ def add_org(payload:Org,p=Depends(identity)):
         row=fetch_one(c,"INSERT INTO org_nodes(id,tenant_id,parent_id,name,kind) VALUES(%s,%s,%s,%s,%s) RETURNING *",(generate_id("org"),p.tenant_id,payload.parent_id,payload.name,payload.kind))
         invalidate_authorization(c,p.tenant_id);audit(c,p,"新增组织",row["id"],system=True)
     return row
-@app.patch("/api/v2/organizations/{node_id}",status_code=202)
+@app.patch("/api/organizations/{node_id}",status_code=202)
 def update_org(node_id:str,payload:OrgChange,p=Depends(identity)):
     require_system(p);n=p.nodes.get(node_id)
     if not n or n["kind"]=="company":raise Denied("组织不存在或不能修改","INVALID",400)
     with database_connection() as c:return approval(c,p,"org",node_id,dict(**payload.model_dump(exclude_none=True),expected_version=n["version"]),p.root)
-@app.get("/api/v2/users")
+@app.get("/api/users")
 def users(p=Depends(identity)):
     if not(p.system_admin or p.boss or p.leader):return {"items":[p.public()]}
     with database_connection() as c:
@@ -175,16 +175,16 @@ def users(p=Depends(identity)):
             if p.system_admin or p.boss or any(p.manages(m["node_id"]) for m in membership):
                 visible.append(dict(**public_user(u),memberships=membership))
         return {"items":visible}
-@app.post("/api/v2/users",status_code=201)
+@app.post("/api/users",status_code=201)
 def add_user(payload:NewUser,p=Depends(identity)):
     with database_connection() as c:return create_user(c,p,**payload.model_dump())
-@app.patch("/api/v2/users/{user_id}",status_code=202)
+@app.patch("/api/users/{user_id}",status_code=202)
 def change_user(user_id:str,payload:UserChange,p=Depends(identity)):
     with database_connection() as c:return user_request(c,p,user_id,payload.model_dump(exclude_none=True))
-@app.post("/api/v2/users/{user_id}/memberships",status_code=202)
+@app.post("/api/users/{user_id}/memberships",status_code=202)
 def assign(user_id:str,payload:Membership,p=Depends(identity)):
     with database_connection() as c:return membership_request(c,p,user_id,payload.node_id,payload.role,payload.remove)
-@app.get("/api/v2/documents")
+@app.get("/api/documents")
 def documents(p=Depends(identity)):
     with database_connection() as c:
         rows=fetch_all(c,"SELECT * FROM documents WHERE tenant_id=%s AND state<>'deleted' ORDER BY updated_at DESC LIMIT 2000",(p.tenant_id,))
@@ -194,10 +194,10 @@ def documents(p=Depends(identity)):
                 result.append(dict(**{k:d[k] for k in ("id","title","scope","node_id","level","state","current_version","acl_version","ai_allowed","download_allowed","updated_at","error")},
                    node_name=p.nodes.get(d["node_id"],{}).get("name",""),can_write=can_write(c,p,d),can_download=can_download(c,p,d),can_policy=p.boss or p.system_admin or p.manages(d["node_id"])))
         return {"items":result}
-@app.post("/api/v2/documents",status_code=201)
+@app.post("/api/documents",status_code=201)
 def add_document(payload:Doc,p=Depends(identity)):
     with database_connection() as c:return new_document(c,p,**payload.model_dump())
-@app.post("/api/v2/documents/upload",status_code=201)
+@app.post("/api/documents/upload",status_code=201)
 async def upload(file:UploadFile=File(...),title:str=Form(...),node_id:str=Form(...),scope:str=Form("org"),level:int=Form(2),p=Depends(identity)):
     from .ingest import validate_upload
     content=await file.read(20*1024*1024+1)
@@ -210,13 +210,13 @@ async def upload(file:UploadFile=File(...),title:str=Form(...),node_id:str=Form(
     try:
         with database_connection() as c:return new_document(c,p,**parsed.model_dump(),blob=name,mime=mime)
     except Exception:path.unlink(missing_ok=True);raise
-@app.get("/api/v2/documents/{doc_id}")
+@app.get("/api/documents/{doc_id}")
 def get_doc(doc_id:str,p=Depends(identity)):
     with database_connection() as c:
         d=get_document(c,p,doc_id);require_document_read(c,p,d)
         v=fetch_one(c,"SELECT body FROM document_versions WHERE document_id=%s AND version=%s",(d["id"],d["current_version"]))
         return dict(**{k:d[k] for k in ("id","title","scope","node_id","level","state","current_version","acl_version","ai_allowed","download_allowed","error")},body=v["body"] if p.boss else redact(v["body"]),can_write=can_write(c,p,d) and (p.boss or v["body"]==redact(v["body"])),can_download=can_download(c,p,d))
-@app.get("/api/v2/documents/{doc_id}/versions")
+@app.get("/api/documents/{doc_id}/versions")
 def versions(doc_id:str,p=Depends(identity)):
     with database_connection() as c:
         d=get_document(c,p,doc_id);require_document_read(c,p,d)
@@ -228,11 +228,11 @@ def versions(doc_id:str,p=Depends(identity)):
                 if not p.boss:item["body"]=redact(item["body"])
                 result.append(item)
         return {"items":result}
-@app.put("/api/v2/documents/{doc_id}")
+@app.put("/api/documents/{doc_id}")
 def edit(doc_id:str,payload:EditDoc,p=Depends(identity)):
     with database_connection() as c:
         d=get_document(c,p,doc_id);return edit_document(c,p,d,**payload.model_dump())
-@app.delete("/api/v2/documents/{doc_id}")
+@app.delete("/api/documents/{doc_id}")
 def remove(doc_id:str,p=Depends(identity)):
     with database_connection() as c:
         d=get_document(c,p,doc_id)
@@ -240,7 +240,7 @@ def remove(doc_id:str,p=Depends(identity)):
         c.execute("UPDATE documents SET state='deleted',acl_version=acl_version+1,updated_at=now() WHERE id=%s",(d["id"],))
         invalidate_authorization(c,p.tenant_id);audit(c,p,"删除资料",d["id"],d["node_id"],d["level"])
     return {"message":"资料已删除，历史来源不再可用"}
-@app.post("/api/v2/documents/{doc_id}/policy",status_code=202)
+@app.post("/api/documents/{doc_id}/policy",status_code=202)
 def policy_change(doc_id:str,payload:DocPolicy,p=Depends(identity)):
     with database_connection() as c:
         d=get_document(c,p,doc_id)
@@ -250,7 +250,7 @@ def policy_change(doc_id:str,payload:DocPolicy,p=Depends(identity)):
         scope=data.get("scope",d["scope"]);node=data.get("node_id",d["node_id"])
         if scope=="company" and node!=p.root:raise Denied("公司共享资料应归属公司","INVALID",400)
         return approval(c,p,"document_policy",d["id"],dict(**data,expected_acl=d["acl_version"],expected_version=d["current_version"]),d["node_id"])
-@app.get("/api/v2/documents/{doc_id}/permission-status")
+@app.get("/api/documents/{doc_id}/permission-status")
 def permission_status(doc_id:str,p=Depends(identity)):
     require_system(p)
     with database_connection() as c:
@@ -258,7 +258,7 @@ def permission_status(doc_id:str,p=Depends(identity)):
         audit(c,p,"查询资料授权配置",d["id"],system=True)
         return {k:d[k] for k in ("id","scope","node_id","level","state","current_version","acl_version","ai_allowed","download_allowed")}
 
-@app.get("/api/v2/system/status")
+@app.get("/api/system/status")
 def system_status(p=Depends(identity)):
     require_system(p)
     with database_connection() as c:
@@ -269,13 +269,13 @@ def system_status(p=Depends(identity)):
     from .embedding import available as embed_available
     return dict(database=True,worker_available=workers>0,counts=counts,model_configured=bool(s.api_key),business_configured=bool(s.business_api_url and s.business_api_token),semantic_retrieval=embed_available(),mode=load_config().mode)
 
-@app.get("/api/v2/documents/{doc_id}/grants")
+@app.get("/api/documents/{doc_id}/grants")
 def grants(doc_id:str,p=Depends(identity)):
     with database_connection() as c:
         d=get_document(c,p,doc_id)
         if not (p.boss or p.system_admin or p.manages(d["node_id"])):raise Denied()
         return {"items":fetch_all(c,"SELECT g.user_id,u.display_name,g.effect,g.can_download,g.can_write,g.expires_at FROM document_grants g JOIN users u ON u.id=g.user_id WHERE g.tenant_id=%s AND g.document_id=%s",(p.tenant_id,d["id"]))}
-@app.post("/api/v2/documents/{doc_id}/grants",status_code=202)
+@app.post("/api/documents/{doc_id}/grants",status_code=202)
 def grant_change(doc_id:str,payload:Grant,p=Depends(identity)):
     if payload.expires_at and (payload.expires_at.tzinfo is None or payload.expires_at<=datetime.now(timezone.utc)):raise Denied("授权到期时间须为未来时间","INVALID_EXPIRY",400)
     with database_connection() as c:
@@ -283,13 +283,13 @@ def grant_change(doc_id:str,payload:Grant,p=Depends(identity)):
         if not (p.boss or p.system_admin or p.manages(d["node_id"])):raise Denied()
         if not fetch_one(c,"SELECT id FROM users WHERE tenant_id=%s AND id=%s AND active",(p.tenant_id,payload.user_id)):raise Denied("授权人员无效","INVALID",400)
         return approval(c,p,"grant",d["id"],dict(**payload.model_dump(mode="json"),expected_acl=d["acl_version"],expected_version=d["current_version"]),d["node_id"])
-@app.post("/api/v2/documents/{doc_id}/request-access",status_code=202)
+@app.post("/api/documents/{doc_id}/request-access",status_code=202)
 def request_access(doc_id:str,p=Depends(identity)):
     with database_connection() as c:
         d=fetch_one(c,"SELECT * FROM documents WHERE tenant_id=%s AND id=%s AND state='published'",(p.tenant_id,doc_id))
         if d:approval(c,p,"grant",doc_id,dict(user_id=p.id,can_download=False,can_write=False,effect="allow",expected_acl=d["acl_version"],expected_version=d["current_version"]),d["node_id"])
     return {"message":"申请已提交，资料负责人确认后可开放访问"}
-@app.get("/api/v2/documents/{doc_id}/download")
+@app.get("/api/documents/{doc_id}/download")
 def download(doc_id:str,p=Depends(identity)):
     with database_connection() as c:
         d=get_document(c,p,doc_id)
@@ -303,7 +303,7 @@ def download(doc_id:str,p=Depends(identity)):
             if not path.is_file():raise Denied("附件不可用","NOT_FOUND",404)
             return FileResponse(path,media_type=v["mime_type"],filename=d["title"]+path.suffix)
         return Response(v["body"] if p.boss else redact(v["body"]),media_type="text/plain; charset=utf-8",headers={"Content-Disposition":"attachment; filename*=UTF-8''"+quote(d["title"]+".txt")})
-@app.get("/api/v2/approvals")
+@app.get("/api/approvals")
 def approvals(p=Depends(identity)):
     with database_connection() as c:
         result=[]
@@ -317,11 +317,11 @@ def approvals(p=Depends(identity)):
             if "password_hash" in a["payload"]:payload["reset_password"]=True
             result.append(dict(**{k:a[k] for k in ("id","kind","target_id","requested_by","required_role","state","created_at","comment")},label=label,title=title,can_decide=responsible,payload=payload))
         return {"items":result}
-@app.post("/api/v2/approvals/{aid}/decision")
+@app.post("/api/approvals/{aid}/decision")
 def decision(aid:str,payload:Decision,p=Depends(identity)):
     with database_connection() as c:return decide(c,p,aid,payload.approve,payload.comment)
 @app.post("/api/research/task",status_code=202)
-@app.post("/api/v2/tasks",status_code=202)
+@app.post("/api/tasks",status_code=202)
 def ask(payload:Question,idempotency_key:str|None=Header(default=None,max_length=128),p=Depends(identity)):
     node=payload.node_id or next((m["node_id"] for m in p.memberships if m["role"] in ("leader","employee")),p.root)
     data=payload.model_dump(exclude={"question","node_id","input_level"})
@@ -330,19 +330,19 @@ def ask(payload:Question,idempotency_key:str|None=Header(default=None,max_length
         job=create_job(c,p,"ask",node,data,payload.question,payload.input_level,idempotency_key)
         return {"id":job["id"],"task_id":job["id"],"state":job["state"],"message":"任务已提交"}
 @app.get("/api/research/tasks")
-@app.get("/api/v2/tasks")
+@app.get("/api/tasks")
 def tasks(p=Depends(identity)):
     with database_connection() as c:
         rows=fetch_all(c,"SELECT * FROM jobs WHERE tenant_id=%s AND kind='ask' ORDER BY created_at DESC LIMIT 500",(p.tenant_id,))
         return {"items":[present_job(c,p,r,False) for r in rows if can_task(p,r) and (r["owner_id"]==p.id or sources_valid(c,p,r["sources"]))]}
 @app.get("/api/research/task/{task_id}")
-@app.get("/api/v2/tasks/{task_id}")
+@app.get("/api/tasks/{task_id}")
 def task(task_id:str,p=Depends(identity)):
     with database_connection() as c:
         r=fetch_one(c,"SELECT * FROM jobs WHERE tenant_id=%s AND id=%s",(p.tenant_id,task_id))
         if not r:raise Denied("任务不存在或没有访问权限","NOT_FOUND",404)
         return present_job(c,p,r)
-@app.post("/api/v2/tasks/{task_id}/cancel")
+@app.post("/api/tasks/{task_id}/cancel")
 def cancel(task_id:str,p=Depends(identity)):
     with database_connection() as c:
         r=fetch_one(c,"SELECT * FROM jobs WHERE tenant_id=%s AND id=%s FOR UPDATE",(p.tenant_id,task_id))
@@ -351,7 +351,7 @@ def cancel(task_id:str,p=Depends(identity)):
         c.execute("UPDATE jobs SET cancel_requested=true,state=CASE WHEN state='running' THEN state ELSE 'cancelled' END WHERE id=%s",(task_id,))
         audit(c,p,"取消任务",task_id,r["node_id"],r["input_level"])
     return {"message":"已请求取消"}
-@app.post("/api/v2/tasks/{task_id}/review")
+@app.post("/api/tasks/{task_id}/review")
 def review(task_id:str,payload:Decision,p=Depends(identity)):
     with database_connection() as c:
         r=fetch_one(c,"SELECT * FROM jobs WHERE tenant_id=%s AND id=%s FOR UPDATE",(p.tenant_id,task_id))
@@ -364,7 +364,7 @@ def review(task_id:str,payload:Decision,p=Depends(identity)):
         c.execute("INSERT INTO task_reviews(tenant_id,job_id,reviewer_id,decision,comment) VALUES(%s,%s,%s,%s,%s)",(p.tenant_id,r["id"],p.id,"approved" if payload.approve else "rejected",payload.comment))
         audit(c,p,"审核业务答案",r["id"],r["node_id"],r["input_level"],detail={"decision":"approved" if payload.approve else "rejected"})
     return {"message":"答案已发布" if payload.approve else "答案未通过审核"}
-@app.get("/api/v2/tasks/{task_id}/events")
+@app.get("/api/tasks/{task_id}/events")
 async def events(task_id:str,request:Request,after:int=Query(0,ge=0),p=Depends(identity)):
     task(task_id,p)
     async def stream():
@@ -387,7 +387,7 @@ async def events(task_id:str,request:Request,after:int=Query(0,ge=0),p=Depends(i
             except Denied:return
             yield ": 心跳\n\n";await asyncio.sleep(1)
     return StreamingResponse(stream(),media_type="text/event-stream")
-@app.post("/api/v2/tools")
+@app.post("/api/tools")
 def tool(payload:Tool,p=Depends(identity)):
     with database_connection() as c:
         if payload.name in ("query_stock","query_order"):
@@ -396,18 +396,18 @@ def tool(payload:Tool,p=Depends(identity)):
         from .retriever import search_documents
         hits=search_documents(c,p,payload.query,8)
         return {"items":hits}
-@app.get("/api/v2/knowledge-map")
+@app.get("/api/knowledge-map")
 def knowledge_map(p=Depends(identity)):
     from .facts import list_visible_mentions
     with database_connection() as c:return {"items":list_visible_mentions(c,p)}
 
-@app.get("/api/v2/audit")
+@app.get("/api/audit")
 def audit_list(p=Depends(identity)):
     if not(p.system_admin or p.boss or p.leader):raise Denied()
     with database_connection() as c:
         rows=fetch_all(c,"SELECT * FROM audit_events WHERE tenant_id=%s ORDER BY id DESC LIMIT 500",(p.tenant_id,))
         return {"items":[r for r in rows if (r["system"] and (p.system_admin or p.boss)) or (not r["system"] and p.grade(r["node_id"])>=r["level"] and p.manages(r["node_id"]))]}
-@app.get("/api/v2/dashboard")
+@app.get("/api/dashboard")
 def dashboard(p=Depends(identity)):
     with database_connection() as c:
         docs=documents(p)["items"]
