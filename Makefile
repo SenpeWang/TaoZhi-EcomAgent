@@ -63,3 +63,12 @@ check-format:
 
 check-commits:
 	python3 scripts/check_development.py commits --base "$(COMMIT_BASE)" --head "$(COMMIT_HEAD)"
+
+evals-quick:
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.demo" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --quick --compare
+
+evals-full:
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.demo" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --full --compare
+
+evals-baseline:
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.demo" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --quick --save-baseline

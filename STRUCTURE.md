@@ -23,6 +23,7 @@
 | `src/ecom_copilot/debate/` | 离线证据讨论 |
 | `src/ecom_copilot/enterprise/` | 在线权限、会话、文档、业务服务、工作流及 Worker |
 | `src/ecom_copilot/graph/` | 本地图谱与共享图能力 |
+| `evals/` | 固定评测基准与基线分数 |
 | `src/ecom_copilot/hypothesis/` | 离线假设管理 |
 | `src/ecom_copilot/ingestion/` | 资料来源与入库共享工具 |
 | `src/ecom_copilot/llm/` | 模型客户端、路由与直连控制 |
