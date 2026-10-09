@@ -380,6 +380,7 @@ async function signOut() {
 function chooseRole(name: string) {
   loginForm.username = name
   loginForm.password = '123456'
+  ElMessage.info(`已快捷填入 ${name} 演示账号与默认密码 123456`)
 }
 /**
  * 切换中文菜单并按当前身份获取审计或运行状态；菜单可见不代替后端授权。
@@ -878,6 +879,10 @@ let timer: ReturnType<typeof setInterval>
 onMounted(async () => {
   try {
     info.value = await api<WorkspaceInfo>('/info')
+  } catch (e: unknown) {
+    console.error('获取工作空间信息失败:', e)
+  }
+  try {
     user.value = await api<User>('/auth/me')
     askForm.input_level = user.value!.is_boss ? 3 : user.value!.is_leader ? 2 : 1
     askForm.allow_external = !user.value!.is_boss
@@ -930,43 +935,66 @@ onUnmounted(() => {
         <el-tag v-if="info.demo" type="warning" effect="plain">独立演示环境</el-tag>
         <h2>登录工作台</h2>
         <p class="muted">使用企业账号继续</p>
-        <el-form label-position="top" @submit.prevent="signIn"
-          ><el-form-item label="账号"
-            ><el-input
+        <el-form label-position="top" @submit.prevent="signIn">
+          <el-form-item>
+            <template #label>
+              <div class="login-label-row">
+                <span>账号</span>
+                <span v-if="info.demo" class="quick-roles-inline">
+                  快捷选择：
+                  <a href="javascript:void(0)" @click.prevent="chooseRole('admin')">admin</a>
+                  <span class="sep">/</span>
+                  <a href="javascript:void(0)" @click.prevent="chooseRole('leader')">leader</a>
+                  <span class="sep">/</span>
+                  <a href="javascript:void(0)" @click.prevent="chooseRole('staff')">staff</a>
+                  <span class="sep">/</span>
+                  <a href="javascript:void(0)" @click.prevent="chooseRole('boss')">boss</a>
+                </span>
+              </div>
+            </template>
+            <el-input
               v-model="loginForm.username"
-              placeholder="请输入账号"
+              placeholder="请输入账号 (如 admin / leader / staff / boss)"
               autocomplete="username"
-              size="large" /></el-form-item
-          ><el-form-item label="密码"
-            ><el-input
+              size="large"
+            />
+          </el-form-item>
+          <el-form-item label="密码">
+            <el-input
               v-model="loginForm.password"
               type="password"
               show-password
-              placeholder="请输入密码"
+              placeholder="请输入密码 (演示环境统一 123456)"
               autocomplete="current-password"
               size="large"
-              @keyup.enter="signIn" /></el-form-item
-          ><el-button class="full" size="large" type="primary" :loading="busy" @click="signIn"
-            >登录</el-button
-          ></el-form
-        >
+              @keyup.enter="signIn"
+            />
+          </el-form-item>
+          <el-button class="full" size="large" type="primary" :loading="busy" @click="signIn">
+            登录
+          </el-button>
+        </el-form>
         <div v-if="info.demo" class="demo-box">
-          <strong>选择身份体验</strong>
-          <p>四个演示账号的密码均为 123456</p>
+          <div class="demo-box-head">
+            <strong>快捷填入演示账号</strong>
+            <el-tag size="small" type="success" effect="light">密码统一为 123456</el-tag>
+          </div>
+          <p>点击下方身份一键填入账号与密码：</p>
           <div class="role-buttons">
             <el-button
               v-for="r in [
-                { n: 'admin', l: '管理员' },
-                { n: 'staff', l: '员工' },
-                { n: 'leader', l: '组长' },
-                { n: 'boss', l: '老板' },
+                { n: 'admin', l: '管理员 (admin)' },
+                { n: 'leader', l: '组长 (leader)' },
+                { n: 'staff', l: '员工 (staff)' },
+                { n: 'boss', l: '老板 (boss)' },
               ]"
               :key="r.n"
+              :type="loginForm.username === r.n ? 'primary' : 'default'"
               @click="chooseRole(r.n)"
               >{{ r.l }}</el-button
             >
           </div>
-          <small>管理员维护系统，业务机密需单独授权。</small>
+          <small>管理员维护系统与组织，业务机密需单独授权。</small>
         </div>
         <p class="login-foot">资料与答案均按当前身份授权访问</p>
       </div>

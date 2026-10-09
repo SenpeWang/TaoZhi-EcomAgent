@@ -177,14 +177,45 @@ small {
   color: #7c889b;
   margin-top: 10px;
 }
-.role-buttons {
+.login-label-row {
   display: flex;
-  gap: 5px;
-  margin-bottom: 13px;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+.quick-roles-inline {
+  font-size: 12px;
+  font-weight: 400;
+  color: #7c889b;
+}
+.quick-roles-inline a {
+  color: #245ad8;
+  text-decoration: none;
+  font-weight: 500;
+}
+.quick-roles-inline a:hover {
+  text-decoration: underline;
+}
+.quick-roles-inline .sep {
+  margin: 0 4px;
+  color: #c0cce0;
+}
+.demo-box-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.role-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0 14px;
 }
 .role-buttons .el-button {
   margin-left: 0;
   padding: 8px 10px;
+  width: 100%;
+  justify-content: center;
 }
 .login-foot {
   text-align: center;
