@@ -1,8 +1,12 @@
 #!/bin/sh
 set -eu
 cd "$(git rev-parse --show-toplevel)"
-if [ "$2" != "https://github.com/SenpeWang/test.git" ] && [ "$2" != "git@github.com:SenpeWang/test.git" ]; then
-    echo "推送目标与项目约定不符" >&2
-    exit 1
-fi
+case "$2" in
+    *SenpeWang/TaoZhi-EcomAgent*|*SenpeWang/test*)
+        ;;
+    *)
+        echo "推送目标与项目约定不符" >&2
+        exit 1
+        ;;
+esac
 python3 scripts/check_development.py push

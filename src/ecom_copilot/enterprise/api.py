@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 from fastapi import FastAPI,Request,Response,Depends,UploadFile,File,Form,Header,Query
-from fastapi.responses import JSONResponse,FileResponse,StreamingResponse
+from fastapi.responses import JSONResponse,FileResponse,RedirectResponse,StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel,ConfigDict,Field,ValidationError
@@ -16,6 +16,7 @@ from .services import (approval, create_job, create_user, decide, edit_document,
 from .auth import identity,login,hash_token,SESSION_COOKIE,CSRF_COOKIE
 from .passwords import hash_password,verify_password
 from .privacy import redact
+from .storage import get_blob_store
 
 app=FastAPI(title="企业智能协作工作台",docs_url=None,redoc_url=None)
 class Input(BaseModel):
@@ -205,11 +206,10 @@ async def upload(file:UploadFile=File(...),title:str=Form(...),node_id:str=Form(
     try:parsed=Doc(title=title,body="待解析附件",node_id=node_id,scope=scope,level=level)
     except ValidationError:raise Denied("资料名称、范围或密级格式不正确","INVALID_INPUT",422) from None
     name=generate_id("blob")+"."+{"application/pdf":"pdf","application/vnd.openxmlformats-officedocument.wordprocessingml.document":"docx","text/plain":"txt"}[mime]
-    folder=load_config().private_dir/p.tenant_id;folder.mkdir(parents=True,exist_ok=True,mode=0o700)
-    path=folder/name;path.write_bytes(content);path.chmod(0o600)
+    store=get_blob_store();store.put_blob(p.tenant_id,name,content)
     try:
         with database_connection() as c:return new_document(c,p,**parsed.model_dump(),blob=name,mime=mime)
-    except Exception:path.unlink(missing_ok=True);raise
+    except Exception:store.remove_blob(p.tenant_id,name);raise
 @app.get("/api/documents/{doc_id}")
 def get_doc(doc_id:str,p=Depends(identity)):
     with database_connection() as c:
@@ -299,6 +299,8 @@ def download(doc_id:str,p=Depends(identity)):
         if v["blob_name"]:
             if not p.boss:
                 return Response(redact(v["body"]),media_type="text/plain; charset=utf-8",headers={"Content-Disposition":"attachment; filename*=UTF-8''"+quote(d["title"]+".txt")})
+            url=get_blob_store().presign_url(p.tenant_id,v["blob_name"])  # 审计已落库后再签发直链
+            if url:return RedirectResponse(url,status_code=302)
             path=load_config().private_dir/p.tenant_id/v["blob_name"]
             if not path.is_file():raise Denied("附件不可用","NOT_FOUND",404)
             return FileResponse(path,media_type=v["mime_type"],filename=d["title"]+path.suffix)

@@ -340,10 +340,21 @@ def _debate_brief(debate: DebateMatrix | None) -> str:
 
 
 def _overall_confidence(state: ResearchState) -> float:
-    relevant={"spec_query":"product","sku_compare":"product","compat_recommend":"compatibility","after_sales":"after_sales"}
-    role=relevant.get(getattr(state.get("plan"),"intent",""))
-    specialists=state.get("specialists") or []
-    verified=[s for s in specialists if s.get("role")==role and s.get("verdict")=="supported" and s.get("findings")]
+    relevant = {
+        "spec_query": "product",
+        "sku_compare": "product",
+        "compat_recommend": "compatibility",
+        "after_sales": "after_sales",
+        "coach_query": "coach",
+    }
+    role = relevant.get(getattr(state.get("plan"), "intent", ""))
+    specialists = state.get("specialists") or []
+    verified = [
+        s for s in specialists
+        if (s.get("role") == role or s.get("agent_name") == role)
+        and s.get("verdict") == "supported"
+        and s.get("findings")
+    ]
     if verified:
         # Only bounded advisory confidence; semantic correctness still requires quality/review.
         return 0.7

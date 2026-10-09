@@ -10,6 +10,7 @@
 | `.github/ISSUE_TEMPLATE/` | 中文 Bug、功能、文档与使用问题表单 |
 | `.github/workflows/` | main 推送触发的最小权限 CI，不自动部署 |
 | `.githooks/` | 每份克隆主动启用的提交与推送门禁 |
+| `k8s/` | 生产 Kubernetes 容器编排与 HPA 弹性伸缩清单 |
 | `migrations/` | Alembic 环境 |
 | `migrations/versions/` | 只追加已验证的数据库升级版本 |
 | `scripts/` | 部署、数据管理、构建、验收与提交检查 |
@@ -41,7 +42,7 @@
 
 ## 根文件
 
-README.md 为 GitHub 项目介绍。Makefile 是统一维护命令，alembic.ini 配置迁移，requirements.txt 声明依赖，requirements.lock.txt 锁定验证版本，.env.example 仅无秘密占位，.gitignore 阻止私有和生成物。.editorconfig 统一编辑器换行和缩进；web/eslint.config.js、.prettierrc.json、commitlint.config.cjs 分别定义代码、格式和消息检查，scripts/check_development.py 调度实际快照门禁。
+README.md 为 GitHub 项目介绍。Makefile 是统一维护命令，Dockerfile 为容器化运行时定义，alembic.ini 配置迁移，requirements.txt 声明依赖，requirements.lock.txt 锁定验证版本，.env.example 仅无秘密占位，.gitignore 阻止私有和生成物。.editorconfig 统一编辑器换行和缩进；web/eslint.config.js、.prettierrc.json、commitlint.config.cjs 分别定义代码、格式和消息检查，scripts/check_development.py 调度实际快照门禁。
 
 AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；两者都不跟踪或提交，公开文档不链接或依赖它们。维护者在本机维护这些文件，克隆仓库无需取得它们。
 
@@ -64,7 +65,7 @@ AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；
 
 ## 依赖与同步
 
-页面调用统一 API，API 加载当前会话并使用业务服务；权限集中 enterprise/policy.py。Worker 和 Agent 使用同一权限与来源门禁。PostgreSQL 保存在线状态和队列，文件目录保存私有原件。
+页面调用统一 API，API 加载当前会话并使用业务服务；权限集中 enterprise/policy.py。Worker 和 Agent 使用同一权限与来源门禁。PostgreSQL 保存在线状态、任务队列和 outbox；附件原件存 MinIO 桶 ecom-private（enterprise/storage.py，可回落本地私有目录）；任务事件经 Kafka ecom.tasks 主题分发（enterprise/queue.py，outbox 发布 + 幂等认领，轮询兜底）；检索切片同步 ES 索引 chunks_v1（enterprise/es_index.py，BM25+kNN 双路召回并前置权限过滤，可回落本地五信号链路）。
 
 原模块仍用于共享或离线回归；删除前检查全部引用。新在线能力不得另起旧 JWT、SQLite 或平行授权路径。
 

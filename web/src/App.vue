@@ -1522,12 +1522,14 @@ onUnmounted(() => {
           type="warning"
           :closable="false"
         /><template v-if="activeTask.result"
-          ><h3>核验结果</h3>
+          ><h3>多智能体协同核验结果</h3>
           <div class="detail-meta">
+            <el-tag type="primary" effect="dark">🎯 Main 调度</el-tag>
             <el-tag v-for="s in activeTask.result.specialists || []" :key="s.name" effect="plain"
               >{{ s.name }} ·
               {{ s.count ? '已核验 ' + s.count + ' 条原文' : '暂无支持结论' }}</el-tag
             >
+            <el-tag type="success" effect="dark">🔍 Verifier 终审</el-tag>
           </div>
           <pre class="answer-body">{{ activeTask.result.answer }}</pre>
           <div v-if="activeTask.result.missing?.length" class="missing-box">

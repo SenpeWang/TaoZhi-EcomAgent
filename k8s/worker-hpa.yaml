@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taozhi-worker
+  namespace: ecom-prod
+  labels:
+    app: taozhi-worker
+    tier: background
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: taozhi-worker
+  template:
+    metadata:
+      labels:
+        app: taozhi-worker
+    spec:
+      containers:
+      - name: worker
+        image: registry.cn-hangzhou.aliyuncs.com/ecom/taozhi-agent:v3.0.0
+        command: ["python", "-m", "ecom_copilot.enterprise.worker"]
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+        envFrom:
+        - configMapRef:
+            name: taozhi-config
+        - secretRef:
+            name: taozhi-secrets
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - python -c "from ecom_copilot.enterprise.worker import heartbeat; heartbeat()"
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: taozhi-worker-hpa
+  namespace: ecom-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: taozhi-worker
+  minReplicas: 4
+  maxReplicas: 100
+  metrics:
+  # 1. 基础 CPU 利用率弹性伸缩（当 CPU > 70% 触发扩容）
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  # 2. 核心大促积压指标：基于 Kafka 消息消费延迟（Consumer Lag）动态扩容
+  - type: External
+    external:
+      metric:
+        name: kafka_consumergroup_lag
+        selector:
+          matchLabels:
+            topic: ecom-jobs-production
+            consumergroup: ecom-workers
+      target:
+        type: AverageValue
+        averageValue: "30"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60

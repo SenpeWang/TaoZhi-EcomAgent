@@ -74,7 +74,7 @@ def supervisor_node(state: ResearchState, config: RunnableConfig) -> Dict[str, A
     # 安全护栏：防止编排死循环
     if state.get("iteration", 0) >= runtime.settings.max_agent_iterations:
         route = "report_generation"
-    append_trace(state, "supervisor", f"intent={plan.intent} -> {route}",
+    append_trace(state, "supervisor", f"[Main调度主脑] intent={plan.intent} -> {route}",
                  time.perf_counter() - started)
     log_event("supervisor_route", task_id=task.task_id, intent=plan.intent, route=route)
 

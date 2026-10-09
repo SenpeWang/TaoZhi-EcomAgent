@@ -37,12 +37,20 @@ def assess(state):
     if any(k in q for k in ("下单","退款","赔付")) or (
        any(k in q for k in ("库存","实时价格","当前价格")) and not stock.get("as_of")):
         reasons.append("需要订单/库存/价格系统实时核实；知识文档不能执行交易")
-    relevant={"spec_query":"product","sku_compare":"product","compat_recommend":"compatibility","after_sales":"after_sales"}
+    relevant={
+        "spec_query": ("product", "Spec"),
+        "sku_compare": ("product", "Spec"),
+        "compat_recommend": ("compatibility", "Details"),
+        "after_sales": ("after_sales", "Support"),
+        "coach_query": ("coach", "Coach"),
+    }
     intent=getattr(state.get("plan"),"intent","")
+    target_roles = relevant.get(intent, ())
     for specialist in state.get("specialists",[]):
-        if specialist["verdict"] in ("failed","timeout","conflict") or (
-            specialist["role"]==relevant.get(intent) and specialist["verdict"]=="unknown"):
-            reasons.append(specialist["role"]+"专家未收敛")
+        is_target = specialist["role"] in target_roles or specialist.get("agent_name") in target_roles
+        if specialist["verdict"] in ("failed","timeout","conflict") or (is_target and specialist["verdict"]=="unknown"):
+            display_name = specialist.get("agent_name") or specialist["role"]
+            reasons.append(f"{display_name}核验未收敛")
     if report.review_required:reasons.append("置信度或引用覆盖率需要人工复核")
     return {"passed":not reasons,"reasons":list(dict.fromkeys(reasons))}
 

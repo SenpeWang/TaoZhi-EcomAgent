@@ -17,8 +17,7 @@ def validate_upload(name,data):
         except UnicodeError:raise Denied("文本附件须为 UTF-8 编码","UPLOAD_ENCODING",400) from None
         return "text/plain"
     raise Denied("支持 PDF、Word、文本和 Markdown 附件","UPLOAD_FORMAT",400)
-def parse(path,mime):
-    data=path.read_bytes()
+def parse(data,mime):
     if mime=="application/pdf":
         import fitz
         with fitz.open(stream=data,filetype="pdf") as pdf:

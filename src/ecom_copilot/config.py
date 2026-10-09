@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     )
 
     # ───────────────────────── 基本 ─────────────────────────
-    app_name: str = "电商商品知识智能问答系统"
+    app_name: str = "TaoZhi-EcomAgent 电商商品知识多智能体中台"
     app_env: str = Field(default="dev", alias="APP_ENV")
     log_level: str = "INFO"
 

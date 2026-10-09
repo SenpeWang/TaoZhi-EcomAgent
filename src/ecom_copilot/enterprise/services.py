@@ -140,6 +140,8 @@ def create_job(conn,p,kind,node,payload,question="",level=1,key=None):
     if count>=load_config().max_pending:raise Denied("任务较多，请稍后重试","QUEUE_FULL",429)
     job=fetch_one(conn,"INSERT INTO jobs(id,tenant_id,owner_id,owner_version,node_id,kind,question,input_level,payload,idempotency_key,fingerprint) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
       (generate_id("task"),p.tenant_id,p.id,p.version,node,kind,question,level,as_jsonb(payload),key,fingerprint))
+    if load_config().kafka_enabled:  # outbox 同事务落库，relay 异步投递 Kafka
+        conn.execute("INSERT INTO task_outbox(job_id) VALUES(%s)",(job["id"],))
     audit(conn,p,"提交问答" if kind=="ask" else "提交资料解析",job["id"],node,level,detail={"kind":kind})
     return job
 
