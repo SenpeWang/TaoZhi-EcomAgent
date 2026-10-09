@@ -55,13 +55,13 @@ def seed_demo():
         for user,node,role in [(users["staff"],nodes["店铺运营组"],"employee"),(users["leader"],nodes["店铺运营组"],"leader"),(users["boss"],nodes["公司"],"boss")]:
             c.execute("INSERT INTO memberships(tenant_id,user_id,node_id,role) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING",(tenant,user,node,role))
         for did,chunks in corpus().items():
-            add_doc(c,tenant,users["boss"],"demo_"+did,chunks[0].get("doc_name","商品资料"),"【演示资料，不代表真实产品信息】\n"+"\n".join(x["text"] for x in chunks),nodes["公司"])
+            add_doc(c,tenant,users["boss"],"demo_"+did,chunks[0].get("doc_name","商品资料"),"\n".join(x["text"] for x in chunks),nodes["公司"])
         samples=[
-          ("company","公司使用与权限说明","员工只能读取获准资料；组长管理负责团队；老板审批机密授权；管理员管理系统。演示系统不包含真实订单或财务数据。","公司","company",1),
-          ("team","店铺运营组工作说明","店铺运营组负责商品信息核对、店铺内容和商品问答。发布商品内容应引用正式产品资料，不推测适配范围或售后承诺。","店铺运营组","org",1),
-          ("leader","运营组长内部计划","演示资料：组长负责运营内容复核和本组资料发布，跨团队事项应由对应负责人处理。该文档不向普通员工默认开放。","店铺运营组","org",2),
-          ("procurement","采购组内部协作说明","演示资料：采购组负责供应商对接和采购资料核验。其他团队不能默认读取本组内部资料。","采购组","org",2),
-          ("boss","老板经营决策备忘录","老板级机密权限演示。经营决策和敏感合作事项由老板管理。该文档不包含真实财务数据，默认禁止发送外部 AI。","公司","company",3)]
+          ("company","企业数据安全与文档密级分级规范","全员遵守企业信息安全准则。员工依岗位授权读取已获准商品资料；组长负责本部门业务审核与文档初审；老板审批跨部门及三级机密授权；管理员负责系统底层与账号运维。","公司","company",1),
+          ("team","店铺运营组日常业务作业指导书","店铺运营组负责电商各渠道商品详情维护、上架参数核验与客户售前咨询支持。日常作业必须严格引用官方核准规格，杜绝臆测适配型号或夸大售后承诺。","店铺运营组","org",1),
+          ("leader","电商运营组工作职责与内容发布审核规范","运营组长全面负责本组日常运营内容与上架文档的二级合规复核。遇跨部门供应链或涉保修例外事项，应发起跨部门协同审批。","店铺运营组","org",2),
+          ("procurement","供应链采购协同与供应商日常管理指引","采购组负责品牌官方配件及核心耗材供应商对接、准入资质审核与出厂批次抽检。非本组经办人员查阅进货明细及供应商底价需单独授权。","采购组","org",2),
+          ("boss","企业经营战略与核心商业秘密保护规定","公司核心经营指标、战略采购底价协议及关键供应商股权合作事宜归属三级核心商业秘密，由企业法定代表人统一管理，严格禁止向未经审核的第三方外部模型出境传输。","公司","company",3)]
         for tag,title,body,node,scope,level in samples:add_doc(c,tenant,users["boss"],"demo_doc_"+tag,title,body,nodes[node],scope,level)
     print("独立演示企业与四种身份已初始化")
 def sqlite_rows(name,table):

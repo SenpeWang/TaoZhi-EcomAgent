@@ -287,7 +287,6 @@ def publish_node(state):
                 labels={"available":"可用库存","price_minor":"销售价格（分）","status":"订单状态","as_of":"数据时间","sku_id":"商品编号","order_id":"订单编号","currency":"币种","phone":"联系电话","address":"收货地址","customer_name":"客户","purchase_cost_minor":"采购成本（分）"}
                 statuses={"CNY":"人民币","pending":"待支付","paid":"已支付","shipped":"已发货","delivered":"已签收","cancelled":"已取消","refunded":"已退款"}
                 answer+="\n\n实时业务数据：\n"+"\n".join(labels.get(k,k)+"："+str(statuses.get(str(v),v)) for k,v in record.items())
-    if load_config().mode=="demo" and not state["hard_block"]:answer="演示问答：以下资料不代表真实商品、订单或财务信息。\n\n"+answer
     return {"answer":answer,"input_level":max([job["input_level"]]+[e["level"] for e in state["evidence"]]+[b.get("source",{}).get("level",1) for b in state["business"]])}
 
 def build_question_workflow(checkpointer):
