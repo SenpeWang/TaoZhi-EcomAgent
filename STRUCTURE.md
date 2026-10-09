@@ -42,7 +42,7 @@
 
 ## 根文件
 
-README.md 为 GitHub 项目介绍。Makefile 是统一维护命令，Dockerfile 为容器化运行时定义，alembic.ini 配置迁移，requirements.txt 声明依赖，requirements.lock.txt 锁定验证版本，.env.example 仅无秘密占位，.gitignore 阻止私有和生成物。.editorconfig 统一编辑器换行和缩进；web/eslint.config.js、.prettierrc.json、commitlint.config.cjs 分别定义代码、格式和消息检查，scripts/check_development.py 调度实际快照门禁。
+README.md 为 GitHub 项目介绍。Makefile 是统一维护命令，Dockerfile 为容器化运行时定义，alembic.ini 配置迁移，requirements.txt 声明依赖，requirements.lock.txt 锁定验证版本，.env.example 仅无秘密占位，.gitignore 阻止私有和生成物。.editorconfig 统一编辑器换行和缩进；web/eslint.config.js、.prettierrc.json、web/commitlint.config.cjs 分别定义代码、格式和消息检查，scripts/check_development.py 调度实际快照门禁。提交必须遵循 Conventional Commits 规范与树状多层级 Body，向 GitHub 远端推送必须严格遵守主动向 Senpe 询问确认的铁律纪律。
 
 AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；两者都不跟踪或提交，公开文档不链接或依赖它们。维护者在本机维护这些文件，克隆仓库无需取得它们。
 
