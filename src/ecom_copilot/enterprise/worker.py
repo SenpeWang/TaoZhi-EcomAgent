@@ -81,23 +81,24 @@ def process_question_job(job):
     if cached:
         with database_connection() as c:
             p = load_principal(c, job["owner_id"])
-            result = dict(
-                answer=cached["answer"],
-                citations=cached["citations"],
-                specialists=[{"name": "Main 调度 / 语义缓存", "count": 1}],
-                missing=[],
-                hard_block=False,
-                external_blocked=False,
-                model_calls=0,
-                usage=[{"role": "semantic_cache", "elapsed_ms": cached["latency_ms"], "outcome": "hit"}],
-                cache_hit=True,
-                similarity=cached["similarity"]
-            )
-            c.execute("UPDATE jobs SET result=%s,sources=%s,input_level=%s,state='completed',stage='已完成（命中语义缓存）',progress=100,lease_until=NULL,finished_at=now() WHERE id=%s AND run_version=%s",
-                (as_jsonb(result), as_jsonb(cached["sources"]), job["input_level"], job["id"], job["run_version"]))
-            c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,'已完成（命中语义缓存）',100,'completed')",
-                (p.tenant_id, job["id"], job["run_version"]))
-            return
+            if sources_valid(c, p, cached.get("sources", [])):
+                result = dict(
+                    answer=cached["answer"],
+                    citations=cached["citations"],
+                    specialists=[{"name": "Main 调度 / 语义缓存", "count": 1}],
+                    missing=[],
+                    hard_block=False,
+                    external_blocked=False,
+                    model_calls=0,
+                    usage=[{"role": "semantic_cache", "elapsed_ms": cached["latency_ms"], "outcome": "hit"}],
+                    cache_hit=True,
+                    similarity=cached["similarity"]
+                )
+                c.execute("UPDATE jobs SET result=%s,sources=%s,input_level=%s,state='completed',stage='已完成（命中语义缓存）',progress=100,lease_until=NULL,finished_at=now() WHERE id=%s AND run_version=%s",
+                    (as_jsonb(result), as_jsonb(cached["sources"]), job["input_level"], job["id"], job["run_version"]))
+                c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,'已完成（命中语义缓存）',100,'completed')",
+                    (p.tenant_id, job["id"], job["run_version"]))
+                return
 
     from langgraph.checkpoint.postgres import PostgresSaver
     from .pipeline import build_question_workflow,validate_task_execution,SPECIALIST_ROLES

@@ -28,6 +28,9 @@ SPECIALIST_OPTIONS = {
 
 def test_jev_choice_semantic_fast_path():
     """测试 Jev 快速语义近邻离散决策（System 1a 高置信度直达）。"""
+    from ecom_copilot.enterprise.embedding import available as embedding_available
+    if not embedding_available():
+        pytest.skip("本地向量嵌入服务未运行，跳过语义快道测试")
     jev = get_jev_engine()
 
     # 预热选项向量缓存
@@ -44,6 +47,9 @@ def test_jev_choice_semantic_fast_path():
 
 def test_jev_choice_llm_multi_select():
     """测试 Jev 多角色协同规划决策（System 1b 结构化 LLM 决策）。"""
+    from ecom_copilot.config import get_settings
+    if not get_settings().has_llm:
+        pytest.skip("未配置真实 LLM API 凭据，跳过 LLM 结构化多选决策测试")
     jev = get_jev_engine()
 
     # 既问尺寸参数又问兼容手机壳，属于规格与兼容双角色
@@ -57,6 +63,9 @@ def test_jev_choice_llm_multi_select():
 
 def test_jev_score_primitive():
     """测试 Jev Score 连续打分评估原语。"""
+    from ecom_copilot.config import get_settings
+    if not get_settings().has_llm:
+        pytest.skip("未配置真实 LLM API 凭据，跳过 LLM 打分原语测试")
     jev = get_jev_engine()
 
     criterion = "根据回答是否严谨陈述了保修换新条款进行打分，1.0为完全严谨，0.0为完全未提及"
@@ -70,6 +79,9 @@ def test_jev_score_primitive():
 
 def test_jev_noul_primitive():
     """测试 Jev Noul 布尔断言核验原语。"""
+    from ecom_copilot.config import get_settings
+    if not get_settings().has_llm:
+        pytest.skip("未配置真实 LLM API 凭据，跳过 LLM 断言核验测试")
     jev = get_jev_engine()
 
     context = "本商品为直屏专用钢化膜，不支持任何曲面屏或折叠屏机型。"
@@ -83,3 +95,22 @@ def test_jev_noul_primitive():
     res_true = jev.noul(context, "该产品适用于直屏手机")
     assert res_true.value is True
     assert res_true.confidence >= 0.7
+
+
+def test_jev_offline_safe_fallback():
+    """测试在完全离线无外部模型凭据与无向量服务环境下，Jev 原语安全降级保障。"""
+    jev = get_jev_engine()
+    # Choice 离线降级
+    res = jev.choice("用了一周边缘起泡开胶了，给换新吗？", SPECIALIST_OPTIONS, allow_llm=False)
+    assert res.selected
+    assert res.path in (DecisionPath.FAST_SEMANTIC, DecisionPath.HEURISTIC_FALLBACK)
+
+    # Score 安全降级/执行
+    score_res = jev.score("测试内容", "评分标准")
+    assert 0.0 <= score_res.score <= 1.0
+    assert score_res.path in (DecisionPath.FAST_LLM, DecisionPath.HEURISTIC_FALLBACK)
+
+    # Noul 安全降级/执行
+    noul_res = jev.noul("直屏专用", "适用于折叠屏")
+    assert isinstance(noul_res.value, bool)
+    assert noul_res.path in (DecisionPath.FAST_LLM, DecisionPath.HEURISTIC_FALLBACK)

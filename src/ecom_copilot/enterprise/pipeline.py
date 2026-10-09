@@ -71,34 +71,37 @@ def plan_node(state):
     p, job = validate_task_execution(state, "动态意图理解与多智能体路由规划（Jev决策核）", 10)
     q = job["question"]
     from .privacy import redact
-    from .jev import get_jev_engine, DecisionPath
+    from .jev import get_jev_engine
 
     options = {k: f"{v[0]}：{v[1]}" for k, v in SPECIALIST_ROLES.items()}
     jev = get_jev_engine()
 
-    allow_external = job["payload"].get("allow_external", True) and not (job["input_level"] >= 3 and not p.boss)
-    # 若合规限制不允许外部模型，仅使用本地毫秒级纯语义决策（127.0.0.1 回环，零数据出境）
-    # 若允许外部模型，则启用完整双轨制（语义快道 + Fast LLM 结构化决策）
+    # 意图理解与专家智能体路由规划（Jev System 1 决策核）：
+    # 严格遵循零外部模型调用原则（allow_llm=False）：
+    # 1. 优先使用本地回环语义向量快道（若嵌入服务在线且已预热）；
+    # 2. 离线/机密环境下秒级降级至本地模式匹配规则兜底；
+    # 3. 绝不发起任何外部 LLM 调用，严格保证数据不出境、不消耗 model_calls 预算并守护机密隔离。
     decision = jev.choice(
         context=redact(q),
         options=options,
-        multi_select=allow_external,
+        multi_select=False,
         top_k=3,
         force_llm=False,
+        allow_llm=False,
     )
-    route = [r for r in decision.selected if r in SPECIALIST_ROLES][:3]
-    if not route:
-        route = ["product"]
+    route = [r for r in decision.selected if r in SPECIALIST_ROLES]
+    for r, patterns in [("product", ["规格", "参数", "型号", "尺寸", "切幅", "材质", "材质说明", "功能", "兼容", "区别", "对比"]),
+                        ("after_sales", ["售后", "退货", "保修", "保修期", "换新", "运费", "维修", "投诉"]),
+                        ("operations", ["主图", "文案", "卖点", "上架", "违禁词", "详情页"]),
+                        ("supply", ["库存", "发货", "起订", "供货", "现货", "交期"]),
+                        ("finance", ["毛利", "成本", "底价", "结算"])]:
+        if any(w in q for w in patterns):
+            route.append(r)
+    if not route or re.search("规格|尺寸|型号|参数|幅宽|切幅|材质", q):
+        route.insert(0, "product")
+    route = list(dict.fromkeys(route))[:3]
 
-    call_role = "jev_system_one_semantic" if decision.path == DecisionPath.FAST_SEMANTIC else "jev_system_one_llm"
-    try:
-        with database_connection() as c:
-            c.execute("INSERT INTO model_calls(tenant_id,job_id,role,elapsed_ms,outcome) VALUES(%s,%s,%s,%s,'ok')",
-                      (p.tenant_id, job["id"], call_role, int(decision.latency_ms)))
-    except Exception:
-        pass
-
-    return dict(question=q, route=route, model_calls=1 if decision.path == DecisionPath.FAST_LLM else 0,
+    return dict(question=q, route=route or ["product"], model_calls=0,
                 missing=[], findings=[], sources=[], business=[], usage=[], input_level=job["input_level"])
 _HYDE_SYSTEM="你是商品资料检索助手。根据用户问题，写一段可能出现在商品资料库中的正文段落：陈述句、含型号、参数或步骤等具体细节。允许内容与事实不符，禁止任何解释、前言或标题，只输出段落正文。"
 def _hyde_vector(c,p,job,state):
@@ -172,6 +175,11 @@ def domain_node(state):
     if not selected_roles:
         selected_roles = ["product"]
 
+    with database_connection() as c:
+        spent = fetch_one(c, "SELECT count(*) AS n FROM model_calls WHERE job_id=%s", (state["job_id"],))["n"]
+    if spent >= load_config().max_model_calls:
+        return {"findings": [], "missing": ["本任务已达到模型调用预算，保留原文供核验"], "model_calls": 0, "usage": []}
+
     def _run_specialist_agent(role):
         role_findings = []
         role_missing = []
@@ -187,16 +195,17 @@ def domain_node(state):
             "每项结论必须给出资料序号和逐字引用；无依据时 findings 为空。")
 
         call_id = None
-        try:
-            with database_connection() as c:
-                current = fetch_one(c, "SELECT * FROM jobs WHERE id=%s FOR UPDATE", (state["job_id"],))
-                if current and current["run_version"] == state["run_version"] and current["state"] == "running" and not current["cancel_requested"]:
-                    call = fetch_one(c, "INSERT INTO model_calls(tenant_id,job_id,role,elapsed_ms,outcome) VALUES(%s,%s,%s,0,'started') RETURNING id",
-                                     (current["tenant_id"], state["job_id"], role))
-                    if call:
-                        call_id = call["id"]
-        except Exception:
-            pass
+        with database_connection() as c:
+            current = fetch_one(c, "SELECT * FROM jobs WHERE id=%s FOR UPDATE", (state["job_id"],))
+            if not current or current["run_version"] != state["run_version"] or current["state"] != "running" or current["cancel_requested"]:
+                raise Denied("任务执行版本已失效", "TASK_STOPPED", 409)
+            spent = fetch_one(c, "SELECT count(*) AS n FROM model_calls WHERE job_id=%s", (state["job_id"],))["n"]
+            if spent >= load_config().max_model_calls:
+                return {"findings": [], "missing": ["本任务已达到模型调用预算，保留原文供核验"], "usage": {"role": role_name, "elapsed_ms": 0, "outcome": "budget_exhausted"}}
+            call = fetch_one(c, "INSERT INTO model_calls(tenant_id,job_id,role,elapsed_ms,outcome) VALUES(%s,%s,%s,0,'started') RETURNING id",
+                             (current["tenant_id"], state["job_id"], role))
+            if call:
+                call_id = call["id"]
 
         started = time.monotonic()
         outcome = "ok"
@@ -238,6 +247,7 @@ def domain_node(state):
     all_findings = []
     all_missing = []
     all_usage = []
+    actual_calls = 0
     with ThreadPoolExecutor(max_workers=min(len(selected_roles), 3)) as pool:
         futures = {pool.submit(_run_specialist_agent, r): r for r in selected_roles}
         for fut in futures:
@@ -245,8 +255,10 @@ def domain_node(state):
             all_findings.extend(res["findings"])
             all_missing.extend(res["missing"])
             all_usage.append(res["usage"])
+            if res["usage"].get("outcome") in ("ok", "failed"):
+                actual_calls += 1
 
-    return dict(findings=all_findings, missing=list(dict.fromkeys(all_missing)), model_calls=len(selected_roles), usage=all_usage)
+    return dict(findings=all_findings, missing=list(dict.fromkeys(all_missing)), model_calls=actual_calls, usage=all_usage)
 def quality_node(state):
     p,job=validate_task_execution(state,"事实、数字与引用核验",82)
     from ..ingestion.guard import detect_injection

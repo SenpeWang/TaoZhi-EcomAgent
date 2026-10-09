@@ -124,6 +124,7 @@ class JevEngine:
         multi_select: bool = False,
         top_k: int = 1,
         force_llm: bool = False,
+        allow_llm: bool = True,
     ) -> ChoiceResult:
         """执行离散选择决策（Choice 原语）。
 
@@ -135,6 +136,7 @@ class JevEngine:
             multi_select: 是否允许多选。
             top_k: 最多选择的选项个数。
             force_llm: 是否强制跳过语义快道直接调用 LLM。
+            allow_llm: 是否允许调用外部大模型（若为 False 则保证零外部网络/大模型调用）。
 
         Returns:
             ChoiceResult: 结构化决策结果，包含选择项、置信度、概率分布及耗时。
@@ -151,8 +153,8 @@ class JevEngine:
                 latency_ms=elapsed,
             )
 
-        # 尝试 Fast Semantic 路径（单选且非强制 LLM 时优先）
-        if not force_llm and not multi_select and embedding_available():
+        # 尝试 Fast Semantic 路径（非强制 LLM 时优先）
+        if not force_llm and embedding_available():
             try:
                 keys, opt_vecs = self._get_option_vectors(options)
                 q_vec = encode_query(context)[0]
@@ -172,8 +174,20 @@ class JevEngine:
 
                 dist = {keys[i]: round(float(probs[i]), 4) for i in sorted_indices}
 
+                if multi_select and not allow_llm:
+                    selected_keys = [keys[i] for i in sorted_indices[:top_k]]
+                    elapsed = (time.monotonic() - start_time) * 1000
+                    return ChoiceResult(
+                        selected=selected_keys,
+                        confidence=round(top_prob, 4),
+                        distribution=dist,
+                        rationale=f"语义向量多选近邻，Top-1 置信度 {top_prob:.1%}",
+                        path=DecisionPath.FAST_SEMANTIC,
+                        latency_ms=round(elapsed, 2),
+                    )
+
                 # 若 Top-1 置信度明确且区分度显著，直接在快路径返回
-                if top_prob >= self.semantic_threshold and margin >= self.margin_threshold:
+                if not multi_select and top_prob >= self.semantic_threshold and margin >= self.margin_threshold:
                     elapsed = (time.monotonic() - start_time) * 1000
                     return ChoiceResult(
                         selected=[keys[top_idx]],
@@ -184,10 +198,42 @@ class JevEngine:
                         latency_ms=round(elapsed, 2),
                     )
             except Exception as e:
-                logger.warning("Jev 语义快道异常，升级至 LLM 决策: %s", e)
+                logger.warning("Jev 语义快道异常: %s", e)
+
+        # 若不允许调用外部 LLM，安全降级至本地模式规则匹配
+        if not allow_llm:
+            return self._heuristic_choice(context, options, multi_select, top_k, start_time)
 
         # 升级至 Fast Constrained LLM 路径
         return self._llm_choice(context, options, multi_select, top_k, start_time)
+
+    def _heuristic_choice(
+        self,
+        context: str,
+        options: Dict[str, str],
+        multi_select: bool,
+        top_k: int,
+        start_time: float,
+    ) -> ChoiceResult:
+        """纯本地启发式规则匹配，绝对不发起任何外部网络/LLM 请求。"""
+        matched = []
+        for k, desc in options.items():
+            words = [k] + [w for w in desc.replace("：", " ").replace("、", " ").replace("，", " ").split() if len(w) >= 2]
+            if any(w in context for w in words):
+                matched.append(k)
+        if not matched:
+            matched = [list(options.keys())[0]]
+        selected = matched[:top_k] if multi_select else [matched[0]]
+        elapsed = (time.monotonic() - start_time) * 1000
+        dist = {k: 1.0 / len(selected) for k in selected}
+        return ChoiceResult(
+            selected=selected,
+            confidence=0.6,
+            distribution=dist,
+            rationale="本地启发式规则匹配兜底（零模型外部调用）",
+            path=DecisionPath.HEURISTIC_FALLBACK,
+            latency_ms=round(elapsed, 2),
+        )
 
     def _llm_choice(
         self,

@@ -17,6 +17,8 @@ setup=importlib.util.module_from_spec(spec);spec.loader.exec_module(setup)
 def reset(monkeypatch):
     assert load_config().mode=="test" and load_config().dsn.endswith("/ecom_test")
     with database_connection() as c:c.execute("TRUNCATE tenants CASCADE");c.execute("TRUNCATE login_attempts")
+    from ecom_copilot.enterprise.semantic_cache import get_semantic_cache
+    get_semantic_cache().clear()
     # 固定的合成测试事实，与部署 data/ 及真实产品文档无关。
     monkeypatch.setattr(setup,"corpus",lambda:{"synthetic_product":[{
         "doc_id":"synthetic_product","doc_name":"合成商品测试说明",
