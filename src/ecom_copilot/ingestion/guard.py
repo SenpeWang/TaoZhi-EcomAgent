@@ -17,7 +17,8 @@ _INJECTION_PATTERNS: List[Tuple[str, str]] = [
     (r"忘记(你|之前|上面)(的)?(所有)?(设定|指令|身份)", "身份重置攻击"),
     (r"你现在(是|扮演|作为).{0,20}(?:系统|管理员|root|developer)", "角色扮演越权"),
     (r"(system|assistant)\s*:\s*", "伪造对话角色"),
-    (r"<\s*(?:system|assistant|tool_call)\s*>", "伪造结构化标记"),
+    (r"<\s*/?\s*(?:system|assistant|tool_call|context|prompt|instruction)\b[^>]*>", "伪造结构化标记逃逸"),
+    (r"\[\s*/?\s*(?:SYSTEM|ASSISTANT|TOOL_CALL|INST)\s*\]", "伪造指令分隔符"),
     (r"(reveal|print|输出).{0,15}(system prompt|提示词|密钥|api[_ -]?key)", "敏感信息泄露探测"),
     (r"sudo\s+rm|rm\s+-rf|drop\s+table|delete\s+from", "危险操作指令"),
     (r"(curl|wget)\s+http", "外联指令"),
@@ -26,14 +27,16 @@ _INJECTION_PATTERNS: List[Tuple[str, str]] = [
 ]
 
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
 _MAX_INPUT_CHARS = 4000
 
 
 def sanitize(text: str, max_chars: int = _MAX_INPUT_CHARS) -> str:
-    """去除控制字符、统一全角、截断超长输入。"""
+    """去除控制字符、零宽走私字符、统一全角、截断超长输入。"""
     if text is None:
         return ""
-    text = unicodedata.normalize("NFKC", str(text))
+    text = _ZERO_WIDTH_RE.sub("", str(text))
+    text = unicodedata.normalize("NFKC", text)
     text = _CONTROL_RE.sub(" ", text)
     text = re.sub(r"\s{3,}", "  ", text).strip()
     if len(text) > max_chars:
@@ -45,8 +48,16 @@ def detect_injection(text: str) -> Tuple[bool, List[str]]:
     """返回 (是否可疑, 命中规则列表)。"""
     if not text:
         return False, []
-    probe = text[:8000]
     hits: List[str] = []
+    # 探测异常隐形走私字符
+    raw_probe = text[:8000]
+    zw_matches = len(_ZERO_WIDTH_RE.findall(raw_probe))
+    if zw_matches >= 3:
+        hits.append("零宽走私字符载荷")
+
+    # 剥离隐形走私字符并 NFKC 归一化，彻底瓦解 "i\u200bg\u200bn\u200bo\u200br\u200be" 等字符穿透混淆
+    clean_probe = _ZERO_WIDTH_RE.sub("", raw_probe)
+    probe = unicodedata.normalize("NFKC", clean_probe)
     for pattern, label in _INJECTION_PATTERNS:
         if re.search(pattern, probe, flags=re.IGNORECASE):
             hits.append(label)
