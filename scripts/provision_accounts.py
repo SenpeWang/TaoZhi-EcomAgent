@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""在企业正式库创建/补齐标准角色真实账号（员工 / 组长 / 老板 / 管理员）。
+"""在企业正式库创建/补齐标准角色真实账号（员工 / 组长 / 管理员；老板由 manage_database.py bootstrap-owner 初始化）。
 
 与已删除的 seed_demo 区别：
 - 只写入**真实企业租户**（由 ECOM_TENANT_CODE 指定），不建 tenant_demo；
@@ -31,7 +31,6 @@ STATE = Path.home() / ".local/share/ecom-agent"
 # (用户名, 显示名, 角色, 组织类型, 系统管理员)
 BLUEPRINT = [
     ("admin", "系统管理员", "admin", "company", True),
-    ("boss", "公司老板", "boss", "company", False),
     ("leader", "运营组长", "leader", "team", False),
     ("staff", "运营员工", "employee", "team", False),
 ]
