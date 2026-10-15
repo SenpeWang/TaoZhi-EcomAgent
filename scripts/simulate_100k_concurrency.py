@@ -49,8 +49,14 @@ def run_100k_concurrency_simulation(total_queries: int = 100_000, batch_size: in
     print(f"🚀 开始执行 TaoZhi-EcomAgent 真实十万级（{total_queries:,}）大促并发脉冲实测")
     print("======================================================================")
 
+    from ecom_copilot.enterprise.config import load_config
     cache = get_semantic_cache()
-    tenant_id = "tenant_demo"
+    cfg = load_config()
+    with database_connection() as c:
+        row = fetch_one(c, "SELECT id FROM tenants WHERE code=%s", (cfg.tenant_code,))
+    if not row:
+        raise SystemExit(f"未找到企业租户 code={cfg.tenant_code}；请先执行 scripts/manage_database.py migrate 与 bootstrap-owner")
+    tenant_id = row["id"]
     cache.clear(tenant_id)
 
     # 阶段 1：向语义缓存预热注入 8 组高频权威热点答案
@@ -131,8 +137,8 @@ def run_100k_concurrency_simulation(total_queries: int = 100_000, batch_size: in
     sample_penetration = 5_000
     print(f"\n[阶段 4] 穿透流量高频排队与 Outbox 削峰实测（模拟 {sample_penetration:,} 笔复杂任务并发入库）...")
     with database_connection() as c:
-        user = fetch_one(c, "SELECT id FROM users WHERE tenant_id='tenant_demo' AND username='staff'")
-        node = fetch_one(c, "SELECT id FROM org_nodes WHERE tenant_id='tenant_demo' LIMIT 1")
+        user = fetch_one(c, "SELECT id FROM users WHERE tenant_id=%s AND username='staff'", (tenant_id,))
+        node = fetch_one(c, "SELECT id FROM org_nodes WHERE tenant_id=%s LIMIT 1", (tenant_id,))
 
     t_db0 = time.monotonic()
     # 模拟批量插入任务与 Outbox 发件箱

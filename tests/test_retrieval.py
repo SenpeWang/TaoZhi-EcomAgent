@@ -77,3 +77,76 @@ def test_rerank_prefers_overlap():
     ]
     ranked = rerank("MC-500 120mm 切幅", hits, top_k=2)
     assert ranked[0].chunk.id == "c1"
+
+
+# ── 企业在线链路 Rerank 精排（enterprise/retriever._rerank_order） ──
+
+import numpy as np
+
+from ecom_copilot.enterprise import embedding as ent_embedding
+from ecom_copilot.enterprise import retriever as ent_retriever
+
+
+class _Cfg:
+    def __init__(self, enabled=True, candidates=20):
+        self.rerank_enabled = enabled
+        self.rerank_candidates = candidates
+
+
+def _fused_chunks(n=5):
+    chunks = [{"id": f"k{i}", "text": f"切片{i} 膜切机参数"} for i in range(n)]
+    fused = np.linspace(0.01, 0.03, n)  # 融合分按索引递增：i 越大融合分越高
+    return chunks, fused
+
+
+def test_enterprise_rerank_reorders_candidates(monkeypatch):
+    chunks, fused = _fused_chunks()
+    monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg())
+    # 客户端打分恰好把融合序反转，验证精排生效
+    monkeypatch.setattr(ent_embedding, "rerank",
+                        lambda q, texts: [float(len(texts) - j) for j in range(len(texts))])
+    order = ent_retriever._rerank_order("膜切机", chunks, fused)
+    assert order[0] == 4 and order[-1] == 0
+    assert sorted(order) == list(range(5))
+
+
+def test_enterprise_rerank_failure_falls_back_to_fused(monkeypatch):
+    chunks, fused = _fused_chunks()
+    monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg())
+
+    def _boom(q, texts):
+        raise RuntimeError("服务不可用")
+
+    monkeypatch.setattr(ent_embedding, "rerank", _boom)
+    order = ent_retriever._rerank_order("膜切机", chunks, fused)
+    assert order == [4, 3, 2, 1, 0]  # 融合分降序
+
+
+def test_enterprise_rerank_disabled_keeps_fused_order(monkeypatch):
+    chunks, fused = _fused_chunks()
+    monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg(enabled=False))
+
+    def _unexpected(q, texts):
+        raise AssertionError("关闭精排时不应调用客户端")
+
+    monkeypatch.setattr(ent_embedding, "rerank", _unexpected)
+    assert ent_retriever._rerank_order("膜切机", chunks, fused) == [4, 3, 2, 1, 0]
+
+
+def test_enterprise_rerank_floor_and_candidates(monkeypatch):
+    chunks, fused = _fused_chunks()
+    # 候选数上限 2：只有融合分最高的 2 条进入精排
+    monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg(candidates=2))
+    seen = {}
+
+    def _fake(q, texts):
+        seen["texts"] = texts
+        return [0.9, 0.1]
+
+    monkeypatch.setattr(ent_embedding, "rerank", _fake)
+    order = ent_retriever._rerank_order("膜切机", chunks, fused)
+    assert order == [4, 3]
+    assert len(seen["texts"]) == 2
+    # 融合分低于 RRF_FLOOR 的候选全部剔除
+    low = np.array([0.0001] * 5)
+    assert ent_retriever._rerank_order("膜切机", chunks, low) == []

@@ -113,10 +113,39 @@ def health():
         fetch_one(c,"SELECT 1")
         worker=fetch_one(c,"SELECT count(*) AS n FROM jobs WHERE state='running' AND lease_until>now()")
     return dict(status="ok",version="3.0",message="服务正常")
+def _quick_accounts(c,cfg):
+    """运维便利：返回真实企业账号清单。
+
+    仅在 ECOM_QUICK_LOGIN=true 时启用；口令只在 ECOM_QUICK_LOGIN_PASSWORDS=true
+    且本机存在运维凭据文件时才一并返回（仅限内网自用，禁止公网生产开启）。
+    """
+    t=fetch_one(c,"SELECT id FROM tenants WHERE code=%s",(cfg.tenant_code,))
+    if not t:return []
+    rows=fetch_all(c,"SELECT u.username,u.display_name,u.system_admin,"
+                     "coalesce(string_agg(m.role,','),'') AS roles "
+                     "FROM users u LEFT JOIN memberships m ON m.user_id=u.id AND m.tenant_id=u.tenant_id "
+                     "WHERE u.tenant_id=%s AND u.active "
+                     "GROUP BY u.id,u.username,u.display_name,u.system_admin ORDER BY u.username",(t["id"],))
+    creds={}
+    if cfg.quick_login_passwords:
+        p=Path.home()/".local/share/ecom-agent/accounts.json"
+        try:creds=json.loads(p.read_text()) if p.exists() else {}
+        except Exception:creds={}
+    result=[]
+    for r in rows:
+        item=dict(username=r["username"],display_name=r["display_name"],
+                  role="admin" if r["system_admin"] else (r["roles"] or "-"))
+        if creds:item["password"]=creds.get(r["username"],{}).get("password","")
+        result.append(item)
+    return result
 @app.get("/api/info")
 def info():
-    with database_connection() as c:t=fetch_one(c,"SELECT name FROM tenants WHERE code=%s",(load_config().tenant_code,))
-    return dict(name=t["name"] if t else "企业智能协作工作台",mode=load_config().mode,demo=load_config().mode=="demo",tenant_code=load_config().tenant_code)
+    cfg=load_config()
+    with database_connection() as c:
+        t=fetch_one(c,"SELECT name FROM tenants WHERE code=%s",(cfg.tenant_code,))
+        data=dict(name=t["name"] if t else "企业智能协作工作台",mode=cfg.mode,tenant_code=cfg.tenant_code)
+        if cfg.quick_login:data["quick_accounts"]=_quick_accounts(c,cfg)
+    return data
 @app.post("/api/auth/login")
 @app.post("/api/auth/login")
 def signin(payload:Login,request:Request,response:Response):
@@ -420,6 +449,69 @@ def dashboard(p=Depends(identity)):
         return dict(documents=len(docs),tasks=len(visible),review=sum(r["state"]=="review" for r in visible),completed=sum(r["state"]=="completed" for r in visible),
           teams=[p.nodes[m["node_id"]]["name"] for m in p.memberships if m["role"]!="boss"],
           model_ready=bool(settings.api_key),business_ready=bool(settings.business_api_url and settings.business_api_token),mode=load_config().mode)
+
+@app.get("/api/bi/dashboard")
+def bi_dashboard(p=Depends(identity)):
+    """数据中台经营看板：全部数据来自指标语义层受控执行（权限与 ChatBI 同源）。
+
+    无权限/执行失败的板块返回 null，前端按需渲染——不泄露指标存在性之外的信息。
+    """
+    from . import metrics as metrics_mod
+
+    def run(key: str, intent: dict | None = None):
+        with database_connection() as c:
+            m = fetch_one(c, "SELECT * FROM metrics WHERE metric_key=%s AND tenant_id=%s AND state='published'",
+                          (key, p.tenant_id))
+            if not m or not metrics_mod.can_read_metric(c, p, m):
+                return None
+            try:
+                cols, rows, meta = metrics_mod.execute_metric(c, p, m, intent or {})
+                return dict(columns=cols, rows=metrics_mod.jsonable_rows(rows), meta=meta,
+                            name=m["name"], unit=m["unit"], level=m["level"], description=m["description"])
+            except Denied:
+                return None
+            except Exception:
+                return None
+
+    def total(block):
+        if not block or not block["rows"]:
+            return None
+        try:
+            return round(sum(float(r[-1]) for r in block["rows"] if isinstance(r[-1], (int, float))), 2)
+        except (TypeError, ValueError):
+            return None
+
+    days30 = {"time_range": {"days": 30}}
+    gsv, orders = run("biz.gsv", days30), run("biz.order_count", days30)
+    rate, profit = run("biz.refund_rate", days30), run("biz.gross_profit", days30)
+    low, aftersales = run("biz.low_stock_count"), run("biz.aftersales_count", days30)
+    trend = run("biz.gsv_daily", days30)
+
+    cards = dict(
+        gsv_30d=total(gsv), orders_30d=total(orders),
+        gross_profit_30d=total(profit), low_stock=total(low))
+    if rate and rate["rows"]:
+        worst = max(rate["rows"], key=lambda r: float(r[-1]) if isinstance(r[-1], (int, float)) else 0)
+        cards["worst_refund_channel"] = {"channel": worst[0], "rate": worst[-1]}
+        cards["avg_refund_rate"] = round(sum(float(r[-1]) for r in rate["rows"]) / len(rate["rows"]), 2)
+
+    # 渠道销售额分布（对品类求和）
+    channel_gsv = None
+    if gsv and gsv["rows"]:
+        agg = {}
+        for r in gsv["rows"]:
+            agg[r[0]] = round(agg.get(r[0], 0) + float(r[-1]), 2)
+        channel_gsv = dict(sorted(agg.items(), key=lambda x: -x[1]))
+
+    return dict(
+        cards=cards,
+        trend=trend,
+        channel_gsv=channel_gsv,
+        refund_rate=rate,
+        aftersales=aftersales,
+        low_stock=low,
+        gross_profit=profit,
+        generated_at=datetime.now(timezone.utc).isoformat())
 
 dist=ROOT/"web/dist"
 if (dist/"assets").exists():app.mount("/assets",StaticFiles(directory=dist/"assets"),name="assets")

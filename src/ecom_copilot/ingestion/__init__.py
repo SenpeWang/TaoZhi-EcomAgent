@@ -14,7 +14,6 @@ from .sources import (  # noqa: F401
     PolicyNoticeAdapter,
     ProductPageAdapter,
     ReviewFeedAdapter,
-    SyntheticCorpusAdapter,
     adapters_by_name,
     default_adapters,
 )
@@ -23,6 +22,6 @@ __all__ = [
     "FetchRequest", "SourceAdapter",
     "assert_tool_allowed", "allowed_tools", "detect_injection", "is_safe", "sanitize",
     "ProductPageAdapter", "ReviewFeedAdapter", "PolicyNoticeAdapter",
-    "ManualSourceAdapter", "LocalCorpusAdapter", "SyntheticCorpusAdapter",
+    "ManualSourceAdapter", "LocalCorpusAdapter",
     "adapters_by_name", "default_adapters",
 ]

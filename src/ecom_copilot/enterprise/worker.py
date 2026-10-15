@@ -58,18 +58,18 @@ def process_ingestion_job(job):
         for i,ch in enumerate(chunks):
             c.execute("INSERT INTO chunks(id,tenant_id,document_id,version,ordinal,page,text,embedding) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
               (ch["id"],p.tenant_id,d["id"],v["version"],ch["ordinal"],ch["page"],ch["text"],
-               None if vectors is None else vectors[i].tobytes()))
+               None if vectors is None else vectors[i]))
         from .facts import index_mentions
         index_mentions(c,p.tenant_id,d["id"],v["version"],chunks)
         c.execute("UPDATE documents SET state='review',error='' WHERE id=%s",(d["id"],))
         approval(c,p,"publish",d["id"],dict(expected_acl=d["acl_version"],expected_version=v["version"]),d["node_id"],"boss" if d["level"]==3 or d["scope"]=="company" else "leader")
         c.execute("UPDATE jobs SET state='completed',progress=100,stage='解析完成，等待发布审核',finished_at=now(),lease_until=NULL WHERE id=%s AND run_version=%s",(job["id"],job["run_version"]))
-    try:  # 事务提交后同步 ES（尽力而为，失败不阻断入库）
+    try:  # 事务提交后同步 ES（尽力而为，失败不阻断入库；ES 仅承担 BM25，不含向量）
         from . import es_index
         if es_index.available():
             es_index.delete_chunks(d["id"],v["version"])
             with database_connection() as c2:
-                rows=fetch_all(c2,"SELECT id,tenant_id,document_id,version,ordinal,page,text,embedding FROM chunks WHERE document_id=%s AND version=%s",(d["id"],v["version"]))
+                rows=fetch_all(c2,"SELECT id,tenant_id,document_id,version,ordinal,page,text FROM chunks WHERE document_id=%s AND version=%s",(d["id"],v["version"]))
             es_index.index_chunks(rows)
     except Exception as exc:
         print("ES 索引同步失败",type(exc).__name__,flush=True)
@@ -115,15 +115,23 @@ def process_question_job(job):
         citations=[{k:e[k] for k in ("document_id","version","title","quote","page","chunk_id")} for e in state["evidence"]]
         result=dict(answer=state["answer"],citations=citations,specialists=[{"name":SPECIALIST_ROLES[r][0],"count":sum(f["role"]==SPECIALIST_ROLES[r][0] for f in state["findings"])} for r in state["route"]],
            missing=state["missing"],hard_block=state["hard_block"],external_blocked=state["external_blocked"],model_calls=state["model_calls"],usage=state["usage"])
+        # 问数（ChatBI）：结构化结果透传给前端渲染表格与图表；denied 结果不透传 data
+        dr = state.get("data_result")
+        if dr and not dr.get("denied"):
+            result["data"]=dr
+            result["specialists"]=[{"name":"指标语义层（受控 SQL）","count":1}]
         status="review" if state["review"] else "completed";stage="等待业务负责人审核" if state["review"] else "已完成"
         c.execute("UPDATE jobs SET result=%s,sources=%s,input_level=%s,state=%s,stage=%s,progress=100,lease_until=NULL,finished_at=now() WHERE id=%s AND run_version=%s",
             (as_jsonb(result),as_jsonb(state["sources"]),state["input_level"],status,stage,job["id"],job["run_version"]))
         c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,100,%s)",(p.tenant_id,job["id"],job["run_version"],stage,status))
 
     # 权威核验答案自动灌入语义缓存，赋能后续高频并发命中
-    if not state.get("hard_block") and not state.get("review") and state.get("answer"):
+    # 安全边界：问数结果不进缓存（指标结果实时执行，且缓存按问题相似度命中会
+    # 跨角色泄露受限指标，如 boss 的毛利答案被 staff 命中）；
+    # 缓存密级必须用答案提升后的 input_level（含 L2/L3 引用时不得低于该密级）。
+    if not state.get("hard_block") and not state.get("review") and state.get("answer") and not state.get("data_result"):
         try:
-            cache.put(job["tenant_id"], job["question"], state["answer"], citations, state.get("sources", []), job["input_level"])
+            cache.put(job["tenant_id"], job["question"], state["answer"], citations, state.get("sources", []), state.get("input_level", job["input_level"]))
         except Exception:
             pass
 def heartbeat():

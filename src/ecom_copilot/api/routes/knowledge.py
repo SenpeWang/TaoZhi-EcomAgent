@@ -163,7 +163,7 @@ def ingest(payload:dict,user:User=Depends(require_permission("knowledge:write"))
     from ...ingestion.sources import adapters_by_name
     from ...ingestion.base import FetchRequest
     names=payload.get("sources") or ["local_corpus"]
-    if names!=["local_corpus"]:raise HTTPException(400,"当前仅支持管理员导入演示语料，其他资料请上传")
+    if not names:raise HTTPException(400,"请指定要导入的企业数据源")
     request=FetchRequest(keywords=payload.get("keywords") or [],limit=min(30,int(payload.get("limit",10))),
                          permission={"user_id":user.user_id,"org_tag":user.org_tag})
     imported=[]

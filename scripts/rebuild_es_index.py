@@ -1,11 +1,11 @@
-"""存量切片重建 Elasticsearch 索引。
+"""存量切片重建 Elasticsearch 索引（仅 BM25 文本字段；ANN 向量检索已迁 PG pgvector）。
 
 用法：
-    ECOM_ENV_FILE=.env.demo .venv/bin/python scripts/rebuild_es_index.py [--drop]
+    ECOM_ENV_FILE=.env.production .venv/bin/python scripts/rebuild_es_index.py [--drop]
 
 行为：
 - 确认 ES 可用且 es_enabled；--drop 时先删除整个索引再建；
-- 分批把当前版本全部切片（含向量）写入 chunks_v1。
+- 分批把当前版本全部切片（文本字段）写入 chunks。
 """
 from __future__ import annotations
 import argparse
@@ -38,7 +38,7 @@ def main() -> int:
     total, batch = 0, 2000
     with database_connection() as c:
         cur = c.cursor()
-        cur.execute("""SELECT c.id,c.tenant_id,c.document_id,c.version,c.ordinal,c.page,c.text,c.embedding
+        cur.execute("""SELECT c.id,c.tenant_id,c.document_id,c.version,c.ordinal,c.page,c.text
             FROM chunks c JOIN documents d ON d.id=c.document_id AND d.current_version=c.version
             ORDER BY c.document_id,c.ordinal""")
         while True:

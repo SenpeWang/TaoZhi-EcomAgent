@@ -1,6 +1,6 @@
 """本地语义向量服务客户端：HTTP 取向量，服务不可用时自动降级为词法检索。
 
-模型与重依赖只存在于独立嵌入服务进程（sp_llm 环境，scripts/embedding_server.py），
+模型与重依赖只存在于独立嵌入服务进程（llm 环境，scripts/embedding_server.py），
 本模块不引入 torch/transformers。文档内容只发往 127.0.0.1 回环地址。
 """
 import threading
@@ -52,3 +52,14 @@ def encode_passages(texts: list[str]) -> np.ndarray:
 def encode_query(query: str) -> np.ndarray:
     """对查询编码（附带检索指令前缀），返回 (1, dim) 向量。"""
     return _post([query], instruct=True)
+
+
+def rerank(query: str, texts: list[str]) -> list[float]:
+    """交叉编码器精排打分：返回与 texts 输入顺序对齐的相关性概率（0-1）。
+
+    服务不可用或精排模型缺失（503）时抛异常，由调用方回落融合序。
+    """
+    r = httpx.post(load_config().embed_service_url.rstrip("/") + "/rerank",
+                   json={"query": query, "texts": list(texts)}, timeout=30, trust_env=False)
+    r.raise_for_status()
+    return [float(s) for s in r.json()["scores"]]

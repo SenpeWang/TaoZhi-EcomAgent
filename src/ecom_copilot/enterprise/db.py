@@ -8,6 +8,11 @@ from .config import load_config
 @contextmanager
 def database_connection():
     with psycopg.connect(load_config().dsn, row_factory=dict_row, connect_timeout=8) as conn:
+        try:
+            from pgvector.psycopg import register_vector
+            register_vector(conn)  # chunks.embedding 为 vector(512)：写入传 numpy/列表，读回 numpy
+        except Exception:
+            pass  # pgvector-python 缺失时退化为文本协议，向量读写由调用方兜底
         with conn.transaction():
             yield conn
 

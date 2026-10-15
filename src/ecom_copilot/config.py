@@ -14,7 +14,7 @@ from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# <...>/00_base/multi-agent
+# <...>/TaoZhi-EcomAgent
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 # <...>/00_base/.env
 DEFAULT_ENV_FILE: Path = PROJECT_ROOT.parent / ".env"

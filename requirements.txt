@@ -27,6 +27,7 @@ joblib>=1.3.0
 rank-bm25>=0.2.2
 jieba>=0.42.1
 networkx>=3.2
+pgvector>=0.4.0                # PG pgvector 的 Python 客户端（chunks.embedding 向量读写）
 
 # ─── 文档解析（多模态） ───
 pymupdf>=1.24.0

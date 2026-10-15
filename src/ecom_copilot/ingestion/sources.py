@@ -1,22 +1,26 @@
-"""数据源适配器实现（电商商品知识模块：A1 商品详情页/参数 / A2 评价工单 / A3 售后政策 / A4 手册教程）。
+"""数据源适配器实现（A1 商品详情/参数 · A2 评价工单 · A3 售后政策 · A4 手册教程 · A5 语料）。
 
-设计：电商数据源优先读取本地模拟数据（离线可用），其次 LLM 合成兜底；
-两者都不可用时返回空列表降级，流程继续依赖本地语料等其他数据源
-（与原公网采集「失败即返回空」的异常隔离风格一致，PRD 八、风险对策）。
+设计：所有适配器均读取**企业真实数据**：
+- A1~A4 读取企业级入库目录 `data/incoming/<tenant_code>/`（与生产入库链路
+  upload → worker 解析 → 切片 → 向量化 → PG/ES 使用的是同一份真实资料）；
+- A5 读取企业知识语料 `data/corpus/`。
+
+已移除本地模拟 JSON（data/mock）与 LLM 合成兜底：不再产出 synthetic 文档。
+目录缺失、读取失败或权限异常时返回空列表并记录告警日志，异常隔离不阻断主流程。
 """
 
 from __future__ import annotations
 
-import json
+import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..config import Settings, get_settings
-from ..llm import ModelTier, get_llm
-from ..llm.json_utils import extract_json
 from ..schemas.common import DocType, SourceDocument
 from .base import FetchRequest, SourceAdapter
+
+logger = logging.getLogger(__name__)
 
 _TEXT_SUFFIXES = {".md", ".txt", ".markdown"}
 _PDF_SUFFIXES = {".pdf"}
@@ -43,260 +47,225 @@ def _query_terms(request: FetchRequest) -> List[str]:
             + [request.category, request.product_line, request.brand] if t]
 
 
-def _match_item(item: Dict[str, Any], terms: List[str]) -> bool:
-    if not terms:
-        return True
-    hay = " ".join(str(item.get(k, "")) for k in
-                   ("title", "text", "brand", "category", "product_line", "product", "issuer"))
-    return any(t in hay for t in terms)
+def _read_corpus_text(path: Path) -> str:
+    """读取文档文本：md/txt 直接读取；pdf 尽力用 pypdf 抽取（未安装则留空）。"""
+    if path.suffix.lower() in _PDF_SUFFIXES:
+        try:
+            from pypdf import PdfReader  # noqa: PLC0415
+
+            return "\n".join((page.extract_text() or "") for page in PdfReader(str(path)).pages)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("PDF 文本抽取失败，已跳过内容: %s (%s)", path, exc)
+            return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        logger.warning("文档读取失败，已跳过: %s (%s)", path, exc)
+        return ""
 
 
-# ───────────────────────── 通用骨架：模拟 JSON → LLM 合成 ─────────────────────────
+# ───────────────────────── 通用骨架：企业真实入库目录 ─────────────────────────
 
 
-class _MockJsonSourceAdapter(SourceAdapter):
-    """电商数据源通用骨架：本地模拟 JSON → LLM 合成 → 空列表降级。
+class _EnterpriseIngestAdapter(SourceAdapter):
+    """企业真实入库资料适配器基类。
 
-    模拟 JSON 约定存放在 `data/mock/<mock_file>`，格式为
-    {"items": [{"title": "", "text": "", ...}]}；条目字段见各适配器 `_mock_doc`。
-    无网络 / 无 LLM Key 时：读到模拟 JSON 即可正常工作；否则返回空列表，
-    不抛出异常（与原公网爬虫的错误处理风格一致）。
+    数据源为企业级入库目录 `data/incoming/<tenant_code>/`，即生产入库链路
+    实际消费的真实资料目录（如 products_official/、ledger_templates/ 等）。
+    子类通过 `ingest_subdirs` 声明自己负责的子目录范围；未声明则纳入全部。
+    不产出任何模拟 / 合成数据：读取失败仅记录日志并返回空列表。
     """
 
-    mock_file: str = ""
-    synth_prompt: str = ""
-    synth_n: int = 4
+    ingest_subdirs: Tuple[str, ...] = ()
+    _root_cache: Optional[Path] = None
+
+    def _ingest_root(self) -> Path:
+        """企业入库根目录：data/incoming/<tenant_code>/（租户目录不存在则回退到 incoming/）。"""
+        if self._root_cache is not None:
+            return self._root_cache
+        base = self.settings.data_dir / "incoming"
+        tenant = ""
+        try:
+            from ..enterprise.config import load_config
+
+            tenant = load_config().tenant_code
+        except Exception as exc:  # noqa: BLE001  企业配置不可用时不应中断本地取数
+            logger.warning("未能读取企业租户配置，回退到入库根目录 %s: %s", base, exc)
+        root = (base / tenant) if tenant and (base / tenant).exists() else base
+        self._root_cache = root
+        return root
+
+    def _in_scope(self, path: Path, root: Path) -> bool:
+        """按子目录判定该文档是否属于本适配器负责范围。"""
+        if not self.ingest_subdirs:
+            return True
+        try:
+            parts = {p.lower() for p in path.relative_to(root).parts[:-1]}
+        except ValueError:
+            return False
+        return bool(parts & {s.lower() for s in self.ingest_subdirs})
 
     def fetch(self, request: FetchRequest) -> List[SourceDocument]:
-        docs = self._from_mock(request)
-        if not docs:
-            docs = self._synthesize(request)
-        return docs[: request.limit]
-
-    # ───── 本地模拟 JSON ─────
-    def _from_mock(self, request: FetchRequest) -> List[SourceDocument]:
-        path = self.settings.data_dir / "mock" / self.mock_file
-        if not self.mock_file or not path.exists():
-            return []
-        try:
-            items = (json.loads(path.read_text(encoding="utf-8")) or {}).get("items") or []
-        except Exception:  # noqa: BLE001
+        root = self._ingest_root()
+        if not root.exists():
+            logger.warning("企业入库目录不存在，数据源 %s 返回空: %s", self.name, root)
             return []
         terms = _query_terms(request)
-        picked = [it for it in items if isinstance(it, dict) and _match_item(it, terms)]
-        if not picked and items:
-            # 模拟语料规模有限，无强命中时整体返回，保证问答链路可用
-            picked = [it for it in items if isinstance(it, dict)]
-        return [self._mock_doc(it) for it in picked[: request.limit]]
-
-    def _mock_doc(self, item: Dict[str, Any]) -> SourceDocument:
-        raise NotImplementedError
-
-    # ───── LLM 合成兜底 ─────
-    def _synthesize(self, request: FetchRequest) -> List[SourceDocument]:
-        if not self.synth_prompt or not self.settings.synthetic_fallback_enabled \
-                or not self.settings.has_llm:
-            return []
-        prompt = self.synth_prompt.format(
-            n=self.synth_n,
-            question=" / ".join(request.keywords) or request.category
-            or request.product_line or "电商商品知识",
-            brand=request.brand or "未指定",
-            category=request.category or "未指定",
-            product_line=request.product_line or "未指定",
-        )
-        try:
-            raw = get_llm().chat(prompt, tier=ModelTier.FAST)
-            items = (extract_json(raw, expect="object") or {}).get("items") or []
-        except Exception:  # noqa: BLE001
-            return []
+        suffixes = _TEXT_SUFFIXES | _PDF_SUFFIXES
         docs: List[SourceDocument] = []
-        for item in items[: self.synth_n]:
-            if isinstance(item, dict) and (item.get("title") or item.get("text")):
-                docs.append(self._mock_doc(item))
-        return docs
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in suffixes:
+                continue
+            if not self._in_scope(path, root):
+                continue
+            text = _read_corpus_text(path)
+            if not text.strip():
+                continue
+            if terms and not any(t in text or t in path.name for t in terms):
+                continue
+            docs.append(self._ingest_doc(path, text, root))
+            if len(docs) >= request.limit:
+                break
+        if not docs:
+            logger.info("数据源 %s 在 %s 下未命中查询词 %s", self.name, root, terms or "(空)")
+        return docs[: request.limit]
+
+    def _ingest_doc(self, path: Path, text: str, root: Path) -> SourceDocument:
+        raise NotImplementedError
 
 
 # ───────────────────────── A1 商品详情页 / 站内参数接口 ─────────────────────────
 
 
-class ProductPageAdapter(_MockJsonSourceAdapter):
+class ProductPageAdapter(_EnterpriseIngestAdapter):
     """商品详情页 / 站内参数接口适配器。
 
-    真实部署时对接电商平台站内商品接口；开发与离线环境优先读取
-    `data/mock/product_pages.json` 模拟返回，其次由 LLM 合成。
+    读取企业入库目录中的商品资料（products_official / product / catalog / sku），
     产出 DocType=PRODUCT_PAGE（详情页）/ SPEC_SHEET（参数表）。
     """
 
     name = "product_page"
-    label = "商品详情页 · 站内参数接口"
+    label = "商品详情页 · 企业入库商品资料"
     doc_type = DocType.PRODUCT_PAGE
     priority = "P0"
-    mock_file = "product_pages.json"
+    ingest_subdirs = ("products_official", "product", "catalog", "sku")
 
-    PROMPT = """你是手机配件商品知识资料撰写专家。请围绕问答主题生成 {n} 条「商品详情页 / 参数表」模拟资料，
-用于在没有站内商品接口时驱动知识库构建与商品问答检索。
-
-问答主题：{question}
-品牌：{brand}    商品类目：{category}    产品线：{product_line}
-
-要求：
-- 每条包含：商品型号 / 名称、核心参数（如切幅、防窥角度、喷头精度、适配机型，以官方参数表口径为准）、卖点描述。
-- 参数口径必须与官方参数表一致，不得编造精确参数；无把握时用「约」或省略。
-- 输出 JSON：{{"items":[{{"title":"","kind":"详情页或参数表","text":"","published":"YYYY-MM-DD"}}]}}
-"""
-
-    def _mock_doc(self, item: Dict[str, Any]) -> SourceDocument:
-        kind = str(item.get("kind", ""))
+    def _ingest_doc(self, path: Path, text: str, root: Path) -> SourceDocument:
+        title = self._title(path, text)
         return _doc(
-            str(item.get("title", "")),
-            str(item.get("text", "")),
-            str(item.get("url", "")),
-            str(item.get("published", "")),
-            doc_type=DocType.SPEC_SHEET if "参数" in kind else DocType.PRODUCT_PAGE,
-            kind=kind,
-            brand=str(item.get("brand", "")),
-            category=str(item.get("category", "")),
-            product_line=str(item.get("product_line", "")),
-            synthetic=True,
+            title,
+            text,
+            f"file://{path}",
+            datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d"),
+            doc_type=DocType.SPEC_SHEET if "参数" in title else DocType.PRODUCT_PAGE,
+            source="enterprise_incoming",
+            path=str(path),
         )
+
+    @staticmethod
+    def _title(path: Path, text: str) -> str:
+        for line in text.splitlines():
+            stripped = line.strip().lstrip("#").strip()
+            if stripped:
+                return stripped[:80]
+        return path.stem.replace("_", " ")
 
 
 # ───────────────────────── A2 用户评价 / 客服工单流 ─────────────────────────
 
 
-class ReviewFeedAdapter(_MockJsonSourceAdapter):
+class ReviewFeedAdapter(_EnterpriseIngestAdapter):
     """用户评价 / 客服工单流适配器（售后 FAQ 与真实使用痛点来源）。
 
-    优先读取 `data/mock/review_feed.json` 模拟评价与工单流，
-    其次由 LLM 合成，产出 DocType=FAQ。
+    读取企业入库目录中的售后 / 评价类资料（after_sales / review），产出 DocType=FAQ。
     """
 
     name = "review_feed"
     label = "用户评价 · 客服工单流"
     doc_type = DocType.FAQ
     priority = "P1"
-    mock_file = "review_feed.json"
+    ingest_subdirs = ("after_sales", "review", "reviews")
 
-    PROMPT = """你是手机配件商品知识资料撰写专家。请围绕问答主题生成 {n} 条「用户评价 / 客服工单」模拟记录，
-用于提炼售后 FAQ 与真实使用痛点。
-
-问答主题：{question}
-品牌：{brand}    商品类目：{category}    产品线：{product_line}
-
-要求：
-- 每条包含：涉及商品型号、问题描述（如钢化膜起泡 / UV 打印机堵头 / 切膜机切歪 / 切膜机连不上蓝牙等常见故障）、客服答复口径。
-- 答复口径必须与官方售后政策一致，不得承诺保修范围之外的内容。
-- 输出 JSON：{{"items":[{{"title":"","text":"","published":"YYYY-MM-DD"}}]}}
-"""
-
-    def _mock_doc(self, item: Dict[str, Any]) -> SourceDocument:
+    def _ingest_doc(self, path: Path, text: str, root: Path) -> SourceDocument:
         return _doc(
-            str(item.get("title", "")),
-            str(item.get("text", "")),
-            str(item.get("url", "")),
-            str(item.get("published", "")),
+            ProductPageAdapter._title(path, text),
+            text,
+            f"file://{path}",
+            datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d"),
             doc_type=DocType.FAQ,
-            product=str(item.get("product", "")),
-            synthetic=True,
+            source="enterprise_incoming",
+            path=str(path),
         )
 
 
 # ───────────────────────── A3 平台售后政策 / 质保规则公告 ─────────────────────────
 
 
-class PolicyNoticeAdapter(_MockJsonSourceAdapter):
+class PolicyNoticeAdapter(_EnterpriseIngestAdapter):
     """平台售后政策 / 质保规则公告适配器。
 
-    优先读取 `data/mock/policy_notices.json` 模拟平台公告，
-    其次由 LLM 合成，产出 DocType=POLICY。
+    读取企业入库目录中的政策 / 公告类资料（policies / notices / policy），产出 DocType=POLICY。
     """
 
     name = "policy_notice"
     label = "平台售后政策 · 质保规则公告"
     doc_type = DocType.POLICY
     priority = "P0"
-    mock_file = "policy_notices.json"
+    ingest_subdirs = ("policies", "notices", "policy")
 
-    PROMPT = """你是手机配件商品知识资料撰写专家。请围绕问答主题生成 {n} 条「平台售后政策 / 质保规则」模拟公告，
-用于支撑售后政策类问答。
-
-问答主题：{question}
-品牌：{brand}    商品类目：{category}
-
-要求：
-- 每条包含：政策标题、适用商品范围、核心条款（如 7 天无理由 / 设备与喷头质保期 / 耗材是否保修 / 以旧换新）、发布主体。
-- 条款口径必须与官方售后政策一致，不得自行扩展质保承诺。
-- 输出 JSON：{{"items":[{{"title":"","text":"","issuer":"","published":"YYYY-MM-DD"}}]}}
-"""
-
-    def _mock_doc(self, item: Dict[str, Any]) -> SourceDocument:
+    def _ingest_doc(self, path: Path, text: str, root: Path) -> SourceDocument:
         return _doc(
-            str(item.get("title", "")),
-            str(item.get("text", "")),
-            str(item.get("url", "")),
-            str(item.get("published", "")),
+            ProductPageAdapter._title(path, text),
+            text,
+            f"file://{path}",
+            datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d"),
             doc_type=DocType.POLICY,
-            issuer=str(item.get("issuer", "")),
-            synthetic=True,
+            source="enterprise_incoming",
+            path=str(path),
         )
 
 
 # ───────────────────────── A4 商品手册 / 使用教程 ─────────────────────────
 
 
-class ManualSourceAdapter(_MockJsonSourceAdapter):
+class ManualSourceAdapter(_EnterpriseIngestAdapter):
     """商品手册 / 使用教程文档源适配器。
 
-    优先读取 `data/mock/manuals.json` 模拟手册电子稿，
-    其次由 LLM 合成；产出 DocType=MANUAL（手册）/ TUTORIAL（教程）。
+    读取企业入库目录中的手册 / 培训类资料（manuals / training），
+    产出 DocType=MANUAL（手册）/ TUTORIAL（教程）。
     """
 
     name = "manual_source"
     label = "商品手册 · 使用教程"
     doc_type = DocType.MANUAL
     priority = "P0"
-    mock_file = "manuals.json"
+    ingest_subdirs = ("manuals", "training")
 
-    PROMPT = """你是电商商品知识资料撰写专家。请围绕问答主题生成 {n} 段「商品手册 / 使用教程」模拟文档，
-用于在没有手册电子稿时驱动知识库构建。
-
-问答主题：{question}
-品牌：{brand}    产品线：{product_line}    商品类目：{category}
-
-要求：
-- 每段包含：适用型号、章节主题（如上手设置 / 日常维护 / 配件安装与型号适配 / 故障排查）、操作步骤。
-- 型号与配件的适配关系、参数口径必须与官方参数表一致。
-- 输出 JSON：{{"items":[{{"title":"","kind":"手册或教程","text":"","published":"YYYY-MM-DD"}}]}}
-"""
-
-    def _mock_doc(self, item: Dict[str, Any]) -> SourceDocument:
-        kind = str(item.get("kind", ""))
+    def _ingest_doc(self, path: Path, text: str, root: Path) -> SourceDocument:
+        title = ProductPageAdapter._title(path, text)
         return _doc(
-            str(item.get("title", "")),
-            str(item.get("text", "")),
-            str(item.get("url", "")),
-            str(item.get("published", "")),
-            doc_type=DocType.TUTORIAL if "教程" in kind else DocType.MANUAL,
-            kind=kind,
-            product_line=str(item.get("product_line", "")),
-            synthetic=True,
+            title,
+            text,
+            f"file://{path}",
+            datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d"),
+            doc_type=DocType.TUTORIAL if "教程" in title else DocType.MANUAL,
+            source="enterprise_incoming",
+            path=str(path),
         )
 
 
 # ───────────────────────── A5 本地商品知识语料 ─────────────────────────
 
 
-def _read_corpus_text(path: Path) -> str:
-    """读取语料文本：md/txt 直接读取；pdf 尽力用 pypdf 抽取（未安装则留空）。"""
-    if path.suffix.lower() in _PDF_SUFFIXES:
-        try:
-            from pypdf import PdfReader  # noqa: PLC0415
-
-            return "\n".join((page.extract_text() or "") for page in PdfReader(str(path)).pages)
-        except Exception:  # noqa: BLE001
-            return ""
-    return path.read_text(encoding="utf-8", errors="ignore")
+def _corpus_doc(path: Path, text: str) -> SourceDocument:
+    return _doc(
+        path.stem.replace("_", " "),
+        text,
+        f"file://{path}",
+        datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d"),
+        doc_type=_corpus_doctype(path),
+        path=str(path),
+    )
 
 
 def _corpus_doctype(path: Path) -> DocType:
@@ -342,17 +311,6 @@ def _corpus_doctype(path: Path) -> DocType:
     return DocType.MANUAL
 
 
-def _corpus_doc(path: Path, text: str) -> SourceDocument:
-    return _doc(
-        path.stem.replace("_", " "),
-        text,
-        f"file://{path}",
-        datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d"),
-        doc_type=_corpus_doctype(path),
-        path=str(path),
-    )
-
-
 class LocalCorpusAdapter(SourceAdapter):
     """本地商品知识语料库（data/corpus 下商品手册 / 参数表 / SKU 与配件指南 /
     使用教程 / 售后 FAQ / 保修政策等 md 文档，及 data/corpus/documents 下的 PDF）。"""
@@ -369,6 +327,7 @@ class LocalCorpusAdapter(SourceAdapter):
 
     def fetch(self, request: FetchRequest) -> List[SourceDocument]:
         if not self.corpus_dir.exists():
+            logger.warning("企业语料目录不存在，数据源 %s 返回空: %s", self.name, self.corpus_dir)
             return []
         query_terms = _query_terms(request)
         # 中文检索按 2-gram 片段匹配，避免长句式子问题无法命中
@@ -377,7 +336,7 @@ class LocalCorpusAdapter(SourceAdapter):
         suffixes = _TEXT_SUFFIXES | _PDF_SUFFIXES
         docs: List[SourceDocument] = []
         for path in sorted(self.corpus_dir.rglob("*")):
-            if path.suffix.lower() not in suffixes:
+            if not path.is_file() or path.suffix.lower() not in suffixes:
                 continue
             text = _read_corpus_text(path)
             if fragments and not any(f in text or f in path.name for f in fragments):
@@ -386,81 +345,13 @@ class LocalCorpusAdapter(SourceAdapter):
             if len(docs) >= request.limit:
                 break
         if not docs:
-            # 本地语料规模有限且经人工筛选，无强命中时整体返回，保证检索层有可用语料
+            # 语料规模有限且经人工筛选，无强命中时整体返回，保证检索层有可用语料
             for path in sorted(self.corpus_dir.rglob("*")):
-                if path.suffix.lower() not in suffixes:
+                if not path.is_file() or path.suffix.lower() not in suffixes:
                     continue
                 docs.append(_corpus_doc(path, _read_corpus_text(path)))
                 if len(docs) >= request.limit:
                     break
-        return docs
-
-
-# ───────────────────────── A6 兜底：LLM 合成数据 ─────────────────────────
-
-
-class SyntheticCorpusAdapter(SourceAdapter):
-    """LLM 生成模拟数据兜底（仅在数据源全部失效时启用）。
-
-    产出文档会被标记 `synthetic=true`，回答中会以「模拟数据」显著标注，
-    避免与真实引用混淆（PRD 八、风险对策 / E3 强制溯源）。
-    """
-
-    name = "synthetic"
-    label = "LLM 合成兜底语料"
-    doc_type = DocType.OTHER   # 合成标记统一走 meta.synthetic=true
-    priority = "P2"
-    read_only = True
-
-    PROMPT = """你是一位电商商品知识资料撰写专家。请针对问答主题生成 {n} 条"商品知识速记"，
-用于在没有外部数据源时驱动商品适配图谱与商品问答推理。
-
-问答主题：{question}
-关注产品线：{focus}
-品牌：{brand}    商品类目：{category}
-
-要求：
-- 每条包含：来源名称、核心事实（商品型号与参数、配件型号适配关系或售后条款）、时间。
-- 内容须符合电商商品知识常识，口径必须与官方参数表一致；不要编造精确参数，如需数量请用"约"。
-- 输出 JSON：{{"items":[{{"title":"","source":"","text":"","published":"YYYY-MM-DD"}}]}}
-"""
-
-    def __init__(self, settings: Optional[Settings] = None, n: int = 4) -> None:
-        super().__init__(settings)
-        self.n = n
-
-    def fetch(self, request: FetchRequest) -> List[SourceDocument]:
-        if not self.settings.synthetic_fallback_enabled or not self.settings.has_llm:
-            return []
-        prompt = self.PROMPT.format(
-            n=self.n,
-            question=" / ".join(request.keywords) or request.category,
-            focus=request.product_line or "全产品线",
-            brand=request.brand or "未指定",
-            category=request.category or "未指定",
-        )
-        try:
-            raw = get_llm().chat(prompt, tier=ModelTier.FAST)
-            data = extract_json(raw, expect="object") or {}
-            items = data.get("items") or []
-        except Exception:  # noqa: BLE001
-            return []
-        docs: List[SourceDocument] = []
-        for item in items[: self.n]:
-            title = str(item.get("title", "")).strip()
-            text = str(item.get("text", "")).strip()
-            if not title and not text:
-                continue
-            docs.append(
-                _doc(
-                    title or "合成商品知识速记",
-                    text,
-                    "",
-                    str(item.get("published", ""))[:10],
-                    org=item.get("source", ""),
-                    synthetic=True,
-                )
-            )
         return docs
 
 
@@ -475,7 +366,6 @@ def default_adapters(settings: Optional[Settings] = None) -> List[SourceAdapter]
         ReviewFeedAdapter(cfg),
         PolicyNoticeAdapter(cfg),
         ManualSourceAdapter(cfg),
-        SyntheticCorpusAdapter(cfg),
     ]
     return [a for a in adapters if a.enabled]
 

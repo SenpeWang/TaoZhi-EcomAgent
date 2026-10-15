@@ -1,3 +1,4 @@
+-- 前置条件：需超级用户执行 CREATE EXTENSION vector;（pgvector，本库为 0.8.7）
 CREATE TABLE tenants (
  id text PRIMARY KEY, code text UNIQUE NOT NULL, name text NOT NULL, mode text NOT NULL,
  enabled boolean NOT NULL DEFAULT true, epoch bigint NOT NULL DEFAULT 1, created_at timestamptz NOT NULL DEFAULT now()
@@ -54,11 +55,12 @@ CREATE TABLE document_versions (
 );
 CREATE TABLE chunks (
  id text PRIMARY KEY, tenant_id text NOT NULL, document_id text NOT NULL, version integer NOT NULL,
- ordinal integer NOT NULL, page integer NOT NULL DEFAULT 0, text text NOT NULL, embedding bytea,
+ ordinal integer NOT NULL, page integer NOT NULL DEFAULT 0, text text NOT NULL, embedding vector(512),
  FOREIGN KEY(tenant_id,document_id) REFERENCES documents(tenant_id,id),
  FOREIGN KEY(document_id,version) REFERENCES document_versions(document_id,version),
  UNIQUE(document_id,version,ordinal)
 );
+CREATE INDEX chunks_embedding_hnsw_idx ON chunks USING hnsw (embedding vector_cosine_ops) WITH (m=16, ef_construction=100);
 CREATE TABLE document_grants (
  tenant_id text NOT NULL, document_id text NOT NULL, user_id text NOT NULL,
  effect text NOT NULL CHECK(effect IN ('allow','deny')), can_read boolean NOT NULL DEFAULT true,

@@ -64,7 +64,7 @@ AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；
 
 ## 依赖与同步
 
-页面调用统一 API，API 加载当前会话并使用业务服务；权限集中 enterprise/policy.py。Worker 和 Agent 使用同一权限与来源门禁。PostgreSQL 保存在线状态、任务队列和 outbox；附件原件存 MinIO 桶 ecom-private（enterprise/storage.py，可回落本地私有目录）；任务事件经 Kafka ecom.tasks 主题分发（enterprise/queue.py，outbox 发布 + 幂等认领，轮询兜底）；检索切片同步 ES 索引 chunks_v1（enterprise/es_index.py，BM25+kNN 双路召回并前置权限过滤，可回落本地五信号链路）。
+页面调用统一 API，API 加载当前会话并使用业务服务；权限集中 enterprise/policy.py。Worker 和 Agent 使用同一权限与来源门禁。PostgreSQL 保存在线状态、任务队列和 outbox；附件原件存 MinIO 桶 ecom-private（enterprise/storage.py，可回落本地私有目录）；任务事件经 Kafka ecom.tasks 主题分发（enterprise/queue.py，outbox 发布 + 幂等认领，轮询兜底）；检索切片同步 ES 索引 chunks（enterprise/es_index.py，ES 仅中文 BM25，ANN 语义走 PG pgvector HNSW，双路 RRF 融合并前置权限过滤，可回落本地五信号链路）。
 
 原模块仍用于共享或离线回归；删除前检查全部引用。新在线能力不得另起旧 JWT、SQLite 或平行授权路径。
 

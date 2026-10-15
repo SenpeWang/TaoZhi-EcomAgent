@@ -3,10 +3,13 @@ ROOT=Path(__file__).resolve().parents[1]
 state=Path.home()/".local/share/ecom-agent"
 state.mkdir(parents=True,exist_ok=True,mode=0o700)
 python=ROOT/".venv/bin/python"
-def find_sp_llm_python():
-    for candidate in (Path.home()/"huguoqiang/anaconda3/envs/sp_llm/bin/python",
-                      Path.home()/"anaconda3/envs/sp_llm/bin/python",
-                      Path.home()/"miniconda3/envs/sp_llm/bin/python"):
+def find_llm_python():
+    """定位向量服务所用的 conda 环境（llm）解释器。
+
+    历史遗留的 sp_llm 环境已不存在，统一使用 llm 环境。
+    """
+    for candidate in (Path.home()/"miniconda3/envs/llm/bin/python",
+                      Path.home()/"anaconda3/envs/llm/bin/python"):
         if candidate.is_file():return candidate
     return None
 parts=[f"""[unix_http_server]
@@ -32,7 +35,7 @@ killasgroup=true
 stdout_logfile={state}/database-guard.log
 redirect_stderr=true
 """]
-for mode,port in (("demo",18501),("production",18080)):
+for mode,port in (("production",18080),):
  for kind in ("worker","api"):
   name=kind+"-"+mode
   command=f"{python} -m ecom_copilot.enterprise.worker" if kind=="worker" else f"{python} -m uvicorn ecom_copilot.enterprise.api:app --host 127.0.0.1 --port {port} --no-access-log"
@@ -52,12 +55,12 @@ stdout_logfile_maxbytes=5MB
 stdout_logfile_backups=3
 redirect_stderr=true
 """)
-sp_llm=find_sp_llm_python()
-if sp_llm:
+llm_python=find_llm_python()
+if llm_python:
   parts.append(f"""[program:embedding]
-command={sp_llm} {ROOT}/scripts/embedding_server.py
+command={llm_python} {ROOT}/scripts/embedding_server.py
 directory={ROOT}
-environment=EMBED_MODEL_PATH="{ROOT.parent}/models/bge-small-zh-v1.5",EMBED_PORT="18555",EMBED_DEVICE="cpu"
+environment=EMBED_MODEL_PATH="{ROOT.parent}/models/bge-small-zh-v1.5",EMBED_PORT="18555",EMBED_DEVICE="cuda:0"
 priority=15
 autostart=true
 autorestart=true
@@ -97,7 +100,7 @@ def middleware_programs(state):
   es_dir=newest("elasticsearch-*");kafka_dir=newest("kafka_*")
   java_home=(es_dir/"jdk") if es_dir else None
   if (mw/"minio").is_file():
-    creds=env_file_values(".env.demo")
+    creds=env_file_values(".env.production")
     result.append(f"""[program:minio]
 command={mw}/minio server {state}/minio-data --address 127.0.0.1:19000 --console-address 127.0.0.1:19001
 directory={mw}

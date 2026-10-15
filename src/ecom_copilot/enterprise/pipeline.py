@@ -7,6 +7,7 @@ from .db import database_connection,fetch_one,fetch_all,as_jsonb
 from .policy import (Denied, load_principal, sources_valid)
 from .config import load_config
 from .retriever import search_documents
+from . import metrics as metrics_mod
 
 SPECIALIST_ROLES={
  "product":("Spec 规格专家","核对型号、尺寸、材料、批次和参数，不混用不同型号。"),
@@ -35,6 +36,8 @@ class State(TypedDict,total=False):
     input_level:int
     usage:list
     history:list
+    data_intent:dict
+    data_result:dict
 
 def validate_task_execution(state,stage,progress,external=False):
     with database_connection() as c:
@@ -101,9 +104,101 @@ def plan_node(state):
         route.insert(0, "product")
     route = list(dict.fromkeys(route))[:3]
 
+    # 问数（ChatBI）意图判定：命中则改走语义层数据节点，SQL 永不由 LLM 生成
+    data_intent = None
+    try:
+        with database_connection() as c:
+            data_intent = _build_data_intent(c, p, q)
+    except Exception:
+        data_intent = None
+
     return dict(question=q, route=route or ["product"], model_calls=0,
-                missing=[], findings=[], sources=[], business=[], usage=[], input_level=job["input_level"])
+                missing=[], findings=[], sources=[], business=[], usage=[], input_level=job["input_level"],
+                data_intent=data_intent or {})
+# ── 问数（ChatBI）意图判定：规则式、可解释、零外部模型调用 ──
+# 量化后缀 gate：命中才进入指标匹配，避免"退货政策"误路由到"退货率"
+_DATA_KEYWORDS = re.compile(
+    "销售额|销量|GMV|营业额|成交|订单量|单量|退货率|退款率|售后率|售后工单|退换货数量"
+    "|毛利|利润|采购成本|进货成本|进货额|底价|库存|补货|日销售|趋势|客单价"
+    "|有多少|多少个|多少单|卖了多少|赚了多少|分布")
+_CHANNEL_SYNONYMS = {"天猫": "天猫", "淘宝": "天猫", "京东": "京东", "拼多多": "拼多多",
+                     "抖音": "抖音", "小程序": "微信小程序", "微信小店": "微信小程序"}
+_CATEGORY_SYNONYMS = ["钢化膜", "手机壳", "平板膜", "充电器", "数据线", "车载支架"]
+
+
+def _parse_time_range(q):
+    m = re.search(r"近\s*(\d+)\s*天", q)
+    if m: return {"days": min(int(m.group(1)), 365)}
+    if re.search("本周|这一周|这周", q): return {"days": 7}
+    if re.search("近一周|最近一周|上周", q): return {"days": 7}
+    if re.search("近两周|最近两周", q): return {"days": 14}
+    if re.search("本月|这个月|近一月|最近一月", q): return {"days": 30}
+    if re.search("近三月|最近三月|这个季度", q): return {"days": 90}
+    if re.search("今年|近半年|最近半年", q): return {"days": 183}
+    return {"days": 30}
+
+
+def _intent_of(c, p, m, q):
+    """由命中指标构造受控执行意图（维度过滤 + 时间范围）。"""
+    dims = set(m["dimensions"])
+    filters = {}
+    for word, name in _CHANNEL_SYNONYMS.items():
+        if word in q and "channel_name" in dims:
+            filters["channel_name"] = name
+            break
+    for cat in _CATEGORY_SYNONYMS:
+        if cat in q and "category" in dims:
+            filters["category"] = cat
+            break
+    return {"metric_key": m["metric_key"], "intent": {"metric_key": m["metric_key"], "filters": filters,
+            "time_range": _parse_time_range(q)}, "metric_id": m["id"],
+            "metric_name": m["name"], "metric_level": m["level"]}
+
+
+def _build_data_intent(c, p, q):
+    """构造问数意图：别名强匹配（含越权检测）→ 词重叠弱匹配（阈值门控）。
+
+    返回 None（非问数）、intent dict（可执行）或 {"denied","reason"}（受限指标明示拒绝，
+    绝不拿其他可见指标顶替回答——答非所问比"无权查看"危害更大）。
+    LLM 只允许在此意图上做同义改写，SQL 永远由语义层模板组装。
+    """
+    if not _DATA_KEYWORDS.search(q):
+        return None
+    all_m = fetch_all(c, "SELECT * FROM metrics WHERE tenant_id=%s AND state='published'", (p.tenant_id,))
+    if not all_m:
+        return None
+    visible_ids = {m["id"] for m in metrics_mod.list_metrics(c, p)}
+    # 强匹配：问题文本包含指标名或别名（最长优先），可跨权限感知受限指标
+    strong = []
+    for m in all_m:
+        names = [m["name"]] + [a for a in (m["aliases"] or []) if a]
+        hit = next((n for n in sorted(names, key=len, reverse=True) if n in q), None)
+        if hit:
+            strong.append((len(hit), m))
+    if strong:
+        strong.sort(key=lambda x: -x[0])
+        _, m = strong[0]
+        if m["id"] not in visible_ids:
+            return {"denied": True,
+                    "reason": f"「{m['name']}」是受限指标（密级 L{m['level']}），您当前的角色无权查看。如需访问请联系指标负责人申请授权。"}
+        return _intent_of(c, p, m, q)
+    # 弱匹配：jieba 词重叠（仅可见指标），阈值门控防答非所问
+    from .retriever import words
+    terms = set(words(q))
+    scored = []
+    for m in metrics_mod.list_metrics(c, p):
+        toks = set(words(m["metric_key"] + " " + m["name"] + " " + " ".join(m["aliases"]) + " " + m["description"]))
+        score = len(terms & toks) / max(1, len(terms))
+        if score >= 0.4:
+            scored.append((score, m))
+    if not scored:
+        return None
+    scored.sort(key=lambda x: -x[0])
+    return _intent_of(c, p, scored[0][1], q)
+
+
 _HYDE_SYSTEM="你是商品资料检索助手。根据用户问题，写一段可能出现在商品资料库中的正文段落：陈述句、含型号、参数或步骤等具体细节。允许内容与事实不符，禁止任何解释、前言或标题，只输出段落正文。"
+
 def _hyde_vector(c,p,job,state):
     """HyDE：脱敏后生成假设性答案并编码为检索向量。
 
@@ -158,6 +253,33 @@ def retrieval_node(state):
                 history.append({"answer":old["result"].get("answer","")[:500]})
         blocked=not job["payload"].get("allow_external",True) or any(not e["ai_allowed"] for e in evidence) or any(b.get("source",{}).get("level",1)>=3 for b in business) or (job["input_level"]>=3 and not (p.boss and job["payload"].get("allow_external",False)))
     return dict(evidence=evidence,sources=sources,business=business,history=history,external_blocked=blocked,hard_block=not evidence and not any(x.get("available") for x in business))
+def data_query_node(state):
+    """问数节点：受控执行语义层指标，数字来自白名单 SQL，无需 LLM 生成。"""
+    p, job = validate_task_execution(state, "执行受控指标查询（语义层）", 40)
+    di = state.get("data_intent") or {}
+    result = {"denied": True, "message": di.get("reason") or "未找到可回答该问题的指标。"}
+    level = 1
+    if di.get("metric_key"):
+        with database_connection() as c:
+            m = fetch_one(c, "SELECT * FROM metrics WHERE id=%s AND tenant_id=%s AND state='published'",
+                          (di["metric_id"], p.tenant_id))
+            if not m or not metrics_mod.can_read_metric(c, p, m):
+                result = {"denied": True, "message": "该指标不存在，或您当前的角色与密级无权查看。"}
+            else:
+                try:
+                    cols, rows, meta = metrics_mod.execute_metric(c, p, m, di.get("intent") or {})
+                    rows = metrics_mod.jsonable_rows(rows)
+                    result = {"denied": False, "columns": cols, "rows": rows, "meta": meta,
+                              "metric_key": m["metric_key"], "metric_name": m["name"],
+                              "unit": m["unit"], "description": m["description"]}
+                    level = m["level"]
+                except Denied as e:
+                    result = {"denied": True, "message": f"指标执行被安全策略拒绝：{e}"}
+                except Exception:
+                    result = {"denied": True, "message": "指标查询暂时不可用，请稍后重试。"}
+    return dict(data_result=result, evidence=[], findings=[], missing=[], sources=[], business=[],
+                external_blocked=False, hard_block=result.get("denied", False), input_level=max(job["input_level"], level))
+
 def domain_node(state):
     validate_task_execution(state, "专业智能体多角色协同核验", 45)
     if state["external_blocked"] or state["hard_block"]:
@@ -273,6 +395,26 @@ def quality_node(state):
     return dict(findings=findings,review=review and not hard,hard_block=hard)
 def publish_node(state):
     p,job=validate_task_execution(state,"发布前校验权限与来源",95)
+    if state.get("data_result"):
+        dr=state["data_result"]
+        if dr.get("denied"):
+            answer=dr.get("message","该问题暂无法通过指标数据回答。")+"\n\n您也可以换个问法，或改从知识库资料中查找。"
+        else:
+            cols,rows=dr["columns"],dr["rows"]
+            meta=dr["meta"]
+            head="、".join(str(x) for x in cols)
+            lines=[f"「{dr['metric_name']}」查询结果（{meta.get('unit','')}，共 {len(rows)} 行，耗时 {meta.get('elapsed_ms','?')}ms）：",
+                   "",
+                   head,
+                   "─"*min(60,max(24,len(head)*2))]
+            for r in rows[:15]:
+                lines.append(" | ".join(str(x) for x in r))
+            if len(rows)>15:lines.append(f"...（其余 {len(rows)-15} 行已省略）")
+            lines.append("")
+            lines.append(f"口径说明：{dr['description']}")
+            lines.append(f"数据来源：企业指标语义层（{dr['metric_key']}），受控只读查询，密级 L{meta.get('level',1)}。")
+            answer="\n".join(lines)
+        return {"answer":answer,"input_level":max(state.get("input_level",job["input_level"]),1),"hard_block":False,"review":False}
     if state["hard_block"]:
         answer="当前没有足够的授权资料，无法给出事实结论。请补充资料，或联系负责人申请访问权限。"
     elif state["findings"]:
@@ -292,7 +434,14 @@ def publish_node(state):
 def build_question_workflow(checkpointer):
     from langgraph.graph import StateGraph,START,END
     builder=StateGraph(State)
-    for name,func in [("planning",plan_node),("retrieval",retrieval_node),("specialists",domain_node),("quality",quality_node),("publication",publish_node)]:builder.add_node(name,func)
+    for name,func in [("planning",plan_node),("retrieval",retrieval_node),("data_query",data_query_node),("specialists",domain_node),("quality",quality_node),("publication",publish_node)]:builder.add_node(name,func)
     builder.add_edge(START,"planning")
-    for a,b in [("planning","retrieval"),("retrieval","specialists"),("specialists","quality"),("quality","publication"),("publication",END)]:builder.add_edge(a,b)
+    builder.add_conditional_edges("planning",
+        lambda s: "data_query" if s.get("data_intent") else "retrieval",
+        {"data_query":"data_query","retrieval":"retrieval"})
+    builder.add_edge("data_query","publication")
+    builder.add_edge("retrieval","specialists")
+    builder.add_edge("specialists","quality")
+    builder.add_edge("quality","publication")
+    builder.add_edge("publication",END)
     return builder.compile(checkpointer=checkpointer)

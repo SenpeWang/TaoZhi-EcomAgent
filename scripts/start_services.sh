@@ -12,9 +12,10 @@ if .venv/bin/python -m supervisor.supervisorctl -c "$CONF" status >/dev/null 2>&
  printf '%s\n' '企业工作台已运行'
  exit 0
 fi
-if [ -S "$STATE/supervisor.sock" ]; then
+if [ -S "$STATE/supervisor.sock" ] && .venv/bin/python -m supervisor.supervisorctl -c "$CONF" status >/dev/null 2>&1; then
  .venv/bin/python -m supervisor.supervisorctl -c "$CONF" start all
 else
+ rm -f "$STATE/supervisor.sock"
  nohup .venv/bin/python -m supervisor.supervisord -c "$CONF" > data/runtime/supervisor-start.log 2>&1 < /dev/null &
 fi
 sleep 3

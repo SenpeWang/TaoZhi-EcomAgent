@@ -1,4 +1,4 @@
-"""仅由远端部署账号运行：私有数据库初始化、演示种子与旧库迁移。"""
+"""仅由远端部署账号运行：私有数据库初始化与企业库迁移。"""
 import os,sys,json,secrets,subprocess,sqlite3,hashlib,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
@@ -38,32 +38,6 @@ def corpus():
     for chunk in json.loads(path.read_text()) if path.exists() else []:
         groups.setdefault(chunk["doc_id"],[]).append(chunk)
     return groups
-def seed_demo():
-    from ecom_copilot.enterprise.config import load_config
-    if load_config().mode not in ("demo","test"):
-        raise RuntimeError("演示初始化仅允许演示或测试环境")
-    with database_connection() as c:
-        tenant="tenant_demo"
-        c.execute("INSERT INTO tenants(id,code,name,mode) VALUES(%s,'mofa','手机配件电商 · 演示企业','demo') ON CONFLICT(id) DO NOTHING",(tenant,))
-        nodes=organization(c,tenant,"手机配件电商 · 演示企业")
-        users={}
-        hashed=hash_password("123456","demo")
-        for username,display,admin in [("admin","系统管理员",True),("staff","运营员工",False),("leader","运营组长",False),("boss","公司老板",False)]:
-            existing=fetch_one(c,"SELECT id FROM users WHERE tenant_id=%s AND username=%s",(tenant,username))
-            user=existing["id"] if existing else generate_id("user");users[username]=user
-            c.execute("INSERT INTO users(id,tenant_id,username,display_name,password_hash,system_admin,must_change) VALUES(%s,%s,%s,%s,%s,%s,false) ON CONFLICT(tenant_id,username) DO NOTHING",(user,tenant,username,display,hashed,admin))
-        for user,node,role in [(users["staff"],nodes["店铺运营组"],"employee"),(users["leader"],nodes["店铺运营组"],"leader"),(users["boss"],nodes["公司"],"boss")]:
-            c.execute("INSERT INTO memberships(tenant_id,user_id,node_id,role) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING",(tenant,user,node,role))
-        for did,chunks in corpus().items():
-            add_doc(c,tenant,users["boss"],"demo_"+did,chunks[0].get("doc_name","商品资料"),"\n".join(x["text"] for x in chunks),nodes["公司"])
-        samples=[
-          ("company","企业数据安全与文档密级分级规范","全员遵守企业信息安全准则。员工依岗位授权读取已获准商品资料；组长负责本部门业务审核与文档初审；老板审批跨部门及三级机密授权；管理员负责系统底层与账号运维。","公司","company",1),
-          ("team","店铺运营组日常业务作业指导书","店铺运营组负责电商各渠道商品详情维护、上架参数核验与客户售前咨询支持。日常作业必须严格引用官方核准规格，杜绝臆测适配型号或夸大售后承诺。","店铺运营组","org",1),
-          ("leader","电商运营组工作职责与内容发布审核规范","运营组长全面负责本组日常运营内容与上架文档的二级合规复核。遇跨部门供应链或涉保修例外事项，应发起跨部门协同审批。","店铺运营组","org",2),
-          ("procurement","供应链采购协同与供应商日常管理指引","采购组负责品牌官方配件及核心耗材供应商对接、准入资质审核与出厂批次抽检。非本组经办人员查阅进货明细及供应商底价需单独授权。","采购组","org",2),
-          ("boss","企业经营战略与核心商业秘密保护规定","公司核心经营指标、战略采购底价协议及关键供应商股权合作事宜归属三级核心商业秘密，由企业法定代表人统一管理，严格禁止向未经审核的第三方外部模型出境传输。","公司","company",3)]
-        for tag,title,body,node,scope,level in samples:add_doc(c,tenant,users["boss"],"demo_doc_"+tag,title,body,nodes[node],scope,level)
-    print("独立演示企业与四种身份已初始化")
 def sqlite_rows(name,table):
     p=ROOT/"data/state"/name
     if not p.exists():return []
@@ -97,7 +71,7 @@ def migrate():
                 body="\n".join(x["text"] for x in groups.get(r["id"],[])) or "历史资料未找到原文，需重新核验。"
                 scope="company" if r["visibility"]=="company" else ("selected" if r["visibility"]=="selected" else "company")
                 level=1 if r["visibility"]=="company" else 3
-                add_doc(c,tenant,creator["id"],r["id"],("【历史演示】"+r["title"]) if groups.get(r["id"]) and all(x.get("source")=="local_corpus" for x in groups[r["id"]]) else r["title"],body,nodes["公司"],scope,level,"deleted" if r["deleted"] else ("published" if groups.get(r["id"]) else "draft"),max(1,r["version"]))
+                add_doc(c,tenant,creator["id"],r["id"],("【历史迁移】"+r["title"]) if groups.get(r["id"]) and all(x.get("source")=="local_corpus" for x in groups[r["id"]]) else r["title"],body,nodes["公司"],scope,level,"deleted" if r["deleted"] else ("published" if groups.get(r["id"]) else "draft"),max(1,r["version"]))
                 for reader in json.loads(r["allowed_users"] or "[]"):
                     if usermap.get(reader)==tenant:
                         c.execute("INSERT INTO document_grants(tenant_id,document_id,user_id,effect,can_read,granted_by) VALUES(%s,%s,%s,'allow',true,%s) ON CONFLICT DO NOTHING",(tenant,r["id"],reader,creator["id"]))
@@ -118,6 +92,34 @@ def migrate():
                     root=node_id(tenant,"公司")
                     c.execute("INSERT INTO jobs(id,tenant_id,owner_id,owner_version,node_id,kind,question,input_level,state,stage,fingerprint) VALUES(%s,%s,%s,%s,%s,'ask',%s,3,'legacy','历史记录待重新核验',%s) ON CONFLICT(id) DO NOTHING",(r["id"],tenant,user["id"],user["version"],root,task.get("question",""),hashlib.sha256(r["task_json"].encode()).hexdigest()))
     print("旧账号、资料权限与任务档案已迁移；旧会话未迁移")
+def seed_test():
+    """初始化测试库：企业租户、四种身份账号与密级样文档（仅 test 模式，供在线验收使用）。"""
+    from ecom_copilot.enterprise.config import load_config
+    if load_config().mode!="test":
+        raise RuntimeError("测试初始化仅允许测试环境")
+    with database_connection() as c:
+        tenant="tenant_test"
+        c.execute("INSERT INTO tenants(id,code,name,mode) VALUES(%s,'mofa','手机配件电商 · 测试企业','test') ON CONFLICT(id) DO NOTHING",(tenant,))
+        nodes=organization(c,tenant,"手机配件电商 · 测试企业")
+        users={}
+        hashed=hash_password("123456","test")
+        for username,display,admin in [("admin","系统管理员",True),("staff","运营员工",False),("leader","运营组长",False),("boss","公司老板",False)]:
+            existing=fetch_one(c,"SELECT id FROM users WHERE tenant_id=%s AND username=%s",(tenant,username))
+            user=existing["id"] if existing else generate_id("user");users[username]=user
+            c.execute("INSERT INTO users(id,tenant_id,username,display_name,password_hash,system_admin,must_change) VALUES(%s,%s,%s,%s,%s,%s,false) ON CONFLICT(tenant_id,username) DO NOTHING",(user,tenant,username,display,hashed,admin))
+        for user,node,role in [(users["staff"],nodes["店铺运营组"],"employee"),(users["leader"],nodes["店铺运营组"],"leader"),(users["boss"],nodes["公司"],"boss")]:
+            c.execute("INSERT INTO memberships(tenant_id,user_id,node_id,role) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING",(tenant,user,node,role))
+        for did,chunks in corpus().items():
+            add_doc(c,tenant,users["boss"],"test_"+did,chunks[0].get("doc_name","商品资料"),"\n".join(x["text"] for x in chunks),nodes["公司"])
+        samples=[
+          ("company","企业数据安全与文档密级分级规范","全员遵守企业信息安全准则。员工依岗位授权读取已获准商品资料；组长负责本部门业务审核与文档初审；老板审批跨部门及三级机密授权；管理员负责系统底层与账号运维。","公司","company",1),
+          ("team","店铺运营组日常业务作业指导书","店铺运营组负责电商各渠道商品详情维护、上架参数核验与客户售前咨询支持。日常作业必须严格引用官方核准规格，杜绝臆测适配型号或夸大售后承诺。","店铺运营组","org",1),
+          ("leader","电商运营组工作职责与内容发布审核规范","运营组长全面负责本组日常运营内容与上架文档的二级合规复核。遇跨部门供应链或涉保修例外事项，应发起跨部门协同审批。","店铺运营组","org",2),
+          ("procurement","供应链采购协同与供应商日常管理指引","采购组负责品牌官方配件及核心耗材供应商对接、准入资质审核与出厂批次抽检。非本组经办人员查阅进货明细及供应商底价需单独授权。","采购组","org",2),
+          ("boss","企业经营战略与核心商业秘密保护规定","公司核心经营指标、战略采购底价协议及关键供应商股权合作事宜归属三级核心商业秘密，由企业法定代表人统一管理，严格禁止向未经审核的第三方外部模型出境传输。","公司","company",3)]
+        for tag,title,body,node,scope,level in samples:add_doc(c,tenant,users["boss"],"test_doc_"+tag,title,body,nodes[node],scope,level)
+    print("测试企业与四种身份已初始化")
+
 def bootstrap_owner():
     with database_connection() as c:
         for tenant in fetch_all(c,"SELECT * FROM tenants"):
@@ -148,7 +150,7 @@ def provision():
     private=STATE/"database-secrets.json"
     if private.exists():secrets_data=json.loads(private.read_text())
     else:
-        secrets_data={name:secrets.token_urlsafe(32) for name in ("owner","demo","production","test")}
+        secrets_data={name:secrets.token_urlsafe(32) for name in ("owner","production","test")}
         private.write_text(json.dumps(secrets_data));private.chmod(0o600)
     if "test" not in secrets_data:
         secrets_data["test"]=secrets.token_urlsafe(32)
@@ -163,7 +165,7 @@ def provision():
     if status.returncode:
         subprocess.run([str(bin/"pg_ctl"),"-D",str(data),"-l",str(STATE/"postgres.log"),"start","-w"],check=True,stdout=subprocess.DEVNULL)
     with psycopg.connect(host=str(STATE/"socket"),port=15432,dbname="postgres",autocommit=True) as c:
-        for mode in ("demo","production","test"):
+        for mode in ("production","test"):
             role="ecom_"+mode;dbname="ecom_"+mode
             if not c.execute("SELECT 1 FROM pg_roles WHERE rolname=%s",(role,)).fetchone():c.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(sql.Identifier(role),sql.Literal(secrets_data[mode])))
             if not c.execute("SELECT 1 FROM pg_database WHERE datname=%s",(dbname,)).fetchone():c.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(dbname),sql.Identifier(role)))
@@ -173,10 +175,10 @@ def provision():
                 env.write_text("ECOM_MODE="+mode+"\nECOM_DATABASE_URL=postgresql://"+role+":"+secrets_data[mode]+"@127.0.0.1:15432/"+dbname+"\nECOM_TENANT_CODE=mofa\nECOM_COOKIE_SECURE=false\n")
                 env.chmod(0o600)
             subprocess.run([str(ROOT/".venv/bin/python"),"-m","alembic","-c","alembic.ini","upgrade","head"],cwd=ROOT,env={**os.environ,"ECOM_ENV_FILE":str(env),"PYTHONPATH":str(ROOT/"src")},check=True)
-    print("私有 PostgreSQL 演示库、正式库和独立测试库已就绪")
+    print("私有 PostgreSQL 正式库和独立测试库已就绪")
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="企业数据库初始化、演示种子和历史迁移管理")
-    parser.add_argument("command", choices=("provision", "demo", "migrate", "bootstrap-owner", "archive-tasks"))
+    parser = argparse.ArgumentParser(description="企业数据库初始化与历史迁移管理")
+    parser.add_argument("command", choices=("provision", "migrate", "bootstrap-owner", "archive-tasks"))
     args = parser.parse_args()
-    {"provision": provision, "demo": seed_demo, "migrate": migrate, "bootstrap-owner": bootstrap_owner, "archive-tasks": migrate_task_list}[args.command]()
+    {"provision": provision, "migrate": migrate, "bootstrap-owner": bootstrap_owner, "archive-tasks": migrate_task_list}[args.command]()

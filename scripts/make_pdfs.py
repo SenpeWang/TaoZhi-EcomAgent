@@ -25,7 +25,7 @@ OUT_DIR = CORPUS / "documents"
 PAGE_W, PAGE_H = 595.0, 842.0  # A4
 MARGIN = 46.0
 CONTENT_W = PAGE_W - 2 * MARGIN
-FOOTER_TEXT = "膜法工坊 MofaLab · 电商商品知识智能问答系统演示语料"
+FOOTER_TEXT = "膜法工坊 MofaLab · 电商商品知识智能问答企业语料"
 
 INK = (0.12, 0.12, 0.12)
 HEAD_COLOR = (0.05, 0.22, 0.50)
@@ -435,7 +435,7 @@ class _Doc:
             page.insert_text((PAGE_W - MARGIN - FONT.text_length(label, fontsize=7),
                               PAGE_H - 22), label, fontsize=7, fontname=FONTNAME,
                              color=(0.5, 0.5, 0.5))
-        self.doc.set_metadata({"title": self.title, "author": "膜法工坊 MofaLab（虚构演示品牌）",
+        self.doc.set_metadata({"title": self.title, "author": "膜法工坊 MofaLab",
                                "creator": "make_pdfs.py"})
         out.parent.mkdir(parents=True, exist_ok=True)
         self.doc.save(str(out), deflate=True, garbage=3)
