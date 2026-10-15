@@ -4,7 +4,7 @@
 
 与已删除的 seed_demo 区别：
 - 只写入**真实企业租户**（由 ECOM_TENANT_CODE 指定），不建 tenant_demo；
-- 口令为 16 位强随机（满足生产 ≥12 位且非弱口令要求），不使用 123456；
+- 口令为 16 位强随机（满足生产 ≥12 位且非弱口令要求）；内网快捷登录开启时由 manage_database.py quick-passwords 统一下发默认口令；
 - 账号挂载到**真实组织节点**（部门/小组），用于权限校验与资料可见性验证；
 - 凭据仅写入 ~/.local/share/ecom-agent/accounts.json（0600），便于运维快速接入。
 

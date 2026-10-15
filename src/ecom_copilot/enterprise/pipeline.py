@@ -53,22 +53,6 @@ def validate_task_execution(state,stage,progress,external=False):
         c.execute("UPDATE jobs SET stage=%s,progress=%s WHERE id=%s AND run_version=%s",(stage,progress,job["id"],job["run_version"]))
         c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,%s,'running')",(p.tenant_id,job["id"],job["run_version"],stage,progress))
         return p,job
-_ROUTER_SYSTEM = """你是电商商品知识问答系统的多智能体规划主管（Supervisor Router）。
-请根据用户问题，做深层语义理解并动态裁决需要调度哪些专业智能体协同处理。
-
-【可选领域专家】
-- product: 商品规格专家，核对型号、尺寸、材质、物理与工艺参数，不混用不同型号；
-- compatibility: 产品适配专家，核对手机机型、屏幕形态（曲面屏/折叠屏/直板）、膜壳兼容与互斥替换；
-- after_sales: 客服售后专家，核对保修质保期、开胶开裂换新政策、退换凭证与使用故障排查；
-- operations: 运营选品专家，核对卖点文案、选品依据与转化理由；
-- supply: 库存供应链专家，核对采购周期、库存快照与发货；
-- finance: 经营分析专家，核对财务依据与采购成本。
-
-【输出格式】
-必须只输出严格的 JSON 对象：
-{"intent":"spec_query|sku_compare|compat_recommend|after_sales|general","reasoning":"一句话拆解理由","selected_agents":["product","compatibility"]}
-注意：selected_agents 从上述6个角色中选取1到3个最相关的角色，按优先级排序。
-"""
 
 def plan_node(state):
     p, job = validate_task_execution(state, "动态意图理解与多智能体路由规划（Jev决策核）", 10)

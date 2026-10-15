@@ -198,7 +198,7 @@ def phase_behavior(per_class=8):
         stats.setdefault(cat, {"n": 0, "pass": 0, "fail": [], "skipped": 0})
         s = stats[cat]
         uid = (case.get("test_identity") or {}).get("user_id", "").upper()
-        name = "admin" if "ADMIN" in uid else "boss" if "BOSS" in uid else "leader" if "LDR" in uid else "staff"
+        name = "admin" if "ADMIN" in uid else "owner" if "BOSS" in uid else "leader" if "LDR" in uid else "staff"
         session = httpx.Client(base_url="http://127.0.0.1:18080", trust_env=False, timeout=200)
         lr = session.post("/api/auth/login", json={"username": name, "password": "123456"})
         if lr.status_code != 200:
