@@ -101,7 +101,7 @@ def process_question_job(job):
                 return
 
     from langgraph.checkpoint.postgres import PostgresSaver
-    from .pipeline import build_question_workflow,validate_task_execution,SPECIALIST_ROLES
+    from .pipeline import build_question_workflow,validate_task_execution,SPECIALIST_AGENTS
     with PostgresSaver.from_conn_string(load_config().dsn) as saver:
         saver.setup()
         flow=build_question_workflow(saver)
@@ -113,7 +113,7 @@ def process_question_job(job):
         p=load_principal(c,row["owner_id"])
         if p.version!=row["owner_version"] or not sources_valid(c,p,state["sources"]):raise Denied("人员或来源权限已变化","SOURCE_CHANGED",409)
         citations=[{k:e[k] for k in ("document_id","version","title","quote","page","chunk_id")} for e in state["evidence"]]
-        result=dict(answer=state["answer"],citations=citations,specialists=[{"name":SPECIALIST_ROLES[r][0],"count":sum(f["role"]==SPECIALIST_ROLES[r][0] for f in state["findings"])} for r in state["route"]],
+        result=dict(answer=state["answer"],citations=citations,specialists=[{"name":SPECIALIST_AGENTS[r][0],"count":sum(f["role"]==SPECIALIST_AGENTS[r][0] for f in state["findings"])} for r in state["selected_agents"]],
            missing=state["missing"],hard_block=state["hard_block"],external_blocked=state["external_blocked"],model_calls=state["model_calls"],usage=state["usage"])
         # 问数（ChatBI）：结构化结果透传给前端渲染表格与图表；denied 结果不透传 data
         dr = state.get("data_result")
