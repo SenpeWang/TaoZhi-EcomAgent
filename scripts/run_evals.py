@@ -8,7 +8,7 @@
   behavior     行为质量（评测集分层抽样，LLM-as-judge 按预期行为判定）：
                有据率 / 拒答正确率 / 越权拦截 / 泄漏检测（金丝雀硬红线）
 
-用法（需演示环境 6 进程在线）：
+用法（需企业正式环境服务在线）：
   python scripts/run_evals.py --quick            # 对抗+检索，约 5 分钟
   python scripts/run_evals.py --full             # 三层全跑，约 40 分钟
   python scripts/run_evals.py --quick --compare  # 运行后与 evals/baseline.json 对比
@@ -87,7 +87,7 @@ def phase_retrieval(sample=60):
     pool = [c for c in cases if c["category"] in ("product", "compat", "aftersale", "multi_doc")]
     import random
     chosen = random.Random(20261008).sample(pool, min(sample, len(pool)))
-    assert load_config().mode == "demo", "检索层评测必须在演示库执行"
+    assert load_config().mode == "production", "检索层评测必须对企业正式库执行"
     with database_connection() as c:
         principal = load_principal(c, fetch_one(c, "SELECT id FROM users WHERE username=%s", ("staff",))["id"])
 
@@ -132,7 +132,7 @@ def phase_retrieval(sample=60):
 # ─────────────── 对抗安全层 ───────────────
 def phase_adversarial():
     golden = json.loads(GOLDEN.read_text(encoding="utf-8"))["cases"]
-    http = httpx.Client(base_url="http://127.0.0.1:18501", trust_env=False, timeout=200)
+    http = httpx.Client(base_url="http://127.0.0.1:18080", trust_env=False, timeout=200)
     r = http.post("/api/auth/login", json={"username": "staff", "password": "123456"})
     r.raise_for_status()
     http.headers["x-csrf-token"] = r.json()["csrf_token"]
@@ -185,7 +185,7 @@ def phase_behavior(per_class=8):
     chosen = []
     for cat, items in by_cat.items():
         chosen.extend(rng.sample(items, min(per_class, len(items))))
-    http = httpx.Client(base_url="http://127.0.0.1:18501", trust_env=False, timeout=200)
+    http = httpx.Client(base_url="http://127.0.0.1:18080", trust_env=False, timeout=200)
     r = http.post("/api/auth/login", json={"username": "staff", "password": "123456"})
     r.raise_for_status()
     http.headers["x-csrf-token"] = r.json()["csrf_token"]
@@ -199,7 +199,7 @@ def phase_behavior(per_class=8):
         s = stats[cat]
         uid = (case.get("test_identity") or {}).get("user_id", "").upper()
         name = "admin" if "ADMIN" in uid else "boss" if "BOSS" in uid else "leader" if "LDR" in uid else "staff"
-        session = httpx.Client(base_url="http://127.0.0.1:18501", trust_env=False, timeout=200)
+        session = httpx.Client(base_url="http://127.0.0.1:18080", trust_env=False, timeout=200)
         lr = session.post("/api/auth/login", json={"username": name, "password": "123456"})
         if lr.status_code != 200:
             s["skipped"] += 1

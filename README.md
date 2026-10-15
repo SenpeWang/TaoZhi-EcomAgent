@@ -90,13 +90,12 @@ flowchart LR
 | Agent 编排 | LangGraph，多角色并发、证据核验、审核门禁 |
 | 持久化 | PostgreSQL，Alembic 迁移 |
 | 任务 | 独立 Worker，租约、心跳、执行版本与有限重试 |
-| 部署 | Linux 用户目录运行时、Supervisor、单机多进程、K8s/HPA 编排 |
+| 部署 | Linux 用户目录运行时、Supervisor、单机多进程 |
 
 ```text
 src/ecom_copilot/enterprise/   在线业务、权限、语义缓存、Jev 决策核与工作流
 src/ecom_copilot/             共享能力和隔离的离线模块
 web/src/                     中文工作台、类型与同源 API
-k8s/                         生产 Helm/Kubernetes 编排与 HPA 弹性伸缩清单
 evals/                       固定评测基准与基线对比运行器
 .github/workflows/           main 推送的 CI 与提交范围检查
 .github/ISSUE_TEMPLATE/      四类中文反馈表单
@@ -120,21 +119,20 @@ bash scripts/install_runtime.sh
 cp .env.example .env
 # 在本机 .env 中填写模型配置；不要提交密钥
 .venv/bin/python scripts/manage_database.py provision
-ECOM_ENV_FILE="$PWD/.env.demo" .venv/bin/python scripts/manage_database.py demo
 .venv/bin/python scripts/configure_services.py
 make build-web
 make start
 ```
 
-演示入口为 `http://127.0.0.1:18501/`。独立演示环境的 `admin`、`staff`、`leader`、`boss` 密码均为 `123456`，正式环境拒绝此口令。演示初始化只建立明确标注的组织与权限样例；商品文件需自行通过文档库上传。没有资料或模型配置时，系统说明证据或配置不足。
+工作台入口为 `http://127.0.0.1:18080/`。老板身份由 `manage_database.py bootstrap-owner` 初始化，其余账号由管理员按权限创建；商品文件需自行通过文档库上传。没有资料或模型配置时，系统说明证据或配置不足。
 
 远端部署可通过 SSH 转发访问；使用自己的部署账号、地址和 SSH 端口：
 
 ```bash
-ssh -N -L 18501:127.0.0.1:18501 用户名@服务器地址
+ssh -N -L 18080:127.0.0.1:18080 用户名@服务器地址
 ```
 
-浏览器中的 `127.0.0.1` 指客户端电脑，转发连接需保持打开。正式服务默认监听回环地址；对外开放时应配置 HTTPS 和安全 Cookie，不能直接暴露演示环境。
+浏览器中的 `127.0.0.1` 指客户端电脑，转发连接需保持打开。正式服务默认监听回环地址；对外开放时应配置 HTTPS 和安全 Cookie，不得直接暴露未加密服务。
 
 ## 开发与验证门禁
 
@@ -147,7 +145,6 @@ make check-format     # 仅格式检查
 make check-commits    # 新增提交的格式和公开内容检查
 make test             # 独立测试库离线回归（当前 206 项用例 100% 通过）
 make build-web        # TypeScript 检查与生产构建（0 错误）
-make verify-browser   # 演示入口四身份浏览器验收
 ```
 
 依赖锁为 `requirements.lock.txt` 和 `web/package-lock.json`。CI 在 main 推送后验证真实提交及消息、仓库边界、目录登记、ESLint、Prettier、组件命名、类型构建、数据库迁移和独立测试库的离线回归；不读取真实资料或调用付费模型。

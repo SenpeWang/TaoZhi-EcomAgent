@@ -64,10 +64,6 @@ def _enterprise_serve(args: argparse.Namespace, mode: str) -> int:
 def _cmd_api(args: argparse.Namespace) -> int:
     return _enterprise_serve(args,"production")
 
-def _cmd_ui(args: argparse.Namespace) -> int:
-    return _enterprise_serve(args,"demo")
-
-
 def _cmd_eval(args: argparse.Namespace) -> int:
     from .evaluation import report_markdown, run_evaluation, save_report
 
@@ -139,11 +135,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_api.add_argument("--port", type=int, default=18080)
     p_api.add_argument("--reload", action="store_true")
     p_api.set_defaults(func=_cmd_api)
-
-    p_ui = sub.add_parser("ui", help="启动全中文企业工作台")
-    p_ui.add_argument("--host", default="127.0.0.1")
-    p_ui.add_argument("--port", type=int, default=18501)
-    p_ui.set_defaults(func=_cmd_ui)
 
     p_eval = sub.add_parser("eval", help="运行检索层评测")
     p_eval.add_argument("--limit", type=int, default=None)

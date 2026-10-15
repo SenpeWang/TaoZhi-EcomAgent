@@ -2,7 +2,7 @@ PYTHON := .venv/bin/python
 PROJECT_ROOT := $(CURDIR)
 SUPERVISOR_CONFIG := $(HOME)/.local/share/ecom-agent/supervisor.conf
 
-.PHONY: help start stop status test check build-web verify-browser clean install-hooks check-repository lint-web format-web check-format check-commits
+.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -18,7 +18,6 @@ help:
 	@echo "make test           在独立测试库运行离线回归"
 	@echo "make check          检查 Python 语法"
 	@echo "make build-web      构建并切换前端"
-	@echo "make verify-browser 验收演示环境四种身份"
 	@echo "make clean          清除项目 Python 与 pytest 缓存"
 
 start:
@@ -38,9 +37,6 @@ check:
 
 build-web:
 	bash scripts/build_frontend.sh
-
-verify-browser:
-	ECOM_BROWSER_URL=http://127.0.0.1:18501 ECOM_BROWSER_SKIP_MODEL=true $(PYTHON) scripts/verify_browser.py
 
 clean:
 	$(PYTHON) scripts/clean_cache.py
@@ -65,10 +61,10 @@ check-commits:
 	python3 scripts/check_development.py commits --base "$(COMMIT_BASE)" --head "$(COMMIT_HEAD)"
 
 evals-quick:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.demo" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --quick --compare
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --quick --compare
 
 evals-full:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.demo" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --full --compare
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --full --compare
 
 evals-baseline:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.demo" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --quick --save-baseline
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --quick --save-baseline
