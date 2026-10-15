@@ -176,9 +176,30 @@ def provision():
                 env.chmod(0o600)
             subprocess.run([str(ROOT/".venv/bin/python"),"-m","alembic","-c","alembic.ini","upgrade","head"],cwd=ROOT,env={**os.environ,"ECOM_ENV_FILE":str(env),"PYTHONPATH":str(ROOT/"src")},check=True)
     print("私有 PostgreSQL 正式库和独立测试库已就绪")
+def quick_passwords():
+    """内网快捷登录：把本企业全部在用账号口令统一设为 ECOM_QUICK_LOGIN_PASSWORD。
+
+    仅在 ECOM_QUICK_LOGIN=true 且已配置 ECOM_QUICK_LOGIN_PASSWORD 时执行；该口令为弱口令，
+    仅供内网演示与验收，上线公网前必须重新为每个账号设置强口令。
+    """
+    from ecom_copilot.enterprise.config import load_config
+    cfg=load_config()
+    if not cfg.quick_login or not cfg.quick_login_password:
+        raise SystemExit("需同时开启 ECOM_QUICK_LOGIN 并配置 ECOM_QUICK_LOGIN_PASSWORD")
+    hashed=hash_password(cfg.quick_login_password,cfg.mode,allow_weak=True)
+    with database_connection() as c:
+        tenant=fetch_one(c,"SELECT id FROM tenants WHERE code=%s",(cfg.tenant_code,))
+        if not tenant:raise SystemExit("未找到企业租户 code="+cfg.tenant_code)
+        rows=fetch_all(c,"SELECT username FROM users WHERE tenant_id=%s AND active ORDER BY username",(tenant["id"],))
+        for r in rows:
+            c.execute("UPDATE users SET password_hash=%s,must_change=false WHERE tenant_id=%s AND username=%s",(hashed,tenant["id"],r["username"]))
+            print("  已重置快捷登录口令："+r["username"])
+    print("快捷登录默认口令已生效，共 "+str(len(rows))+" 个在用账号")
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="企业数据库初始化与历史迁移管理")
-    parser.add_argument("command", choices=("provision", "migrate", "bootstrap-owner", "archive-tasks"))
+    parser.add_argument("command", choices=("provision", "migrate", "bootstrap-owner", "quick-passwords", "archive-tasks"))
     args = parser.parse_args()
-    {"provision": provision, "migrate": migrate, "bootstrap-owner": bootstrap_owner, "archive-tasks": migrate_task_list}[args.command]()
+    {"provision": provision, "migrate": migrate, "bootstrap-owner": bootstrap_owner,
+     "quick-passwords": quick_passwords, "archive-tasks": migrate_task_list}[args.command]()

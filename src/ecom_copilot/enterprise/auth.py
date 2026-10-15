@@ -32,7 +32,10 @@ def login(username,password,ip,tenant_code):
         p=load_principal(c,row["id"])
         fresh=fetch_one(c,"SELECT * FROM users WHERE id=%s FOR UPDATE",(p.id,))
         if fresh["password_hash"]!=row["password_hash"] or fresh["version"]!=p.version:raise Denied("账号状态已变化，请重试","LOGIN_FAILED",401)
-        if load_config().mode=="production" and verify_password("123456",fresh["password_hash"]):raise Denied("正式环境禁止演示口令，请通过管理员申请重置","DEMO_PASSWORD_FORBIDDEN",403)
+        cfg=load_config()
+        # 内网快捷登录（ECOM_QUICK_LOGIN + ECOM_QUICK_LOGIN_PASSWORD）开启时放行默认口令；
+        # 其余生产部署继续拒绝演示口令，防止弱口令进入正式环境。
+        if cfg.mode=="production" and not (cfg.quick_login and cfg.quick_login_password) and verify_password("123456",fresh["password_hash"]):raise Denied("正式环境禁止演示口令，请通过管理员申请重置","DEMO_PASSWORD_FORBIDDEN",403)
         sid,csrf=secrets.token_urlsafe(32),secrets.token_urlsafe(32)
         expires=now+timedelta(hours=2)
         c.execute("INSERT INTO sessions(id,tenant_id,user_id,user_version,csrf_hash,expires_at) VALUES(%s,%s,%s,%s,%s,%s)",(hash_token(sid),p.tenant_id,p.id,p.version,hash_token(csrf),expires))

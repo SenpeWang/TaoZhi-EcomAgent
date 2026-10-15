@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 BASE = "http://127.0.0.1:18080"
-PASSWORD = "ChatBI-E2E-2026"
+PASSWORD = "123456"  # 与 ECOM_QUICK_LOGIN_PASSWORD 保持一致
 
 CASES = [
     ("chatbi_staff", "近30天退货率最高的渠道是哪个？"),

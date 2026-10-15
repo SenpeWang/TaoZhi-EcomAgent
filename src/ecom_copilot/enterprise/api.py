@@ -116,8 +116,9 @@ def health():
 def _quick_accounts(c,cfg):
     """运维便利：返回真实企业账号清单。
 
-    仅在 ECOM_QUICK_LOGIN=true 时启用；口令只在 ECOM_QUICK_LOGIN_PASSWORDS=true
-    且本机存在运维凭据文件时才一并返回（仅限内网自用，禁止公网生产开启）。
+    仅在 ECOM_QUICK_LOGIN=true 时启用；口令只在 ECOM_QUICK_LOGIN_PASSWORDS=true 时返回：
+    配置 ECOM_QUICK_LOGIN_PASSWORD 时对所有账号统一下发该默认口令（前端免输入），
+    未配置时回落到运维凭据文件 accounts.json（仅限内网自用，禁止公网生产开启）。
     """
     t=fetch_one(c,"SELECT id FROM tenants WHERE code=%s",(cfg.tenant_code,))
     if not t:return []
@@ -126,8 +127,9 @@ def _quick_accounts(c,cfg):
                      "FROM users u LEFT JOIN memberships m ON m.user_id=u.id AND m.tenant_id=u.tenant_id "
                      "WHERE u.tenant_id=%s AND u.active "
                      "GROUP BY u.id,u.username,u.display_name,u.system_admin ORDER BY u.username",(t["id"],))
+    default=cfg.quick_login_password if cfg.quick_login_passwords else ""
     creds={}
-    if cfg.quick_login_passwords:
+    if cfg.quick_login_passwords and not default:
         p=Path.home()/".local/share/ecom-agent/accounts.json"
         try:creds=json.loads(p.read_text()) if p.exists() else {}
         except Exception:creds={}
@@ -135,7 +137,8 @@ def _quick_accounts(c,cfg):
     for r in rows:
         item=dict(username=r["username"],display_name=r["display_name"],
                   role="admin" if r["system_admin"] else (r["roles"] or "-"))
-        if creds:item["password"]=creds.get(r["username"],{}).get("password","")
+        if default:item["password"]=default
+        elif creds:item["password"]=creds.get(r["username"],{}).get("password","")
         result.append(item)
     return result
 @app.get("/api/info")

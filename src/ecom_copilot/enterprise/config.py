@@ -44,6 +44,8 @@ class Config:
     quick_login: bool = False
     # 仅在 quick_login 打开且显式开启时，才把口令一并返回（仅限内网自用，禁止公网生产开启）
     quick_login_passwords: bool = False
+    # 快捷登录统一下发的默认口令（弱口令，仅内网自用；未配置时回落到运维凭据文件）
+    quick_login_password: str = ""
 
 def load_config() -> Config:
     source = Path(os.environ.get("ECOM_ENV_FILE", ROOT / ".env.production"))
@@ -77,4 +79,5 @@ def load_config() -> Config:
       rerank_enabled=values.get("ECOM_RERANK_ENABLED","true")=="true",
       rerank_candidates=int(values.get("ECOM_RERANK_CANDIDATES","20")),
       quick_login=values.get("ECOM_QUICK_LOGIN","false")=="true",
-      quick_login_passwords=values.get("ECOM_QUICK_LOGIN_PASSWORDS","false")=="true")
+      quick_login_passwords=values.get("ECOM_QUICK_LOGIN_PASSWORDS","false")=="true",
+      quick_login_password=values.get("ECOM_QUICK_LOGIN_PASSWORD",""))
