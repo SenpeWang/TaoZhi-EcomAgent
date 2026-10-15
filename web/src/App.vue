@@ -190,39 +190,21 @@ const menus = computed(() => [
   ...(caps.value.review || caps.value.system ? ['审计记录'] : []),
   '个人设置',
 ])
-const title = computed(
-  () =>
-    (
-      ({
-        工作台: '把知识与协作，放在同一个工作台',
-        智能问答: '让每个答案都有可靠依据',
-        数据中台: '经营数据，一屏尽览',
-        任务中心: '从提问到发布，全程可追溯',
-        文档库: '让合适的人，看见合适的资料',
-        团队工作台: '管理团队任务与业务审核',
-        审核与授权: '每一次开放，都有明确依据',
-        组织与人员: '组织清晰，职责明确',
-        审计记录: '查看权限与业务操作记录',
-        运行状态: '查看企业服务运行状态',
-        个人设置: '管理你的账号与登录信息',
-      }) as Record<string, string>
-    )[page.value],
-)
 const subtitles = computed(
   () =>
     (
       ({
-        工作台: '按当前身份展示获准的资料、任务和团队范围。',
-        智能问答: '系统仅使用你有权访问的资料；涉及机密内容时请设置问题密级。',
-        数据中台: '指标语义层受控出数：看板总览经营指标，自然语言直接问数。',
-        任务中心: '查看阶段进度、核验结果与引用。来源撤权后，历史答案也会重新校验。',
-        文档库: '资料按组织范围与密级管理。新资料先审核，再发布。',
-        团队工作台: '审核负责范围内的任务，跨组和机密资料另行授权。',
-        审核与授权: '任职、单文档授权、密级调整和发布审核在这里处理。',
-        组织与人员: '管理员维护系统；业务负责人批准访问范围和角色变化。',
-        审计记录: '管理员查看运行审计，业务负责人查看获准范围内的业务审计。',
-        运行状态: '查看服务连通性、任务进程和本企业队列状态，不展示业务正文。',
-        个人设置: '密码修改后，旧会话会失效，需要重新登录。',
+        工作台: '你获准访问的资料与任务。',
+        智能问答: '仅使用你有权访问的资料回答。',
+        数据中台: '看板总览，自然语言问数。',
+        任务中心: '查看进度、核验结果与引用来源。',
+        文档库: '资料按组织范围与密级管理。',
+        团队工作台: '审核负责范围内的任务。',
+        审核与授权: '处理任职、授权与发布审核。',
+        组织与人员: '维护组织架构与人员任职。',
+        审计记录: '查看权限与业务操作记录。',
+        运行状态: '服务连通性与任务队列状态。',
+        个人设置: '密码修改后需重新登录。',
       }) as Record<string, string>
     )[page.value],
 )
@@ -563,7 +545,7 @@ async function saveDoc() {
       })
     docEdit.value = false
     docOpen.value = false
-    ElMessage.success('资料已保存，解析后等待发布审核')
+    ElMessage.success('资料已保存，等待发布审核')
     await load()
   })
 }
@@ -648,7 +630,7 @@ async function saveGrant() {
       expires_at: grantForm.expires_at ? new Date(grantForm.expires_at).toISOString() : null,
     })
     grantOpen.value = false
-    ElMessage.success('文档授权已提交，等待老板审批')
+    ElMessage.success('授权已提交，等待审批')
     await load()
   })
 }
@@ -707,7 +689,7 @@ async function saveAccount() {
       })
     accountOpen.value = false
     accountForm.password = ''
-    ElMessage.success('账号已创建，任职申请等待业务负责人审批')
+    ElMessage.success('账号已创建，任职待审批')
     await load()
   })
 }
@@ -746,7 +728,7 @@ async function saveMembership() {
 async function disableUser(row: User) {
   await action(async () => {
     await api('/users/' + row.id, 'PATCH', { active: !row.active })
-    ElMessage.success('账号状态变更已提交，等待老板审批')
+    ElMessage.success('状态变更已提交，等待审批')
     await load()
   })
 }
@@ -757,12 +739,12 @@ async function disableUser(row: User) {
 async function resetPassword(row: User) {
   await action(async () => {
     const r = await ElMessageBox.prompt(
-      '输入新的临时密码。正式环境须至少 12 位；批准后旧会话将失效。',
+      '输入新的临时密码（至少 12 位，批准后旧会话失效）。',
       '申请重置密码',
       { confirmButtonText: '提交申请', cancelButtonText: '取消', inputType: 'password' },
     )
     await api('/users/' + row.id, 'PATCH', { new_password: r.value })
-    ElMessage.success('重置申请已提交，等待老板审批')
+    ElMessage.success('重置申请已提交，等待审批')
     await load()
   })
 }
@@ -811,7 +793,7 @@ async function saveOrg() {
         parent_id: orgForm.parent_id,
       })
     orgOpen.value = false
-    ElMessage.success(orgForm.id ? '组织调整已提交，等待老板审批' : '组织已创建')
+    ElMessage.success(orgForm.id ? '组织调整已提交，等待审批' : '组织已创建')
     await load()
   })
 }
@@ -939,7 +921,7 @@ onUnmounted(() => {
     <main class="login-main">
       <div class="login-card">
         <h2>登录工作台</h2>
-        <p class="muted">使用企业账号继续</p>
+        <p class="muted">使用企业账号登录</p>
         <div
           v-if="info.quick_accounts && info.quick_accounts.length"
           style="margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center"
@@ -955,15 +937,10 @@ onUnmounted(() => {
           >
         </div>
         <el-form label-position="top" @submit.prevent="signIn">
-          <el-form-item>
-            <template #label>
-              <div class="login-label-row">
-                <span>账号</span>
-              </div>
-            </template>
+          <el-form-item label="账号">
             <el-input
               v-model="loginForm.username"
-              placeholder="请输入账号 (如 admin / leader / staff / boss)"
+              placeholder="企业账号"
               autocomplete="username"
               size="large"
             />
@@ -983,7 +960,6 @@ onUnmounted(() => {
             登录
           </el-button>
         </el-form>
-        <p class="login-foot">资料与答案均按当前身份授权访问</p>
       </div>
     </main>
   </div>
@@ -1006,7 +982,6 @@ onUnmounted(() => {
           >{{ name }}
         </button>
       </nav>
-      <div class="sidebar-bottom"><span class="status-dot"></span>权限实时校验</div>
     </aside>
     <div class="main-shell">
       <header class="topbar">
@@ -1022,8 +997,7 @@ onUnmounted(() => {
       <main v-loading="loading" class="content">
         <div class="page-heading">
           <div>
-            <span class="eyebrow">企业智能协作</span>
-            <h1>{{ title }}</h1>
+            <h1>{{ page }}</h1>
             <p>{{ subtitles }}</p>
           </div>
           <el-button v-if="page === '文档库' && caps.write" type="primary" @click="newDoc"
@@ -1052,10 +1026,7 @@ onUnmounted(() => {
           <div class="dashboard-grid">
             <section class="panel ask-promo">
               <el-tag effect="plain">基于授权资料回答</el-tag>
-              <h2>今天，需要核对什么？</h2>
-              <p>
-                商品规格、手机适配、售后条件，或团队资料。智能体按问题协作，答案保留可访问的引用。
-              </p>
+              <h2>今天要核对什么？</h2>
               <el-input
                 v-model="askForm.question"
                 type="textarea"
@@ -1063,8 +1034,7 @@ onUnmounted(() => {
                 placeholder="例如：MC-500 的切幅是多少？"
               />
               <div class="panel-actions">
-                <small>仅使用你有权查看的资料</small
-                ><el-button type="primary" @click="page = '智能问答'">开始提问</el-button>
+                <el-button type="primary" @click="page = '智能问答'">开始提问</el-button>
               </div>
             </section>
             <section class="panel">
@@ -1102,7 +1072,7 @@ onUnmounted(() => {
                 ><small>{{ state(d.state) }}</small>
               </button>
             </div>
-            <el-empty v-if="!docs.length" description="当前没有可访问资料" />
+            <el-empty v-if="!docs.length" description="暂无资料" />
           </section>
         </template>
         <template v-else-if="page === '数据中台'">
@@ -1111,7 +1081,6 @@ onUnmounted(() => {
         <template v-else-if="page === '智能问答'"
           ><div class="question-grid">
             <section class="panel">
-              <h3>描述你的问题</h3>
               <el-form label-position="top"
                 ><el-form-item label="问题"
                   ><el-input
@@ -1155,7 +1124,7 @@ onUnmounted(() => {
                   >允许问题使用外部 AI（资料仍需获准）</el-checkbox
                 ><el-alert
                   v-if="askForm.input_level === 3"
-                  title="老板级资料默认禁止发送外部 AI；文档负责人须另行批准资料的 AI 处理权限。"
+                  title="老板级资料默认禁止发送外部 AI，需负责人另行批准。"
                   type="info"
                   :closable="false"
                   show-icon
@@ -1170,7 +1139,7 @@ onUnmounted(() => {
               >
             </section>
             <section class="panel pipeline-panel">
-              <h3>智能体如何协作</h3>
+              <h3>处理流程</h3>
               <div
                 v-for="(step, i) in [
                   '校验身份与组织范围',
@@ -1184,19 +1153,7 @@ onUnmounted(() => {
                 class="pipeline-step"
               >
                 <span>{{ i + 1 }}</span>
-                <div>
-                  {{ step
-                  }}<small>{{
-                    [
-                      '以服务端身份为准',
-                      '只调度问题所需专家',
-                      '缺少接口时明确说明',
-                      '商品、适配、售后、运营等',
-                      '不发布无依据的事实',
-                      '发布前再次验证权限',
-                    ][i]
-                  }}</small>
-                </div>
+                <div>{{ step }}</div>
               </div>
             </section>
           </div></template
@@ -1244,7 +1201,7 @@ onUnmounted(() => {
               ><el-table-column label="提交时间" width="190"
                 ><template #default="{ row }">{{ date(row.created_at) }}</template></el-table-column
               ></el-table
-            ><el-empty v-if="!jobs.length" description="暂时没有可见任务" /></section
+            ><el-empty v-if="!jobs.length" description="暂无任务" /></section
         ></template>
         <template v-else-if="page === '文档库'"
           ><section class="panel">
@@ -1295,12 +1252,12 @@ onUnmounted(() => {
                   ></template
                 ></el-table-column
               ></el-table
-            ><el-empty v-if="!filteredDocs.length" description="当前没有匹配的授权资料" /></section
+            ><el-empty v-if="!filteredDocs.length" description="暂无匹配资料" /></section
         ></template>
         <template v-else-if="page === '审核与授权'"
           ><section class="panel">
             <el-alert
-              title="批准申请不会改变其他人的权限。资料版本或人员状态变化后，旧申请须重新提交。"
+              title="批准不会改变他人权限；资料或人员变化后请重新提交申请。"
               type="info"
               :closable="false"
             /><el-table :data="requests"
@@ -1342,7 +1299,7 @@ onUnmounted(() => {
                   ><span v-else class="muted">等待或已处理</span></template
                 ></el-table-column
               ></el-table
-            ><el-empty v-if="!requests.length" description="暂时没有申请" /></section
+            ><el-empty v-if="!requests.length" description="暂无申请" /></section
         ></template>
         <template v-else-if="page === '组织与人员'"
           ><div class="organization-grid">
@@ -1430,7 +1387,7 @@ onUnmounted(() => {
                   nodeName(row.node_id)
                 }}</template></el-table-column
               ></el-table
-            ><el-empty v-if="!audits.length" description="当前没有可见审计记录" /></section
+            ><el-empty v-if="!audits.length" description="暂无记录" /></section
         ></template>
         <template v-else-if="page === '运行状态'"
           ><section class="panel">
@@ -1482,7 +1439,6 @@ onUnmounted(() => {
             >
           </section></template
         >
-        <footer class="content-footer">资料范围由服务端校验 · 所有业务答案保留来源</footer>
       </main>
     </div>
     <el-dialog v-model="docOpen" :title="detail?.title || '资料详情'" width="760px"
@@ -1529,11 +1485,11 @@ onUnmounted(() => {
           :closable="false"
         /><el-alert
           v-if="activeTask.restricted"
-          title="来源权限或版本已变化，历史答案不可读取，请重新查询。"
+          title="来源权限已变化，请重新查询。"
           type="warning"
           :closable="false"
         /><template v-if="activeTask.result"
-          ><h3>多智能体协同核验结果</h3>
+          ><h3>核验结果</h3>
           <div class="detail-meta">
             <el-tag type="primary" effect="dark">🎯 Main 调度</el-tag>
             <el-tag v-for="s in activeTask.result.specialists || []" :key="s.name" effect="plain"
@@ -1560,7 +1516,7 @@ onUnmounted(() => {
               ></el-collapse-item
             ></el-collapse
           ></template
-        ><el-empty v-else-if="activeTask.state === 'review'" description="答案等待业务负责人审核" />
+        ><el-empty v-else-if="activeTask.state === 'review'" description="等待业务负责人审核" />
         <div class="dialog-actions">
           <template v-if="activeTask.state === 'review' && activeTask.can_review"
             ><el-button type="primary" @click="reviewTask(true)">批准发布</el-button
@@ -1623,7 +1579,7 @@ onUnmounted(() => {
             :rows="10"
             placeholder="粘贴经过确认的企业资料" /></el-form-item
         ><el-alert
-          title="新资料为受限草稿。解析、确认密级和发布审核完成前，不对员工开放。"
+          title="草稿在解析、密级确认与发布审核完成前不开放。"
           type="info"
           :closable="false" /></el-form
       ><template #footer
@@ -1662,7 +1618,7 @@ onUnmounted(() => {
         ><el-checkbox v-model="policyForm.download_allowed"
           >允许符合常规阅读权限的人员下载</el-checkbox
         ><el-alert
-          title="密级调整、扩大可见范围和外部 AI 许可须老板审批。"
+          title="密级、范围与外部 AI 许可需老板审批。"
           type="warning"
           :closable="false" /></el-form
       ><template #footer
@@ -1700,7 +1656,7 @@ onUnmounted(() => {
         ><el-checkbox v-model="grantForm.can_download">允许下载</el-checkbox
         ><el-checkbox v-model="grantForm.revoke">撤销该人员的单独授权</el-checkbox
         ><el-alert
-          title="默认仅授予此份资料的阅读权限，不提升人员角色或其他资料权限。"
+          title="仅授予本资料的阅读权限，不提升人员角色。"
           type="info"
           :closable="false" /></el-form
       ><template #footer
@@ -1740,7 +1696,7 @@ onUnmounted(() => {
               :label="n.name"
               :value="n.id" /></el-select></el-form-item
         ><el-alert
-          title="账号创建后，任职或管理员身份须完成审批；不能通过创建账号自动取得机密权限。"
+          title="任职或管理员身份须经审批；创建账号不自动取得机密权限。"
           type="info"
           :closable="false" /></el-form
       ><template #footer
@@ -1798,14 +1754,14 @@ onUnmounted(() => {
       ></el-dialog
     >
     <el-dialog v-model="permissionIdOpen" title="按资料编号配置权限" width="500px"
-      ><p class="muted">请输入老板提供的资料编号。这里仅查询授权配置，不开放机密正文或标题。</p>
+      ><p class="muted">输入资料编号，仅查询授权配置，不展示正文与标题。</p>
       <el-input v-model="permissionId" placeholder="资料编号" /><template #footer
         ><el-button @click="permissionIdOpen = false">取消</el-button
         ><el-button type="primary" @click="manageById">查询权限配置</el-button></template
       ></el-dialog
     >
     <el-dialog v-model="accessOpen" title="申请资料访问" width="500px"
-      ><p class="muted">请输入资料负责人提供的资料编号。系统不会公开未授权文档的名称和内容。</p>
+      ><p class="muted">输入资料编号申请访问，系统不公开未授权文档信息。</p>
       <el-input v-model="accessId" placeholder="资料编号" /><template #footer
         ><el-button @click="accessOpen = false">取消</el-button
         ><el-button type="primary" @click="requestAccess">提交申请</el-button></template

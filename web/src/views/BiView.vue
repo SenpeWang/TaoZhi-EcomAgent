@@ -7,7 +7,7 @@
       <button :class="{ active: tab === 'chat' }" @click="switchTab('chat')">
         <span class="tab-glyph">数</span>智能问数
       </button>
-      <span class="bi-tab-note">数据来自指标语义层 · 受控只读查询 · 按身份授权展示</span>
+      <span class="bi-tab-note">受控只读查询</span>
     </div>
 
     <!-- ── 经营看板 ─────────────────────────────────────────────── -->
@@ -53,7 +53,7 @@
           </section>
         </div>
       </template>
-      <el-empty v-else-if="!boardLoading" description="看板数据暂不可用，请点击刷新重试" />
+      <el-empty v-else-if="!boardLoading" description="看板数据暂不可用" />
     </div>
 
     <!-- ── 智能问数 ─────────────────────────────────────────────── -->
@@ -61,7 +61,7 @@
       <div ref="chatList" class="chat-list">
         <div v-if="!messages.length" class="chat-welcome">
           <h2>问点数据</h2>
-          <p>用自然语言查询授权范围内的经营指标。SQL 由指标语义层受控生成，不经过大模型。</p>
+          <p>用自然语言查询授权范围内的经营指标。</p>
           <div class="quick-chips">
             <button v-for="q in quickQuestions" :key="q" @click="ask(q)">{{ q }}</button>
           </div>
@@ -240,7 +240,7 @@ const kpiCards = computed(() => {
     label: '销售额（近30天）',
     value: fmtMoney(c.gsv_30d),
     unit: '元',
-    sub: '有效订单 · 不含取消',
+    sub: '不含取消订单',
     tone: 'blue',
   })
   cards.push({
@@ -263,7 +263,7 @@ const kpiCards = computed(() => {
       label: '毛利（近30天）',
       value: fmtMoney(c.gross_profit_30d),
       unit: '元',
-      sub: '销售额 - 商品成本 · L2',
+      sub: '销售额 − 成本 · L2',
       tone: 'green',
     })
   if (c.low_stock !== null && c.low_stock !== undefined)
@@ -271,7 +271,7 @@ const kpiCards = computed(() => {
       label: '低库存 SKU',
       value: fmtNum(c.low_stock),
       unit: '个',
-      sub: '低于安全库存线 · L2',
+      sub: '低于安全线 · L2',
       tone: 'amber',
     })
   return cards
