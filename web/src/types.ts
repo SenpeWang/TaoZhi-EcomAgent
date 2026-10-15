@@ -23,11 +23,17 @@ export interface User {
   capabilities: Capabilities
   active?: boolean
 }
+export interface QuickAccount {
+  username: string
+  display_name: string
+  role: string
+  password?: string
+}
 export interface WorkspaceInfo {
   name: string
   mode: string
-  demo: boolean
   tenant_code: string
+  quick_accounts?: QuickAccount[]
 }
 export interface Organization {
   id: string

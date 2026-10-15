@@ -56,7 +56,7 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
 
 /**
  * 从当前环境的非 HttpOnly CSRF Cookie 读取令牌；不读取会话 Cookie。
- * @param mode - 服务端返回的演示、测试或正式环境名。
+ * @param mode - 服务端返回的运行环境名（production / test）。
  * @returns 当前环境的 CSRF 值；不存在时返回空串，由服务端拒绝写入。
  */
 function readCsrf(mode: string): string {

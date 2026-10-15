@@ -2,6 +2,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { requestApi } from './api'
+import BiView from './views/BiView.vue'
 import type {
   User,
   WorkspaceInfo,
@@ -180,6 +181,7 @@ const root = computed(() => orgs.value.find((n) => n.kind === 'company')?.id || 
 const menus = computed(() => [
   '工作台',
   '智能问答',
+  '数据中台',
   '任务中心',
   '文档库',
   ...(caps.value.review ? ['团队工作台'] : []),
@@ -194,6 +196,7 @@ const title = computed(
       ({
         工作台: '把知识与协作，放在同一个工作台',
         智能问答: '让每个答案都有可靠依据',
+        数据中台: '经营数据，一屏尽览',
         任务中心: '从提问到发布，全程可追溯',
         文档库: '让合适的人，看见合适的资料',
         团队工作台: '管理团队任务与业务审核',
@@ -211,6 +214,7 @@ const subtitles = computed(
       ({
         工作台: '按当前身份展示获准的资料、任务和团队范围。',
         智能问答: '系统仅使用你有权访问的资料；涉及机密内容时请设置问题密级。',
+        数据中台: '指标语义层受控出数：看板总览经营指标，自然语言直接问数。',
         任务中心: '查看阶段进度、核验结果与引用。来源撤权后，历史答案也会重新校验。',
         文档库: '资料按组织范围与密级管理。新资料先审核，再发布。',
         团队工作台: '审核负责范围内的任务，跨组和机密资料另行授权。',
@@ -225,6 +229,7 @@ const subtitles = computed(
 const NAV_GLYPHS: Record<string, string> = {
   工作台: '概',
   智能问答: '问',
+  数据中台: '数',
   任务中心: '任',
   文档库: '文',
   团队工作台: '协',
@@ -374,13 +379,14 @@ async function signOut() {
   })
 }
 /**
- * 填入隔离演示账号；正式环境不展示此入口。
- * @param name - 演示账号名。
+ * 快速切换企业账号：填充真实账号；口令仅在运维显式开启时才随响应提供。
+ * @param a - /api/info 返回的真实企业账号。
+ * @param a.username - 企业账号用户名。
+ * @param a.password - 企业账号口令（仅 ECOM_QUICK_LOGIN_PASSWORDS 开启时返回）。
  */
-function chooseRole(name: string) {
-  loginForm.username = name
-  loginForm.password = '123456'
-  ElMessage.info(`已快捷填入 ${name} 演示账号与默认密码 123456`)
+function pickAccount(a: { username: string; password?: string }) {
+  loginForm.username = a.username
+  if (a.password) loginForm.password = a.password
 }
 /**
  * 切换中文菜单并按当前身份获取审计或运行状态；菜单可见不代替后端授权。
@@ -670,12 +676,12 @@ async function decideRequest(row: Approval, approve: boolean) {
   })
 }
 /**
- * 准备新账号表单；简单口令只用于演示，正式环境须遵守密码校验。
+ * 准备新账号表单；企业环境口令须遵守服务端密码强度校验（生产 ≥12 位）。
  */
 function newAccount() {
   Object.assign(accountForm, {
     username: '',
-    password: info.value.demo ? '123456' : '',
+    password: '',
     display_name: '',
     role: 'employee',
     node_id: root.value,
@@ -932,24 +938,27 @@ onUnmounted(() => {
     </aside>
     <main class="login-main">
       <div class="login-card">
-        <el-tag v-if="info.demo" type="warning" effect="plain">独立演示环境</el-tag>
         <h2>登录工作台</h2>
         <p class="muted">使用企业账号继续</p>
+        <div
+          v-if="info.quick_accounts && info.quick_accounts.length"
+          style="margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center"
+        >
+          <small class="muted">快速切换企业账号：</small>
+          <el-button
+            v-for="a in info.quick_accounts"
+            :key="a.username"
+            size="small"
+            :type="loginForm.username === a.username ? 'primary' : 'default'"
+            @click="pickAccount(a)"
+            >{{ a.display_name }}（{{ a.role }}）</el-button
+          >
+        </div>
         <el-form label-position="top" @submit.prevent="signIn">
           <el-form-item>
             <template #label>
               <div class="login-label-row">
                 <span>账号</span>
-                <span v-if="info.demo" class="quick-roles-inline">
-                  快捷选择：
-                  <a href="javascript:void(0)" @click.prevent="chooseRole('admin')">admin</a>
-                  <span class="sep">/</span>
-                  <a href="javascript:void(0)" @click.prevent="chooseRole('leader')">leader</a>
-                  <span class="sep">/</span>
-                  <a href="javascript:void(0)" @click.prevent="chooseRole('staff')">staff</a>
-                  <span class="sep">/</span>
-                  <a href="javascript:void(0)" @click.prevent="chooseRole('boss')">boss</a>
-                </span>
               </div>
             </template>
             <el-input
@@ -964,7 +973,7 @@ onUnmounted(() => {
               v-model="loginForm.password"
               type="password"
               show-password
-              placeholder="请输入密码 (演示环境统一 123456)"
+              placeholder="请输入密码"
               autocomplete="current-password"
               size="large"
               @keyup.enter="signIn"
@@ -974,28 +983,6 @@ onUnmounted(() => {
             登录
           </el-button>
         </el-form>
-        <div v-if="info.demo" class="demo-box">
-          <div class="demo-box-head">
-            <strong>快捷填入演示账号</strong>
-            <el-tag size="small" type="success" effect="light">密码统一为 123456</el-tag>
-          </div>
-          <p>点击下方身份一键填入账号与密码：</p>
-          <div class="role-buttons">
-            <el-button
-              v-for="r in [
-                { n: 'admin', l: '管理员 (admin)' },
-                { n: 'leader', l: '组长 (leader)' },
-                { n: 'staff', l: '员工 (staff)' },
-                { n: 'boss', l: '老板 (boss)' },
-              ]"
-              :key="r.n"
-              :type="loginForm.username === r.n ? 'primary' : 'default'"
-              @click="chooseRole(r.n)"
-              >{{ r.l }}</el-button
-            >
-          </div>
-          <small>管理员维护系统与组织，业务机密需单独授权。</small>
-        </div>
         <p class="login-foot">资料与答案均按当前身份授权访问</p>
       </div>
     </main>
@@ -1019,18 +1006,13 @@ onUnmounted(() => {
           >{{ name }}
         </button>
       </nav>
-      <div class="sidebar-bottom">
-        <span class="status-dot"></span>权限实时校验<small v-if="info.demo"
-          >演示资料与正式数据隔离</small
-        >
-      </div>
+      <div class="sidebar-bottom"><span class="status-dot"></span>权限实时校验</div>
     </aside>
     <div class="main-shell">
       <header class="topbar">
         <span>{{ page }}</span>
         <div class="topbar-right">
-          <el-tag v-if="info.demo" type="warning" effect="plain">演示环境</el-tag
-          ><span class="avatar">{{ user.display_name?.slice(0, 1) }}</span>
+          <span class="avatar">{{ user.display_name?.slice(0, 1) }}</span>
           <div class="user-info">
             {{ user.display_name }}<small>{{ user.roles.join(' / ') }}</small>
           </div>
@@ -1122,6 +1104,9 @@ onUnmounted(() => {
             </div>
             <el-empty v-if="!docs.length" description="当前没有可访问资料" />
           </section>
+        </template>
+        <template v-else-if="page === '数据中台'">
+          <BiView :user="user" :api="api" />
         </template>
         <template v-else-if="page === '智能问答'"
           ><div class="question-grid">
@@ -1490,9 +1475,7 @@ onUnmounted(() => {
                   v-model="passwordForm.new_password"
                   type="password"
                   show-password
-                  :placeholder="
-                    info.demo ? '至少 6 位' : '至少 12 位，避免常见密码'
-                  " /></el-form-item
+                  placeholder="至少 12 位，避免常见密码" /></el-form-item
               ><el-button type="primary" :loading="busy" @click="changePassword"
                 >修改密码并重新登录</el-button
               ></el-form
