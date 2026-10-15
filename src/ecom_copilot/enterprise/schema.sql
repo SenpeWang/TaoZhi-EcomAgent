@@ -1,4 +1,5 @@
--- 前置条件：需超级用户执行 CREATE EXTENSION vector;（pgvector，本库为 0.8.7）
+-- 前置条件：需超级用户执行 CREATE EXTENSION vector（pgvector，本库为 0.8.7）
+CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE tenants (
  id text PRIMARY KEY, code text UNIQUE NOT NULL, name text NOT NULL, mode text NOT NULL,
  enabled boolean NOT NULL DEFAULT true, epoch bigint NOT NULL DEFAULT 1, created_at timestamptz NOT NULL DEFAULT now()
