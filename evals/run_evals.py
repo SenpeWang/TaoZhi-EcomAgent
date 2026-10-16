@@ -64,23 +64,83 @@ def title_of(p):
     return p.stem
 
 
+# 交付路径的陈旧前缀（目录改名/搬迁后的历史写法），解析时逐个剥离后按尾路径匹配。
+_STALE_PREFIX = ("data/", "incoming/待映射/", "incoming/mofa/", "corpus/", "incoming/")
+_CORPUS = None
+
+
+def _build_corpus():
+    """扫描语料根目录，建立「尾路径 -> 文件集合」索引。
+
+    只扫 data/corpus 与 data/incoming，不碰私有目录与运行时目录。
+    """
+    files = []
+    for base in ("data/corpus", "data/incoming"):
+        root = ROOT / base
+        if root.is_dir():
+            files += [q for q in root.rglob("*")
+                      if q.is_file() and (q.suffix == ".md" or q.name.endswith(".jsonl"))]
+    suffix = {}
+    for f in files:
+        parts = f.relative_to(ROOT).as_posix().split("/")
+        for k in range(1, min(5, len(parts) + 1)):
+            suffix.setdefault("/".join(parts[-k:]), set()).add(f)
+    return files, suffix
+
+
+def corpus_index():
+    global _CORPUS
+    if _CORPUS is None:
+        _CORPUS = _build_corpus()
+    return _CORPUS
+
+
+def resolve_source(file_field):
+    """把用例里的来源路径解析为磁盘上的实际文件；解析不到或存在歧义时返回 None。
+
+    顺序：原始拼法 → 剥离陈旧前缀后按尾路径唯一匹配。歧义即放弃（不猜品牌）。
+    """
+    if not file_field:
+        return None
+    for cand in (ROOT / "data" / file_field,
+                 ROOT / "data/incoming/待映射" / file_field,
+                 ROOT / "data/incoming/mofa" / file_field,
+                 ROOT / file_field):
+        if cand.exists():
+            return cand
+    text = file_field
+    for prefix in _STALE_PREFIX:
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+    parts = [p for p in text.split("/") if p]
+    _, suffix = corpus_index()
+    for k in range(len(parts), 0, -1):
+        hits = suffix.get("/".join(parts[-k:]))
+        if hits and len(hits) == 1:
+            return next(iter(hits))
+    return None
+
+
 def expected_titles(case):
-    out = set()
+    """用例的预期文档标题集合（命中判定用）。"""
+    return _expected(case)[0]
+
+
+def _expected(case):
+    """返回 (预期标题集合, 未解析的来源文件名列表)。"""
+    out, unresolved = set(), []
     for sf in case.get("source_files") or []:
         f = sf.get("file") or ""
-        p = ROOT / "data" / f
-        if not p.exists():
-            p = ROOT / "data/incoming/待映射" / f
-        if not p.exists():
-            p = ROOT / f
-        if not p.exists():
+        target = resolve_source(f)
+        if target is None:
+            unresolved.append(f)
             continue
-        if p.suffix == ".md":
-            out.add(title_of(p))
-        elif p.name.endswith(".jsonl"):
-            for md in p.parent.glob("*.md"):
+        if target.suffix == ".md":
+            out.add(title_of(target))
+        elif target.name.endswith(".jsonl"):
+            for md in sorted(target.parent.glob("*.md")):
                 out.add(title_of(md))
-    return out
+    return out, unresolved
 
 
 def phase_retrieval(sample=60):

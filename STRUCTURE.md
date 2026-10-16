@@ -29,6 +29,7 @@
 | `evals/legacy/` | 已退役的评估原型与分批交付记录，仅留档不维护 |
 | `evals/reports/` | 运行产物不入库，保留历史报告目录为证 |
 | `evals/reports/legacy/` | 历史评估报告原件，作为当期结论的证据留存 |
+| `evals/tools/` | 评估工具脚本：一次性补丁与数据集审核，可重复执行 |
 | `evals/tests/` | 评估代码自身的单元测试，必须进 CI |
 | `src/ecom_copilot/hypothesis/` | 离线假设管理 |
 | `src/ecom_copilot/ingestion/` | 资料来源与入库共享工具 |
