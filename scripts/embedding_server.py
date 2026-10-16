@@ -6,6 +6,8 @@
 - 只监听 127.0.0.1，文档内容不出本机。
 - 嵌入模型或权重缺失时启动失败退出，由 Supervisor 重启；业务侧按服务不可用自动降级为词法检索。
 - 精排模型惰性加载：权重缺失或加载失败不影响嵌入功能，/rerank 返回 503 由业务侧回落融合序。
+- 只能跑在 GPU 上：指定设备不可用时启动即失败退出并给出明确原因，不做 CPU 降级
+  （降级会让时延失真、掩盖真实故障）；运行中 GPU 掉线由看门狗探测后退出，交由 Supervisor 重启。
 - 与在线 API/Worker 进程隔离：重依赖（torch/transformers）只存在于本进程。
 
 运行：llm 环境 python scripts/embedding_server.py
@@ -14,6 +16,10 @@
       RERANK_MODEL_PATH（默认 00_base/models/bge-reranker-v2-m3）。
 """
 import os
+import shutil
+import subprocess
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -42,6 +48,35 @@ MAX_CHARS = 8000
 RERANK_MAX_BATCH = 64
 RERANK_MAX_CHARS = 4000
 QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
+GPU_WATCHDOG_INTERVAL = 30.0
+
+
+def _gpu_probe() -> None:
+    """用 nvidia-smi 独立探测 GPU（不碰已可能损坏的 CUDA 上下文）。不可用则抛异常。"""
+    exe = shutil.which("nvidia-smi") or "/usr/lib/wsl/lib/nvidia-smi"
+    r = subprocess.run([exe, "--query-gpu=name", "--format=csv,noheader"],
+                       capture_output=True, timeout=10)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or b"").decode(errors="ignore").strip()[:120] or "nvidia-smi 非零退出")
+
+
+def gpu_watchdog() -> None:
+    """GPU 掉线看门狗。
+
+    WSL 的 GPU 直通会在宿主挂起、驱动更新后消失。此时**已建立的 CUDA 上下文会静默挂死**：
+    进程占满 CPU、端口还在监听、但请求永不返回——比启动失败隐蔽得多，业务侧只会看到
+    "检索/精排超时"。启动校验拦不住这种运行中掉线，所以必须持续探测。
+
+    探测到掉线就退出进程，交由 Supervisor 重启；重启时若 GPU 仍未恢复，
+    启动校验会立即失败并给出明确错误，而不是继续假装服务正常。
+    """
+    while True:
+        time.sleep(GPU_WATCHDOG_INTERVAL)
+        try:
+            _gpu_probe()
+        except Exception as exc:
+            print(f"[embed] GPU 探测失败（{type(exc).__name__}: {exc}），退出进程交由 Supervisor 重启", flush=True)
+            os._exit(1)
 
 app = FastAPI(title="ecom-embed", docs_url=None, redoc_url=None)
 _tokenizer = None
@@ -155,4 +190,7 @@ def embed(req: EmbedRequest):
 
 if __name__ == "__main__":
     load_model()
+    if DEVICE.startswith("cuda"):
+        threading.Thread(target=gpu_watchdog, daemon=True).start()
+        print(f"[embed] 设备 {DEVICE}，GPU 看门狗已启动（每 {GPU_WATCHDOG_INTERVAL:.0f}s 探测一次）", flush=True)
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
