@@ -47,22 +47,6 @@ def read_pdf(path: Path) -> Dict[str, Any]:
     return {"pages": pages, "tables": tables, "images": images, "text": "\n".join(p["text"] for p in pages)}
 
 
-def jina_read(url: str, api_key: str = "", timeout: int = 60) -> str:
-    """Jina Reader：把网页 / PDF 链接直接解析为 Markdown。"""
-    import httpx  # noqa: PLC0415
-
-    headers = {}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    try:
-        resp = httpx.get(f"https://r.jina.ai/{url}", headers=headers, timeout=timeout)
-        if resp.status_code == 200:
-            return resp.text
-    except Exception:  # noqa: BLE001
-        pass
-    return ""
-
-
 def split_sections(text: str) -> List[Tuple[str, str]]:
     """按章节标题切分，返回 [(section, content)]。"""
     lines = text.split("\n")

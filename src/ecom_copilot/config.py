@@ -72,7 +72,6 @@ class Settings(BaseSettings):
     # ───────────────────── 检索层 ─────────────────────
     retrieval_first_enabled: bool = True
     retrieval_top_k: int = 8
-    retrieval_candidate_multiplier: int = 4
     rrf_k: int = 60
     hyde_enabled: bool = True
     rerank_enabled: bool = True
@@ -105,16 +104,12 @@ class Settings(BaseSettings):
     redis_enabled: bool = False
     redis_url: str = "redis://localhost:6379/0"
 
-    postgres_enabled: bool = False
-    postgres_dsn: str = ""  # 可选离线连接仅从私有环境配置读取
-
     # ───────────────────── 安全 / 权限 ─────────────────────
     jwt_secret: str = "ecom-copilot-dev-secret"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 720
     auth_enabled: bool = False
     auth_default_org: str = "手机配件公司"
-    prompt_injection_guard: bool = True
 
     business_api_url: str = ""
     business_api_token: str = ""
@@ -136,7 +131,6 @@ class Settings(BaseSettings):
     min_evidence_per_hypothesis: int = 2
     confidence_review_threshold: float = 0.6
     citation_coverage_target: float = 0.95
-    context_max_chars: int = 24000
 
     # ───────────────────── 会话记忆 / FAQ 缓存 / 拒答门禁 ─────────────────────
     memory_enabled: bool = Field(default=True, alias="MEMORY_ENABLED")
@@ -161,7 +155,6 @@ class Settings(BaseSettings):
     # 无网络 / 被封禁时启用 LLM 合成数据兜底（PRD 风险对策）
     synthetic_fallback_enabled: bool = False
     offline_mode: bool = False
-    jina_api_key: str = ""
 
     def model_post_init(self, __context) -> None:  # noqa: D105
         if self.app_env.lower() in ("prod", "production"):

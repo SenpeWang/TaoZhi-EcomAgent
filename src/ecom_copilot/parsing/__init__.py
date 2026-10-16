@@ -3,7 +3,6 @@
 from .chunker import chunk_document, chunk_documents  # noqa: F401
 from .pdf import (  # noqa: F401
     extract_annual_report_facts,
-    jina_read,
     parse_pdf_file,
     read_pdf,
     split_sections,
@@ -15,7 +14,7 @@ from .vision import VisionParser  # noqa: F401
 
 __all__ = [
     "chunk_document", "chunk_documents",
-    "extract_annual_report_facts", "jina_read", "parse_pdf_file", "read_pdf",
+    "extract_annual_report_facts", "parse_pdf_file", "read_pdf",
     "split_sections", "table_to_markdown", "tables_to_text",
     "DocumentParsingPipeline", "ParseJob", "get_pipeline", "VisionParser",
 ]
