@@ -1,5 +1,6 @@
-"""Qwen3-VL 多模态解析：研报图表 / 截图 → 结构化描述（PRD B2）。
+"""多模态解析：研报图表 / 截图 → 结构化描述（PRD B2）。
 
+视觉档走 LLMClient 的 vision tier（当前端点 sensenova-6.8-flash-lite，支持 image 输入）。
 端点不支持视觉输入时自动降级为规则化表格描述，流水线不中断。
 """
 

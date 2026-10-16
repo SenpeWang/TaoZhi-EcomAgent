@@ -60,6 +60,7 @@ def rerank(query: str, texts: list[str]) -> list[float]:
     服务不可用或精排模型缺失（503）时抛异常，由调用方回落融合序。
     """
     r = httpx.post(load_config().embed_service_url.rstrip("/") + "/rerank",
-                   json={"query": query, "texts": list(texts)}, timeout=30, trust_env=False)
+                   json={"query": query, "texts": list(texts)},
+                   timeout=load_config().rerank_timeout, trust_env=False)
     r.raise_for_status()
     return [float(s) for s in r.json()["scores"]]

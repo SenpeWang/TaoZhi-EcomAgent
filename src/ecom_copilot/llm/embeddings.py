@@ -1,6 +1,7 @@
 """Embedding 层：远端 OpenAI 兼容端点 → sentence-transformers → 本地 TF-IDF+SVD 降级。
 
-PRD 选型为 BGE-M3（dense）+ Qwen3-VL-Embedding（多模态）。
+企业链路（enterprise/）实际使用本地 bge-small-zh-v1.5（512 维，独立嵌入服务进程）；
+本模块是通用兼容层，可对接任意 OpenAI 兼容 /embeddings 端点或本地句向量模型。
 当部署环境无法访问这些服务时，自动降级为本地可持久化的
 字符 n-gram TF-IDF + TruncatedSVD 语义向量，保证离线可跑。
 """
@@ -42,7 +43,7 @@ class EmbeddingProvider:
 
 
 class RemoteEmbedding(EmbeddingProvider):
-    """OpenAI 兼容 /embeddings 端点（BGE-M3 / Qwen3-VL-Embedding 等）。"""
+    """OpenAI 兼容 /embeddings 端点（远端句向量服务通用对接）。"""
 
     name = "remote"
 
@@ -69,7 +70,7 @@ class RemoteEmbedding(EmbeddingProvider):
 
 
 class SentenceTransformerEmbedding(EmbeddingProvider):
-    """本地 sentence-transformers（BGE-M3 / Qwen3-Embedding）。"""
+    """本地 sentence-transformers 句向量（如 bge-small-zh-v1.5）。"""
 
     name = "sentence-transformers"
 

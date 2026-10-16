@@ -8,7 +8,7 @@
 
 采用双轨快决策机制（Dual-Track System 1）：
 1. Fast Semantic Head: 基于本地语义向量表征与 Softmax 温度标定（~15-30ms，0 Token 成本）；
-2. Fast Constrained LLM Head: 在置信度低或多选复杂关系推理时自动升级为 Qwen3.8-Flash 结构化决策（~200-400ms）；
+2. Fast Constrained LLM Head: 在置信度低或多选复杂关系推理时自动升级为端点强模型（当前 sensenova-6.8-flash-lite）结构化决策（~200-400ms）；
 3. Fallback Head: 外部故障时的自愈保底。
 """
 

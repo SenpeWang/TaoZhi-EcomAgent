@@ -40,6 +40,17 @@ class Config:
     # RRF 融合后用本地交叉编码器（bge-reranker-v2-m3，挂嵌入服务 /rerank）对候选精排；失败自动回落融合序
     rerank_enabled: bool = True
     rerank_candidates: int = 20
+    # 精排请求超时（秒）。精排是增强项：超时即回落融合序，绝不能拖慢问答主链路。
+    rerank_timeout: float = 20.0
+    # 检索结果单条正文字符上限（入库已按 850 窗口切分，这里是对外部写入/未来 chunker 的兜底闸门）
+    quote_max_chars: int = 1200
+    # 送交叉编码器的单条文本字符预算（模型本身截断 512 token，全量长文只是白烧算力）
+    rerank_chars: int = 1000
+    # 同一文档最多进入结果的切片数：避免 top-k 被单篇文档占满，证据多样性优先
+    max_chunks_per_doc: int = 3
+    # 精排分数过滤：绝对阈值挡无关噪音，相对阈值挡远落后于首条的陪跑候选
+    rerank_min_score: float = 0.05
+    rerank_relative: float = 0.15
     # 运维便利：登录页展示真实账号快速切换（默认关闭）
     quick_login: bool = False
     # 仅在 quick_login 打开且显式开启时，才把口令一并返回（仅限内网自用，禁止公网生产开启）
@@ -78,6 +89,12 @@ def load_config() -> Config:
       ann_max_distance=float(values.get("ECOM_ANN_MAX_DIST","0.45")),
       rerank_enabled=values.get("ECOM_RERANK_ENABLED","true")=="true",
       rerank_candidates=int(values.get("ECOM_RERANK_CANDIDATES","20")),
+      rerank_timeout=float(values.get("ECOM_RERANK_TIMEOUT","20")),
+      quote_max_chars=int(values.get("ECOM_QUOTE_MAX_CHARS","1200")),
+      rerank_chars=int(values.get("ECOM_RERANK_CHARS","1000")),
+      max_chunks_per_doc=int(values.get("ECOM_MAX_CHUNKS_PER_DOC","3")),
+      rerank_min_score=float(values.get("ECOM_RERANK_MIN_SCORE","0.05")),
+      rerank_relative=float(values.get("ECOM_RERANK_RELATIVE","0.15")),
       quick_login=values.get("ECOM_QUICK_LOGIN","false")=="true",
       quick_login_passwords=values.get("ECOM_QUICK_LOGIN_PASSWORDS","false")=="true",
       quick_login_password=values.get("ECOM_QUICK_LOGIN_PASSWORD",""))

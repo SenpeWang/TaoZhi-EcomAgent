@@ -3,7 +3,7 @@
 模型分级路由（PRD N4）：
     fast   —— 日常解析 / 抽取 / 摘要
     strong —— 复杂研判 / 裁决 / 报告生成
-    vision —— 多模态（Qwen3-VL）
+    vision —— 多模态（当前端点：sensenova-6.8-flash-lite，网关内唯一支持 image 输入）
 """
 
 from __future__ import annotations

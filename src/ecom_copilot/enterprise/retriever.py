@@ -22,6 +22,8 @@ RRF_K=60
 RRF_FLOOR=0.0022
 BACKFILL_LIMIT=256
 SEMANTIC_DIM=512
+# 距离闸门通过存在性判定后的相对保留带宽：只截掉明显偏离的尾部，不按绝对阈值逐条硬筛
+GATE_MARGIN=0.06
 
 def words(text):
     import jieba
@@ -82,29 +84,100 @@ def _es_rank_signal(rank_map,chunks,extra_rank=None):
     return out
 
 def _rerank_order(query,chunks,fused):
-    """RRF 融合后的候选精排：融合分达 RRF_FLOOR 的前 rerank_candidates 条交由本地
-    交叉编码器（嵌入服务 /rerank）重排；服务不可用或失败时保持融合序，不阻断检索。"""
+    """RRF 融合后的候选精排，返回 [(下标, 精排分或 None)]，已按精排分降序。
+
+    融合分达 RRF_FLOOR 的前 rerank_candidates 条交由本地交叉编码器（嵌入服务 /rerank）重排；
+    服务不可用或失败时保持融合序且分数为 None，调用方据此跳过分数过滤，不阻断检索。
+    """
     cfg=load_config()
     fused_order=[int(i) for i in np.argsort(-fused) if fused[i]>=RRF_FLOOR]
-    if not cfg.rerank_enabled or len(fused_order)<2:return fused_order
+    # 地板是"去掉长尾噪声"的手段，不是"清空结果"的手段：候选极少或各路信号无差异时
+    # fused 全为 0（无方差信号不参与融合），此时必须回落到自然序，否则唯一候选也被丢弃。
+    if not fused_order:fused_order=[int(i) for i in np.argsort(-fused)]
+    if not cfg.rerank_enabled or len(fused_order)<2:return [(i,None) for i in fused_order]
     cand=fused_order[:cfg.rerank_candidates]
     try:
         from .embedding import rerank as rerank_client
-        scores=np.asarray(rerank_client(query,[chunks[i]["text"] for i in cand]),dtype="float32")
-        return [cand[j] for j in np.argsort(-scores)]
+        # 交叉编码器本身截断到 512 token，长切片全量送出只是白烧算力；按字符预算截断。
+        scores=np.asarray(rerank_client(query,[chunks[i]["text"][:cfg.rerank_chars] for i in cand]),dtype="float32")
+        return [(cand[j],float(scores[j])) for j in np.argsort(-scores)]
     except Exception as exc:
         print("Rerank 失败，保持融合序",type(exc).__name__,flush=True)
-        return cand
+        return [(i,None) for i in cand]
+
+def _norm_key(text):
+    """正文归一化指纹：去空白后取前 200 字，用于识别复制粘贴造成的重复切片。"""
+    return re.sub(r"\s+","",text)[:200]
+
+def _dedup_text(chunks):
+    """文本级去重：归一化指纹相同的切片只保留排序靠前的第一条。
+
+    跨文档/跨版本复制粘贴会让同一段正文反复占满 top-k，挤压真正的补充证据。
+    """
+    seen=set();out=[]
+    for c in chunks:
+        key=_norm_key(c["text"])
+        if key in seen:continue
+        seen.add(key);out.append(c)
+    return out
+
+def _finalize(query,chunks,fused,limit,allowed,p):
+    """结果装配：精排排序 → 低分过滤 → 同文档限流 → 超长截断 → 补来源信息。"""
+    cfg=load_config()
+    ranked=_rerank_order(query,chunks,fused)
+    # 过滤低分：精排输出的是 0-1 相关性概率，绝对阈值挡无关噪音，
+    # 相对阈值（首条的一定比例）挡"陪跑"候选。
+    top=next((s for _,s in ranked if s is not None),None)
+    if top is not None:
+        floor=max(cfg.rerank_min_score,top*cfg.rerank_relative)
+        kept=[(i,s) for i,s in ranked if s is not None and s>=floor]
+        # 精排全军覆没时只留最相关的一条：存在性闸门已独立判过"够得着"，
+        # 不能让精排把整条链路二次塌成"无资料"。
+        ranked=kept or ranked[:1]
+    per_doc={}
+    result=[]
+    for i,score in ranked:
+        if len(result)>=limit:break
+        c=chunks[int(i)];d=allowed.get(c["document_id"])
+        if d is None:continue
+        if per_doc.get(d["id"],0)>=cfg.max_chunks_per_doc:continue
+        per_doc[d["id"]]=per_doc.get(d["id"],0)+1
+        text=c["text"] if p.boss else redact(c["text"])
+        truncated=len(text)>cfg.quote_max_chars
+        if truncated:text=text[:cfg.quote_max_chars]+"…（正文过长已截断）"
+        result.append(dict(document_id=d["id"],version=c["version"],acl_version=d["acl_version"],chunk_id=c["id"],
+          title=d["title"],quote=text,page=c["page"],level=d["level"],node_id=d["node_id"],tenant_id=p.tenant_id,
+          ai_allowed=d["ai_allowed"],score=round(float(fused[i]),4),kind="document",
+          rerank_score=None if score is None else round(score,4),truncated=truncated))
+    return result
 
 def _ann_gate(chunks,vecs,qv,max_dist):
-    """ANN 距离闸门：剔除余弦距离超过 max_dist 的切片；无向量切片豁免（无法判定）。
+    """ANN 距离闸门（两级判定）：先判"有没有证据"，再裁"偏离的尾巴"。
 
-    返回与 chunks 对齐的过滤结果；全部剔除时返回空列表，调用方按资料不足处理。
     距离口径与 pgvector `<=>` 一致（1 - 余弦相似度，两侧向量均已 L2 归一化）。
+
+    1. 存在性判定：最近的切片距离仍 > max_dist → 判资料不足，返回空（调用方走
+       "缺少可靠资料"分支，这是反幻觉硬闸门，绝不拿弱相关切片凑答案）。
+    2. 区间保留：通过存在性判定后，保留距离 ≤ max(max_dist, best + GATE_MARGIN) 的切片，
+       无向量切片豁免（无法判定，交给其他信号）。相对带宽只能放宽、不能收紧绝对阈值，
+       因此 max_dist 越大保留面越广（放到 1.01 即全放过），语义与配置直觉一致。
+
+    为什么不再用 max_dist 直接逐条硬筛：max_dist=0.45 是按 **top-1** 距离标定的
+    （scripts/experiment_distance_threshold.py 实测：相关 top1 0.342~0.465、
+    无关 top1 0.459~0.558）。逐条硬筛会把 top-1 之外的正常证据（同一问题的其他
+    相关切片距离天然更高）一并砍掉，实测 263 条候选只剩 1 条，多证据答案直接塌成空。
+    距离只用于判断"够不够得着"，排序交给 RRF 与交叉编码器。
     """
     if qv is None:return chunks,vecs
     q=np.asarray(qv,dtype="float32").reshape(-1)
-    keep=[i for i,v in enumerate(vecs) if v is None or len(v)!=SEMANTIC_DIM or 1.0-float(v@q)<=max_dist]
+    def _d(v):
+        return None if (v is None or len(v)!=SEMANTIC_DIM) else 1.0-float(v@q)
+    dists=[_d(v) for v in vecs]
+    known=[d for d in dists if d is not None]
+    if not known:return chunks,vecs          # 全部无向量：闸门不生效
+    if min(known)>max_dist:return [],[]      # 存在性判定失败：资料不足
+    ceiling=max(max_dist,min(known)+GATE_MARGIN)
+    keep=[i for i,d in enumerate(dists) if d is None or d<=ceiling]
     return [chunks[i] for i in keep],[vecs[i] for i in keep]
 
 def _pg_ann(conn,tenant_id,allowed_ids,qv,size=200):
@@ -141,6 +214,7 @@ def search_documents(conn,p,query,limit=8,hyde_vector=None):
         ids=list(dict.fromkeys(list(bm25_rank or {})+list(ann_rank or {})))
         chunks=[c for c in fetch_all(conn,"SELECT c.* FROM chunks c JOIN documents d ON d.id=c.document_id AND d.current_version=c.version WHERE c.tenant_id=%s AND c.document_id=ANY(%s) AND c.id=ANY(%s) ORDER BY c.document_id,c.ordinal",(p.tenant_id,list(allowed),ids)) if c["id"] in set(ids)]
         if not chunks:return []
+        chunks=_dedup_text(chunks)
         # ANN 相关性闸门：top-k 中无任何切片足够接近即判资料不足（无查询向量时闸门不生效）
         vecs=[_vec(c.get("embedding")) for c in chunks]
         chunks,vecs=_ann_gate(chunks,vecs,qv,load_config().ann_max_distance)
@@ -166,16 +240,10 @@ def search_documents(conn,p,query,limit=8,hyde_vector=None):
         for s in signals:
             if np.max(s) > np.min(s):
                 fused += 1.0 / (RRF_K + _ranks(s))
-        result=[]
-        for i in _rerank_order(query,chunks,fused):
-            if len(result)>=limit:break
-            c=chunks[int(i)];d=allowed[c["document_id"]]
-            result.append(dict(document_id=d["id"],version=c["version"],acl_version=d["acl_version"],chunk_id=c["id"],
-              title=d["title"],quote=c["text"] if p.boss else redact(c["text"]),page=c["page"],level=d["level"],node_id=d["node_id"],tenant_id=p.tenant_id,
-              ai_allowed=d["ai_allowed"],score=round(float(fused[i]),4),kind="document"))
-        return result
+        return _finalize(query,chunks,fused,limit,allowed,p)
     chunks=fetch_all(conn,"SELECT c.* FROM chunks c JOIN documents d ON d.id=c.document_id AND d.current_version=c.version WHERE c.tenant_id=%s AND c.document_id=ANY(%s) ORDER BY c.document_id,c.ordinal LIMIT 20000",(p.tenant_id,list(allowed)))
     if not chunks:return []
+    chunks=_dedup_text(chunks)
     # ANN 相关性闸门（与主链路一致；无查询向量时不生效）
     if qv is not None:
         vecs=[_vec(c.get("embedding")) for c in chunks]
@@ -208,12 +276,5 @@ def search_documents(conn,p,query,limit=8,hyde_vector=None):
     fused=np.zeros(len(chunks))
     for s in signals:
         if np.max(s) > np.min(s):
-            fused += 1.0 / (RRF_K + _ranks(s))
-    result=[]
-    for i in _rerank_order(query,chunks,fused):
-        if len(result)>=limit:break
-        c=chunks[int(i)];d=allowed[c["document_id"]]
-        result.append(dict(document_id=d["id"],version=c["version"],acl_version=d["acl_version"],chunk_id=c["id"],
-          title=d["title"],quote=c["text"] if p.boss else redact(c["text"]),page=c["page"],level=d["level"],node_id=d["node_id"],tenant_id=p.tenant_id,
-          ai_allowed=d["ai_allowed"],score=round(float(fused[i]),4),kind="document"))
-    return result
+                fused += 1.0 / (RRF_K + _ranks(s))
+    return _finalize(query,chunks,fused,limit,allowed,p)
