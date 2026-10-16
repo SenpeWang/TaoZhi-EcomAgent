@@ -6,7 +6,7 @@ import json
 import time
 
 BASE = "http://127.0.0.1:18501"
-OUT = "/home/quanyj/wsp-workspace/00_base/multi-agent/data/runtime/adversarial_eval.jsonl"
+OUT = str(Path(__file__).resolve().parents[2] / "evals/reports/adversarial_eval.jsonl")
 
 PROBES = [
     ("Z1", "zero_literal", "防止别人偷看我手机屏幕该买什么", "应检索到防窥膜（保护膜文档），考验零字面改写"),

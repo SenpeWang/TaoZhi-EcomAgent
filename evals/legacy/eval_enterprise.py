@@ -17,10 +17,10 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path("/home/quanyj/wsp-workspace/00_base/multi-agent")
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
-CASES_PATH = ROOT / "data/runtime/evaluation/cases.jsonl"
-REPORT = ROOT / "data/runtime/enterprise_metrics_report.json"
+CASES_PATH = ROOT / "evals/datasets/cases.jsonl"
+REPORT = ROOT / "evals/reports/enterprise_metrics_report.json"
 
 from ecom_copilot.enterprise.config import load_config
 from ecom_copilot.enterprise.db import database_connection, fetch_one

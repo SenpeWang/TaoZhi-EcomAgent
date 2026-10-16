@@ -1,6 +1,9 @@
 """迁移验证：ES 租户污染检查 + HNSW 近似检索 vs 暴力精确检索召回一致率。"""
 import sys
-sys.path.insert(0, "/home/sp/TaoZhi-EcomAgent/src")
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
 import json
 import urllib.request
 

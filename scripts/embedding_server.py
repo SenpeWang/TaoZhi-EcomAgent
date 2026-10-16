@@ -52,8 +52,14 @@ GPU_WATCHDOG_INTERVAL = 30.0
 
 
 def _gpu_probe() -> None:
-    """用 nvidia-smi 独立探测 GPU（不碰已可能损坏的 CUDA 上下文）。不可用则抛异常。"""
-    exe = shutil.which("nvidia-smi") or "/usr/lib/wsl/lib/nvidia-smi"
+    """用 nvidia-smi 独立探测 GPU（不碰已可能损坏的 CUDA 上下文）。不可用则抛异常。
+
+    只依赖 PATH 查找（WSL 下由系统 PATH 提供），需要时用 EMBED_GPU_PROBE_BIN 覆盖，
+    不把任何机器相关的绝对路径写死在代码里。
+    """
+    exe = os.environ.get("EMBED_GPU_PROBE_BIN") or shutil.which("nvidia-smi")
+    if not exe:
+        raise RuntimeError("PATH 中找不到 nvidia-smi，无法探测 GPU（可用 EMBED_GPU_PROBE_BIN 指定）")
     r = subprocess.run([exe, "--query-gpu=name", "--format=csv,noheader"],
                        capture_output=True, timeout=10)
     if r.returncode != 0:

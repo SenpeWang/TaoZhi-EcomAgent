@@ -11,10 +11,10 @@ import random
 import time
 from pathlib import Path
 
-ROOT = Path("/home/quanyj/wsp-workspace/00_base/multi-agent")
-CASES = ROOT / "data/runtime/evaluation/cases.jsonl"
+ROOT = Path(__file__).resolve().parents[2]
+CASES = ROOT / "evals/datasets/cases.jsonl"
 INCOMING = ROOT / "data/incoming/待映射"
-REPORT = ROOT / "data/runtime/hyde_eval_report.json"
+REPORT = ROOT / "evals/reports/hyde_eval_report.json"
 SAMPLE = 60
 
 import sys
