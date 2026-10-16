@@ -82,3 +82,5 @@ jobs:
           python -m alembic -c alembic.ini upgrade head
       - name: 离线权限、流程与开发门禁回归
         run: python -m pytest tests -m 'not slow' -q --disable-warnings
+      - name: 评估指标口径单元测试
+        run: python -m pytest evals/tests -q --disable-warnings

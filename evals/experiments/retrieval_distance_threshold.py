@@ -4,8 +4,10 @@
 结论用于判断"距离阈值是否可作为相关性闸门"，正式上线前需更大标注集 + 随语料增长复测。
 """
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "/home/sp/TaoZhi-EcomAgent/src")
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "src"))
 
 from ecom_copilot.enterprise.db import database_connection, fetch_all
 from ecom_copilot.enterprise.embedding import encode_query

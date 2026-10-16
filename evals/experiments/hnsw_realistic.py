@@ -4,9 +4,10 @@
 属于对抗几何；本实验让 query 与文档同分布，对应生产中"查询贴近相关文档"的真实情形。
 """
 import sys
+from pathlib import Path
 import time
 
-sys.path.insert(0, "/home/sp/TaoZhi-EcomAgent/src")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 import numpy as np
 

@@ -16,7 +16,7 @@ import concurrent.futures
 import numpy as np
 
 # 确保加载项目源码
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../src")))
 
 from ecom_copilot.enterprise.semantic_cache import get_semantic_cache
 from ecom_copilot.enterprise.db import database_connection, fetch_all, fetch_one

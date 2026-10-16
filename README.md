@@ -96,7 +96,7 @@ flowchart LR
 src/ecom_copilot/enterprise/   在线业务、权限、语义缓存、Jev 决策核与工作流
 src/ecom_copilot/             共享能力和隔离的离线模块
 web/src/                     中文工作台、类型与同源 API
-evals/                       固定评测基准与基线对比运行器
+evals/                       评测数据集、指标实现、基线对比运行器与报告
 .github/workflows/           main 推送的 CI 与提交范围检查
 .github/ISSUE_TEMPLATE/      四类中文反馈表单
 .githooks/                   提交快照、消息和推送门禁

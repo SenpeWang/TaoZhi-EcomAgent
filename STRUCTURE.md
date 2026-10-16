@@ -12,7 +12,7 @@
 | `.githooks/` | 每份克隆主动启用的提交与推送门禁 |
 | `migrations/` | Alembic 环境 |
 | `migrations/versions/` | 只追加已验证的数据库升级版本 |
-| `scripts/` | 部署、数据管理、构建、验收与提交检查 |
+| `scripts/` | 部署、数据管理、构建与运维；不含评估逻辑 |
 | `src/` | Python 源码根目录 |
 | `src/ecom_copilot/` | 共享能力与在线入口，保持统一授权路径 |
 | `src/ecom_copilot/agents/` | 已有离线 Agent 编排与共享组件 |
@@ -23,7 +23,13 @@
 | `src/ecom_copilot/debate/` | 离线证据讨论 |
 | `src/ecom_copilot/enterprise/` | 在线权限、会话、文档、业务服务、工作流及 Worker |
 | `src/ecom_copilot/graph/` | 本地图谱与共享图能力 |
-| `evals/` | 固定评测基准与基线分数 |
+| `evals/` | 评估体系统一入口：数据集、指标、运行器、基线与报告 |
+| `evals/datasets/` | 评测数据集与口径说明，随代码进 Git 可 diff |
+| `evals/experiments/` | 一次性实证实验脚本（结论已回写代码注释） |
+| `evals/legacy/` | 已退役的评估原型与分批交付记录，仅留档不维护 |
+| `evals/reports/` | 运行产物不入库，保留历史报告目录为证 |
+| `evals/reports/legacy/` | 历史评估报告原件，作为当期结论的证据留存 |
+| `evals/tests/` | 评估代码自身的单元测试，必须进 CI |
 | `src/ecom_copilot/hypothesis/` | 离线假设管理 |
 | `src/ecom_copilot/ingestion/` | 资料来源与入库共享工具 |
 | `src/ecom_copilot/llm/` | 模型客户端、路由与直连控制 |

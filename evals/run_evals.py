@@ -9,13 +9,13 @@
                有据率 / 拒答正确率 / 越权拦截 / 泄漏检测（金丝雀硬红线）
 
 用法（需企业正式环境服务在线）：
-  python scripts/run_evals.py --quick            # 对抗+检索，约 5 分钟
-  python scripts/run_evals.py --full             # 三层全跑，约 40 分钟
-  python scripts/run_evals.py --quick --compare  # 运行后与 evals/baseline.json 对比
-  python scripts/run_evals.py --quick --save-baseline  # 将本次结果锁定为基线
-  python scripts/run_evals.py --behavior-only    # 只重跑行为层（LLM judge）
+  python evals/run_evals.py --quick            # 对抗+检索，约 5 分钟
+  python evals/run_evals.py --full             # 三层全跑，约 40 分钟
+  python evals/run_evals.py --quick --compare  # 运行后与 evals/baseline.json 对比
+  python evals/run_evals.py --quick --save-baseline  # 将本次结果锁定为基线
+  python evals/run_evals.py --behavior-only    # 只重跑行为层（LLM judge）
 
-结果落盘 data/runtime/evals/<时间戳>-<git短SHA>.json；基线随代码进 Git。
+数据集在 evals/datasets/，结果落盘 evals/reports/<时间戳>-<git短SHA>.json；基线随代码进 Git。
 """
 import argparse
 import json
@@ -27,9 +27,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-OUT_DIR = ROOT / "data/runtime/evals"
-GOLDEN = ROOT / "evals/golden_adversarial.json"
-BASELINE = ROOT / "evals/baseline.json"
+sys.path.insert(0, str(ROOT / "evals"))  # 指标实现在 evals/metrics.py，全项目只此一份
+EVALS = ROOT / "evals"
+OUT_DIR = EVALS / "reports"
+CASES = EVALS / "datasets/cases.jsonl"
+GOLDEN = EVALS / "datasets/golden_adversarial.json"
+BASELINE = EVALS / "baseline.json"
+
+import metrics  # noqa: E402
 NODE = "org_d1b6fb3bcec7e60ab6de7ec6"
 
 import httpx  # noqa: E402
@@ -83,7 +88,7 @@ def phase_retrieval(sample=60):
     from ecom_copilot.llm.client import LLMClient, ModelTier
     from ecom_copilot.enterprise.privacy import redact
     from ecom_copilot.enterprise.embedding import encode_passages
-    cases = [json.loads(l) for l in (ROOT / "data/runtime/evaluation/cases.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
     pool = [c for c in cases if c["category"] in ("product", "compat", "aftersale", "multi_doc")]
     import random
     chosen = random.Random(20261008).sample(pool, min(sample, len(pool)))
@@ -102,30 +107,36 @@ def phase_retrieval(sample=60):
             return None
 
     def run(use_hyde):
-        hits = {1: 0, 3: 0, 8: 0}
-        rr, lat, n = 0.0, [], 0
+        pairs, lat, skipped = [], [], 0
         for case in chosen:
             exp = expected_titles(case)
             if not exp:
+                skipped += 1
                 continue
-            n += 1
             t0 = time.perf_counter()
             hyde = hyde_vec(case["question"]) if use_hyde else None
             with database_connection() as c:
                 rows = search_documents(c, principal, case["question"], limit=8, hyde_vector=hyde)
             lat.append(time.perf_counter() - t0)
-            got = [r["title"] for r in rows]
-            for k in hits:
-                if any(t in exp for t in got[:k]):
-                    hits[k] += 1
-            for i, t in enumerate(got):
-                if t in exp:
-                    rr += 1.0 / (i + 1)
-                    break
+            pairs.append(([r["title"] for r in rows], exp))
+        # 覆盖率是一等指标：预期文档解析不出来 = 该用例根本没被评估。
+        # 静默在小子集上统计命中率比没有指标更危险，必须显式报出来并告警。
+        coverage = metrics.summarize([1.0] * len(pairs) + [0.0] * skipped)
+        if coverage["mean"] is not None and coverage["mean"] < 0.8:
+            print(f"⚠ 检索层可评估覆盖率仅 {coverage['mean']:.0%}"
+                  f"（{len(pairs)}/{len(chosen)} 例能解析出预期文档）："
+                  f"hit/precision/recall/ndcg 只在该子集上统计，覆盖率低时结论不可用于决策；"
+                  f"需修复 datasets/cases.jsonl 的 source_files 与语料实际路径的对应关系", flush=True)
+        # 指标口径统一走 evals/metrics.py，避免各脚本各算一套
+        report = metrics.retrieval_report(pairs, max_k=8, ks=(1, 3, 8))
+        out = {k: round(v, 3) for k, v in metrics.flat_means(report).items()}
+        out["n"] = report["n"]
+        out["sampled"] = len(chosen)
+        out["coverage"] = round(coverage["mean"], 3) if coverage["mean"] is not None else 0.0
         xs = sorted(lat)
-        return {"n": n, "hit@1": round(hits[1] / n, 3), "hit@3": round(hits[3] / n, 3),
-                "hit@8": round(hits[8] / n, 3), "mrr": round(rr / n, 3),
-                "latency_p50_s": round(xs[len(xs) // 2], 2), "latency_p95_s": round(xs[int(len(xs) * .95)], 2)}
+        out["latency_p50_s"] = round(xs[len(xs) // 2], 2) if xs else None
+        out["latency_p95_s"] = round(xs[int(len(xs) * .95)], 2) if xs else None
+        return out
     return {"hyde_off": run(False), "hyde_on": run(True)}
 
 
@@ -176,7 +187,7 @@ JUDGE_SYSTEM = """你是评测判定器。给定测试用例的预期行为与�
 
 
 def phase_behavior(per_class=8):
-    cases = [json.loads(l) for l in (ROOT / "data/runtime/evaluation/cases.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
     by_cat = {}
     for c in cases:
         by_cat.setdefault(c["category"], []).append(c)

@@ -2,7 +2,7 @@ PYTHON := .venv/bin/python
 PROJECT_ROOT := $(CURDIR)
 SUPERVISOR_CONFIG := $(HOME)/.local/share/ecom-agent/supervisor.conf
 
-.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits
+.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -15,7 +15,10 @@ help:
 	@echo "make start          启动企业工作台与独立任务进程"
 	@echo "make stop           停止应用，保留数据库"
 	@echo "make status         查看服务状态"
-	@echo "make test           在独立测试库运行离线回归"
+	@echo "make test           在独立测试库运行离线回归（含 evals 单元测试）"
+	@echo "make evals-tests    只跑评估代码自身的单元测试（不需要在线服务）"
+	@echo "make evals-quick    评估：检索+对抗层（需企业服务在线）"
+	@echo "make evals-full     评估：三层全跑（需企业服务在线）"
 	@echo "make check          检查 Python 语法"
 	@echo "make build-web      构建并切换前端"
 	@echo "make clean          清除项目 Python 与 pytest 缓存"
@@ -30,7 +33,7 @@ status:
 	$(PYTHON) -m supervisor.supervisorctl -c "$(SUPERVISOR_CONFIG)" status
 
 test:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.test" PYTHONPATH=src $(PYTHON) -m pytest tests -m 'not slow' -q --disable-warnings
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.test" PYTHONPATH=src $(PYTHON) -m pytest tests evals/tests -m 'not slow' -q --disable-warnings
 
 check:
 	$(PYTHON) -m compileall -q src scripts migrations tests
@@ -60,11 +63,14 @@ check-format:
 check-commits:
 	python3 scripts/check_development.py commits --base "$(COMMIT_BASE)" --head "$(COMMIT_HEAD)"
 
+evals-tests:
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.test" PYTHONPATH=src $(PYTHON) -m pytest evals/tests -q
+
 evals-quick:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --quick --compare
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --quick --compare
 
 evals-full:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --full --compare
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --full --compare
 
 evals-baseline:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) scripts/run_evals.py --quick --save-baseline
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --quick --save-baseline

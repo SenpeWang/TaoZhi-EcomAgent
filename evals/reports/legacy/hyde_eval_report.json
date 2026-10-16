@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-08 02:28:44",
+  "sample": 60,
+  "lexical_plus_semantic": {
+    "n": 60,
+    "skipped_no_expected": 0,
+    "hit@1": 0.817,
+    "hit@3": 0.817,
+    "hit@8": 0.817,
+    "latency_avg_s": 1.14,
+    "latency_p50_s": 1.13,
+    "latency_p95_s": 1.19
+  },
+  "plus_hyde": {
+    "n": 60,
+    "skipped_no_expected": 0,
+    "hit@1": 0.817,
+    "hit@3": 0.817,
+    "hit@8": 0.817,
+    "latency_avg_s": 8.06,
+    "latency_p50_s": 7.29,
+    "latency_p95_s": 14.69
+  }
+}

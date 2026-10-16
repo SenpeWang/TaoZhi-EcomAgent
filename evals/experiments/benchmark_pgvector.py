@@ -4,9 +4,10 @@
 基准表 chunks_bench 与生产数据隔离，可随时 drop。
 """
 import sys
+from pathlib import Path
 import time
 
-sys.path.insert(0, "/home/sp/TaoZhi-EcomAgent/src")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 import numpy as np
 
