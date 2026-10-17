@@ -175,3 +175,22 @@ def latency_report(seconds: Sequence[float]) -> dict:
         return {"n": 0, "p50_s": None, "p95_s": None, "mean_s": None}
     return {"n": int(arr.size), "p50_s": float(np.percentile(arr, 50)),
             "p95_s": float(np.percentile(arr, 95)), "mean_s": float(arr.mean())}
+
+
+def faithfulness_report(cases: Sequence[dict]) -> dict:
+    """声明级忠实度（RAGAS 口径）：faithfulness = 被上下文支撑的声明数 / 总声明数。
+
+    为什么不用整体布尔判定：一句"答案是否编造"会把"9 条有据 + 1 条编造"和
+    "1 条有据 + 9 条编造"都判成 false，无法反映编造比例，也无法在基线对比里
+    看出改善。业界做法是拆成原子声明逐条做蕴涵判定，这里同时给出：
+    - micro：Σsupported / Σclaims（RAGAS 口径，长答案权重更大）
+    - macro：逐用例比值再平均（每例等权，防长答案主导）
+    """
+    tot_cases = [c for c in cases if (c.get("claims") or 0) > 0]
+    if not tot_cases:
+        return {"n": 0, "micro": None, "macro": None, "claims": 0, "supported": 0}
+    per = [min(1.0, (c.get("supported") or 0) / c["claims"]) for c in tot_cases]
+    sum_c = sum(c["claims"] for c in tot_cases)
+    sum_s = sum(min(c["claims"], c.get("supported") or 0) for c in tot_cases)
+    return {"n": len(tot_cases), "micro": sum_s / sum_c, "macro": float(np.mean(per)),
+            "claims": int(sum_c), "supported": int(sum_s)}

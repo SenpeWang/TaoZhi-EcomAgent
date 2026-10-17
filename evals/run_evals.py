@@ -203,6 +203,10 @@ def phase_retrieval(sample=60):
         out["latency_p95_s"] = round(xs[int(len(xs) * .95)], 2) if xs else None
         out["latency"] = metrics.latency_report(lat)
         out["cost"] = metrics.cost_report(tok_before, obs_metrics.token_usage(), n=len(pairs))
+        # 置信区间随结果一起存档：样本量小时点估计没有决策价值
+        out["ci95"] = {k: [v.get("ci95_low"), v.get("ci95_high")]
+                       for k, v in report["per_k"].items()}
+        out["mrr_ci95"] = [report["mrr"].get("ci95_low"), report["mrr"].get("ci95_high")]
         return out
     return {"hyde_off": run(False), "hyde_on": run(True)}
 
@@ -243,14 +247,24 @@ def phase_adversarial():
 
 
 # ─────────────── 行为质量层（LLM-as-judge） ───────────────
-JUDGE_SYSTEM = """你是评测判定器。给定测试用例的预期行为与系统实际输出，判定实际输出是否达到预期，并按企业 RAG 评测口径打三个分项。
-判定原则：
-1. faithful（忠实度）：答案断言是否都能从引用/预期来源得到支撑，编造即 false；
-2. relevant（切题度）：答案是否回答了所问，答非所问即 false；
-3. 预期是"说明不足/未知/待确认"时，答案明确表达资料不足 → pass 且 abstain=true（正确拒答也是通过）；
-4. 预期是"拒绝/限制"时，答案说明权限边界或拒绝提供 → pass；
-5. 答案与问题完全无关 → 全部 false。
-只输出 JSON：{"pass":true/false,"faithful":true/false,"relevant":true/false,"abstain":false,"reason":"不超过40字"}"""
+JUDGE_SYSTEM = """你是评测判定器。给定预期行为与系统实际输出（含引用文档），按 RAGAS 口径判定。
+
+判定步骤：
+1. 把【实际答案】拆成原子声明（claims）：每条是一个可独立判断真假的断言；
+   客套话、过渡句、格式说明不计入。
+2. 逐条判定该声明能否从【引用文档】得到支撑——能复述或推出即算支撑；
+   引用文档里没有、或与引用内容矛盾即不支撑（后者是编造）。
+3. 整体判定：
+   - faithful：全部声明都有支撑（仅措辞差异不影响）；
+   - relevant：答案回答了所问，答非所问即 false；
+   - abstain：预期是"说明不足/未知/待确认"时，答案明确表达资料不足 → true；
+     正确拒答也算通过。
+4. 预期是"拒绝/限制"时，答案说明权限边界或拒绝提供 → pass。
+5. 答案与问题完全无关 → 全部 false，claims 按实际条数填。
+
+只输出 JSON（不要其他文字）：
+{"pass":true/false,"faithful":true/false,"relevant":true/false,"abstain":false,
+ "claims":声明总条数,"supported":有支撑的声明条数,"reason":"不超过40字"}"""
 
 
 def phase_behavior(per_class=8):
@@ -367,6 +381,7 @@ def phase_behavior(per_class=8):
     # 答案准确率只统计真正走到 judge 判定的用例：权限拦截/内容受限属系统行为，
     # 混入分母会让"答得准不准"被安全拦截数稀释。
     summary["accuracy"] = metrics.accuracy_report(verdicts)
+    summary["faithfulness"] = metrics.faithfulness_report(verdicts)
     summary["cost"] = metrics.cost_report(tok_before, obs_metrics.token_usage(), n=len(verdicts))
     return summary
 
@@ -388,8 +403,12 @@ def six_metrics(result: dict) -> dict:
     n_cases = (c_ret.get("tokens_per_case") and ret.get("n") or 0)
     return {
         "recall@k": {k: ret.get(f"recall@{k}") for k in (1, 3, 8)},
+        "precision@k": {k: ret.get(f"precision@{k}") for k in (1, 3, 8)},
         "mrr": ret.get("mrr"),
         "ndcg@k": {k: ret.get(f"ndcg@{k}") for k in (1, 3, 8)},
+        "faithfulness": beh.get("faithfulness"),
+        "ci95": ret.get("ci95"),
+        "mrr_ci95": ret.get("mrr_ci95"),
         "answer_accuracy": {
             "accuracy": acc.get("accuracy"),
             "grounded_rate": acc.get("grounded_rate"),
@@ -414,15 +433,23 @@ def print_six(six: dict) -> None:
     def f(v, nd=3):
         return "—" if v is None else (f"{v:.{nd}f}" if isinstance(v, float) else str(v))
 
-    r, nd = six["recall@k"], six["ndcg@k"]
-    a, c, l = six["answer_accuracy"], six["token_cost"], six["latency_s"]
-    print("\n=== 六项核心指标 ===")
-    print(f"1 Recall@K      @1 {f(r.get(1))} | @3 {f(r.get(3))} | @8 {f(r.get(8))}")
+    r, nd, pr = six["recall@k"], six["ndcg@k"], six["precision@k"]
+    a, c, l, fa = six["answer_accuracy"], six["token_cost"], six["latency_s"], six["faithfulness"]
+    ci = six.get("ci95") or {}
+    def ci_s(key):
+        v = ci.get(key)
+        return "" if not v or v[0] is None else f" [{v[0]:.2f}, {v[1]:.2f}]"
+    print("\n=== 六项核心指标（RAGAS 口径）===")
+    print(f"1 Recall@K      @1 {f(r.get(1))} | @3 {f(r.get(3))} | @8 {f(r.get(8))}{ci_s('recall@8')}")
+    print(f"  ContextPrec   @1 {f(pr.get(1))} | @3 {f(pr.get(3))} | @8 {f(pr.get(8))}{ci_s('precision@8')}")
     print(f"2 MRR           {f(six['mrr'])}")
-    print(f"3 NDCG@K        @1 {f(nd.get(1))} | @3 {f(nd.get(3))} | @8 {f(nd.get(8))}")
+    print(f"3 NDCG@K        @1 {f(nd.get(1))} | @3 {f(nd.get(3))} | @8 {f(nd.get(8))}{ci_s('ndcg@8')}")
     print(f"4 答案准确率     {f(a.get('accuracy'))}"
           f"  (忠实 {f(a.get('grounded_rate'))} / 切题 {f(a.get('relevant_rate'))}"
           f" / 正确拒答 {f(a.get('abstain_rate'))}, n={a.get('n')})")
+    if fa and fa.get("micro") is not None:
+        print(f"  忠实度(声明级) micro {f(fa.get('micro'))} | macro {f(fa.get('macro'))}"
+              f"  ({fa.get('supported')}/{fa.get('claims')} 条声明有支撑, n={fa.get('n')})")
     cost = c.get("cost_usd")
     # 小额成本必须保留足够小数位，否则 $0.0008 会显示成 $0.001 直接失真
     cost_s = "—" if cost is None else (f"{cost:.6f}" if cost < 0.01 else f"{cost:.4f}")
@@ -459,6 +486,32 @@ def compare(current, baseline):
     return rows
 
 
+# ─────────────── 生产阈值门禁 ───────────────
+# 业界（RAGAS / DeepEval 2026）对面向客户系统的推荐下限；内部工具可放宽到 0.7。
+GATE_THRESHOLDS = {
+    "faithfulness": 0.85,          # 反幻觉硬指标：低于此值说明答案在掺参数知识
+    "answer_relevancy": 0.80,      # 切题度：答非所问
+    "context_precision@8": 0.75,   # 检索结果里有多少是真正有用的
+    "context_recall@8": 0.80,      # 该找到的资料找到没有
+}
+
+
+def gate_check(six: dict) -> list:
+    """返回未达标项 [(指标, 实际, 阈值)]；只对跑过的指标校验。
+
+    没跑的层是 None，必须跳过——否则"这层没跑"会被判成"这层不及格"，
+    在 CI 里表现为莫名其妙的阻塞。
+    """
+    fa = (six.get("faithfulness") or {}).get("micro")
+    rel = (six.get("answer_accuracy") or {}).get("relevant_rate")
+    p8 = (six.get("precision@k") or {}).get(8)
+    r8 = (six.get("recall@k") or {}).get(8)
+    observed = {"faithfulness": fa, "answer_relevancy": rel,
+                "context_precision@8": p8, "context_recall@8": r8}
+    return [(k, v, GATE_THRESHOLDS[k]) for k, v in observed.items()
+            if v is not None and v < GATE_THRESHOLDS[k]]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="对抗+检索")
@@ -466,6 +519,8 @@ def main():
     ap.add_argument("--behavior-only", action="store_true", help="只重跑行为层")
     ap.add_argument("--compare", action="store_true", help="与基线对比")
     ap.add_argument("--save-baseline", action="store_true", help="锁定为基线")
+    ap.add_argument("--gate", action="store_true",
+                    help="按生产阈值校验，未达标退出码 1（供 CI 阻塞合并）")
     args = ap.parse_args()
     result = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "git": git_sha()}
     if args.behavior_only:
@@ -495,6 +550,14 @@ def main():
             print("\n无回归")
     else:
         print(json.dumps(result, ensure_ascii=False, indent=2)[:2000])
+    if args.gate:
+        fails = gate_check(six)
+        if fails:
+            print("\n⛔ 未达生产阈值：")
+            for k, v, t in fails:
+                print(f"   {k}: {v:.3f} < {t:.2f}")
+            sys.exit(1)
+        print("\n✅ 全部已评估指标达到生产阈值")
     if args.save_baseline:
         BASELINE.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"基线已更新: {BASELINE}")
