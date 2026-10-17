@@ -10,10 +10,15 @@
 2. Shopme 聚合 API（仅 taobao/xhs）：ECOM_SHOPME_API_KEY
    需向 navi@shopmeagent.com 申请 key；数据为聚合库，非实时。
 
-实测结论（2026-10）：淘宝 MTOP 纯签名被 RGV587 风控拦截、拼多多
-机制性封锁（一会话一搜）、Shopme 零密钥路径返回 401——免费且
-零登录的实时数据源不存在；实时数据须扫码登录（persistent profile）
-或注册官方 API。"""
+1.5 浏览器登录设备（仅 taobao）：扫码一次沉淀 persistent profile
+   后自动启用，零配置。headful Chromium 复用登录态打开移动版搜索页，
+   拦截页面自身 mtop 响应取数——详见 browser_search.py 模块注释。
+
+实测结论（2026-10）：淘宝 MTOP 纯签名被 RGV587 风控拦截、headless
+复用 profile 因指纹不符被打回登录墙、拼多多机制性封锁（一会话一搜）、
+Shopme 零密钥路径返回 401——免费且零登录的实时数据源不存在；
+唯一可行的免费实时链路 = 扫码一次 + headful persistent profile
+（2026-10-17 已验证：搜索"牙刷"返回真实价格/销量/店铺）。"""
 
 from __future__ import annotations
 
@@ -114,6 +119,35 @@ def _shopme_fetch(platform_code: str, query: str, limit: int) -> List[Dict[str, 
     ]
 
 
+def _taobao_agent(keyword: str) -> Tuple[str, str, List[Dict[str, Any]], str, str]:
+    """淘宝子智能体：浏览器登录设备实时搜索，失败时降级 Shopme 聚合。"""
+    from .browser_search import taobao_browser_search
+
+    res = taobao_browser_search(keyword, 20)
+    if res["state"] == "ok" and res["items"]:
+        return "taobao", _agent_brief("taobao", keyword, res["items"]), res["items"], "ok", ""
+    note = res.get("note") or ""
+    # 浏览器链路失败 → Shopme 聚合兜底（若配置了 key，数据非实时需注明）
+    if os.environ.get("ECOM_SHOPME_API_KEY", "").strip():
+        try:
+            items = _shopme_fetch("taobao", keyword, 20)
+            if items:
+                brief = (
+                    _agent_brief("taobao", keyword, items)
+                    + f"\n\n（实时浏览器搜索未成功：{note}；以上来自 Shopme 聚合库，非实时数据）"
+                )
+                return "taobao", brief, items, "ok", ""
+        except Exception:  # noqa: BLE001 兜底失败继续走如实标注
+            pass
+    state_map = {
+        "need_login": "need_login",
+        "rate_limited": "rate_limited",
+        "busy": "rate_limited",
+        "not_available": "not_configured",
+    }
+    return "taobao", "", [], state_map.get(res["state"], "error"), note or "浏览器搜索失败"
+
+
 def _agent_brief(name: str, query: str, items: List[Dict[str, Any]]) -> str:
     """平台子智能体的小结：有数据做数据分析；模型不可用时降级为数据清单。"""
     if not items:
@@ -171,9 +205,11 @@ def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], 
     emit(f"派出 {len(picked)} 个平台智能体并行抓取", 30)
 
     def agent_work(name: str):
-        # 数据源优先级：自建端点 > Shopme 聚合（taobao/xhs，需 key）> 未接入
+        # 数据源优先级：自建端点 > 浏览器登录设备（淘宝）> Shopme 聚合（taobao/xhs，需 key）> 未接入
         if _endpoint(name):
             fetch = lambda: _fetch_platform(name, keyword, 20)  # noqa: E731
+        elif name == "taobao":
+            return _taobao_agent(keyword)
         elif name in _SHOPME_PLATFORMS and os.environ.get("ECOM_SHOPME_API_KEY", "").strip():
             fetch = lambda: _shopme_fetch(name, keyword, 20)  # noqa: E731
         else:
@@ -197,7 +233,13 @@ def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], 
                     "name": name,
                     "label": _LABEL.get(name, name),
                     "state": state,
-                    "state_label": {"ok": "已完成", "not_configured": "未接入", "error": "抓取失败"}.get(state, state),
+                    "state_label": {
+                        "ok": "已完成",
+                        "not_configured": "未接入",
+                        "error": "抓取失败",
+                        "need_login": "需重新扫码",
+                        "rate_limited": "风控暂限",
+                    }.get(state, state),
                     "error": err,
                     "brief": brief,
                     "items": items[:20],
