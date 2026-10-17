@@ -14,6 +14,11 @@
    后自动启用，零配置。headful Chromium 复用登录态打开移动版搜索页，
    拦截页面自身 mtop 响应取数——详见 browser_search.py 模块注释。
 
+1.6 1688 免登录 CPS 推广页（仅 p1688）：s.1688.com/page/pccps.html
+   是推广联盟落地页，面向站外流量无需登录即可拿到批发价/销量/回头率/
+   供应商；由 ~/.local/share/ecom-agent/p1688_mcp 下的执行器抓取
+   （同时提供符合 MCP 协议的 server.py，可挂任意 MCP 宿主）。
+
 实测结论（2026-10）：淘宝 MTOP 纯签名被 RGV587 风控拦截、headless
 复用 profile 因指纹不符被打回登录墙、拼多多机制性封锁（一会话一搜）、
 Shopme 零密钥路径返回 401——免费且零登录的实时数据源不存在；
@@ -24,8 +29,10 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple
 
 import httpx
@@ -34,6 +41,7 @@ from ..llm.client import LLMClient, ModelTier
 
 BUILTIN_PLATFORMS: Tuple[Tuple[str, str], ...] = (
     ("pdd", "拼多多"), ("taobao", "淘宝"), ("jd", "京东"), ("xhs", "小红书"),
+    ("p1688", "1688"),
 )
 _SHOPME_PLATFORMS = {"taobao", "xhs"}
 _SHOPME_API = "https://api.shopmeagent.com/mcp/goods/search"
@@ -117,6 +125,45 @@ def _shopme_fetch(platform_code: str, query: str, limit: int) -> List[Dict[str, 
         for p in items
         if isinstance(p, dict)
     ]
+
+
+def _p1688_search(keyword: str, limit: int = 20) -> Dict[str, Any]:
+    """调用 1688 免登录搜索执行器（CPS 推广页，独立 venv 子进程）。"""
+    py = Path.home() / ".local/share/ecom-agent/scraper-venv/bin/python"
+    script = Path.home() / ".local/share/ecom-agent/p1688_mcp/p1688_search.py"
+    if not (py.exists() and script.exists()):
+        return {"state": "not_available", "items": [], "note": "1688 搜索组件未就绪"}
+    proc = subprocess.run(
+        [str(py), str(script), keyword, "--limit", str(limit)],
+        capture_output=True, text=True, timeout=90,
+    )
+    for line in reversed((proc.stdout or "").strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                break
+    return {"state": "error", "items": [],
+            "note": f"1688 搜索无输出：{(proc.stderr or '')[-120:]}"}
+
+
+def _p1688_agent(keyword: str) -> Tuple[str, str, List[Dict[str, Any]], str, str]:
+    """1688 子智能体：CPS 推广页免登录实时搜索（批发价/销量/回头率/供应商）。"""
+    res = _p1688_search(keyword, 20)
+    if res.get("state") == "ok" and res.get("items"):
+        items = [
+            {
+                "title": str(it.get("title") or "")[:200],
+                "price": it.get("price"),
+                "sales": str(it.get("sales") or "")[:40],
+                "shop": str(it.get("shop") or "")[:80],
+                "url": str(it.get("url") or "")[:300],
+            }
+            for it in res["items"]
+        ]
+        return "p1688", _agent_brief("p1688", keyword, items), items, "ok", ""
+    return "p1688", "", [], "error", res.get("note") or "1688 搜索失败"
 
 
 def _taobao_agent(keyword: str) -> Tuple[str, str, List[Dict[str, Any]], str, str]:
@@ -210,6 +257,8 @@ def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], 
             fetch = lambda: _fetch_platform(name, keyword, 20)  # noqa: E731
         elif name == "taobao":
             return _taobao_agent(keyword)
+        elif name == "p1688":
+            return _p1688_agent(keyword)
         elif name in _SHOPME_PLATFORMS and os.environ.get("ECOM_SHOPME_API_KEY", "").strip():
             fetch = lambda: _shopme_fetch(name, keyword, 20)  # noqa: E731
         else:
