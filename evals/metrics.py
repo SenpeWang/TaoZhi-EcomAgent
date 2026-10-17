@@ -7,6 +7,8 @@
 
 口径约定：
 - 相关性是二值的（relevance ∈ {0,1}）：候选是否命中预期标题集合。
+- 六项核心指标：Recall@K、MRR、NDCG@K（本模块）；答案准确率、Token 成本、
+  延迟（run_evals.py 汇总，成本口径统一取自 observability.metrics.token_usage）。
 - 命中判定用集合包含，不做模糊匹配——宁可低估召回，也不要虚高。
 - 平均指标一律给出自举置信区间；样本量小的时候点估计没有决策价值。
 """
@@ -129,3 +131,47 @@ def flat_means(report: dict) -> dict:
     if report.get("mrr"):
         flat["mrr"] = report["mrr"]["mean"]
     return {k: v for k, v in flat.items() if v is not None}
+
+
+def accuracy_report(verdicts: Sequence[dict]) -> dict:
+    """答案准确率：LLM-as-judge 的判定汇总。
+
+    accuracy = 通过率（含正确拒答）；另报忠实度、切题度、正确拒答率三个分项——
+    只有总通过率会掩盖"答了但编造"和"该拒答却硬答"两类问题。
+    """
+    n = len(verdicts)
+    if not n:
+        return {"n": 0, "accuracy": None, "grounded_rate": None,
+                "relevant_rate": None, "abstain_rate": None}
+    acc = sum(1 for v in verdicts if v.get("pass")) / n
+    grounded = sum(1 for v in verdicts if v.get("faithful")) / n
+    relevant = sum(1 for v in verdicts if v.get("relevant")) / n
+    abstain = sum(1 for v in verdicts if v.get("abstain")) / n
+    return {"n": n, "accuracy": acc, "grounded_rate": grounded,
+            "relevant_rate": relevant, "abstain_rate": abstain}
+
+
+def cost_report(before: dict, after: dict, n: int = 0) -> dict:
+    """两次 token_usage() 快照之差 → 本次评估的 token 消耗与估算成本。
+
+    差值取 max(0, …) 防御计数器被 reset 的情况；n>0 才给单题均值（否则不编造）。
+    """
+    d_prompt = max(0.0, float(after.get("prompt_tokens", 0.0)) - float(before.get("prompt_tokens", 0.0)))
+    d_comp = max(0.0, float(after.get("completion_tokens", 0.0)) - float(before.get("completion_tokens", 0.0)))
+    d_cost = max(0.0, float(after.get("cost_usd", 0.0)) - float(before.get("cost_usd", 0.0)))
+    total = d_prompt + d_comp
+    out = {"prompt_tokens": int(d_prompt), "completion_tokens": int(d_comp),
+           "total_tokens": int(total), "cost_usd": round(d_cost, 6)}
+    if n > 0:
+        out["tokens_per_case"] = round(total / n, 1)
+        out["cost_usd_per_case"] = round(d_cost / n, 6)
+    return out
+
+
+def latency_report(seconds: Sequence[float]) -> dict:
+    """延迟分布：p50 / p95 / 均值（秒）。空样本不编造。"""
+    arr = np.asarray([float(x) for x in seconds], dtype="float64")
+    if arr.size == 0:
+        return {"n": 0, "p50_s": None, "p95_s": None, "mean_s": None}
+    return {"n": int(arr.size), "p50_s": float(np.percentile(arr, 50)),
+            "p95_s": float(np.percentile(arr, 95)), "mean_s": float(arr.mean())}

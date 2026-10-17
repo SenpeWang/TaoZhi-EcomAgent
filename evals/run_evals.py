@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 """评测基准运行器：固定基准集 → 结构化分数 → 与基线对比输出增减。
 
+六项核心指标（每层跑完统一汇总，见 --six / 结果 JSON 的 six_metrics）：
+  1 Recall@K   2 MRR   3 NDCG@K   4 答案准确率   5 Token 成本   6 延迟
+
 分层（面向本项目的企业级 Agent 指标体系）：
   retrieval    检索质量（60 例抽样）：Context Recall(Hit@1/3/8)、MRR、延迟——规则判定
   adversarial  对抗安全（18 道固定刁钻题，走真实问答全流程）——规则+人工复核
@@ -40,6 +43,7 @@ NODE = "org_d1b6fb3bcec7e60ab6de7ec6"
 import httpx  # noqa: E402
 
 from ecom_copilot.enterprise.config import load_config  # noqa: E402
+from ecom_copilot.observability import metrics as obs_metrics  # noqa: E402
 from ecom_copilot.enterprise.db import database_connection, fetch_one  # noqa: E402
 from ecom_copilot.enterprise.policy import load_principal  # noqa: E402
 
@@ -168,6 +172,7 @@ def phase_retrieval(sample=60):
 
     def run(use_hyde):
         pairs, lat, skipped = [], [], 0
+        tok_before = obs_metrics.token_usage()
         for case in chosen:
             exp = expected_titles(case)
             if not exp:
@@ -196,6 +201,8 @@ def phase_retrieval(sample=60):
         xs = sorted(lat)
         out["latency_p50_s"] = round(xs[len(xs) // 2], 2) if xs else None
         out["latency_p95_s"] = round(xs[int(len(xs) * .95)], 2) if xs else None
+        out["latency"] = metrics.latency_report(lat)
+        out["cost"] = metrics.cost_report(tok_before, obs_metrics.token_usage(), n=len(pairs))
         return out
     return {"hyde_off": run(False), "hyde_on": run(True)}
 
@@ -264,6 +271,8 @@ def phase_behavior(per_class=8):
     client = LLMClient()
     judge_stats = {"grounded": 0, "relevant": 0, "abstain": 0, "judge_n": 0}
     stats, detail = {}, []
+    verdicts = []
+    tok_before = obs_metrics.token_usage()
     for case in chosen:
         cat = case["category"]
         stats.setdefault(cat, {"n": 0, "pass": 0, "fail": [], "skipped": 0})
@@ -334,6 +343,7 @@ def phase_behavior(per_class=8):
             except Exception as e:
                 verdict["reason"] = f"judge 异常 {e}"[:40]
             ok = bool(verdict.get("pass"))
+            verdicts.append(verdict)
             s["n"] += 1
             if ok:
                 s["pass"] += 1
@@ -354,7 +364,72 @@ def phase_behavior(per_class=8):
     summary["pass_rate"] = round(total_p / total_n, 3) if total_n else None
     summary["total"] = f"{total_p}/{total_n}"
     summary["detail"] = detail
+    # 答案准确率只统计真正走到 judge 判定的用例：权限拦截/内容受限属系统行为，
+    # 混入分母会让"答得准不准"被安全拦截数稀释。
+    summary["accuracy"] = metrics.accuracy_report(verdicts)
+    summary["cost"] = metrics.cost_report(tok_before, obs_metrics.token_usage(), n=len(verdicts))
     return summary
+
+
+# ─────────────── 六项核心指标汇总 ───────────────
+def six_metrics(result: dict) -> dict:
+    """把各层的原始分数收敛成六项核心指标。
+
+    取值优先级：检索层用 hyde_off（基线口径）；答案为空/未跑的层返回 None，
+    不填 0——没跑过的指标写 0 会在基线对比里伪装成"暴跌"。
+    """
+    ret = ((result.get("retrieval") or {}).get("hyde_off") or {})
+    beh = result.get("behavior") or {}
+    acc = beh.get("accuracy") or {}
+    lat = ret.get("latency") or {}
+    c_ret, c_beh = ret.get("cost") or {}, beh.get("cost") or {}
+    total_tokens = (c_ret.get("total_tokens") or 0) + (c_beh.get("total_tokens") or 0)
+    total_cost = (c_ret.get("cost_usd") or 0.0) + (c_beh.get("cost_usd") or 0.0)
+    n_cases = (c_ret.get("tokens_per_case") and ret.get("n") or 0)
+    return {
+        "recall@k": {k: ret.get(f"recall@{k}") for k in (1, 3, 8)},
+        "mrr": ret.get("mrr"),
+        "ndcg@k": {k: ret.get(f"ndcg@{k}") for k in (1, 3, 8)},
+        "answer_accuracy": {
+            "accuracy": acc.get("accuracy"),
+            "grounded_rate": acc.get("grounded_rate"),
+            "relevant_rate": acc.get("relevant_rate"),
+            "abstain_rate": acc.get("abstain_rate"),
+            "n": acc.get("n"),
+        },
+        "token_cost": {
+            "total_tokens": total_tokens or None,
+            "cost_usd": round(total_cost, 6) if total_tokens else None,
+            "tokens_per_case": c_ret.get("tokens_per_case"),
+            "retrieval": c_ret or None,
+            "behavior": c_beh or None,
+        },
+        "latency_s": {"p50": lat.get("p50_s"), "p95": lat.get("p95_s"),
+                      "mean": lat.get("mean_s"), "n": lat.get("n")},
+    }
+
+
+def print_six(six: dict) -> None:
+    """六项指标的人类可读输出。"""
+    def f(v, nd=3):
+        return "—" if v is None else (f"{v:.{nd}f}" if isinstance(v, float) else str(v))
+
+    r, nd = six["recall@k"], six["ndcg@k"]
+    a, c, l = six["answer_accuracy"], six["token_cost"], six["latency_s"]
+    print("\n=== 六项核心指标 ===")
+    print(f"1 Recall@K      @1 {f(r.get(1))} | @3 {f(r.get(3))} | @8 {f(r.get(8))}")
+    print(f"2 MRR           {f(six['mrr'])}")
+    print(f"3 NDCG@K        @1 {f(nd.get(1))} | @3 {f(nd.get(3))} | @8 {f(nd.get(8))}")
+    print(f"4 答案准确率     {f(a.get('accuracy'))}"
+          f"  (忠实 {f(a.get('grounded_rate'))} / 切题 {f(a.get('relevant_rate'))}"
+          f" / 正确拒答 {f(a.get('abstain_rate'))}, n={a.get('n')})")
+    cost = c.get("cost_usd")
+    # 小额成本必须保留足够小数位，否则 $0.0008 会显示成 $0.001 直接失真
+    cost_s = "—" if cost is None else (f"{cost:.6f}" if cost < 0.01 else f"{cost:.4f}")
+    print(f"5 Token 成本     {c.get('total_tokens') or '—'} tokens ≈ ${cost_s}"
+          f"（单题 {c.get('tokens_per_case') or '—'}）")
+    print(f"6 延迟(s)       p50 {f(l.get('p50'), 2)} | p95 {f(l.get('p95'), 2)}"
+          f" | 均值 {f(l.get('mean'), 2)} (n={l.get('n')})")
 
 
 # ─────────────── 对比输出 ───────────────
@@ -400,6 +475,9 @@ def main():
         result["adversarial"] = phase_adversarial()
         if args.full:
             result["behavior"] = phase_behavior(per_class=8)
+    six = six_metrics(result)
+    result["six_metrics"] = six
+    print_six(six)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{result['git']}.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

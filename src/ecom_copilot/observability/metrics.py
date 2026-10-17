@@ -106,6 +106,25 @@ def snapshot() -> Dict[str, float]:
     return out
 
 
+def token_usage() -> Dict[str, float]:
+    """累计 token 用量与估算成本（美元），口径与 _PRICE_PER_1K 同源。
+
+    评测与成本看板都必须读这里，禁止各自按自己的单价重算——
+    否则同一批调用会算出两个成本。缺失 tier 的用量按 0 计，不编造。
+    """
+    with _lock:
+        counters = dict(_counters)
+    prompt = comp = cost = 0.0
+    for tier, price in _PRICE_PER_1K.items():
+        p_tok = counters.get(f"llm.tokens.prompt.{tier}", 0.0)
+        c_tok = counters.get(f"llm.tokens.completion.{tier}", 0.0)
+        prompt += p_tok
+        comp += c_tok
+        cost += (p_tok + c_tok) / 1000.0 * price
+    return {"prompt_tokens": prompt, "completion_tokens": comp,
+            "total_tokens": prompt + comp, "cost_usd": cost}
+
+
 def recent_events(limit: int = 100) -> List[dict]:
     with _lock:
         return list(_events[-limit:])
