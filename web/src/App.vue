@@ -51,9 +51,7 @@ const loginForm = reactive({ username: '', password: '' }),
   passwordForm = reactive({ current_password: '', new_password: '' })
 const askForm = reactive({
   question: '',
-  depth: 'standard',
   input_level: 1,
-  require_review: false,
   allow_external: true,
   sku_id: '',
   order_id: '',
@@ -1092,14 +1090,7 @@ onUnmounted(() => {
                     placeholder="请说明商品型号、适配机型或需要核对的业务事项"
                 /></el-form-item>
                 <div class="form-columns">
-                  <el-form-item label="核验深度"
-                    ><el-select v-model="askForm.depth"
-                      ><el-option label="快速查询" value="quick" /><el-option
-                        label="标准核验"
-                        value="standard" /><el-option
-                        label="深入核验与人工审核"
-                        value="deep" /></el-select></el-form-item
-                  ><el-form-item label="问题内容密级"
+                  <el-form-item label="问题内容密级"
                     ><el-select
                       v-model="askForm.input_level"
                       @change="askForm.allow_external = askForm.input_level < 3"
@@ -1119,8 +1110,7 @@ onUnmounted(() => {
                     ><el-input v-model="askForm.order_id" placeholder="接入订单系统后可查询"
                   /></el-form-item>
                 </div>
-                <el-checkbox v-model="askForm.require_review">请求业务负责人审核</el-checkbox
-                ><el-checkbox v-model="askForm.allow_external"
+                <el-checkbox v-model="askForm.allow_external"
                   >允许问题使用外部 AI（资料仍需获准）</el-checkbox
                 ><el-alert
                   v-if="askForm.input_level === 3"

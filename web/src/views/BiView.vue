@@ -551,7 +551,6 @@ async function ask(q: string) {
     const r = await props.api<{ id: string }>('/tasks', 'POST', {
       question,
       input_level: 1,
-      depth: 'quick',
     })
     stream?.close()
     stream = new EventSource('/api/tasks/' + r.id + '/events')

@@ -78,7 +78,6 @@ class Question(Input):
     question:str=Field(min_length=1,max_length=4000)
     node_id:str=""
     input_level:int=Field(default=1,ge=1,le=3)
-    depth:Literal["quick","standard","deep"]="standard"
     require_review:bool=False
     allow_external:bool=True
     sku_id:str=Field(default="",max_length=64,pattern=r"^[A-Za-z0-9_-]*$")
