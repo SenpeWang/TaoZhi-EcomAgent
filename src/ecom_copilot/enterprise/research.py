@@ -1,13 +1,19 @@
 """平台调研多智能体：关键词 → 多平台子智能体并行抓取 → 汇总调研报告。
 
-平台数据源通过环境变量接入（未配置端点的平台如实标记"未接入"，
-本模块不产出任何模拟/合成数据）：
-  ECOM_RESEARCH_PDD_URL / ECOM_RESEARCH_TAOBAO_URL / ECOM_RESEARCH_JD_URL
-  （可选配 ECOM_RESEARCH_<平台大写>_KEY，将以 X-API-Key 请求头发送）
-协议：POST JSON {"query": str, "limit": int} → {"items": [
-  {"title": str, "price": number|str, "sales": str, "shop": str, "url": str}]}
-接入方式：自建平台抓取服务或第三方电商数据 API，返回该 JSON 即可。
-"""
+平台数据源按优先级接入（未接入的平台如实标记，本模块不产出任何模拟数据）：
+
+1. 自建抓取端点：ECOM_RESEARCH_<平台大写>_URL
+   协议：POST JSON {"query": str, "limit": int} → {"items": [
+     {"title": str, "price": number|str, "sales": str, "shop": str, "url": str}]}
+   （可选 ECOM_RESEARCH_<平台大写>_KEY，以 X-API-Key 请求头发送）
+
+2. Shopme 聚合 API（仅 taobao/xhs）：ECOM_SHOPME_API_KEY
+   需向 navi@shopmeagent.com 申请 key；数据为聚合库，非实时。
+
+实测结论（2026-10）：淘宝 MTOP 纯签名被 RGV587 风控拦截、拼多多
+机制性封锁（一会话一搜）、Shopme 零密钥路径返回 401——免费且
+零登录的实时数据源不存在；实时数据须扫码登录（persistent profile）
+或注册官方 API。"""
 
 from __future__ import annotations
 
@@ -21,7 +27,11 @@ import httpx
 
 from ..llm.client import LLMClient, ModelTier
 
-BUILTIN_PLATFORMS: Tuple[Tuple[str, str], ...] = (("pdd", "拼多多"), ("taobao", "淘宝"), ("jd", "京东"))
+BUILTIN_PLATFORMS: Tuple[Tuple[str, str], ...] = (
+    ("pdd", "拼多多"), ("taobao", "淘宝"), ("jd", "京东"), ("xhs", "小红书"),
+)
+_SHOPME_PLATFORMS = {"taobao", "xhs"}
+_SHOPME_API = "https://api.shopmeagent.com/mcp/goods/search"
 
 _TIMEOUT = 25.0
 _LABEL = dict(BUILTIN_PLATFORMS)
@@ -67,6 +77,41 @@ def _fetch_platform(name: str, query: str, limit: int) -> List[Dict[str, Any]]:
             }
         )
     return out
+
+
+def _shopme_fetch(platform_code: str, query: str, limit: int) -> List[Dict[str, Any]]:
+    """Shopme 聚合库搜索（taobao/xhs）。key 未配置时返回空。"""
+    key = os.environ.get("ECOM_SHOPME_API_KEY", "").strip()
+    if not key:
+        return []
+    headers = {
+        "Content-Type": "application/json",
+        "x-mcp-caller": "cn-ecommerce-search-mcp",
+        # 官方发放 key 时的鉴权头格式未实测；同时携带两种常见形式
+        "Authorization": f"Bearer {key}",
+        "X-API-Key": key,
+    }
+    with httpx.Client(timeout=_TIMEOUT) as client:
+        r = client.post(
+            _SHOPME_API,
+            json={"keyword": query, "platform": platform_code,
+                  "sort_by": "sales_desc", "page": 1, "limit": min(limit, 50)},
+            headers=headers,
+        )
+        r.raise_for_status()
+        body = r.json()
+    items = (body.get("products") or []) if body.get("success") else []
+    return [
+        {
+            "title": str(p.get("name") or "")[:200],
+            "price": p.get("price"),
+            "sales": str(p.get("sales") or "")[:40],
+            "shop": str(p.get("shop_name") or "")[:80],
+            "url": str(p.get("url") or "")[:300],
+        }
+        for p in items
+        if isinstance(p, dict)
+    ]
 
 
 def _agent_brief(name: str, query: str, items: List[Dict[str, Any]]) -> str:
@@ -126,10 +171,18 @@ def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], 
     emit(f"派出 {len(picked)} 个平台智能体并行抓取", 30)
 
     def agent_work(name: str):
-        if not _endpoint(name):
-            return name, "", [], "not_configured", "数据源端点未配置"
+        # 数据源优先级：自建端点 > Shopme 聚合（taobao/xhs，需 key）> 未接入
+        if _endpoint(name):
+            fetch = lambda: _fetch_platform(name, keyword, 20)  # noqa: E731
+        elif name in _SHOPME_PLATFORMS and os.environ.get("ECOM_SHOPME_API_KEY", "").strip():
+            fetch = lambda: _shopme_fetch(name, keyword, 20)  # noqa: E731
+        else:
+            reason = "数据源未配置"
+            if name in _SHOPME_PLATFORMS:
+                reason += "（可申请 Shopme key 或自建端点）"
+            return name, "", [], "not_configured", reason
         try:
-            items = _fetch_platform(name, keyword, 20)
+            items = fetch()
         except Exception as exc:  # noqa: BLE001
             return name, "", [], "error", f"抓取失败：{type(exc).__name__}"
         return name, _agent_brief(name, keyword, items), items, "ok", ""
@@ -165,7 +218,7 @@ def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], 
         else:
             instruction = (
                 "注意：本次所有平台数据源均未接入，没有任何实测数据。请输出："
-                "1) 开头明确说明平台数据源未接入（需配置 ECOM_RESEARCH_<平台大写>_URL 环境变量，协议见代码注释）；"
+                "1) 开头明确说明平台数据源未接入（可申请 Shopme API key、扫码登录持久设备或自建抓取端点，接入方式见模块注释）；"
                 "2) 基于公开常识给出该品类的调研框架与分析建议，并明确标注这是分析框架而非实测数据，"
                 "不得编造任何价格、销量数字。"
             )

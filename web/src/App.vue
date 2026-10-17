@@ -384,7 +384,7 @@ async function navigate(name: string) {
     })
   else await action(load)
 }
-const researchForm = reactive({ keyword: '', platforms: ['pdd', 'taobao', 'jd'] })
+const researchForm = reactive({ keyword: '', platforms: ['pdd', 'taobao', 'jd', 'xhs'] })
 const researching = ref(false)
 /**
  * 提交平台调研任务：派多平台智能体并行抓取并生成调研报告。
@@ -1061,7 +1061,8 @@ onUnmounted(() => {
                 <el-checkbox-group v-model="researchForm.platforms"
                   ><el-checkbox value="pdd">拼多多</el-checkbox
                   ><el-checkbox value="taobao">淘宝</el-checkbox
-                  ><el-checkbox value="jd">京东</el-checkbox></el-checkbox-group
+                  ><el-checkbox value="jd">京东</el-checkbox
+                  ><el-checkbox value="xhs">小红书</el-checkbox></el-checkbox-group
                 >
               </div>
               <div class="panel-actions">
