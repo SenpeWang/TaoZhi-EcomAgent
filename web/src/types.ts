@@ -79,8 +79,20 @@ export interface Citation {
   version: number
   quote: string
 }
+export interface ResearchPlatform {
+  name: string
+  label: string
+  state: string
+  state_label: string
+  error?: string
+  brief?: string
+  items_count: number
+}
 export interface TaskResult {
-  answer: string
+  answer?: string
+  report?: string
+  outline?: string[]
+  platforms?: ResearchPlatform[]
   specialists?: { name: string; count: number }[]
   missing?: string[]
   citations?: Citation[]

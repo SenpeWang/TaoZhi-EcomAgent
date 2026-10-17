@@ -384,6 +384,33 @@ async function navigate(name: string) {
     })
   else await action(load)
 }
+const researchForm = reactive({ keyword: '', platforms: ['pdd', 'taobao', 'jd'] })
+const researching = ref(false)
+/**
+ * 提交平台调研任务：派多平台智能体并行抓取并生成调研报告。
+ * @returns 无返回值；关键词或平台为空时提示且不创建任务。
+ */
+async function submitResearch() {
+  const q = researchForm.keyword.trim()
+  if (!q) return void ElMessage.warning('请输入调研关键词')
+  if (!researchForm.platforms.length) return void ElMessage.warning('至少选择一个平台')
+  researching.value = true
+  try {
+    const r = await api<CreatedResource>('/tasks', 'POST', {
+      question: q,
+      kind: 'research',
+      platforms: [...researchForm.platforms],
+      input_level: 1,
+    })
+    ElMessage.success('调研任务已提交，智能体出动中')
+    page.value = '任务中心'
+    activeTask.value = await api<Task>('/tasks/' + r.id)
+    taskOpen.value = true
+    streamTask(r.id)
+  } finally {
+    researching.value = false
+  }
+}
 /**
  * 提交问答任务并打开获准进度；空问题不提交，审核前不自行显示答案。
  * @returns 操作完成；空问题时返回中文提示，不创建任务。
@@ -1023,16 +1050,24 @@ onUnmounted(() => {
           </div>
           <div class="dashboard-grid">
             <section class="panel ask-promo">
-              <el-tag effect="plain">基于授权资料回答</el-tag>
-              <h2>今天要核对什么？</h2>
+              <el-tag effect="plain">多智能体平台调研</el-tag>
+              <h2>调研什么品类？</h2>
               <el-input
-                v-model="askForm.question"
-                type="textarea"
-                :rows="3"
-                placeholder="例如：MC-500 的切幅是多少？"
+                v-model="researchForm.keyword"
+                placeholder="例如：牙刷"
+                @keyup.enter="submitResearch"
               />
+              <div class="research-platforms">
+                <el-checkbox-group v-model="researchForm.platforms"
+                  ><el-checkbox value="pdd">拼多多</el-checkbox
+                  ><el-checkbox value="taobao">淘宝</el-checkbox
+                  ><el-checkbox value="jd">京东</el-checkbox></el-checkbox-group
+                >
+              </div>
               <div class="panel-actions">
-                <el-button type="primary" @click="page = '智能问答'">开始提问</el-button>
+                <el-button type="primary" :loading="researching" @click="submitResearch"
+                  >派出智能体调研</el-button
+                >
               </div>
             </section>
             <section class="panel">
@@ -1479,32 +1514,46 @@ onUnmounted(() => {
           type="warning"
           :closable="false"
         /><template v-if="activeTask.result"
-          ><h3>核验结果</h3>
-          <div class="detail-meta">
-            <el-tag type="primary" effect="dark">🎯 Main 调度</el-tag>
-            <el-tag v-for="s in activeTask.result.specialists || []" :key="s.name" effect="plain"
-              >{{ s.name }} ·
-              {{ s.count ? '已核验 ' + s.count + ' 条原文' : '暂无支持结论' }}</el-tag
-            >
-            <el-tag type="success" effect="dark">🔍 Verifier 终审</el-tag>
-          </div>
-          <pre class="answer-body">{{ activeTask.result.answer }}</pre>
-          <div v-if="activeTask.result.missing?.length" class="missing-box">
-            <strong>尚需确认</strong>
-            <p v-for="m in activeTask.result.missing" :key="m">{{ m }}</p>
-          </div>
-          <h3 v-if="activeTask.result.citations?.length">引用来源</h3>
-          <el-collapse
-            ><el-collapse-item
-              v-for="(c, i) in activeTask.result.citations"
-              :key="c.chunk_id"
-              :title="'[' + (Number(i) + 1) + '] ' + c.title + ' · 第 ' + c.version + ' 版'"
-            >
-              <pre class="quote-body">{{ c.quote }}</pre>
-              <el-button text type="primary" @click="openDoc(c.document_id)"
-                >查看授权原文</el-button
-              ></el-collapse-item
-            ></el-collapse
+          ><template v-if="activeTask.kind === 'research'"
+            ><h3>调研报告</h3>
+            <div class="detail-meta">
+              <el-tag
+                v-for="pl in activeTask.result.platforms || []"
+                :key="pl.name"
+                :type="pl.state === 'ok' ? 'success' : 'info'"
+                effect="plain"
+                >{{ pl.label }} · {{ pl.state_label }}</el-tag
+              >
+            </div>
+            <pre class="answer-body">{{ activeTask.result.report }}</pre></template
+          ><template v-else
+            ><h3>核验结果</h3>
+            <div class="detail-meta">
+              <el-tag type="primary" effect="dark">🎯 Main 调度</el-tag>
+              <el-tag v-for="s in activeTask.result.specialists || []" :key="s.name" effect="plain"
+                >{{ s.name }} ·
+                {{ s.count ? '已核验 ' + s.count + ' 条原文' : '暂无支持结论' }}</el-tag
+              >
+              <el-tag type="success" effect="dark">🔍 Verifier 终审</el-tag>
+            </div>
+            <pre class="answer-body">{{ activeTask.result.answer }}</pre>
+            <div v-if="activeTask.result.missing?.length" class="missing-box">
+              <strong>尚需确认</strong>
+              <p v-for="m in activeTask.result.missing" :key="m">{{ m }}</p>
+            </div>
+            <h3 v-if="activeTask.result.citations?.length">引用来源</h3>
+            <el-collapse
+              ><el-collapse-item
+                v-for="(c, i) in activeTask.result.citations"
+                :key="c.chunk_id"
+                :title="'[' + (Number(i) + 1) + '] ' + c.title + ' · 第 ' + c.version + ' 版'"
+              >
+                <pre class="quote-body">{{ c.quote }}</pre>
+                <el-button text type="primary" @click="openDoc(c.document_id)"
+                  >查看授权原文</el-button
+                ></el-collapse-item
+              ></el-collapse
+            ></template
           ></template
         ><el-empty v-else-if="activeTask.state === 'review'" description="等待业务负责人审核" />
         <div class="dialog-actions">

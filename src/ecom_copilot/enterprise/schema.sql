@@ -82,7 +82,7 @@ CREATE TABLE approvals (
 );
 CREATE TABLE jobs (
  id text PRIMARY KEY, tenant_id text NOT NULL, owner_id text NOT NULL, owner_version bigint NOT NULL,
- node_id text NOT NULL, kind text NOT NULL CHECK(kind IN ('ask','ingest')),
+ node_id text NOT NULL, kind text NOT NULL CHECK(kind IN ('ask','ingest','research')),
  question text NOT NULL DEFAULT '', input_level integer NOT NULL DEFAULT 1 CHECK(input_level BETWEEN 1 AND 3),
  payload jsonb NOT NULL DEFAULT '{}', state text NOT NULL DEFAULT 'queued',
  result jsonb, sources jsonb NOT NULL DEFAULT '[]', error text NOT NULL DEFAULT '',

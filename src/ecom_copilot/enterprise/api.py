@@ -76,6 +76,8 @@ class Grant(Input):
     revoke:bool=False
 class Question(Input):
     question:str=Field(min_length=1,max_length=4000)
+    kind:Literal["ask","research"]="ask"
+    platforms:list[str]=Field(default_factory=list,max_length=8)
     node_id:str=""
     input_level:int=Field(default=1,ge=1,le=3)
     require_review:bool=False
@@ -360,13 +362,13 @@ def ask(payload:Question,idempotency_key:str|None=Header(default=None,max_length
     data=payload.model_dump(exclude={"question","node_id","input_level"})
     if payload.input_level>=3 and not p.boss:data["allow_external"]=False
     with database_connection() as c:
-        job=create_job(c,p,"ask",node,data,payload.question,payload.input_level,idempotency_key)
+        job=create_job(c,p,payload.kind,node,data,payload.question,payload.input_level,idempotency_key)
         return {"id":job["id"],"task_id":job["id"],"state":job["state"],"message":"任务已提交"}
 @app.get("/api/research/tasks")
 @app.get("/api/tasks")
 def tasks(p=Depends(identity)):
     with database_connection() as c:
-        rows=fetch_all(c,"SELECT * FROM jobs WHERE tenant_id=%s AND kind='ask' ORDER BY created_at DESC LIMIT 500",(p.tenant_id,))
+        rows=fetch_all(c,"SELECT * FROM jobs WHERE tenant_id=%s AND kind IN ('ask','research') ORDER BY created_at DESC LIMIT 500",(p.tenant_id,))
         return {"items":[present_job(c,p,r,False) for r in rows if can_task(p,r) and (r["owner_id"]==p.id or sources_valid(c,p,r["sources"]))]}
 @app.get("/api/research/task/{task_id}")
 @app.get("/api/tasks/{task_id}")

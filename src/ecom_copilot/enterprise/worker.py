@@ -134,6 +134,27 @@ def process_question_job(job):
             cache.put(job["tenant_id"], job["question"], state["answer"], citations, state.get("sources", []), state.get("input_level", job["input_level"]))
         except Exception:
             pass
+def process_research_job(job):
+    """平台调研任务：多平台子智能体并行抓取 → 汇总调研报告。
+
+    不引用企业文档（公网平台数据），sources 恒为空；进度经 emit 写
+    jobs.stage/progress 与 task_events，复用问答任务同一条 SSE 事件流。
+    """
+    from .research import run_research
+
+    def emit(stage,progress):
+        with database_connection() as c:
+            c.execute("UPDATE jobs SET stage=%s,progress=%s WHERE id=%s AND run_version=%s",(stage,progress,job["id"],job["run_version"]))
+            c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,%s,'running')",(job["tenant_id"],job["id"],job["run_version"],stage,progress))
+
+    result=run_research(job["question"],(job["payload"] or {}).get("platforms") or [],emit)
+    with database_connection() as c:
+        row=fetch_one(c,"SELECT * FROM jobs WHERE id=%s FOR UPDATE",(job["id"],))
+        if row["state"]!="running" or row["run_version"]!=job["run_version"] or row["cancel_requested"]:raise Denied("任务执行版本已失效","STALE",409)
+        c.execute("UPDATE jobs SET result=%s,sources='[]'::jsonb,state='completed',stage='调研报告已生成',progress=100,lease_until=NULL,finished_at=now() WHERE id=%s AND run_version=%s",(as_jsonb(result),job["id"],job["run_version"]))
+        c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,'调研报告已生成',100,'completed')",(job["tenant_id"],job["id"],job["run_version"]))
+
+
 def heartbeat():
     with database_connection() as c:
         c.execute("INSERT INTO worker_heartbeats(id) VALUES(%s) ON CONFLICT(id) DO UPDATE SET updated_at=now()",(WORKER,))
@@ -142,6 +163,7 @@ def run_job(job):
     done=threading.Event();thread=threading.Thread(target=renew_job_lease,args=(job,done),daemon=True);thread.start()
     try:
         if job["kind"]=="ingest":process_ingestion_job(job)
+        elif job["kind"]=="research":process_research_job(job)
         else:process_question_job(job)
     except Exception as exc:
         message=exc.message if isinstance(exc,Denied) else "任务处理失败，请重试或联系管理员"
