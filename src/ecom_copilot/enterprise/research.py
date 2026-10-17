@@ -1,29 +1,21 @@
-"""平台调研多智能体：关键词 → 多平台子智能体并行抓取 → 汇总调研报告。
+"""平台调研多智能体：关键词 → 子智能体抓取 1688 实时数据 → 汇总调研报告。
 
-平台数据源按优先级接入（未接入的平台如实标记，本模块不产出任何模拟数据）：
+当前接入平台仅 1688（阿里巴巴批发），数据源为 CPS 推广页
+`s.1688.com/page/pccps.html`——面向站外流量的推广联盟落地页，
+**无需登录**即可拿到批发价、销量、回头率、供应商等完整商品数据。
 
-1. 自建抓取端点：ECOM_RESEARCH_<平台大写>_URL
-   协议：POST JSON {"query": str, "limit": int} → {"items": [
-     {"title": str, "price": number|str, "sales": str, "shop": str, "url": str}]}
-   （可选 ECOM_RESEARCH_<平台大写>_KEY，以 X-API-Key 请求头发送）
+执行器（独立于项目 venv，位于 ~/.local/share/ecom-agent/p1688_mcp）：
+- p1688_search.py：headless playwright + DOM 卡片解析，单次约 5 秒
+- server.py：符合 MCP 协议的 stdio server，可挂任意 MCP 宿主
 
-2. Shopme 聚合 API（仅 taobao/xhs）：ECOM_SHOPME_API_KEY
-   需向 navi@shopmeagent.com 申请 key；数据为聚合库，非实时。
+如需改用自建抓取端点，配置 ECOM_RESEARCH_P1688_URL 即可覆盖
+（协议：POST {"query": str, "limit": int} → {"items": [...]}，
+可选 ECOM_RESEARCH_P1688_KEY 以 X-API-Key 头发送）。
 
-1.5 浏览器登录设备（仅 taobao）：扫码一次沉淀 persistent profile
-   后自动启用，零配置。headful Chromium 复用登录态打开移动版搜索页，
-   拦截页面自身 mtop 响应取数——详见 browser_search.py 模块注释。
-
-1.6 1688 免登录 CPS 推广页（仅 p1688）：s.1688.com/page/pccps.html
-   是推广联盟落地页，面向站外流量无需登录即可拿到批发价/销量/回头率/
-   供应商；由 ~/.local/share/ecom-agent/p1688_mcp 下的执行器抓取
-   （同时提供符合 MCP 协议的 server.py，可挂任意 MCP 宿主）。
-
-实测结论（2026-10）：淘宝 MTOP 纯签名被 RGV587 风控拦截、headless
-复用 profile 因指纹不符被打回登录墙、拼多多机制性封锁（一会话一搜）、
-Shopme 零密钥路径返回 401——免费且零登录的实时数据源不存在；
-唯一可行的免费实时链路 = 扫码一次 + headful persistent profile
-（2026-10-17 已验证：搜索"牙刷"返回真实价格/销量/店铺）。"""
+为何只有 1688（2026-10 实测结论）：淘宝 MTOP 纯签名被 RGV587 风控、
+淘宝/京东/拼多多/小红书/1688 普通搜索入口全部强制登录或机制性封锁，
+免费且零登录的实时数据源只有 1688 CPS 推广页这一条路。
+"""
 
 from __future__ import annotations
 
@@ -39,13 +31,7 @@ import httpx
 
 from ..llm.client import LLMClient, ModelTier
 
-BUILTIN_PLATFORMS: Tuple[Tuple[str, str], ...] = (
-    ("pdd", "拼多多"), ("taobao", "淘宝"), ("jd", "京东"), ("xhs", "小红书"),
-    ("p1688", "1688"),
-)
-_SHOPME_PLATFORMS = {"taobao", "xhs"}
-_SHOPME_API = "https://api.shopmeagent.com/mcp/goods/search"
-
+BUILTIN_PLATFORMS: Tuple[Tuple[str, str], ...] = (("p1688", "1688"),)
 _TIMEOUT = 25.0
 _LABEL = dict(BUILTIN_PLATFORMS)
 
@@ -67,7 +53,7 @@ def platform_status() -> List[Dict[str, Any]]:
 
 
 def _fetch_platform(name: str, query: str, limit: int) -> List[Dict[str, Any]]:
-    """抓取单个平台商品数据，返回归一化后的 items。"""
+    """自建抓取端点（配置 ECOM_RESEARCH_<平台>_URL 时启用），归一化 items。"""
     headers = {"Content-Type": "application/json"}
     key = _api_key(name)
     if key:
@@ -90,41 +76,6 @@ def _fetch_platform(name: str, query: str, limit: int) -> List[Dict[str, Any]]:
             }
         )
     return out
-
-
-def _shopme_fetch(platform_code: str, query: str, limit: int) -> List[Dict[str, Any]]:
-    """Shopme 聚合库搜索（taobao/xhs）。key 未配置时返回空。"""
-    key = os.environ.get("ECOM_SHOPME_API_KEY", "").strip()
-    if not key:
-        return []
-    headers = {
-        "Content-Type": "application/json",
-        "x-mcp-caller": "cn-ecommerce-search-mcp",
-        # 官方发放 key 时的鉴权头格式未实测；同时携带两种常见形式
-        "Authorization": f"Bearer {key}",
-        "X-API-Key": key,
-    }
-    with httpx.Client(timeout=_TIMEOUT) as client:
-        r = client.post(
-            _SHOPME_API,
-            json={"keyword": query, "platform": platform_code,
-                  "sort_by": "sales_desc", "page": 1, "limit": min(limit, 50)},
-            headers=headers,
-        )
-        r.raise_for_status()
-        body = r.json()
-    items = (body.get("products") or []) if body.get("success") else []
-    return [
-        {
-            "title": str(p.get("name") or "")[:200],
-            "price": p.get("price"),
-            "sales": str(p.get("sales") or "")[:40],
-            "shop": str(p.get("shop_name") or "")[:80],
-            "url": str(p.get("url") or "")[:300],
-        }
-        for p in items
-        if isinstance(p, dict)
-    ]
 
 
 def _p1688_search(keyword: str, limit: int = 20) -> Dict[str, Any]:
@@ -166,37 +117,8 @@ def _p1688_agent(keyword: str) -> Tuple[str, str, List[Dict[str, Any]], str, str
     return "p1688", "", [], "error", res.get("note") or "1688 搜索失败"
 
 
-def _taobao_agent(keyword: str) -> Tuple[str, str, List[Dict[str, Any]], str, str]:
-    """淘宝子智能体：浏览器登录设备实时搜索，失败时降级 Shopme 聚合。"""
-    from .browser_search import taobao_browser_search
-
-    res = taobao_browser_search(keyword, 20)
-    if res["state"] == "ok" and res["items"]:
-        return "taobao", _agent_brief("taobao", keyword, res["items"]), res["items"], "ok", ""
-    note = res.get("note") or ""
-    # 浏览器链路失败 → Shopme 聚合兜底（若配置了 key，数据非实时需注明）
-    if os.environ.get("ECOM_SHOPME_API_KEY", "").strip():
-        try:
-            items = _shopme_fetch("taobao", keyword, 20)
-            if items:
-                brief = (
-                    _agent_brief("taobao", keyword, items)
-                    + f"\n\n（实时浏览器搜索未成功：{note}；以上来自 Shopme 聚合库，非实时数据）"
-                )
-                return "taobao", brief, items, "ok", ""
-        except Exception:  # noqa: BLE001 兜底失败继续走如实标注
-            pass
-    state_map = {
-        "need_login": "need_login",
-        "rate_limited": "rate_limited",
-        "busy": "rate_limited",
-        "not_available": "not_configured",
-    }
-    return "taobao", "", [], state_map.get(res["state"], "error"), note or "浏览器搜索失败"
-
-
 def _agent_brief(name: str, query: str, items: List[Dict[str, Any]]) -> str:
-    """平台子智能体的小结：有数据做数据分析；模型不可用时降级为数据清单。"""
+    """子智能体的小结：有数据做数据分析；模型不可用时降级为数据清单。"""
     if not items:
         return f"{_LABEL.get(name, name)}：未获取到商品数据"
     listing = "\n".join(
@@ -240,8 +162,8 @@ def _plan_outline(keyword: str) -> List[str]:
 def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], None]) -> Dict[str, Any]:
     """执行一次平台调研。
 
-    emit(stage, progress) 实时上报进度；每个平台一个子智能体并行
-    （抓取 → 平台小结），最后汇总为 markdown 调研报告。
+    emit(stage, progress) 实时上报进度；平台子智能体并行抓取（当前仅 1688），
+    最后汇总为 markdown 调研报告。未传入已注册平台时回退到全部内置平台。
     """
     started = time.perf_counter()
     picked = [p for p in platforms if p in _LABEL] or [n for n, _ in BUILTIN_PLATFORMS]
@@ -249,28 +171,17 @@ def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], 
     emit("生成调研大纲", 10)
     outline = _plan_outline(keyword)
 
-    emit(f"派出 {len(picked)} 个平台智能体并行抓取", 30)
+    emit("派出子智能体抓取 1688 实时数据", 30)
 
     def agent_work(name: str):
-        # 数据源优先级：自建端点 > 浏览器登录设备（淘宝）> Shopme 聚合（taobao/xhs，需 key）> 未接入
+        # 数据源优先级：自建端点（ECOM_RESEARCH_P1688_URL）> 1688 CPS 免登录抓取
         if _endpoint(name):
-            fetch = lambda: _fetch_platform(name, keyword, 20)  # noqa: E731
-        elif name == "taobao":
-            return _taobao_agent(keyword)
-        elif name == "p1688":
-            return _p1688_agent(keyword)
-        elif name in _SHOPME_PLATFORMS and os.environ.get("ECOM_SHOPME_API_KEY", "").strip():
-            fetch = lambda: _shopme_fetch(name, keyword, 20)  # noqa: E731
-        else:
-            reason = "数据源未配置"
-            if name in _SHOPME_PLATFORMS:
-                reason += "（可申请 Shopme key 或自建端点）"
-            return name, "", [], "not_configured", reason
-        try:
-            items = fetch()
-        except Exception as exc:  # noqa: BLE001
-            return name, "", [], "error", f"抓取失败：{type(exc).__name__}"
-        return name, _agent_brief(name, keyword, items), items, "ok", ""
+            try:
+                items = _fetch_platform(name, keyword, 20)
+            except Exception as exc:  # noqa: BLE001
+                return name, "", [], "error", f"抓取失败：{type(exc).__name__}"
+            return name, _agent_brief(name, keyword, items), items, "ok", ""
+        return _p1688_agent(keyword)
 
     platform_results: List[Dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=min(4, len(picked))) as pool:
@@ -282,13 +193,7 @@ def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], 
                     "name": name,
                     "label": _LABEL.get(name, name),
                     "state": state,
-                    "state_label": {
-                        "ok": "已完成",
-                        "not_configured": "未接入",
-                        "error": "抓取失败",
-                        "need_login": "需重新扫码",
-                        "rate_limited": "风控暂限",
-                    }.get(state, state),
+                    "state_label": {"ok": "已完成", "error": "抓取失败"}.get(state, state),
                     "error": err,
                     "brief": brief,
                     "items": items[:20],
@@ -296,7 +201,7 @@ def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], 
                 }
             )
 
-    emit("汇总各智能体发现，生成调研报告", 70)
+    emit("汇总智能体发现，生成调研报告", 70)
     platform_results.sort(key=lambda r: list(_LABEL).index(r["name"]) if r["name"] in _LABEL else 99)
     # 线程完成顺序不定，报告需按内置平台顺序稳定输出
     data_blocks = "\n\n".join(
@@ -308,8 +213,8 @@ def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], 
             instruction = "汇总各平台智能体的发现为一份完整的电商调研报告。"
         else:
             instruction = (
-                "注意：本次所有平台数据源均未接入，没有任何实测数据。请输出："
-                "1) 开头明确说明平台数据源未接入（可申请 Shopme API key、扫码登录持久设备或自建抓取端点，接入方式见模块注释）；"
+                "注意：本次未获取到任何实测商品数据。请输出："
+                "1) 开头明确说明数据源未取到数据（说明组件状态与可能原因）；"
                 "2) 基于公开常识给出该品类的调研框架与分析建议，并明确标注这是分析框架而非实测数据，"
                 "不得编造任何价格、销量数字。"
             )
@@ -320,7 +225,7 @@ def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], 
             system="你是资深电商市场调研负责人，输出结构化 markdown 调研报告。数据必须来自给定发现，禁止编造数字。",
         )
     except Exception as exc:  # noqa: BLE001 汇总失败降级为原始发现
-        report = f"# 调研报告：{keyword}\n\n汇总模型暂不可用（{type(exc).__name__}），以下为各智能体原始发现。\n\n{data_blocks}"
+        report = f"# 调研报告：{keyword}\n\n汇总模型暂不可用（{type(exc).__name__}），以下为智能体原始发现。\n\n{data_blocks}"
 
     emit("调研报告已生成", 100)
     return {
