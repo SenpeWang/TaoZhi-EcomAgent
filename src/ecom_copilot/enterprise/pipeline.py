@@ -373,8 +373,9 @@ def quality_node(state):
         e=state["evidence"][f["evidence_index"]]
         from .privacy import redact
         if f["quote"] in redact(e["quote"]) and not detect_injection(e["quote"])[0]:findings.append(f)
-    # 密级 3 的问题强制人工审核（系统规则，不靠提交方自选）；require_review 保留为 API 级能力
-    review=job["payload"].get("require_review",False) or job["input_level"]>=3
+    # 问答基于账户查阅权限：检索前已按租户/组织树/密级过滤授权文档，答案直接发布。
+    # 人工审核仅由调用方显式要求（require_review，API 级能力，测试在用）。
+    review=job["payload"].get("require_review",False)
     # Security/absence checks are hard gates; a human cannot approve unsupported facts.
     hard=state["hard_block"] or (state["selected_agents"]==["finance"] and not any(re.search("财务|经营|成本|毛利|利润|收入",e["title"]+e["quote"]) for e in state["evidence"]))
     return dict(findings=findings,review=review and not hard,hard_block=hard)
