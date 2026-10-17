@@ -206,6 +206,7 @@ def embed(req: EmbedRequest):
 
 if __name__ == "__main__":
     load_model()
+    load_reranker()  # 启动即预热：精排懒加载会让首个 /rerank 请求冷启动 30s+，超过检索侧客户端超时
     if DEVICE.startswith("cuda"):
         threading.Thread(target=gpu_watchdog, daemon=True).start()
         print(f"[embed] 设备 {DEVICE}，GPU 看门狗已启动（每 {GPU_WATCHDOG_INTERVAL:.0f}s 探测一次）", flush=True)
