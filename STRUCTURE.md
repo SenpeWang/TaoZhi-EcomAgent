@@ -24,7 +24,12 @@
 | `src/ecom_copilot/enterprise/` | 在线权限、会话、文档、业务服务、工作流及 Worker |
 | `src/ecom_copilot/graph/` | 本地图谱与共享图能力 |
 | `evals/` | 评估体系统一入口：数据集、指标、运行器、基线与报告 |
+| `evals/dataset/` | 独立评测数据包：规格、契约校验、确定性生成与幂等灌库 |
+| `evals/dataset/spec/` | 数据包规格（组织/夹具/语料/模板），唯一事实来源 |
 | `evals/datasets/` | 评测数据集与口径说明，随代码进 Git 可 diff |
+| `evals/datasets/generated/` | 独立包生成产物：用例、语料与 manifest，随代码进 Git |
+| `evals/datasets/generated/latest/` | 指向当前最新版本的指针目录，由 generate 同步 |
+| `evals/datasets/generated/v1/` | v1 版生成快照：44 例用例 + 16 篇语料文档 |
 | `evals/experiments/` | 一次性实证实验脚本（结论已回写代码注释） |
 | `evals/legacy/` | 已退役的评估原型与分批交付记录，仅留档不维护 |
 | `evals/reports/` | 运行产物不入库，保留历史报告目录为证 |

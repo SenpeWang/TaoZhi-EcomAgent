@@ -1,0 +1,50 @@
+{
+  "dataset": "generated/v1",
+  "seed": 20261018,
+  "spec_sha256": {
+    "corpus.yaml": "f4d8e1ed0b9b69164d9232124ea7a2f91afcbaabca4a21879fa576d5930aac83",
+    "fixtures.yaml": "ef6127d6f39c40adea649977e124e838332d3005f3907ba5ded8af2fa25a2ca9",
+    "org.yaml": "f2c83b49afaa9966f05ebb31e58aba951b22c8235fc056f83a474b520b6139e0",
+    "templates.yaml": "1391accf2b08daf4a655af16e2e57abb2a902042b4646c48a99e1b546d387781"
+  },
+  "counts": {
+    "cases": 44,
+    "by_category": {
+      "aftersale": 3,
+      "compat": 10,
+      "conflict": 2,
+      "grant": 2,
+      "injection": 2,
+      "insufficient": 2,
+      "leakage": 2,
+      "multi_doc": 3,
+      "product": 12,
+      "revocation": 2,
+      "role": 4
+    },
+    "templates": 26
+  },
+  "docs": {
+    "total": 16,
+    "by_kind": {
+      "conflict": 2,
+      "fixture": 5,
+      "policy": 3,
+      "product": 6
+    }
+  },
+  "identities": [
+    "SYN_A_STAFF001",
+    "SYN_A_STAFF002",
+    "SYN_A_STAFF003",
+    "SYN_A_STAFF004",
+    "SYN_A_LDR001",
+    "SYN_A_BOSS001",
+    "SYN_A_ADMIN001"
+  ],
+  "canaries": [
+    "SYN-CANARY-A01",
+    "SYN-CANARY-A-COST"
+  ],
+  "notes": "确定性生成：同 spec 同种子输出逐字节一致；manifest 不含时间戳，版本信息由 git 承担。对抗层沿用 evals/datasets/golden_adversarial.json，其权限用例由本包夹具背书。"
+}

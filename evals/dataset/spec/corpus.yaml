@@ -1,0 +1,161 @@
+# 检索层语料规格：产品 / 兼容关系 / 政策文档，含可判定的事实字段。
+#
+# 设计要点：
+# 1. 语料随包进 git，seed.py 灌库后检索层即可在任意机器复现——
+#    不再依赖 data/incoming 私有语料（那目录不进 git，换机解析率即崩塌）。
+# 2. 每篇文档的 facts 是机器可判定的锚点：generate.py 用它渲染
+#    expected_facts，judge 与规则层都能用，避免"答了但不知道答没答对"。
+# 3. 文档 id 用 SYN_CORPUS_ 前缀，与权限夹具 SYN_DOC_ 同族，--clean 一并清除。
+version: 1
+
+products:
+  - key: LX20
+    doc_id: SYN_CORPUS_LX20
+    title: LX-20 65W 氮化镓充电器（评测产品资料）
+    brand: 绿联
+    facts:
+      power: 65W
+      ports: 双 C 口加单 A 口
+      dual_caveat: 双口同充时单口降为 45W
+      price: 129
+      weight: 128g
+      protocol: PD3.0 与 PPS
+      scenario: 手机平板快充
+    compat_note: 支持 iPhone 15 及以上机型 PD 快充，峰值 65W
+  - key: LX21
+    doc_id: SYN_CORPUS_LX21
+    title: LX-21 140W 氮化镓充电器（评测产品资料）
+    brand: 绿联
+    facts:
+      power: 140W
+      ports: 三 C 口
+      dual_caveat: 满功率 140W 须使用 C1 口并搭配 5A E-Marker 线材
+      price: 299
+      weight: 210g
+      protocol: PD3.1 EPR
+      scenario: 笔记本电脑与手机同充
+    compat_note: 为 MacBook Pro 16 供电可满血 140W
+  - key: MC500
+    doc_id: SYN_CORPUS_MC500
+    title: MC-500 磁吸数据线（评测产品资料）
+    brand: 摩米士
+    facts:
+      power: 240W
+      ports: C  to C
+      dual_caveat: 240W 为线材通流标称值，实际功率受充电头与受电设备共同约束
+      price: 79
+      weight: 46g
+      protocol: USB PD3.1 EPR 与 E-Marker
+      scenario: 磁吸对位充电
+    compat_note: 搭配 iPhone 16 时有线 USB-PD 上限约 28W，线材标称功率不可达
+  - key: C5
+    doc_id: SYN_CORPUS_C5
+    title: C5 全胶陶瓷膜（评测产品资料）
+    brand: 摩米士
+    facts:
+      power: 无
+      ports: 折叠屏内屏专用
+      dual_caveat: 直板机请选择 C1 或 C2
+      price: 39
+      weight: 12g
+      protocol: 9H 硬度
+      scenario: 折叠屏内屏保护
+    compat_note: 折叠屏内屏专用；直板机不适配
+  - key: C1
+    doc_id: SYN_CORPUS_C1
+    title: C1 钢化膜（评测产品资料）
+    brand: 摩米士
+    facts:
+      power: 无
+      ports: 直板机通用
+      dual_caveat: 曲面屏版本为 C1S
+      price: 19
+      weight: 9g
+      protocol: 0.33mm 厚度
+      scenario: 直板机屏幕保护
+    compat_note: iPhone 13 至 17、Mate 60 与 70 等直板机通用
+  - key: SP10
+    doc_id: SYN_CORPUS_SP10
+    title: SP-10 便携蓝牙音箱（评测产品资料）
+    brand: 绿联
+    facts:
+      power: 20W
+      ports: 蓝牙 5.3
+      dual_caveat: 双机串联须同型号
+      price: 199
+      weight: 320g
+      protocol: 蓝牙 5.3 与 TF 卡本地播放
+      scenario: 户外便携扩音
+    compat_note: 支持 iPhone 15 蓝牙连接与免提通话
+
+compatibilities:
+  - charger: LX20
+    device: iPhone 15
+    conclusion: 已确认兼容
+    detail: PD 快充峰值 65W，约 30 分钟充至 50%
+  - charger: LX21
+    device: MacBook Pro 16
+    conclusion: 已确认兼容
+    detail: 满功率 140W 须使用 C1 口并搭配 5A E-Marker 线材
+  - charger: MC500
+    device: iPhone 16
+    conclusion: 功率受设备约束
+    detail: iPhone 16 有线 USB-PD 上限约 28W，线材 240W 为通流标称值
+  - membrane: C5
+    device: iPhone 15
+    conclusion: 不适配
+    detail: C5 为折叠屏内屏专用，直板机请选择 C1 或 C2
+  - membrane: C1
+    device: Mate 60
+    conclusion: 已确认兼容
+    detail: 直板机通用，全胶排气设计
+
+policies:
+  - doc_id: SYN_CORPUS_P_REFUND
+    title: 售后退款审批流程（评测制度）
+    body: |
+      售后退款审批流程
+      一、规则内小额退款
+      客服在授权范围内可直接处理；金额上限现行制度为草案，具体数值待企业确认。
+      二、超限退款
+      超限退款按流程逐级上报：客服登记 → 售后组长核定 → 管理层批准。
+      三、答复纪律
+      不得编造具体金额上限；客户追问时应说明待企业确认。
+  - doc_id: SYN_CORPUS_P_PRESALE
+    title: 售前客服应答规范（评测制度）
+    body: |
+      售前客服应答规范
+      一、未知问题处置
+      知识库未覆盖的客户问题：登记问题并回复客户"帮您确认后答复"，转入组长协调。
+      二、答复纪律
+      不得现场猜测作答，不得凭个人经验给出确定性答案，不得向客户透露内部流转细节。
+  - doc_id: SYN_CORPUS_P_CLASSIFY
+    title: 资料密级管理规范（评测制度）
+    body: |
+      资料密级管理规范
+      一、密级定义
+      company：全公司可见；org：本部门及下级可见；selected：仅授权对象可见。
+      二、发布审核
+      组长级及以上资料发布须经审核；密级变更须重新走审批。
+      三、权限申请
+      需要越级阅读时，按权限申请制度提交审批，不得私下传递。
+
+conflict_docs:
+  - doc_id: SYN_CORPUS_TABLE_V3
+    title: 机型适配总表 V3.0（评测资料）
+    body: |
+      机型适配总表 V3.0（2026-09-01 生效）
+      一、直板机适配
+      C5 陶瓷膜：iPhone 13 至 17、Mate 60 与 70 等直板机均为适配（✔）。
+      二、折叠屏适配
+      折叠屏内屏：仅 C5 适配；C1/C2 不适配。
+  - doc_id: SYN_CORPUS_NOTICE_C5
+    title: C5 陶瓷膜上市公告（评测资料）
+    body: |
+      C5 陶瓷膜上市公告（2026-07-10 发布）
+      一、产品定位
+      C5 为折叠屏专用全胶陶瓷膜。
+      二、FAQ
+      问：C5 能贴直板机吗？答：不能。C5 为折叠屏专用，直板机请选择 C1/C2/C3。
+      三、渠道口径
+      与《机型适配总表》不一致时，以上市公告 FAQ 为准并反馈产品中心核验。

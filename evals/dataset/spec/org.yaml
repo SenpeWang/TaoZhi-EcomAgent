@@ -1,0 +1,60 @@
+# 评测组织规格：逻辑身份 → 真实登录账号的唯一映射。
+#
+# 为什么需要这一层：历史用例里的 test_identity 是逻辑身份（SYN_A_STAFF001），
+# 由 run_evals 用字符串包含关系硬映射到 staff/leader/owner/admin 四个固定账号。
+# 该映射有两个缺陷：① 同一角色的多个逻辑身份会塌到同一账号（SYN_A_STAFF001/003/004
+# 都变成 staff），按用户维度的授权/撤权用例因此互相污染；② 映射规则散落在评测
+# 脚本里，新增身份类型就要改代码。本规格把映射提升为数据，seed.py 按它建档，
+# run_evals 按它解析，身份与夹具状态一一对应。
+#
+# tenant: existing —— 复用当前租户。auth 按 (tenant_id, username) 解析登录，
+# 新建 syn_* 账号不影响既有 staff/leader/owner/admin。
+version: 1
+
+nodes:
+  - id: SYN_NODE_OP
+    name: 评测-产品适配组
+    kind: team
+    parent_by_name: 电商运营部      # 按名称解析挂载，避免把 UUID 写进规格
+  - id: SYN_NODE_CS
+    name: 评测-售后组
+    kind: team
+    parent_by_name: 电商运营部
+
+identities:
+  - logical_id: SYN_A_STAFF001
+    username: syn_staff1
+    display_name: 评测-运营员工1
+    role: employee
+    node: SYN_NODE_OP
+  - logical_id: SYN_A_STAFF002
+    username: syn_staff2
+    display_name: 评测-运营员工2
+    role: employee
+    node: SYN_NODE_OP
+  - logical_id: SYN_A_STAFF003
+    username: syn_staff3
+    display_name: 评测-运营员工3
+    role: employee
+    node: SYN_NODE_OP
+  - logical_id: SYN_A_STAFF004
+    username: syn_staff4
+    display_name: 评测-售后员工
+    role: employee
+    node: SYN_NODE_CS
+  - logical_id: SYN_A_LDR001
+    username: syn_leader1
+    display_name: 评测-适配组长
+    role: leader
+    node: SYN_NODE_OP
+  - logical_id: SYN_A_BOSS001
+    username: syn_boss
+    display_name: 评测-老板
+    role: boss
+    node: COMPANY_ROOT        # 公司根节点（按 kind=company 解析）
+  - logical_id: SYN_A_ADMIN001
+    username: syn_admin
+    display_name: 评测-系统管理员
+    role: employee
+    node: SYN_NODE_OP
+    system_admin: true
