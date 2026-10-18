@@ -10,8 +10,8 @@ spec 哈希与种子，没有时间戳（时间信息由 git 提交记录承担�
   python -m evals.dataset.generate                 # 生成到 evals/datasets/generated/v1
   python -m evals.dataset.generate --out <dir>     # 指定输出目录
 
-与手写集（evals/datasets/cases.jsonl）的关系：手写集保留作 legacy 对照，
-本生成器产出的是可复现、可扩展、契约校验过的新集；两者共用同一套指标口径。
+本生成器产出唯一评测口径：可复现、可扩展、契约校验过的数据包（手写 legacy
+集已随单口径化删除，指标口径全项目唯一，见 evals/metrics.py）。
 """
 from __future__ import annotations
 

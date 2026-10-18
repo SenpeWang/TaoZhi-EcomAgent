@@ -31,10 +31,7 @@
 | `evals/datasets/generated/latest/` | 指向当前最新版本的指针目录，由 generate 同步 |
 | `evals/datasets/generated/v1/` | v1 版生成快照：44 例用例 + 16 篇语料文档 |
 | `evals/experiments/` | 一次性实证实验脚本（结论已回写代码注释） |
-| `evals/legacy/` | 已退役的评估原型与分批交付记录，仅留档不维护 |
-| `evals/reports/` | 运行产物不入库，保留历史报告目录为证 |
-| `evals/reports/legacy/` | 历史评估报告原件，作为当期结论的证据留存 |
-| `evals/tools/` | 评估工具脚本：一次性补丁与数据集审核，可重复执行 |
+| `evals/reports/` | 运行产物不入库（.gitignore 全忽略） |
 | `evals/tests/` | 评估代码自身的单元测试，必须进 CI |
 | `src/ecom_copilot/hypothesis/` | 离线假设管理 |
 | `src/ecom_copilot/ingestion/` | 资料来源与入库共享工具 |

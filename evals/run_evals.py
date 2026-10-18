@@ -17,8 +17,11 @@
   python evals/run_evals.py --quick --compare  # 运行后与 evals/baseline.json 对比
   python evals/run_evals.py --quick --save-baseline  # 将本次结果锁定为基线
   python evals/run_evals.py --behavior-only    # 只重跑行为层（LLM judge）
+  python evals/run_evals.py --adversarial-only  # 只重跑对抗层（规则判定，约 5 分钟）
 
-数据集在 evals/datasets/，结果落盘 evals/reports/<时间戳>-<git短SHA>.json；基线随代码进 Git。
+用例与语料来自独立数据包（evals/dataset/：spec → generate → seed 灌库，检索走 PG/ES）；
+跑评测前先灌库：PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed。
+结果落盘 evals/reports/<时间戳>-<git短SHA>.json；基线随代码进 Git。
 """
 import argparse
 import json
@@ -34,8 +37,7 @@ sys.path.insert(0, str(ROOT / "evals"))  # 指标实现在 evals/metrics.py，�
 sys.path.insert(0, str(ROOT))            # evals.dataset.*（灌库口令等）按包路径导入
 EVALS = ROOT / "evals"
 OUT_DIR = EVALS / "reports"
-CASES = EVALS / "datasets/cases.jsonl"
-GEN_CASES = EVALS / "datasets/generated/latest/cases.jsonl"
+CASES = EVALS / "datasets/generated/latest/cases.jsonl"
 GOLDEN = EVALS / "datasets/golden_adversarial.json"
 BASELINE = EVALS / "baseline.json"
 
@@ -81,164 +83,14 @@ def git_sha():
 
 
 # ─────────────── 检索质量层 ───────────────
-def title_of(p):
-    for line in p.read_text(encoding="utf-8").splitlines():
-        s = line.strip()
-        if s.startswith("#"):
-            return s.lstrip("#").strip()[:80]
-    return p.stem
 
 
-# 交付路径的陈旧前缀（目录改名/搬迁后的历史写法），解析时逐个剥离后按尾路径匹配。
-_STALE_PREFIX = ("data/", "incoming/待映射/", "incoming/mofa/", "corpus/", "incoming/")
-_CORPUS = None
-
-
-def _build_corpus():
-    """扫描语料根目录，建立「尾路径 -> 文件集合」索引。
-
-    只扫 data/corpus 与 data/incoming，不碰私有目录与运行时目录。
-    """
-    files = []
-    for base in ("data/corpus", "data/incoming"):
-        root = ROOT / base
-        if root.is_dir():
-            files += [q for q in root.rglob("*")
-                      if q.is_file() and (q.suffix == ".md" or q.name.endswith(".jsonl"))]
-    suffix = {}
-    for f in files:
-        parts = f.relative_to(ROOT).as_posix().split("/")
-        for k in range(1, min(5, len(parts) + 1)):
-            suffix.setdefault("/".join(parts[-k:]), set()).add(f)
-    return files, suffix
-
-
-def corpus_index():
-    global _CORPUS
-    if _CORPUS is None:
-        _CORPUS = _build_corpus()
-    return _CORPUS
-
-
-def resolve_source(file_field):
-    """把用例里的来源路径解析为磁盘上的实际文件；解析不到或存在歧义时返回 None。
-
-    顺序：原始拼法 → 剥离陈旧前缀后按尾路径唯一匹配。歧义即放弃（不猜品牌）。
-    """
-    if not file_field:
-        return None
-    for cand in (ROOT / "data" / file_field,
-                 ROOT / "data/incoming/待映射" / file_field,
-                 ROOT / "data/incoming/mofa" / file_field,
-                 ROOT / file_field):
-        if cand.exists():
-            return cand
-    text = file_field
-    for prefix in _STALE_PREFIX:
-        if text.startswith(prefix):
-            text = text[len(prefix):]
-    parts = [p for p in text.split("/") if p]
-    _, suffix = corpus_index()
-    for k in range(len(parts), 0, -1):
-        hits = suffix.get("/".join(parts[-k:]))
-        if hits and len(hits) == 1:
-            return next(iter(hits))
-    return None
-
-
-# 证据位置里的通用词：出现频率高但不指向任何具体文档，匹配时必须排除，
-# 否则"充电器"会把库里所有充电器文档都算成预期，等于变相回到"展开整个目录"。
-_EVIDENCE_STOPWORDS = ("资料", "字段", "记录", "列表", "说明", "参数", "小节", "章节",
-                       "官方", "采集", "数据", "文件", "版本", "兼容")
-# 语料频率闸门：一个特征词若命中超过这么多个文档标题，说明它不具区分度
-# （典型如 evidence_location 里的路径段 apple/huawei/products.jsonl），
-# 必须剔除——否则预期集合被放大到几十个，recall 被分母压死而 hit@k 被抬虚。
-_EVIDENCE_MAX_MATCHES = 5
-
-
-def evidence_terms(case) -> list:
-    """从 evidence_location 与问题文本提取指向具体文档的特征词（型号/规格）。
-
-    两条来源：evidence_location（证据所在记录）与 question（兼容类多选题会在
-    问题里点名多个产品，evidence_location 反而只有 jsonl 行号）。
-    数字型特征（iPhone 15 Pro、畅享 60、20W、L532 240W）区分度最高，一律排在
-    纯英文词之前——否则路径段垃圾词（apple/products/jsonl）会占满配额把有效
-    特征词挤掉（历史上 terms[:6] 截断就踩过这个坑）。
-    """
-    location = case.get("evidence_location") or ""
-    question = case.get("question") or ""
-    q_lower = question.lower()
-    numeric, plain, seen = [], [], set()
-
-    def add(term, from_question):
-        t = term.strip()
-        if not t or t.lower() in seen or t in _EVIDENCE_STOPWORDS:
-            return
-        # 纯英文词必须是问题里点名的产品名：evidence_location 里的同形词大多是
-        # JSON 字段名（power/voltage/interface）或路径段（products/jsonl），
-        # 不指向具体文档（power 就曾命中"USB Power Delivery"标题）。
-        # 数字型特征（20W、畅享 60、L532 240W）自带区分度，不受此限。
-        if not any(ch.isdigit() for ch in t) and not from_question and t.lower() not in q_lower:
-            return
-        seen.add(t.lower())
-        (numeric if any(ch.isdigit() for ch in t) else plain).append(t)
-
-    for text, from_question in ((location, False), (question, True)):
-        # 英文/数字型号（可含空格分隔的后缀，如 iPhone 13 Pro、Mate X5、USB-C）
-        for m in re.findall(r"[A-Za-z][A-Za-z0-9\-]*(?:\s+(?:\d+[A-Za-z]*|[A-Z]\d+[A-Za-z]*))*(?:\s+(?:Pro|Max|Plus|mini|Ultra|Air|SE))?", text):
-            if len(m.strip()) >= 4:
-                add(m, from_question)
-        # 数字+单位/中文型号（20W、67W、畅享 70）
-        for m in re.findall(r"\d+\s*[WA瓦]|[\u4e00-\u9fa5]{2,}\s*\d+", text):
-            add(m, from_question)
-    return (numeric + plain)[:8]
-
-
-def expected_titles(case, corpus_titles=None):
-    """用例的预期文档标题集合（命中判定用）。"""
-    return _expected(case, corpus_titles)[0]
-
-
-def _expected(case, corpus_titles=None):
-    """返回 (预期标题集合, 未解析的来源文件名列表)。
-
-    预期文档的两条来源：
-    1. source_files 里显式列出的 .md（解析到实际文件后取标题）；
-    2. evidence_location 里的型号/规格特征词，在正式库标题中精确匹配。
-
-    历史教训：曾按 .jsonl 展开同目录全部 md，预期集合被放大到 22~53 个，
-    导致 recall 被分母压到 0.17、而 hit@8 被"命中任意一个"抬到 0.80——
-    两个方向的失真同时发生，指标完全失去决策价值。
-    """
-    out, unresolved = set(), []
-    for sf in case.get("source_files") or []:
-        f = sf.get("file") or ""
-        target = resolve_source(f)
-        if target is None:
-            unresolved.append(f)
-            continue
-        if target.suffix == ".md":
-            out.add(title_of(target))
-    if corpus_titles:
-        low = [(t, t.lower()) for t in corpus_titles]
-        for term in evidence_terms(case):
-            if term in _EVIDENCE_STOPWORDS:
-                continue
-            tl = term.lower()
-            hits = [t for t, t_lower in low if tl in t_lower]
-            if len(hits) > _EVIDENCE_MAX_MATCHES:
-                continue  # 频率闸门：非区分性特征词（品牌词/路径段）不进预期集合
-            out.update(hits)
-    return out, unresolved
-
-
-def phase_retrieval(sample=60, dataset="legacy"):
+def phase_retrieval(sample=60):
     from ecom_copilot.enterprise.retriever import search_documents
     from ecom_copilot.llm.client import LLMClient, ModelTier
     from ecom_copilot.enterprise.privacy import redact
     from ecom_copilot.enterprise.embedding import encode_passages
-    cases_path = GEN_CASES if dataset == "generated" else CASES
-    cases = [json.loads(l) for l in cases_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
     pool = [c for c in cases if c["category"] in ("product", "compat", "aftersale", "multi_doc")]
     import random
     chosen = random.Random(20261008).sample(pool, min(sample, len(pool)))
@@ -256,28 +108,17 @@ def phase_retrieval(sample=60, dataset="legacy"):
         except Exception:
             return None
 
-    # 正式库已发布文档标题（内存内匹配，避免逐用例查库）
+    # 预期文档按 id 解析：expected_documents 直接给文档 id，库内 id→title 映射
+    # （语料由 seed.py 灌库，id 由 seed 保证存在）。缺一个 expected 文档即整例
+    # 不可评估：recall 分母含不存在的文档，指标会被无声压死，必须显式进 skipped
+    # 让覆盖率暴露，绝不按部分预期打分。
     with database_connection() as c:
-        corpus_titles = [r["title"] for r in fetch_all(
-            c, "SELECT title FROM documents WHERE tenant_id=%s AND state=%s",
-            (principal.tenant_id, "published"))]
-
-    # 预期文档集合的两套口径：
-    # legacy    —— source_files 路径解析 + evidence_location 特征词匹配标题（语料在磁盘 data/）；
-    # generated —— expected_documents 直接给文档 id，库内 id→title 解析（语料由 seed.py 灌库）。
-    # generated 口径下缺一个 expected 文档即整例不可评估：recall 分母含不存在的文档，
-    # 指标会被无声压死，必须显式进 skipped 让覆盖率暴露，绝不按部分预期打分。
-    id_to_title = {}
-    if dataset == "generated":
-        with database_connection() as c:
-            id_to_title = {r["id"]: r["title"] for r in fetch_all(
-                c, "SELECT id,title FROM documents WHERE tenant_id=%s", (principal.tenant_id,))}
+        id_to_title = {r["id"]: r["title"] for r in fetch_all(
+            c, "SELECT id,title FROM documents WHERE tenant_id=%s", (principal.tenant_id,))}
 
     def exp_of(case):
-        if dataset == "generated":
-            want = case.get("expected_documents") or []
-            return {id_to_title[d] for d in want if d in id_to_title}, [d for d in want if d not in id_to_title]
-        return expected_titles(case, corpus_titles)
+        want = case.get("expected_documents") or []
+        return {id_to_title[d] for d in want if d in id_to_title}, [d for d in want if d not in id_to_title]
 
     def run(use_hyde):
         pairs, lat, skipped = [], [], 0
@@ -297,9 +138,7 @@ def phase_retrieval(sample=60, dataset="legacy"):
         # 静默在小子集上统计命中率比没有指标更危险，必须显式报出来并告警。
         coverage = metrics.summarize([1.0] * len(pairs) + [0.0] * skipped)
         if coverage["mean"] is not None and coverage["mean"] < 0.8:
-            hint = ("需修复 datasets/cases.jsonl 的 source_files 与语料实际路径的对应关系"
-                    if dataset == "legacy" else
-                    "需先灌库夹具：PYTHONPATH=src ECOM_ENV_FILE=.env.production "
+            hint = ("需先灌库夹具：PYTHONPATH=src ECOM_ENV_FILE=.env.production "
                     ".venv/bin/python -m evals.dataset.seed")
             print(f"⚠ 检索层可评估覆盖率仅 {coverage['mean']:.0%}"
                   f"（{len(pairs)}/{len(chosen)} 例能解析出预期文档）："
@@ -470,9 +309,8 @@ JUDGE_SYSTEM = """你是评测判定器。给定预期行为与系统实际输�
  "claims":声明总条数,"supported":有支撑的声明条数,"reason":"不超过40字"}"""
 
 
-def phase_behavior(per_class=8, dataset="legacy"):
-    cases_path = GEN_CASES if dataset == "generated" else CASES
-    cases = [json.loads(l) for l in cases_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+def phase_behavior(per_class=8):
+    cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
     by_cat = {}
     for c in cases:
         by_cat.setdefault(c["category"], []).append(c)
@@ -481,10 +319,6 @@ def phase_behavior(per_class=8, dataset="legacy"):
     chosen = []
     for cat, items in by_cat.items():
         chosen.extend(rng.sample(items, min(per_class, len(items))))
-    http = httpx.Client(base_url="http://127.0.0.1:18080", trust_env=False, timeout=200)
-    r = http.post("/api/auth/login", json={"username": "staff", "password": "123456"})
-    r.raise_for_status()
-    http.headers["x-csrf-token"] = r.json()["csrf_token"]
     with database_connection() as c:
         node = resolve_eval_node(c)
     from ecom_copilot.llm.client import LLMClient, ModelTier
@@ -498,15 +332,10 @@ def phase_behavior(per_class=8, dataset="legacy"):
         cat = case["category"]
         stats.setdefault(cat, {"n": 0, "pass": 0, "fail": [], "skipped": 0})
         s = stats[cat]
-        if dataset == "generated":
-            # 独立数据包：身份由 spec/org.yaml 建档、seed.py 灌库，用例直接带登录名，
-            # 不再有"字符串包含关系把多个逻辑身份塌成同一账号"的旧映射。
-            name = (case.get("test_identity") or {}).get("username") or ""
-            password = EVAL_PASSWORD
-        else:
-            uid = (case.get("test_identity") or {}).get("user_id", "").upper()
-            name = "admin" if "ADMIN" in uid else "owner" if "BOSS" in uid else "leader" if "LDR" in uid else "staff"
-            password = "123456"
+        # 身份由 spec/org.yaml 建档、seed.py 灌库，用例直接带登录名：
+        # 身份是数据，不再有按用户 id 字符串包含关系做的塌缩映射。
+        name = (case.get("test_identity") or {}).get("username") or ""
+        password = EVAL_PASSWORD
         if not name:
             s["skipped"] += 1
             continue
@@ -717,41 +546,33 @@ def compare(current, baseline):
 
 # ─────────────── 生产阈值门禁 ───────────────
 # 业界（RAGAS / DeepEval 2026）对面向客户系统的推荐下限；内部工具可放宽到 0.7。
+# precision@8 不设门禁：16 篇迷你语料上该指标有结构性上限——单预期文档的用例
+# 最高 1/8=0.125、双预期 0.25，实测 0.36 已接近完美系统的表现。对它设阈值衡量
+# 的是语料结构而非系统质量；回归检测由 recall@8 / hit@8 / MRR 与 --compare
+# 逐项对比承担。faithfulness/relevancy 与语料规模无关，照常设阈。
 GATE_THRESHOLDS = {
     "faithfulness": 0.85,          # 反幻觉硬指标：低于此值说明答案在掺参数知识
     "answer_relevancy": 0.80,      # 切题度：答非所问
-    "context_precision@8": 0.75,   # 检索结果里有多少是真正有用的
+    "context_precision@8": None,   # 检索结果里有多少是真正有用的（迷你语料结构性上限，不设阈）
     "context_recall@8": 0.80,      # 该找到的资料找到没有
 }
 
-# generated 口径（16 篇迷你语料）的门禁：precision@8 在此语料上有结构性上限——
-# 单预期文档的用例最高 1/8=0.125、双预期 0.25，实测 0.36 已接近完美系统的表现。
-# 对它设阈值衡量的是语料结构而非系统质量，故不设门禁；回归检测由 recall@8 /
-# hit@8 / MRR 与 --compare 逐项对比承担。faithfulness/relevancy 与语料规模无关，不变。
-GATE_THRESHOLDS_GENERATED = {
-    "faithfulness": 0.85,
-    "answer_relevancy": 0.80,
-    "context_precision@8": None,
-    "context_recall@8": 0.80,
-}
 
-
-def gate_check(six: dict, dataset: str = "legacy") -> list:
+def gate_check(six: dict) -> list:
     """返回未达标项 [(指标, 实际, 阈值)]；只对跑过的指标校验。
 
-    没跑的层是 None，必须跳过——否则"这层没跑"会被判成"这层不及格"，
-    在 CI 里表现为莫名其妙的阻塞。阈值为 None 的指标（如 generated 口径的
-    precision@8）同样跳过，理由见 GATE_THRESHOLDS_GENERATED 注释。
+    没跑的层是 None，必须跳过——否则这层没跑会被判成这层不及格，
+    在 CI 里表现为莫名其妙的阻塞。阈值为 None 的指标（如迷你语料上的
+    precision@8）同样跳过，理由见 GATE_THRESHOLDS 注释。
     """
-    thresholds = GATE_THRESHOLDS_GENERATED if dataset == "generated" else GATE_THRESHOLDS
     fa = (six.get("faithfulness") or {}).get("micro")
     rel = (six.get("answer_accuracy") or {}).get("relevant_rate")
     p8 = (six.get("precision@k") or {}).get(8)
     r8 = (six.get("recall@k") or {}).get(8)
     observed = {"faithfulness": fa, "answer_relevancy": rel,
                 "context_precision@8": p8, "context_recall@8": r8}
-    return [(k, v, thresholds[k]) for k, v in observed.items()
-            if v is not None and thresholds.get(k) is not None and v < thresholds[k]]
+    return [(k, v, GATE_THRESHOLDS[k]) for k, v in observed.items()
+            if v is not None and GATE_THRESHOLDS.get(k) is not None and v < GATE_THRESHOLDS[k]]
 
 
 def main():
@@ -760,24 +581,21 @@ def main():
     ap.add_argument("--full", action="store_true", help="三层全跑")
     ap.add_argument("--behavior-only", action="store_true", help="只重跑行为层")
     ap.add_argument("--adversarial-only", action="store_true", help="只重跑对抗层（规则判定，约 5 分钟）")
-    ap.add_argument("--dataset", default="legacy", choices=["legacy", "generated"],
-                    help="用例集口径：legacy=历史 200 条集（source_files 路径解析）；"
-                         "generated=独立评测数据包（spec 生成 + seed 灌库，预期文档按 id 解析）")
     ap.add_argument("--compare", action="store_true", help="与基线对比")
     ap.add_argument("--save-baseline", action="store_true", help="锁定为基线")
     ap.add_argument("--gate", action="store_true",
                     help="按生产阈值校验，未达标退出码 1（供 CI 阻塞合并）")
     args = ap.parse_args()
-    result = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "git": git_sha(), "dataset": args.dataset}
+    result = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "git": git_sha()}
     if args.adversarial_only:
         result["adversarial"] = phase_adversarial()
     elif args.behavior_only:
-        result["behavior"] = phase_behavior(per_class=8, dataset=args.dataset)
+        result["behavior"] = phase_behavior(per_class=8)
     else:
-        result["retrieval"] = phase_retrieval(dataset=args.dataset)
+        result["retrieval"] = phase_retrieval()
         result["adversarial"] = phase_adversarial()
         if args.full:
-            result["behavior"] = phase_behavior(per_class=8, dataset=args.dataset)
+            result["behavior"] = phase_behavior(per_class=8)
     six = six_metrics(result)
     result["six_metrics"] = six
     print_six(six)
@@ -785,14 +603,9 @@ def main():
     path = OUT_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{result['git']}.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"结果已存档: {path}")
-    # 基线按数据集口径分流：两个口径的语料、身份、预期解析都不同，
-    # 拿 legacy 的基线对比 generated 的跑数是拿苹果比橘子。旧基线无 dataset
-    # 字段（2026-10-08 的快照），按 legacy 处理并提示口径差异。
-    baseline_path = BASELINE if args.dataset == "legacy" else EVALS / "baseline.generated.json"
-    if args.compare and baseline_path.exists():
-        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-        if baseline.get("dataset") and baseline.get("dataset") != args.dataset:
-            print(f"⚠ 基线口径（{baseline.get('dataset')}）与本次（{args.dataset}）不同，对比仅供参考")
+    # 唯一口径：语料、身份、预期解析同一套，基线只有一份，直接对比。
+    if args.compare and BASELINE.exists():
+        baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
         rows = compare(result, baseline)
         print(f"\n{'指标':<30}{'基线':>10}{'本次':>10}  变化")
         for k, b, c, d in rows:
@@ -805,7 +618,7 @@ def main():
     else:
         print(json.dumps(result, ensure_ascii=False, indent=2)[:2000])
     if args.gate:
-        fails = gate_check(six, dataset=args.dataset)
+        fails = gate_check(six)
         if fails:
             print("\n⛔ 未达生产阈值：")
             for k, v, t in fails:
@@ -813,8 +626,8 @@ def main():
             sys.exit(1)
         print("\n✅ 全部已评估指标达到生产阈值")
     if args.save_baseline:
-        baseline_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"基线已更新: {baseline_path}")
+        BASELINE.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"基线已更新: {BASELINE}")
 
 
 if __name__ == "__main__":

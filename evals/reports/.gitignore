@@ -1,5 +1,3 @@
-# 运行产物不入库；legacy/ 下的历史报告作为证据保留
+# 运行产物不入库
 *
-!legacy/
-!legacy/**
 !.gitignore

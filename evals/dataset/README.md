@@ -5,7 +5,7 @@
 
 ## 为什么需要它（2026-10 测试集审计结论）
 
-旧集 `datasets/cases.jsonl` 的三个结构性问题：
+已退役的手写集（200 例，`datasets/cases.jsonl`，单口径化时删除）的三个结构性问题：
 
 1. **权限夹具不存在**：约 70 条权限/角色/撤权类用例引用的 `SYN_*` 夹具，
    代码里没有、生产库里也没有（0 个 SYN 文档、0 条授权）。夹具缺失时系统必然
@@ -50,8 +50,8 @@ PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.s
 PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed --clean
 
 # 5. 跑评测（检索/行为层的 expected 文档按 id 解析，身份按 spec 登录）
-PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python evals/run_evals.py --quick --dataset generated
-PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python evals/run_evals.py --full  --dataset generated
+PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python evals/run_evals.py --quick
+PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python evals/run_evals.py --full
 ```
 
 ## 设计约束
@@ -69,10 +69,3 @@ PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python evals/run_evals.py
   （有效授权/过期=撤权/deny 优先/密级通路/草稿状态），字段对但 grade 算错的白检过不了。
 - **`SYN_` 前缀即命名空间**：文档/账号/节点/授权统一前缀，`--clean` 按它整包清除，
   不碰业务数据。
-
-## 与旧集的关系
-
-`datasets/cases.jsonl`（200 例）保留为 `--dataset legacy` 口径，其语料在磁盘 `data/`；
-新包为 `--dataset generated` 口径，其语料在 PG/ES（seed 灌库）。两套口径的
-预期文档解析、身份登录、node_id 来源都不同，run_evals.py 内按 dataset 参数分支。
-对抗层（`golden_adversarial.json`，18 例）两套口径共用，其权限用例由本包夹具背书。

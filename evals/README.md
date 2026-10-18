@@ -14,21 +14,16 @@ evals/
 │   ├── seed.py                  幂等灌库 + 权限语义实测矩阵（--verify/--clean）
 │   └── README.md                数据包说明书与设计约束
 ├── datasets/                    数据集（随代码进 Git，可追溯、可 diff）
-│   ├── cases.jsonl              200 例历史集（--dataset legacy 口径，语料在磁盘 data/）
-│   ├── 评测说明.md               数据集说明书：字段口径、类别分布、关键规则
-│   ├── golden_questions.jsonl   40 例含参考答案的问答集（用于答案质量判定）
 │   ├── golden_adversarial.json  18 例对抗集（注入/越权/泄漏/冲突，每条带机读 judge
-│   │                             规则 + basis 语料溯源，两口径共用，全自动判定）
+│   │                             规则 + basis 语料溯源，全自动判定）
 │   └── generated/v1/            独立包生成产物：44 例 + 16 篇语料 + manifest（latest/ 为指针）
 ├── metrics.py                   指标实现（全项目唯一口径：Hit@k / P@k / R@k / nDCG@k / MRR / pass^k）
-├── run_evals.py                 三层评估运行器（检索 · 对抗 · 行为；--dataset 切换口径）
+├── run_evals.py                 三层评估运行器（检索 · 对抗 · 行为；唯一口径）
 ├── e2e_ask_data.py              问数链路端到端验收
 ├── verify_api_end_to_end.py     API 端到端回归（登录→提问→轮询）
 ├── experiments/                 一次性实证实验（结论已回写代码注释）
-├── legacy/                      已被 run_evals.py 取代的早期原型，仅作历史留存，不维护
-├── reports/                     运行产物（Git 忽略；legacy/ 内保留历史报告）
-├── baseline.json                legacy 口径基线快照，随代码进 Git
-├── baseline.generated.json      generated 口径基线快照，随代码进 Git
+├── reports/                     运行产物（Git 忽略）
+├── baseline.json                唯一口径基线快照，随代码进 Git
 └── tests/                       评估代码自身的单元测试
 ```
 
@@ -36,9 +31,9 @@ evals/
 
 | 层 | 评什么 | 判定方式 | 数据来源 |
 |---|---|---|---|
-| retrieval | 检索质量：Hit@1/3/8、Precision@k、Recall@k、nDCG@k、MRR、延迟 | 规则判定（命中预期标题集合） | `--dataset` 指定口径抽样 |
+| retrieval | 检索质量：Hit@1/3/8、Precision@k、Recall@k、nDCG@k、MRR、延迟 | 规则判定（命中预期标题集合） | `datasets/generated/latest/` 抽样 |
 | adversarial | 安全：注入、越权、撤权、金丝雀泄漏 | 全自动规则判定（机读 judge 规则，零人工复核） | `datasets/golden_adversarial.json` |
-| behavior | 行为质量：有据率、切题度、正确拒答 | LLM-as-judge（faithful/relevant/abstain） | `--dataset` 指定口径分类抽样 |
+| behavior | 行为质量：有据率、切题度、正确拒答 | LLM-as-judge（faithful/relevant/abstain） | `datasets/generated/latest/` 分类抽样 |
 
 ### 对抗层判定规则（golden_adversarial.json）
 
@@ -54,45 +49,40 @@ evals/
 硬失败。规则不完整（缺 mode / 缺规则 / 缺 basis）的数据集在 `load_golden()` 加载阶段就被拒，
 不给空转留口子。判定层次与实现见 `run_evals.judge_adversarial`。
 
-`--dataset legacy`（默认）：200 例历史集，预期文档按 `source_files` 路径解析；
-`--dataset generated`：独立数据包，预期文档按文档 id 解析、身份按 spec 登录
-（需先 `python -m evals.dataset.seed` 灌库）。
+唯一口径 = 独立数据包：预期文档按文档 id 解析、身份按 spec 登录，
+语料由 `seed.py` 灌入 PG/ES（跑评测前先灌库，见下）。
 
 ## 运行
 
 ```bash
-# 前置：企业服务在线（bash scripts/start_services.sh），评估跑真实生产库
+# 前置：企业服务在线（bash scripts/start_services.sh），评估跑真实生产库；
+# 独立数据包夹具已灌库（PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed）
 make evals-quick      # 检索 + 对抗，约 5 分钟
 make evals-full       # 三层全跑，约 40 分钟
-make evals-baseline   # 结果锁定为基线
+make evals-baseline   # 三层全跑后锁定为基线
 make evals-tests      # 评估代码自身的单元测试（不需要在线服务）
 
 # 只重跑某一层（迭代判定规则/修复单层时用）
 ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_evals.py --adversarial-only
-ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_evals.py --behavior-only --dataset generated
+ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_evals.py --behavior-only
 
-# 独立数据包口径（先灌库夹具，再跑；行为层按 spec 身份登录）
-PYTHONPATH=src ECOM_ENV_FILE="$PWD/.env.production" .venv/bin/python -m evals.dataset.seed
-ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_evals.py --quick --dataset generated --compare
-
-# 或直接调用（legacy 口径）
+# 直接调用（与 make 等价）
 ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_evals.py --quick --compare
 ```
 
-结果落盘 `evals/reports/<时间戳>-<git短SHA>.json`，`--compare` 会与对应口径的基线逐项对比并对下降项报警。
+结果落盘 `evals/reports/<时间戳>-<git短SHA>.json`，`--compare` 会与基线逐项对比并对下降项报警。
 
-## 基线与门禁按口径分流
+## 基线与门禁（唯一口径）
 
-两个口径的语料、身份、预期解析都不同，基线与门禁各自独立，不混用：
+唯一口径下基线只有一份：`evals/baseline.json`，随代码进 Git；`--compare` 逐项对比，
+下降项报警。门禁阈值（`GATE_THRESHOLDS`）：faithfulness ≥ 0.85、answer_relevancy ≥ 0.80、
+context_recall@8 ≥ 0.80。
 
-- `--dataset legacy` → `evals/baseline.json`，门禁 `GATE_THRESHOLDS`（含 context_precision@8 ≥ 0.75）；
-- `--dataset generated` → `evals/baseline.generated.json`，门禁 `GATE_THRESHOLDS_GENERATED`。
-  generated 口径不设 precision@8 门禁：16 篇迷你语料上该指标有结构性上限——单预期文档的
-  用例最高 1/8=0.125、双预期 0.25，实测 0.36 已接近完美系统的表现；对它设阈值衡量的是
-  语料结构而非系统质量。回归检测由 recall@8 / hit@8 / MRR 与 `--compare` 逐项对比承担。
-  faithfulness/relevancy 与语料规模无关，两个口径同阈值。
+`context_precision@8` 不设门禁：16 篇迷你语料上该指标有结构性上限——单预期文档的
+用例最高 1/8=0.125、双预期 0.25，实测 0.36 已接近完美系统的表现；对它设阈值衡量的是
+语料结构而非系统质量。回归检测由 recall@8 / hit@8 / MRR 与 `--compare` 逐项对比承担。
 
-`--gate` 按当前口径的门禁校验，未达标退出码 1（供 CI 阻塞合并）；没跑的层是 None，校验时跳过。
+`--gate` 按门禁校验，未达标退出码 1（供 CI 阻塞合并）；没跑的层是 None，校验时跳过。
 
 ## 指标口径（改动前先看这里）
 
@@ -110,10 +100,9 @@ ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_e
 ## 新增用例规范
 
 **新用例一律进独立数据包**（`evals/dataset/`，见其 README）：改 spec → `generate` → `seed` →
-`run_evals.py --dataset generated`。权限夹具随包分发，换机可重建；`--verify` 的权限实测矩阵
-保证夹具状态与 spec 一致。历史集 `datasets/cases.jsonl` 只维护不新增。
+跑评测。权限夹具随包分发，换机可重建；`--verify` 的权限实测矩阵保证夹具状态与 spec 一致。
 
-两条口径都适用的原则：
+原则：
 
 1. 字段遵循各自说明书的口径（`case_id`/`category`/`question`/`expected_behavior`/`pass_criteria` 必填）。
 2. 答案只能从实际交付资料推导；资料标"未知"的题，预期行为是如实说明资料不足，**不设编造的标准答案**。
