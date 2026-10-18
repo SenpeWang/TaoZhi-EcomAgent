@@ -44,7 +44,7 @@ import httpx  # noqa: E402
 
 from ecom_copilot.enterprise.config import load_config  # noqa: E402
 from ecom_copilot.observability import metrics as obs_metrics  # noqa: E402
-from ecom_copilot.enterprise.db import database_connection, fetch_one  # noqa: E402
+from ecom_copilot.enterprise.db import database_connection, fetch_all, fetch_one  # noqa: E402
 from ecom_copilot.enterprise.policy import load_principal  # noqa: E402
 
 CANARIES = ["SYN-CANARY-A01", "SYN-CANARY-A-COST", "SYN-CANARY-B01", "SYN-CANARY-B-COST"]
@@ -125,13 +125,70 @@ def resolve_source(file_field):
     return None
 
 
-def expected_titles(case):
+# 证据位置里的通用词：出现频率高但不指向任何具体文档，匹配时必须排除，
+# 否则"充电器"会把库里所有充电器文档都算成预期，等于变相回到"展开整个目录"。
+_EVIDENCE_STOPWORDS = ("资料", "字段", "记录", "列表", "说明", "参数", "小节", "章节",
+                       "官方", "采集", "数据", "文件", "版本", "兼容")
+# 语料频率闸门：一个特征词若命中超过这么多个文档标题，说明它不具区分度
+# （典型如 evidence_location 里的路径段 apple/huawei/products.jsonl），
+# 必须剔除——否则预期集合被放大到几十个，recall 被分母压死而 hit@k 被抬虚。
+_EVIDENCE_MAX_MATCHES = 5
+
+
+def evidence_terms(case) -> list:
+    """从 evidence_location 与问题文本提取指向具体文档的特征词（型号/规格）。
+
+    两条来源：evidence_location（证据所在记录）与 question（兼容类多选题会在
+    问题里点名多个产品，evidence_location 反而只有 jsonl 行号）。
+    数字型特征（iPhone 15 Pro、畅享 60、20W、L532 240W）区分度最高，一律排在
+    纯英文词之前——否则路径段垃圾词（apple/products/jsonl）会占满配额把有效
+    特征词挤掉（历史上 terms[:6] 截断就踩过这个坑）。
+    """
+    location = case.get("evidence_location") or ""
+    question = case.get("question") or ""
+    q_lower = question.lower()
+    numeric, plain, seen = [], [], set()
+
+    def add(term, from_question):
+        t = term.strip()
+        if not t or t.lower() in seen or t in _EVIDENCE_STOPWORDS:
+            return
+        # 纯英文词必须是问题里点名的产品名：evidence_location 里的同形词大多是
+        # JSON 字段名（power/voltage/interface）或路径段（products/jsonl），
+        # 不指向具体文档（power 就曾命中"USB Power Delivery"标题）。
+        # 数字型特征（20W、畅享 60、L532 240W）自带区分度，不受此限。
+        if not any(ch.isdigit() for ch in t) and not from_question and t.lower() not in q_lower:
+            return
+        seen.add(t.lower())
+        (numeric if any(ch.isdigit() for ch in t) else plain).append(t)
+
+    for text, from_question in ((location, False), (question, True)):
+        # 英文/数字型号（可含空格分隔的后缀，如 iPhone 13 Pro、Mate X5、USB-C）
+        for m in re.findall(r"[A-Za-z][A-Za-z0-9\-]*(?:\s+(?:\d+[A-Za-z]*|[A-Z]\d+[A-Za-z]*))*(?:\s+(?:Pro|Max|Plus|mini|Ultra|Air|SE))?", text):
+            if len(m.strip()) >= 4:
+                add(m, from_question)
+        # 数字+单位/中文型号（20W、67W、畅享 70）
+        for m in re.findall(r"\d+\s*[WA瓦]|[\u4e00-\u9fa5]{2,}\s*\d+", text):
+            add(m, from_question)
+    return (numeric + plain)[:8]
+
+
+def expected_titles(case, corpus_titles=None):
     """用例的预期文档标题集合（命中判定用）。"""
-    return _expected(case)[0]
+    return _expected(case, corpus_titles)[0]
 
 
-def _expected(case):
-    """返回 (预期标题集合, 未解析的来源文件名列表)。"""
+def _expected(case, corpus_titles=None):
+    """返回 (预期标题集合, 未解析的来源文件名列表)。
+
+    预期文档的两条来源：
+    1. source_files 里显式列出的 .md（解析到实际文件后取标题）；
+    2. evidence_location 里的型号/规格特征词，在正式库标题中精确匹配。
+
+    历史教训：曾按 .jsonl 展开同目录全部 md，预期集合被放大到 22~53 个，
+    导致 recall 被分母压到 0.17、而 hit@8 被"命中任意一个"抬到 0.80——
+    两个方向的失真同时发生，指标完全失去决策价值。
+    """
     out, unresolved = set(), []
     for sf in case.get("source_files") or []:
         f = sf.get("file") or ""
@@ -141,9 +198,16 @@ def _expected(case):
             continue
         if target.suffix == ".md":
             out.add(title_of(target))
-        elif target.name.endswith(".jsonl"):
-            for md in sorted(target.parent.glob("*.md")):
-                out.add(title_of(md))
+    if corpus_titles:
+        low = [(t, t.lower()) for t in corpus_titles]
+        for term in evidence_terms(case):
+            if term in _EVIDENCE_STOPWORDS:
+                continue
+            tl = term.lower()
+            hits = [t for t, t_lower in low if tl in t_lower]
+            if len(hits) > _EVIDENCE_MAX_MATCHES:
+                continue  # 频率闸门：非区分性特征词（品牌词/路径段）不进预期集合
+            out.update(hits)
     return out, unresolved
 
 
@@ -170,11 +234,17 @@ def phase_retrieval(sample=60):
         except Exception:
             return None
 
+    # 正式库已发布文档标题（内存内匹配，避免逐用例查库）
+    with database_connection() as c:
+        corpus_titles = [r["title"] for r in fetch_all(
+            c, "SELECT title FROM documents WHERE tenant_id=%s AND state=%s",
+            (principal.tenant_id, "published"))]
+
     def run(use_hyde):
         pairs, lat, skipped = [], [], 0
         tok_before = obs_metrics.token_usage()
         for case in chosen:
-            exp = expected_titles(case)
+            exp = expected_titles(case, corpus_titles)
             if not exp:
                 skipped += 1
                 continue
