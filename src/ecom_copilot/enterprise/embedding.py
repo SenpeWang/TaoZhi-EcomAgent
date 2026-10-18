@@ -42,6 +42,18 @@ def _post(texts: list[str], instruct: bool) -> np.ndarray:
     return np.asarray(r.json()["vectors"], dtype="float32")
 
 
+def embedding_input(title: str, text: str) -> str:
+    """构造切片的嵌入输入：文档标题作为上下文前缀拼在正文前。
+
+    Contextual retrieval：切片脱离文档后语义不完整（"支持 20W 快充"分不清是哪款
+    产品），标题前缀让向量自带归属锚。标题只参与向量计算——chunks.text 列仍存纯
+    正文（展示、精排、事实抽取不受影响），也不进 ES（BM25 与向量是互补信号）。
+    入库、检索侧惰性补算、全量回填脚本三处必须共用本函数，保证向量口径一致。
+    """
+    title=(title or "").strip()
+    return f"{title}\n{text}" if title else text
+
+
 def encode_passages(texts: list[str]) -> np.ndarray:
     """对资料切片编码，返回 (n, dim) 的 L2 归一化 float32 矩阵。"""
     if not texts:

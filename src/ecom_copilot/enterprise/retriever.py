@@ -50,9 +50,13 @@ def _vec(raw):
     return None
 
 def _semantic_matrix(conn,chunks,dim):
-    """返回与 chunks 对齐的向量矩阵及存在标记；缺失向量惰性补算（限流），失败返回 None。"""
+    """返回与 chunks 对齐的向量矩阵及存在标记；缺失向量惰性补算（限流），失败返回 None。
+
+    补算口径与入库一致：文档标题前缀 + 正文（chunks 行需带 doc_title，缺失退化为纯正文，
+    与回填前的历史向量兼容）。
+    """
     try:
-        from .embedding import available as embed_available,encode_passages
+        from .embedding import available as embed_available,encode_passages,embedding_input
         if not embed_available():return None
         mats=[None]*len(chunks);missing=[]
         for i,c in enumerate(chunks):
@@ -61,7 +65,7 @@ def _semantic_matrix(conn,chunks,dim):
             else:missing.append(i)
         if missing:
             picked=missing[:BACKFILL_LIMIT]
-            vecs=encode_passages([chunks[i]["text"] for i in picked])
+            vecs=encode_passages([embedding_input(chunks[i].get("doc_title"),chunks[i]["text"]) for i in picked])
             for i,v in zip(picked,vecs):
                 mats[i]=v
                 try:
@@ -241,7 +245,7 @@ def search_documents(conn,p,query,limit=8,hyde_vector=None):
             if np.max(s) > np.min(s):
                 fused += 1.0 / (RRF_K + _ranks(s))
         return _finalize(query,chunks,fused,limit,allowed,p)
-    chunks=fetch_all(conn,"SELECT c.* FROM chunks c JOIN documents d ON d.id=c.document_id AND d.current_version=c.version WHERE c.tenant_id=%s AND c.document_id=ANY(%s) ORDER BY c.document_id,c.ordinal LIMIT 20000",(p.tenant_id,list(allowed)))
+    chunks=fetch_all(conn,"SELECT c.*,d.title AS doc_title FROM chunks c JOIN documents d ON d.id=c.document_id AND d.current_version=c.version WHERE c.tenant_id=%s AND c.document_id=ANY(%s) ORDER BY c.document_id,c.ordinal LIMIT 20000",(p.tenant_id,list(allowed)))
     if not chunks:return []
     chunks=_dedup_text(chunks)
     # ANN 相关性闸门（与主链路一致；无查询向量时不生效）
