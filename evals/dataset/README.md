@@ -26,7 +26,7 @@ evals/dataset/
 │   ├── corpus.yaml        6 个产品、5 条兼容关系、3 条政策、2 对冲突文档
 │   └── templates.yaml     26 个模板覆盖 11 个类别；槽位语法 {a.b.c}
 ├── schema.py              契约校验：必填字段、类别合法、身份/文档/金丝雀可解析、查重
-├── generate.py            确定性生成器 → datasets/generated/v1/（含 latest/ 指针）
+├── generate.py            确定性生成器 → datasets/generated/latest/（唯一一份，版本由 Git 承担）
 └── seed.py                幂等灌库：组织/身份/文档/切片/向量/ES/授权 + 权限实测校验
 ```
 

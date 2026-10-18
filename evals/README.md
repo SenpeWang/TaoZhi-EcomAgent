@@ -16,11 +16,9 @@ evals/
 ├── datasets/                    数据集（随代码进 Git，可追溯、可 diff）
 │   ├── golden_adversarial.json  18 例对抗集（注入/越权/泄漏/冲突，每条带机读 judge
 │   │                             规则 + basis 语料溯源，全自动判定）
-│   └── generated/v1/            独立包生成产物：44 例 + 16 篇语料 + manifest（latest/ 为指针）
+│   └── generated/latest/         独立包生成产物：44 例 + 16 篇语料 + manifest（唯一一份）
 ├── metrics.py                   指标实现（全项目唯一口径：Hit@k / P@k / R@k / nDCG@k / MRR / pass^k）
 ├── run_evals.py                 三层评估运行器（检索 · 对抗 · 行为；唯一口径）
-├── e2e_ask_data.py              问数链路端到端验收
-├── verify_api_end_to_end.py     API 端到端回归（登录→提问→轮询）
 ├── experiments/                 一次性实证实验（结论已回写代码注释）
 ├── reports/                     运行产物（Git 忽略）
 ├── baseline.json                唯一口径基线快照，随代码进 Git

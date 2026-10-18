@@ -7,7 +7,7 @@
 spec 哈希与种子，没有时间戳（时间信息由 git 提交记录承担）。
 
 用法：
-  python -m evals.dataset.generate                 # 生成到 evals/datasets/generated/v1
+  python -m evals.dataset.generate                 # 生成到 evals/datasets/generated/latest
   python -m evals.dataset.generate --out <dir>     # 指定输出目录
 
 本生成器产出唯一评测口径：可复现、可扩展、契约校验过的数据包（手写 legacy
@@ -185,7 +185,7 @@ def sha256_file(p: Path) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="从 spec 生成独立评测数据集")
-    ap.add_argument("--out", default=str(ROOT / "evals/datasets/generated/v1"))
+    ap.add_argument("--out", default=str(ROOT / "evals/datasets/generated/latest"))
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -216,15 +216,8 @@ def main() -> int:
         "".join(json.dumps(d, ensure_ascii=False) + "\n" for d in corpus_docs), encoding="utf-8")
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 同步 latest 指针（普通目录而非软链，避免 Windows 侧 checkout 丢链接）
-    latest = out.parent / "latest"
-    if latest.exists():
-        for f in latest.iterdir():
-            f.unlink()
-    else:
-        latest.mkdir(parents=True)
-    for f in out.iterdir():
-        (latest / f.name).write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+    # 唯一一份产物直接写入 out（默认 generated/latest/）；版本追溯由 Git 承担，
+    # 不维护 v1 快照 + latest 指针的双份结构（2026-10-19 单口径统一）。
 
     print(f"生成 {len(cases)} 条用例 / {len(corpus_docs)} 篇语料文档 → {out}")
     print("类别分布:", dict(sorted(by_cat.items())))
