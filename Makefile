@@ -17,8 +17,8 @@ help:
 	@echo "make status         查看服务状态"
 	@echo "make test           在独立测试库运行离线回归（含 evals 单元测试）"
 	@echo "make evals-tests    只跑评估代码自身的单元测试（不需要在线服务）"
-	@echo "make evals-quick    评估：检索+对抗层（需企业服务在线）"
-	@echo "make evals-full     评估：三层全跑（需企业服务在线）"
+	@echo "make evals-quick    评估：检索+对抗层（需企业服务在线；对比基线并过门禁）"
+	@echo "make evals-full     评估：三层全跑（需企业服务在线；对比基线并过门禁）"
 	@echo "make check          检查 Python 语法"
 	@echo "make build-web      构建并切换前端"
 	@echo "make clean          清除项目 Python 与 pytest 缓存"
@@ -67,10 +67,10 @@ evals-tests:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.test" PYTHONPATH=src $(PYTHON) -m pytest evals/tests -q
 
 evals-quick:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --quick --compare
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --quick --compare --gate
 
 evals-full:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --full --compare
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --full --compare --gate
 
 evals-baseline:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --full --save-baseline

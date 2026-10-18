@@ -57,8 +57,8 @@ evals/
 ```bash
 # 前置：企业服务在线（bash scripts/start_services.sh），评估跑真实生产库；
 # 独立数据包夹具已灌库（PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed）
-make evals-quick      # 检索 + 对抗，约 5 分钟
-make evals-full       # 三层全跑，约 40 分钟
+make evals-quick      # 检索 + 对抗，约 5 分钟（对比基线 + 门禁，不过则退出码 1）
+make evals-full       # 三层全跑，约 40 分钟（对比基线 + 门禁，不过则退出码 1）
 make evals-baseline   # 三层全跑后锁定为基线
 make evals-tests      # 评估代码自身的单元测试（不需要在线服务）
 
@@ -83,6 +83,30 @@ context_recall@8 ≥ 0.80。
 语料结构而非系统质量。回归检测由 recall@8 / hit@8 / MRR 与 `--compare` 逐项对比承担。
 
 `--gate` 按门禁校验，未达标退出码 1（供 CI 阻塞合并）；没跑的层是 None，校验时跳过。
+
+## 改动后的验证流程（以后修改都走这里）
+
+唯一口径的含义：**评判标准只有这一套**。任何改动——检索参数、合成链路、提示词、
+判定规则本身——都按同一流程验收，不允许"这次特殊只看某几条"：
+
+1. `make evals-tests`：评估代码自身的单元测试（判定器契约、数据集契约、
+   身份同源、AST 回归断言），不需要在线服务，秒级。CI 也跑这一层。
+2. `make evals-full`：三层全跑，一次做三件事——与 `evals/baseline.json`
+   逐项对比（下降项报警）、按 `GATE_THRESHOLDS` 门禁校验（未达标退出码 1）、
+   结果存档 `evals/reports/<时间戳>-<git短SHA>.json`。full 评测需要生产服务
+   在线（PG/ES/API 在回环地址），在本机跑，不进 CI。
+3. 读结果：
+   - 无回归且门禁通过 → 改动可提交；
+   - 有回归或门禁不过 → 修到通过；只有确属有意变更（如修复已知缺陷过程中的
+     临时水位）才走第 4 步，且提交信息里写明原因。
+4. `make evals-baseline`：三层全跑后把新结果锁定为基线，随提交进 Git。
+   基线是唯一事实来源——刷新它等于宣布新水位，必须在提交信息说明为什么动
+   （修了什么、哪个指标为什么变、旧基线是什么水位）。
+
+判定规则本身也归这套流程管：改 `judge_adversarial` 或 golden 集，先由
+`make evals-tests` 的契约测试拦（缺 mode/规则/basis、正则可编译），再跑
+`--adversarial-only` 看判定结果变化；对抗层分数以机读 note 为准，
+不接受"看起来答对了"的主观放行。
 
 ## 指标口径（改动前先看这里）
 
