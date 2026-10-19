@@ -23,13 +23,12 @@
 | `src/ecom_copilot/debate/` | 离线证据讨论 |
 | `src/ecom_copilot/enterprise/` | 在线权限、会话、文档、业务服务、工作流及 Worker |
 | `src/ecom_copilot/graph/` | 本地图谱与共享图能力 |
-| `evals/` | 评估体系统一入口：数据集、指标、运行器、基线与报告 |
+| `evals/` | 评估模块（独立单元）：口径说明、数据集、指标、运行器、基线与报告 |
 | `evals/dataset/` | 独立评测数据包：规格、契约校验、确定性生成与幂等灌库 |
 | `evals/dataset/spec/` | 数据包规格（组织/夹具/语料/模板），唯一事实来源 |
 | `evals/datasets/` | 评测数据集与口径说明，随代码进 Git 可 diff |
 | `evals/datasets/generated/` | 独立包生成产物：用例、语料与 manifest，随代码进 Git |
 | `evals/datasets/generated/latest/` | 独立包生成产物目录，generate 直接写入（唯一一份，版本由 Git 承担） |
-| `evals/experiments/` | 一次性实证实验脚本（结论已回写代码注释） |
 | `evals/reports/` | 运行产物不入库（.gitignore 全忽略） |
 | `evals/tests/` | 评估代码自身的单元测试，必须进 CI |
 | `src/ecom_copilot/hypothesis/` | 离线假设管理 |

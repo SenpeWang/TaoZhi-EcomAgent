@@ -19,7 +19,7 @@ evals/
 │   └── generated/latest/         独立包生成产物：44 例 + 16 篇语料 + manifest（唯一一份）
 ├── metrics.py                   指标实现（全项目唯一口径：Hit@k / P@k / R@k / nDCG@k / MRR / pass^k）
 ├── run_evals.py                 三层评估运行器（检索 · 对抗 · 行为；唯一口径）
-├── experiments/                 一次性实证实验（结论已回写代码注释）
+├── BENCHMARK.md                 评估口径与方案（唯一口径来源：指标定义·判定协议·报告 schema）
 ├── reports/                     运行产物（Git 忽略）
 ├── baseline.json                唯一口径基线快照，随代码进 Git
 └── tests/                       评估代码自身的单元测试
@@ -72,9 +72,8 @@ ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_e
 
 ## 基线与门禁（唯一口径）
 
-唯一口径下基线只有一份：`evals/baseline.json`，随代码进 Git；`--compare` 逐项对比，
-下降项报警。门禁阈值（`GATE_THRESHOLDS`）：faithfulness ≥ 0.85、answer_relevancy ≥ 0.80、
-context_recall@8 ≥ 0.80。
+基线只有一份：`evals/baseline.json`，随代码进 Git；`--compare` 逐项对比、下降项报警。
+`--gate` 按代码里的 `GATE_THRESHOLDS` 校验、未达标退出码 1；阈值数值以代码为准。
 
 `context_precision@8` 不设门禁：16 篇迷你语料上该指标有结构性上限——单预期文档的
 用例最高 1/8=0.125、双预期 0.25，实测 0.36 已接近完美系统的表现；对它设阈值衡量的是
@@ -106,13 +105,12 @@ context_recall@8 ≥ 0.80。
 `--adversarial-only` 看判定结果变化；对抗层分数以机读 note 为准，
 不接受"看起来答对了"的主观放行。
 
-## 指标口径（改动前先看这里）
+## 指标口径
 
-- **相关性是二值的**：候选标题命中预期标题集合即为相关。不做模糊匹配——宁可低估召回，也不要虚高。
-- **Hit@k** 只回答"前 k 条里有没有命中"，不反映排序好坏；**nDCG@k 才惩罚把相关项埋在后面**。两个一起看。
-- **所有均值都给 95% 自举置信区间**（`metrics.summarize`）。样本量小时点估计没有决策价值。
-- **pass^k**：非确定性系统看"k 次全过"，单次通过率会系统性高估稳定性。端到端验收必须两者都报。
-- 指标在计算层不取整，取整只在渲染层，避免基线对比出现假的"无变化"。
+口径以 **[`BENCHMARK.md`](BENCHMARK.md) 为唯一来源**：模块边界、指标定义、判定协议、
+报告 schema、数据契约、确定性设计、变更规则都在那里。
+
+本文件只讲"怎么跑"，不复述口径——口径散在多处必然互相矛盾。
 
 ## 改阈值之前
 
