@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 from langchain_core.runnables import RunnableConfig
 
 from ..llm import ModelTier, get_llm
-from ..llm.json_utils import extract_json
+from langchain_core.output_parsers import JsonOutputParser
 from ..observability import log_event
 from ..schemas.research import ResearchDepth, ResearchTask, TaskPlan
 from .state import ResearchRuntime, ResearchState, append_trace
@@ -109,7 +109,7 @@ def _make_plan(state: ResearchState, task: ResearchTask,
     )
     try:
         raw = get_llm().chat(prompt, tier=ModelTier.STRONG, max_tokens=1200)
-        data = extract_json(raw, expect="object") or {}
+        data = JsonOutputParser().parse(raw) or {}
     except Exception:  # noqa: BLE001
         data = {}
     context = [x for x in (task.product_line, task.category) if x]
@@ -140,7 +140,7 @@ def _refine_plan(task: ResearchTask, state: ResearchState,
     )
     try:
         raw = get_llm().chat(prompt, tier=ModelTier.FAST, max_tokens=800)
-        data = extract_json(raw, expect="object") or {}
+        data = JsonOutputParser().parse(raw) or {}
         queries = [str(q) for q in (data.get("queries") or [])][:5]
     except Exception:  # noqa: BLE001
         queries = []

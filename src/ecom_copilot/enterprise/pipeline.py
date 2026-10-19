@@ -271,7 +271,7 @@ def domain_node(state):
     evidence = state["evidence"]
     from ..config import get_settings
     from ..llm import LLMClient, ModelTier
-    from ..llm.json_utils import extract_json
+    from langchain_core.output_parsers import JsonOutputParser
     from .privacy import redact
     settings = get_settings()
     if not settings.api_key:
@@ -318,7 +318,10 @@ def domain_node(state):
         client = LLMClient(settings.model_copy(update={"llm_timeout": 45, "llm_max_retries": 0, "llm_empty_retries": 0, "llm_max_concurrency": 2, "llm_max_tokens": 4096, "llm_output_cap": 4096}))
         try:
             raw = client.chat(prompt, system=instruction, tier=ModelTier.FAST, max_tokens=4096)
-            data = extract_json(raw)
+            try:
+                data = JsonOutputParser().parse(raw)
+            except Exception:
+                data = None
             if not isinstance(data, dict):
                 raise ValueError()
             for f in data.get("findings", [])[:8]:

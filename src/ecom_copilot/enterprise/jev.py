@@ -245,7 +245,7 @@ class JevEngine:
     ) -> ChoiceResult:
         """调用结构化 Fast LLM 进行约束型离散决策。"""
         from ..llm import LLMClient, ModelTier
-        from ..llm.json_utils import extract_json
+        from langchain_core.output_parsers import JsonOutputParser
 
         options_desc = "\n".join([f"- {k}: {v}" for k, v in options.items()])
         select_mode = f"选择 1 到 {top_k} 个最匹配的选项" if multi_select else "选择 1 个最匹配的选项"
@@ -265,7 +265,10 @@ class JevEngine:
         try:
             client = LLMClient()
             raw = client.chat(f"上下文：{context}", system=system_prompt, tier=ModelTier.FAST, max_tokens=250)
-            data = extract_json(raw, expect="object")
+            try:
+                data = JsonOutputParser().parse(raw)
+            except Exception:
+                data = None
             if isinstance(data, dict):
                 candidates = data.get("selected", [])
                 if isinstance(candidates, str):
@@ -324,7 +327,7 @@ class JevEngine:
         """
         start_time = time.monotonic()
         from ..llm import LLMClient, ModelTier
-        from ..llm.json_utils import extract_json
+        from langchain_core.output_parsers import JsonOutputParser
 
         min_val, max_val = scale
         system_prompt = f"""你是智能体决策核心（Jev System 1 Decision Primitive: Score）。
@@ -340,7 +343,10 @@ class JevEngine:
         try:
             client = LLMClient()
             raw = client.chat(f"内容：{context}", system=system_prompt, tier=ModelTier.FAST, max_tokens=200)
-            data = extract_json(raw, expect="object")
+            try:
+                data = JsonOutputParser().parse(raw)
+            except Exception:
+                data = None
             if isinstance(data, dict):
                 score_val = float(data.get("score", (min_val + max_val) / 2))
                 score_val = max(min_val, min(max_val, score_val))
@@ -383,7 +389,7 @@ class JevEngine:
         """
         start_time = time.monotonic()
         from ..llm import LLMClient, ModelTier
-        from ..llm.json_utils import extract_json
+        from langchain_core.output_parsers import JsonOutputParser
 
         system_prompt = f"""你是智能体决策核心（Jev System 1 Decision Primitive: Noul/Bool）。
 请核验断言在给定上下文中是否成立（true 为成立/满足，false 为不成立/不满足/违规）。
@@ -398,7 +404,10 @@ class JevEngine:
         try:
             client = LLMClient()
             raw = client.chat(f"上下文：{context}", system=system_prompt, tier=ModelTier.FAST, max_tokens=200)
-            data = extract_json(raw, expect="object")
+            try:
+                data = JsonOutputParser().parse(raw)
+            except Exception:
+                data = None
             if isinstance(data, dict):
                 val = bool(data.get("value", False))
                 conf = float(data.get("confidence", 0.9))

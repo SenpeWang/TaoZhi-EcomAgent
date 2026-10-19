@@ -9,7 +9,7 @@ from langchain_core.runnables import RunnableConfig
 
 from ..context import collapse
 from ..llm import ModelTier, get_llm
-from ..llm.json_utils import extract_json
+from langchain_core.output_parsers import JsonOutputParser
 from ..observability import inc, log_event
 from ..safety.rejection import build_refusal, log_rejection, should_refuse, to_text
 from ..schemas.common import Citation, Evidence, PermissionContext
@@ -200,7 +200,7 @@ def _generate_report(state: ResearchState, task: ResearchTask,
     )
     try:
         raw = get_llm().chat(prompt, tier=ModelTier.STRONG, max_tokens=6000)
-        data = extract_json(raw, expect="object") or {}
+        data = JsonOutputParser().parse(raw) or {}
     except Exception:  # noqa: BLE001
         data = {}
 

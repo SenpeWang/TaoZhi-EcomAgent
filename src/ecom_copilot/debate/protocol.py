@@ -14,7 +14,7 @@ from typing import List, Optional, Sequence
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..llm import ModelTier, get_llm
-from ..llm.json_utils import dump, extract_json
+from langchain_core.output_parsers import JsonOutputParser
 from ..observability import inc, timer
 from ..schemas.common import Evidence, Sentiment
 from ..schemas.research import ConflictItem, DebateMatrix, DebatePoint
@@ -98,7 +98,10 @@ class DebateProtocol:
                 raw = get_llm().chat(prompt, tier=ModelTier.FAST, max_tokens=2500)
             except Exception:  # noqa: BLE001
                 return []
-        data = extract_json(raw, expect="object")
+        try:
+            data = JsonOutputParser().parse(raw)
+        except Exception:
+            data = None
         if not isinstance(data, dict):
             return []
         points: List[DebatePoint] = []
@@ -194,7 +197,7 @@ class DebateProtocol:
         with timer("debate.verdict"):
             try:
                 raw = get_llm().chat(prompt, tier=ModelTier.STRONG, max_tokens=1200)
-                data = extract_json(raw, expect="object") or {}
+                data = JsonOutputParser().parse(raw) or {}
             except Exception:  # noqa: BLE001
                 data = {}
         matrix.verdict = str(data.get("verdict", "")).strip() or self._fallback_verdict(matrix)

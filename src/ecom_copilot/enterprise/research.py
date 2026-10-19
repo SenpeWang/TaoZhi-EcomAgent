@@ -149,9 +149,12 @@ def _plan_outline(keyword: str) -> List[str]:
             max_tokens=300,
             system="只输出 JSON 数组，不要其他文字。",
         )
-        from ..llm.json_utils import extract_json
+        from langchain_core.output_parsers import JsonOutputParser
 
-        arr = extract_json(raw)
+        try:
+            arr = JsonOutputParser().parse(raw)
+        except Exception:
+            arr = None
         if isinstance(arr, list) and arr:
             return [str(x)[:60] for x in arr[:6]]
     except Exception:  # noqa: BLE001

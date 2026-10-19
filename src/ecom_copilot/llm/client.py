@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from ..config import Settings, get_settings
 from ..observability import metrics as _metrics
-from .json_utils import dump, extract_json, parse_model, to_json_schema_hint
+from langchain_core.output_parsers import JsonOutputParser
 
 Message = Union[str, BaseMessage, Dict[str, str]]
 
@@ -43,8 +43,8 @@ def _pydantic_parser(schema):
     """LangChain PydanticOutputParser：拿不到就返回 None，链路自动降级为自研解析。
 
     官方解析器负责两件事：① 生成社区验证过的 format instructions；
-    ② 解析 + pydantic 校验。它救不回的四类畸形（思维链前缀 / 尾逗号 / 单引号紧凑 /
-    组合畸形）由自研 json_utils 兜底，两者互补才有实测的 8/8。
+    ② 解析 + pydantic 校验。本版本库（langchain 1.4.2 / langchain_core 1.6.4）
+    已移除 OutputFixingParser 与 Retry*OutputParser，故重试由 chat_json 的循环承担。
     """
     try:
         from langchain_core.output_parsers import PydanticOutputParser
@@ -225,11 +225,7 @@ class LLMClient:
         官方解析器失败再落回自研修复解析（见 _pydantic_parser 注释）。
         """
         parser = _pydantic_parser(schema) if schema is not None else None
-        hint = schema_hint or (
-            parser.get_format_instructions()
-            if parser is not None
-            else (to_json_schema_hint(schema) if schema else "")
-        )
+        hint = schema_hint or (parser.get_format_instructions() if parser is not None else "")
         full_prompt = f"{prompt}\n\n{hint}\n{_JSON_RULES}".strip()
         last_raw = ""
         for attempt in range(retries):
@@ -247,19 +243,12 @@ class LLMClient:
                     return default if default is not None else ({} if expect == "object" else [])
                 continue
             last_raw = raw
-            if parser is not None:
-                try:
-                    return parser.parse(raw)
-                except Exception:
-                    pass  # 官方解析器救不回 → 落回自研修复解析
-            data = extract_json(raw, expect=expect)
-            if data is None:
-                continue
-            if schema is None:
-                return data
-            parsed = parse_model(dump(data) if not isinstance(data, str) else data, schema, expect=expect)
-            if parsed is not None:
-                return parsed
+            try:
+                # 解析全部交给库：有 schema 走 PydanticOutputParser（含 pydantic 校验），
+                # 无 schema 走 JsonOutputParser
+                return parser.parse(raw) if parser is not None else JsonOutputParser().parse(raw)
+            except Exception:
+                pass  # 交给下一轮重试（提示词里回灌上一次的原始输出）
         if schema is not None and default is None:
             try:
                 return None

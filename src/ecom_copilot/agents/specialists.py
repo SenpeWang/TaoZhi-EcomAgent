@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from ..schemas.common import PermissionContext
 from ..llm import get_llm, ModelTier
-from ..llm.json_utils import extract_json
+from langchain_core.output_parsers import JsonOutputParser
 from ..ingestion.guard import detect_injection
 from .state import append_trace
 
@@ -93,7 +93,10 @@ def _one(role,question,evidence,settings):
     try:
         raw=get_llm().chat(prompt,tier=ModelTier.FAST,max_tokens=2500,
                            system="你只能提供基于已授权原文的业务建议，不能执行任何交易。")
-        data=extract_json(raw,expect="object")
+        try:
+            data = JsonOutputParser().parse(raw)
+        except Exception:
+            data = None
         item=SpecialistResult.model_validate(data)
         item.role=role
         item.agent_name=agent_name

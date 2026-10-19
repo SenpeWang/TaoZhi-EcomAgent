@@ -17,7 +17,7 @@ from ..debate import DebateProtocol
 from ..hypothesis import HypothesisTracker, sentiment_from_text
 from ..hypothesis import HypothesisTracker, sentiment_from_text
 from ..llm import ModelTier, get_llm
-from ..llm.json_utils import extract_json
+from langchain_core.output_parsers import JsonOutputParser
 from ..observability import inc, log_event
 from ..schemas.common import Evidence, PermissionContext, Sentiment
 from ..schemas.research import DebateMatrix, HypothesisStatus, ResearchDepth
@@ -180,7 +180,7 @@ def _generate_hypotheses(state: ResearchState) -> List[str]:
     )
     try:
         raw = get_llm().chat(prompt, tier=ModelTier.STRONG, max_tokens=1200)
-        data = extract_json(raw, expect="object") or {}
+        data = JsonOutputParser().parse(raw) or {}
         items = [str(x).strip() for x in (data.get("hypotheses") or []) if str(x).strip()]
     except Exception:  # noqa: BLE001
         items = []
@@ -218,7 +218,7 @@ def _label_sentiment(hypothesis: str, evidence: List[Evidence]) -> List[Evidence
     prompt = _SENTIMENT_PROMPT.format(hypothesis=hypothesis, evidence=listing)
     try:
         raw = get_llm().chat(prompt, tier=ModelTier.FAST, max_tokens=600)
-        data = extract_json(raw, expect="object") or {}
+        data = JsonOutputParser().parse(raw) or {}
         labels = data.get("labels") or []
     except Exception:  # noqa: BLE001
         labels = []

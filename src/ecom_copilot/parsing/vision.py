@@ -35,7 +35,7 @@ class VisionParser:
     def _call(self, prompt: str, image_b64: str) -> Optional[dict]:
         if not self.enabled or not image_b64:
             return None
-        from ..llm.json_utils import extract_json
+        from langchain_core.output_parsers import JsonOutputParser
 
         message = HumanMessage(
             content=[
@@ -50,7 +50,10 @@ class VisionParser:
             raw = get_llm().chat([message], tier=ModelTier.VISION, max_tokens=1500)
         except Exception:  # noqa: BLE001
             return None
-        return extract_json(raw, expect="object")
+        try:
+            return JsonOutputParser().parse(raw)
+        except Exception:
+            return None
 
     def describe_batch(self, images: List[str], limit: int = 3) -> List[str]:
         out: List[str] = []

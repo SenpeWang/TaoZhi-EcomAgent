@@ -6,7 +6,7 @@ import re
 from typing import List, Optional, Tuple
 
 from ..llm import ModelTier, get_llm
-from ..llm.json_utils import dump, extract_json
+from langchain_core.output_parsers import JsonOutputParser
 from ..observability import inc, timer
 from ..schemas.common import Evidence, Sentiment, TextChunk
 from ..schemas.graph import (
@@ -180,7 +180,10 @@ class KnowledgeExtractor:
                 raw = get_llm().chat(prompt, tier=ModelTier.FAST, max_tokens=16000)
             except Exception:  # noqa: BLE001
                 return None
-        data = extract_json(raw, expect="object")
+        try:
+            data = JsonOutputParser().parse(raw)
+        except Exception:
+            data = None
         if not isinstance(data, dict):
             return None
         entities: List[EntityMention] = []
