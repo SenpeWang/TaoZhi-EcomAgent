@@ -35,8 +35,23 @@ _JSON_RULES = """【输出格式要求】
 1. 只输出一个 JSON 对象，**不要**输出任何解释、标题、前言或 markdown 代码块围栏；
 2. 不要使用单引号、注释或尾随逗号；
 3. 所有字符串使用双引号，必须严格符合下面给出的字段结构；
-4. 若某项确无信息，使用空字符串 / 空数组，禁止省略字段。
+-4. 若某项确无信息，使用空字符串 / 空数组，禁止省略字段。
 """
+
+
+def _pydantic_parser(schema):
+    """LangChain PydanticOutputParser：拿不到就返回 None，链路自动降级为自研解析。
+
+    官方解析器负责两件事：① 生成社区验证过的 format instructions；
+    ② 解析 + pydantic 校验。它救不回的四类畸形（思维链前缀 / 尾逗号 / 单引号紧凑 /
+    组合畸形）由自研 json_utils 兜底，两者互补才有实测的 8/8。
+    """
+    try:
+        from langchain_core.output_parsers import PydanticOutputParser
+
+        return PydanticOutputParser(pydantic_object=schema)
+    except Exception:
+        return None
 
 
 class LLMClient:
@@ -202,9 +217,19 @@ class LLMClient:
         retries: int = 3,
         default: Any = None,
         expect: str = "object",
+        max_tokens: Optional[int] = None,
     ) -> Any:
-        """请求 LLM 返回 JSON；失败时自动重生成（PRD E3 缺失即重生成）。"""
-        hint = schema_hint or (to_json_schema_hint(schema) if schema else "")
+        """请求 LLM 返回 JSON；失败时自动重生成（PRD E3 缺失即重生成）。
+
+        有 schema 时优先用 LangChain PydanticOutputParser 生成格式指令并做校验；
+        官方解析器失败再落回自研修复解析（见 _pydantic_parser 注释）。
+        """
+        parser = _pydantic_parser(schema) if schema is not None else None
+        hint = schema_hint or (
+            parser.get_format_instructions()
+            if parser is not None
+            else (to_json_schema_hint(schema) if schema else "")
+        )
         full_prompt = f"{prompt}\n\n{hint}\n{_JSON_RULES}".strip()
         last_raw = ""
         for attempt in range(retries):
@@ -214,6 +239,7 @@ class LLMClient:
                     else f"{full_prompt}\n\n上一次输出无法解析为合法 JSON：\n{last_raw[:400]}\n请重新严格输出 JSON。",
                     tier=tier,
                     system=system or "你是严谨的产业研究结构化信息抽取引擎。",
+                    **({"max_tokens": max_tokens} if max_tokens else {}),
                 )
             except Exception as exc:
                 _metrics.record_llm_error(tier.value)
@@ -221,6 +247,11 @@ class LLMClient:
                     return default if default is not None else ({} if expect == "object" else [])
                 continue
             last_raw = raw
+            if parser is not None:
+                try:
+                    return parser.parse(raw)
+                except Exception:
+                    pass  # 官方解析器救不回 → 落回自研修复解析
             data = extract_json(raw, expect=expect)
             if data is None:
                 continue
