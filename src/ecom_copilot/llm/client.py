@@ -8,10 +8,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from enum import Enum
-from typing import Any, AsyncIterator, Dict, List, Optional, Type, Union
+from typing import Any, Dict, List, Optional, Type, Union
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -151,61 +150,6 @@ class LLMClient:
                              max_tokens=min(self.settings.llm_output_cap, budget * 3), _empty_retry=_empty_retry + 1)
         return text
 
-    async def achat(
-        self,
-        prompt: Union[str, List[Message]],
-        tier: ModelTier = ModelTier.FAST,
-        system: str = "",
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-    ) -> str:
-        return await asyncio.to_thread(
-            self.chat, prompt, tier, system, temperature, max_tokens
-        )
-
-    def stream(
-        self,
-        prompt: Union[str, List[Message]],
-        tier: ModelTier = ModelTier.FAST,
-        system: str = "",
-    ):
-        messages = self._to_messages(prompt)
-        if system:
-            messages = [SystemMessage(content=system)] + messages
-        for chunk in self._client(tier).stream(messages):
-            content = getattr(chunk, "content", "")
-            if isinstance(content, str) and content:
-                yield content
-
-    async def astream(
-        self,
-        prompt: Union[str, List[Message]],
-        tier: ModelTier = ModelTier.FAST,
-        system: str = "",
-    ) -> AsyncIterator[str]:
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue = asyncio.Queue()
-
-        def _producer():
-            try:
-                for piece in self.stream(prompt, tier=tier, system=system):
-                    loop.call_soon_threadsafe(queue.put_nowait, piece)
-            except Exception as exc:
-                loop.call_soon_threadsafe(queue.put_nowait, exc)
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, None)
-
-        import threading
-
-        threading.Thread(target=_producer, daemon=True).start()
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            if isinstance(item, Exception):
-                raise item
-            yield item
-
     # ───────────────── 结构化输出 ─────────────────
     def chat_json(
         self,
@@ -250,22 +194,6 @@ class LLMClient:
             except Exception:
                 pass  # 交给下一轮重试（提示词里回灌上一次的原始输出）
         return default if default is not None else ({} if expect == "object" else [])
-
-    async def achat_json(self, *args, **kwargs) -> Any:
-        return await asyncio.to_thread(self.chat_json, *args, **kwargs)
-
-    def chat_model(
-        self,
-        prompt: str,
-        schema: Type[BaseModel],
-        tier: ModelTier = ModelTier.FAST,
-        system: str = "",
-        retries: int = 3,
-    ) -> BaseModel:
-        result = self.chat_json(prompt, schema=schema, tier=tier, system=system, retries=retries)
-        if not isinstance(result, schema):
-            raise ValueError("Model output failed schema validation")
-        return result
 
 
 def _clean(text: str) -> str:
