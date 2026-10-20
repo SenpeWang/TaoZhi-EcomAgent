@@ -2,19 +2,8 @@
 
 把评测集从"某台机器数据库里的隐式状态"变成**随代码分发的数据包**：
 规格（spec）进 Git，用例由规格确定性生成，夹具由 seed 幂等灌库，权限语义有实测矩阵背书。
-
-## 为什么需要它（2026-10 测试集审计结论）
-
-已退役的手写集（200 例，`datasets/cases.jsonl`，单口径化时删除）的三个结构性问题：
-
-1. **权限夹具不存在**：约 70 条权限/角色/撤权类用例引用的 `SYN_*` 夹具，
-   代码里没有、生产库里也没有（0 个 SYN 文档、0 条授权）。夹具缺失时系统必然
-   "文档不存在→拒答"，而判定逻辑把拒答算作通过——**权限测试空转，还给出虚假的安全感**。
-2. **身份塌缩**：`test_identity` 是逻辑身份，run_evals 用字符串包含关系映射到
-   staff/leader/owner/admin 四个固定账号，同一角色多个逻辑身份塌成同一账号，
-   按用户维度的授权/撤权用例互相污染。
-3. **语料不可重建**：`source_files` 指向 `data/` 下 101 个不存在的文件，
-   而 `data/` 整个不进 Git，换机即失效。
+退役手写集（200 例）的三个结构性问题（夹具不存在、身份塌缩、语料不可重建）已固化为
+下列设计约束，不保留历史叙述。
 
 ## 目录结构
 
@@ -49,23 +38,28 @@ PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.s
 PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed --verify
 PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed --clean
 
-# 5. 跑评测（检索/行为层的 expected 文档按 id 解析，身份按 spec 登录）
-PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python evals/run_evals.py --quick
-PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python evals/run_evals.py --full
+# 5. 跑评测（预期文档按 id 解析，身份按 spec 登录；完整命令见上一级 README）
 ```
 
 ## 设计约束
 
 - **确定性**：同 spec 同种子，输出逐字节一致；manifest 不含时间戳，版本信息由 git 承担。
-- **预期文档用 id 不用路径**：`expected_documents: ["SYN_CORPUS_LX20"]`。路径口径
-  （`source_files`）依赖 `data/` 目录且 101/350 解析失败；id 口径由 seed 保证存在，
+- **预期文档用 id 不用路径**：`expected_documents: ["SYN_CORPUS_LX20"]`——路径口径
+  依赖 `data/` 目录（不进 Git，换机即失效）；id 口径由 seed 保证存在，
   缺一个即整例不可评估（覆盖率显式暴露，不按部分预期打分）。
-- **身份是数据不是代码**：逻辑身份→登录名在 org.yaml，seed 建档、run_evals 解析，
-  不再有字符串包含关系的塌缩映射。口令统一 `EVAL_PASSWORD`（≥12 位，过生产弱口令校验）。
+- **身份是数据不是代码**：逻辑身份→登录名在 org.yaml，seed 建档、run_evals 解析。
+  口令统一 `EVAL_PASSWORD`（≥12 位，过生产弱口令校验）。
 - **夹具可直接写 published**：绕过发布审批流——这是测试夹具，不是业务资料。
-- **`COMPANY_ROOT` 占位**：org.yaml 里身份/文档可写 `node: COMPANY_ROOT`，
-  seed 插入前解析为当前租户的公司根节点（`kind='company'`），规格不写死 UUID。
-- **权限语义实测**：seed 的 `--verify` 用 `can_read()` 跑 10 条矩阵
+- **`COMPANY_ROOT` 占位**：身份/文档可写 `node: COMPANY_ROOT`，seed 插入前解析为
+  当前租户的公司根节点（`kind='company'`），规格不写死 UUID。
+- **权限语义实测**：`seed --verify` 用 `can_read()` 跑 10 条矩阵
   （有效授权/过期=撤权/deny 优先/密级通路/草稿状态），字段对但 grade 算错的白检过不了。
 - **`SYN_` 前缀即命名空间**：文档/账号/节点/授权统一前缀，`--clean` 按它整包清除，
   不碰业务数据。
+- **不编造标准答案**：答案只能从实际交付资料推导；资料标"未知"的题，
+  预期行为是如实说明资料不足。
+- **金丝雀标记（`SYN-CANARY-*`）只允许出现**在 `forbidden_disclosure` 与
+  `evidence_location`。
+- **对抗用例判定必须可机读**：`judge` 规则挂在 `basis` 语料溯源上，评测链路
+  不留人工复核口子（协议见 BENCHMARK 第 8 节）。
+- **权限类用例绑定真实夹具状态**：不得通过问题正文指定角色绕过认证。

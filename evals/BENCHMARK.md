@@ -51,7 +51,7 @@ spec/*.yaml → generate → seed → evals/tests → 检索层 → 生成层 �
 
 | 改了什么 | 必须跑 | 顺序 |
 |---|---|---|
-| 检索实现 / 检索参数（距离阈值 · 同文档限流 · 精排阈值） | 检索层 | 单测 → 先跑全量拿基线 → 改 → 再跑 → 对比后再定；不接受单条 query 的手感判断 |
+| 检索实现 / 检索参数（`ECOM_ANN_MAX_DIST`、`GATE_MARGIN`、精排双阈值、`ECOM_MAX_CHUNKS_PER_DOC`） | 检索层 | 单测 → 先跑全量拿基线 → 改 → 再跑 → 对比后再定；不接受单条 query 的手感判断 |
 | 提示词 / 合成链路 / 模型 | 生成层 | 单测 → 检索层 → 生成层 |
 | 指标定义 / 口径 | 全量 | 本文 + `metrics.py` + 单测 → 两层 → 重锁基线 |
 | 判定协议 / judge 提示词 | 对应层 | 单测 → 对应层 → 重锁基线 |
@@ -136,10 +136,10 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
 | 来源 | 做法 |
 |---|---|
 | 数据集 | `manifest` 记 `spec_sha256`，跑前比对；漂移即拒跑 `[待接线 preflight]` |
-| 抽样 | **取消随机抽样，全量跑**（检索池 28 例）；确需抽样则固定 seed 并写进报告 |
+| 抽样 | **取消随机抽样，全量跑**；确需抽样则固定 seed 并写进报告 |
 | 检索 | 固定 embedding 模型与维度、ES mapping、HNSW `ef_search`/`probes`、rerank 模型名，全部写进报告 |
 | 答案生成 | temperature=0、seed 固定、模型名+版本进报告 |
-| judge | 同上 + **结果缓存**（key = `case_id` + answer hash + judge 模型 + prompt 版本）`[待接线]` |
+| judge | temperature=0、模型名+版本进报告；**结果缓存见第 8 节** |
 | 报告 | 固定 schema；时间戳/耗时只进文件名与 metadata，不进可比字段；计算层不取整；bootstrap 固定 seed |
 
 **已知耦合（必须在报告中显式记录，否则结果不可解释）**：检索链路的 TF-IDF 分支每次查询
@@ -199,7 +199,7 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
 |---|---|---|
 | `hit@k` | 前 k 条中至少 1 条是金标准 | 只回答"找没找到"，不反映排序 |
 | `recall@k` | 前 k 条覆盖的金标准数 / 金标准总数 | 多文档用例分母 > 1（金标准是集合） |
-| `precision@k` | 前 k 条中金标准占比 | **分母固定 = k**，同时记录实际返回条数 `[待接线：现为实际返回条数]` |
+| `precision@k` | 前 k 条中金标准占比 | **分母固定 = k**，同时记录实际返回条数 `[待接线：现为实际返回条数]`。不设门禁：16 篇迷你语料上分母有结构性上限（单预期文档 1/8、双预期 0.25），衡量的是语料结构而非系统质量，回归检测由 recall/hit/MRR 承担 |
 | `mrr` | 首条命中的倒数排名，无命中 0 | — |
 | `ndcg@k` | 二值相关性的位置折损 | 只惩罚位置，不区分相关项之间权重 |
 
@@ -211,9 +211,6 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
 | `answer_relevancy` | 答案能反推出原问的程度；实现为"由答案生成问句 + 与原问的嵌入相似度" | 嵌入服务 |
 | `answer correctness` | faithfulness 与「对参考答案的语义相似度」的组合 | **`reference_answer`** `[待接线]` |
 | `semantic similarity` | 答案 vs 参考答案（嵌入相似度 / token F1） | **`reference_answer`** `[待接线]` |
-
-不用整段二元判定：一段里"9 条有据 + 1 条编造"与"1 条有据 + 9 条编造"都会判 false，
-既丢分辨率也无法在对比里看出改善。声明级判定是唯一能反映编造比例的口径。
 
 ### 7.3 可靠性
 
@@ -232,6 +229,12 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
 - **judge 配置固定**：temperature=0、模型名与版本写入报告，保证可复现。
 - **judge 结果缓存**：key = `case_id` + answer hash + judge 模型 + prompt 版本。
 - **每条判定输出**：`verdict` + `reason`（≤40 字）+ 依据片段，供人复核。
+- **对抗层为规则判定，不用 LLM judge**：每条用例的机读 `judge` 规则挂在 `basis`
+  语料溯源上——`mode=decline` 须命中至少一条拒答/资料不足表达（`must_contain_any`）；
+  `mode=facts` 须逐字命中 `must_contain_all`、同义组每组至少一条（`any_groups`）、
+  正则断言全部命中（`must_match`）；两种模式通用负向规则 `must_not_contain` /
+  `must_not_match` 防泄漏与编造（老板级标题、手机号、成本数字等）。规则缺项
+  （缺 mode / 缺规则 / 缺 basis）在数据集加载期即拒收。实现见 `run_evals.judge_adversarial`。
 
 ---
 
@@ -267,25 +270,16 @@ ops         延迟 p50/p95 / token / 成本
 
 ## 11. 落地清单（尚未接线的部分）
 
-**已完成（2026-10-20）**：
-- ~~取消 `hyde_off/hyde_on` 双跑与检索层随机抽样~~：单跑生产默认口径（HyDE 开），
-  检索层与行为层均全量跑，`six_metrics` 直接读单份 retrieval；基线已按新结构重锁。
-- 删除 `reports/` 下三份历史实验产物（探针报告 ×2、答案缓存 ×1，零引用 scratch）。
-
 1. 相关性粒度：标题级 → `document_id`/chunk 级
 2. `precision@k` 分母：实际返回条数 → 固定 k，并在报告记录实际返回条数
 3. 取消 `quick/full` 两套组合语义，收敛为单一入口 + 层参数
-5. `six_metrics` 改名（名说六项、实际八项）
-6. `reference_answer` 字段：spec → 生成 → 数据集
-7. judge：声明级输入改为引用原文 + 结果缓存 + 模型版本记录
-8. k=3 与 pass^k 接线
-9. SUT 适配器（检索 / 生成）抽出，指标层与项目解耦
-10. preflight 前置自检
-11. **逐条上下文相关性判定** `[待接线]`：现在只有"对金标准文档集合的召回/精度"，
-    缺"每条检索到的上下文是否与查询相关"的判定 → 三元组第 1 维不闭环，
-    "上下文充满噪声"这个失败模式测不出来
-12. **用例标签 `difficulty` / `answerable`** `[待接线]`：分层分析（F7-5）与拒答
-    能力评估的前提；没有难度分层，均值无法回答「改哪里」
-13. **吞吐量（并发）指标** `[待接线]`：延迟/成本已有，并发吞吐无指标
-14. **`answer relevancy` 补完整度维度** `[待接线]`：现为 judge 单比特，无法区分
-    "答了一半"与"答全了"（三元组第 3 维要求的完整性）
+4. `six_metrics` 改名（名说六项、实际八项）
+5. `reference_answer` 字段：spec → 生成 → 数据集
+6. judge：声明级输入改为引用原文 + 结果缓存 + 模型版本记录
+7. k=3 与 pass^k 接线
+8. SUT 适配器（检索 / 生成）抽出，指标层与项目解耦
+9. preflight 前置自检
+10. **逐条上下文相关性判定** `[待接线]`（三元组第 1 维，见第 4 节）
+11. **用例标签 `difficulty` / `answerable`** `[待接线]`（F7-5 分层分析的前提）
+12. **吞吐量（并发）指标** `[待接线]`
+13. **`answer relevancy` 补完整度维度** `[待接线]`（三元组第 3 维）
