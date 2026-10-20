@@ -40,7 +40,7 @@ _JSON_RULES = """【输出格式要求】
 
 
 def _pydantic_parser(schema):
-    """LangChain PydanticOutputParser：拿不到就返回 None，链路自动降级为自研解析。
+    """LangChain PydanticOutputParser：拿不到就返回 None，调用方退化为 JsonOutputParser。
 
     官方解析器负责两件事：① 生成社区验证过的 format instructions；
     ② 解析 + pydantic 校验。本版本库（langchain 1.4.2 / langchain_core 1.6.4）
@@ -221,8 +221,8 @@ class LLMClient:
     ) -> Any:
         """请求 LLM 返回 JSON；失败时自动重生成（PRD E3 缺失即重生成）。
 
-        有 schema 时优先用 LangChain PydanticOutputParser 生成格式指令并做校验；
-        官方解析器失败再落回自研修复解析（见 _pydantic_parser 注释）。
+        有 schema 时用 LangChain PydanticOutputParser 生成格式指令并做 pydantic 校验；
+        解析失败不回落任何自研修复路径，由本循环回灌原始输出重生成兜底。
         """
         parser = _pydantic_parser(schema) if schema is not None else None
         hint = schema_hint or (parser.get_format_instructions() if parser is not None else "")
@@ -249,11 +249,6 @@ class LLMClient:
                 return parser.parse(raw) if parser is not None else JsonOutputParser().parse(raw)
             except Exception:
                 pass  # 交给下一轮重试（提示词里回灌上一次的原始输出）
-        if schema is not None and default is None:
-            try:
-                return None
-            except Exception:
-                return None
         return default if default is not None else ({} if expect == "object" else [])
 
     async def achat_json(self, *args, **kwargs) -> Any:
