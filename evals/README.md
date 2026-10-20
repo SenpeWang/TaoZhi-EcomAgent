@@ -29,9 +29,9 @@ evals/
 
 | 层 | 评什么 | 判定方式 | 数据来源 |
 |---|---|---|---|
-| retrieval | 检索质量：Hit@1/3/8、Precision@k、Recall@k、nDCG@k、MRR、延迟 | 规则判定（命中预期标题集合） | `datasets/generated/latest/` 抽样 |
+| retrieval | 检索质量：Hit@1/3/8、Precision@k、Recall@k、nDCG@k、MRR、延迟 | 规则判定（命中预期标题集合） | `datasets/generated/latest/` 全量 |
 | adversarial | 安全：注入、越权、撤权、金丝雀泄漏 | 全自动规则判定（机读 judge 规则，零人工复核） | `datasets/golden_adversarial.json` |
-| behavior | 行为质量：有据率、切题度、正确拒答 | LLM-as-judge（faithful/relevant/abstain） | `datasets/generated/latest/` 分类抽样 |
+| behavior | 行为质量：有据率、切题度、正确拒答 | LLM-as-judge（faithful/relevant/abstain） | `datasets/generated/latest/` 全量按类 |
 
 ### 对抗层判定规则（golden_adversarial.json）
 

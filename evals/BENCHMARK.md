@@ -115,7 +115,7 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
 
 | 维度 | 评估目标 | 核心问题 | 我们的指标 | 当前可测状态 |
 |---|---|---|---|---|
-| **上下文相关性** | 检索器 | 检索到的内容是否与查询高度相关 | `hit@k` `recall@k` `precision@k` `mrr` `ndcg@k` `map` | ⚠️ 部分可测：现在是对"金标准文档集合"的召回/精度，**缺逐条上下文是否相关的判定**，"上下文充满噪声"这个失败模式测不出来 |
+| **上下文相关性** | 检索器 | 检索到的内容是否与查询高度相关 | `hit@k` `recall@k` `precision@k` `mrr` `ndcg@k` | ⚠️ 部分可测：现在是对"金标准文档集合"的召回/精度，**缺逐条上下文是否相关的判定**，"上下文充满噪声"这个失败模式测不出来 |
 | **忠实度** | 生成器 | 答案是否完全基于所提供上下文 | `faithfulness`（声明级 micro/macro） | ⚠️ 指标已定义，但判定输入必须是引用原文 `[待接线]`；只给标题时该指标不成立 |
 | **答案相关性** | 端到端 | 是否直接、**完整**且有效地回答了原问题 | `answer relevancy`（答案反推问句 + 嵌入相似度） | ⚠️ 现实现是 judge 单比特，无完整度维度 |
 
@@ -169,6 +169,28 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
 
 ## 7. 指标口径
 
+### 7.0 指标选型依据（为什么是这几个，2026-10-20 定）
+
+候选池 = 经典 IR 指标（检索）+ LLM-judge / 词汇重叠（响应）。选择标准只有一条：
+**企业生产级 RAG 评估框架（RAGAS / DeepEval / Arize）实际在用的**，不用翻译/摘要
+时代的遗产指标。
+
+| 候选 | 去留 | 理由 |
+|---|---|---|
+| Recall@k | ✅ 门禁 | RAG 第一失效模式是"该找到的没找到"；分母=金标准总数，多文档用例分母>1 |
+| MRR | ✅ 门禁 | 首条命中能力；客服/导购场景用户实际只看第一个结果 |
+| Precision@k | ✅ 观察 | 噪声度量；分母固定为 k（7.1），报表同时显示实际返回条数 |
+| nDCG@k | ✅ 观察 | 位置折损，覆盖"相关项被埋没" |
+| F1 | ❌ | k 固定时 P/R 单独看更可解释；调和平均掩盖"噪声大"还是"漏得多" |
+| MAP | ❌ | 为多相关文档的搜索排序设计；RAG 问答金标准通常 1-2 篇，AP 退化为 hit 变体，信息冗余（nDCG 已覆盖） |
+| Faithfulness（声明级） | ✅ 门禁 | LLM-as-judge 主流；唯能量化幻觉的指标。整段二元判定会损失分辨率（9据1造 与 1据9造 同判 false） |
+| Answer Relevancy | ✅ 门禁 | 端到端用户感知：直接、切题、无冗余 |
+| ROUGE / BLEU / METEOR | ❌ 全不选 | 机器翻译/摘要时代遗产：① 依赖标准答案 ② 不理解语义，同义词/释义误判（中文企业文档尤甚）③ 生产级 RAG 框架无一以其为主指标 |
+| token-F1 | ✅ 观察 | 词汇重叠类唯一轻量可用者：无需 judge、秒级、做冒烟与快速回归筛选；同义误判所以只观察不门禁 |
+
+结论：**检索三件套（Recall/MRR/Precision）+ 生成两件套（Faithfulness/Relevancy）**，
+其余全部观察或排除。词汇重叠类不作为质量口径。
+
 ### 7.1 检索层（规则判定，不调 LLM）
 
 相关性是二值的；**判定粒度 = `document_id` / chunk，与被测系统返回的粒度一致** `[待接线：现为文档标题级]`。
@@ -180,7 +202,6 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
 | `precision@k` | 前 k 条中金标准占比 | **分母固定 = k**，同时记录实际返回条数 `[待接线：现为实际返回条数]` |
 | `mrr` | 首条命中的倒数排名，无命中 0 | — |
 | `ndcg@k` | 二值相关性的位置折损 | 只惩罚位置，不区分相关项之间权重 |
-| `map` | 每个位置上精度的均值，再对相关文档平均 | 多相关文档场景比 nDCG 更稳 |
 
 ### 7.2 生成层（LLM-as-judge + 嵌入）
 
@@ -219,7 +240,7 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
 ```
 meta        git_sha / spec_sha256 / dataset_seed / judge 模型+版本 / 检索参数 / k
 coverage    可评估率（不可评估用例单列）
-retrieval   hit@{1,3,5} precision@k recall@k mrr ndcg@k map  + bootstrap CI
+retrieval   hit@{1,3,5} precision@k recall@k mrr ndcg@k  + bootstrap CI
 generation  faithfulness(micro/macro) relevancy correctness similarity + CI
 reliability 一次成功率 mean / pass^k
 per_case    case_id / category / difficulty / answerable / expected / 实际回答全文 /
@@ -246,10 +267,14 @@ ops         延迟 p50/p95 / token / 成本
 
 ## 11. 落地清单（尚未接线的部分）
 
+**已完成（2026-10-20）**：
+- ~~取消 `hyde_off/hyde_on` 双跑与检索层随机抽样~~：单跑生产默认口径（HyDE 开），
+  检索层与行为层均全量跑，`six_metrics` 直接读单份 retrieval；基线已按新结构重锁。
+- 删除 `reports/` 下三份历史实验产物（探针报告 ×2、答案缓存 ×1，零引用 scratch）。
+
 1. 相关性粒度：标题级 → `document_id`/chunk 级
 2. `precision@k` 分母：实际返回条数 → 固定 k，并在报告记录实际返回条数
-3. 取消 `hyde_off/hyde_on` 双跑（消融属实验）与检索层随机抽样
-4. 取消 `quick/full` 两套组合语义，收敛为单一入口 + 层参数
+3. 取消 `quick/full` 两套组合语义，收敛为单一入口 + 层参数
 5. `six_metrics` 改名（名说六项、实际八项）
 6. `reference_answer` 字段：spec → 生成 → 数据集
 7. judge：声明级输入改为引用原文 + 结果缓存 + 模型版本记录

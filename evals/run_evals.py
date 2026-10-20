@@ -87,15 +87,14 @@ def git_sha():
 # ─────────────── 检索质量层 ───────────────
 
 
-def phase_retrieval(sample=60):
+def phase_retrieval():
     from ecom_copilot.enterprise.retriever import search_documents
     from ecom_copilot.llm.client import LLMClient, ModelTier
     from ecom_copilot.enterprise.privacy import redact
     from ecom_copilot.enterprise.embedding import encode_passages
     cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
-    pool = [c for c in cases if c["category"] in ("product", "compat", "aftersale", "multi_doc")]
-    import random
-    chosen = random.Random(20261008).sample(pool, min(sample, len(pool)))
+    # 全量跑：检索池 28 例，小于任何抽样规模——抽样只丢覆盖不省时间（BENCHMARK F3）
+    chosen = [c for c in cases if c["category"] in ("product", "compat", "aftersale", "multi_doc")]
     assert load_config().mode == "production", "检索层评测必须对企业正式库执行"
     with database_connection() as c:
         principal = load_principal(c, fetch_one(c, "SELECT id FROM users WHERE username=%s", ("staff",))["id"])
@@ -122,7 +121,7 @@ def phase_retrieval(sample=60):
         want = case.get("expected_documents") or []
         return {id_to_title[d] for d in want if d in id_to_title}, [d for d in want if d not in id_to_title]
 
-    def run(use_hyde):
+    def run():
         pairs, lat, skipped = [], [], 0
         tok_before = obs_metrics.token_usage()
         for case in chosen:
@@ -131,7 +130,9 @@ def phase_retrieval(sample=60):
                 skipped += 1
                 continue
             t0 = time.perf_counter()
-            hyde = hyde_vec(case["question"]) if use_hyde else None
+            # 生产默认口径：HyDE 开启（pipeline 的 ECOM_HYDE_ENABLED 默认 true），
+            # 评测测的是生产链路真实行为，不再跑 hyde_off/on 双份消融（BENCHMARK 第10节）
+            hyde = hyde_vec(case["question"])
             with database_connection() as c:
                 rows = search_documents(c, principal, case["question"], limit=8, hyde_vector=hyde)
             lat.append(time.perf_counter() - t0)
@@ -150,7 +151,6 @@ def phase_retrieval(sample=60):
         report = metrics.retrieval_report(pairs, max_k=8, ks=(1, 3, 8))
         out = {k: round(v, 3) for k, v in metrics.flat_means(report).items()}
         out["n"] = report["n"]
-        out["sampled"] = len(chosen)
         out["coverage"] = round(coverage["mean"], 3) if coverage["mean"] is not None else 0.0
         xs = sorted(lat)
         out["latency_p50_s"] = round(xs[len(xs) // 2], 2) if xs else None
@@ -162,7 +162,7 @@ def phase_retrieval(sample=60):
                        for k, v in report["per_k"].items()}
         out["mrr_ci95"] = [report["mrr"].get("ci95_low"), report["mrr"].get("ci95_high")]
         return out
-    return {"hyde_off": run(False), "hyde_on": run(True)}
+    return run()
 
 
 # ─────────────── 对抗安全层 ───────────────
@@ -323,16 +323,13 @@ class JudgeVerdict(BaseModel):
     reason: str = Field("", description="不超过40字")
 
 
-def phase_behavior(per_class=8):
+def phase_behavior():
     cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
     by_cat = {}
     for c in cases:
         by_cat.setdefault(c["category"], []).append(c)
-    import random
-    rng = random.Random(20261008)
-    chosen = []
-    for cat, items in by_cat.items():
-        chosen.extend(rng.sample(items, min(per_class, len(items))))
+    # 全量按类跑：分层由 category 天然承担，不抽样（BENCHMARK F3）
+    chosen = [c for items in by_cat.values() for c in items]
     with database_connection() as c:
         node = resolve_eval_node(c)
     from ecom_copilot.llm.client import LLMClient, ModelTier
@@ -466,17 +463,16 @@ def phase_behavior(per_class=8):
 def six_metrics(result: dict) -> dict:
     """把各层的原始分数收敛成六项核心指标。
 
-    取值优先级：检索层用 hyde_off（基线口径）；答案为空/未跑的层返回 None，
+    取值优先级：检索层即单份生产默认口径；答案为空/未跑的层返回 None，
     不填 0——没跑过的指标写 0 会在基线对比里伪装成"暴跌"。
     """
-    ret = ((result.get("retrieval") or {}).get("hyde_off") or {})
+    ret = result.get("retrieval") or {}
     beh = result.get("behavior") or {}
     acc = beh.get("accuracy") or {}
     lat = ret.get("latency") or {}
     c_ret, c_beh = ret.get("cost") or {}, beh.get("cost") or {}
     total_tokens = (c_ret.get("total_tokens") or 0) + (c_beh.get("total_tokens") or 0)
     total_cost = (c_ret.get("cost_usd") or 0.0) + (c_beh.get("cost_usd") or 0.0)
-    n_cases = (c_ret.get("tokens_per_case") and ret.get("n") or 0)
     return {
         "recall@k": {k: ret.get(f"recall@{k}") for k in (1, 3, 8)},
         "precision@k": {k: ret.get(f"precision@{k}") for k in (1, 3, 8)},
@@ -563,11 +559,9 @@ def compare(current, baseline):
 
 
 # ─────────────── 生产阈值门禁 ───────────────
-# 业界（RAGAS / DeepEval 2026）对面向客户系统的推荐下限；内部工具可放宽到 0.7。
-# precision@8 不设门禁：16 篇迷你语料上该指标有结构性上限——单预期文档的用例
-# 最高 1/8=0.125、双预期 0.25，实测 0.36 已接近完美系统的表现。对它设阈值衡量
-# 的是语料结构而非系统质量；回归检测由 recall@8 / hit@8 / MRR 与 --compare
-# 逐项对比承担。faithfulness/relevancy 与语料规模无关，照常设阈。
+# 阈值只是红线参考，判定以 BENCHMARK.md 的回归对比为准（相对 baseline 的变化）。
+# 原"precision@8 结构性上限 1/8"论证已作废：该推导基于旧的分母口径（实际返回条数），
+# 新口径分母固定为 k（BENCHMARK 第 6.1 节，待接线）。
 GATE_THRESHOLDS = {
     "faithfulness": 0.85,          # 反幻觉硬指标：低于此值说明答案在掺参数知识
     "answer_relevancy": 0.80,      # 切题度：答非所问
@@ -608,12 +602,12 @@ def main():
     if args.adversarial_only:
         result["adversarial"] = phase_adversarial()
     elif args.behavior_only:
-        result["behavior"] = phase_behavior(per_class=8)
+        result["behavior"] = phase_behavior()
     else:
         result["retrieval"] = phase_retrieval()
         result["adversarial"] = phase_adversarial()
         if args.full:
-            result["behavior"] = phase_behavior(per_class=8)
+            result["behavior"] = phase_behavior()
     six = six_metrics(result)
     result["six_metrics"] = six
     print_six(six)
