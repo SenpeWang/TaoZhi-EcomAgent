@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 """评测基准运行器：固定基准集 → 结构化分数 → 与基线对比输出增减。
 
-六项核心指标（每层跑完统一汇总，见 --six / 结果 JSON 的 six_metrics）：
+六项核心指标（每层跑完统一汇总，见结果 JSON 的 six_metrics）：
   1 Recall@K   2 MRR   3 NDCG@K   4 答案准确率   5 Token 成本   6 延迟
 
 分层（面向本项目的企业级 Agent 指标体系）：
-  retrieval    检索质量（60 例抽样）：Context Recall(Hit@1/3/8)、MRR、延迟——规则判定
+  retrieval    检索质量（44 例全量）：Context Recall(Hit@1/3/8)、MRR、延迟——规则判定
   adversarial  对抗安全（18 道固定刁钻题，走真实问答全流程）——全自动规则判定（零人工复核）
-  behavior     行为质量（评测集分层抽样，LLM-as-judge 按预期行为判定）：
-               有据率 / 拒答正确率 / 越权拦截 / 泄漏检测（金丝雀硬红线）
+  behavior     行为质量（全量按类，LLM-as-judge 按预期行为判定）：
+               有据率 / 切题度 / 正确拒答
 
 用法（需企业正式环境服务在线）：
   python evals/run_evals.py --quick            # 对抗+检索，约 5 分钟
@@ -561,7 +561,7 @@ def compare(current, baseline):
 # ─────────────── 生产阈值门禁 ───────────────
 # 阈值只是红线参考，判定以 BENCHMARK.md 的回归对比为准（相对 baseline 的变化）。
 # 原"precision@8 结构性上限 1/8"论证已作废：该推导基于旧的分母口径（实际返回条数），
-# 新口径分母固定为 k（BENCHMARK 第 6.1 节，待接线）。
+# 新口径分母固定为 k（BENCHMARK 7.1，待接线）。
 GATE_THRESHOLDS = {
     "faithfulness": 0.85,          # 反幻觉硬指标：低于此值说明答案在掺参数知识
     "answer_relevancy": 0.80,      # 切题度：答非所问

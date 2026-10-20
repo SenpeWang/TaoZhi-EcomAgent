@@ -243,7 +243,7 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
 ```
 meta        git_sha / spec_sha256 / dataset_seed / judge 模型+版本 / 检索参数 / k
 coverage    可评估率（不可评估用例单列）
-retrieval   hit@{1,3,5} precision@k recall@k mrr ndcg@k  + bootstrap CI
+retrieval   hit@{1,3,8} precision@k recall@k mrr ndcg@k  + bootstrap CI
 generation  faithfulness(micro/macro) relevancy correctness similarity + CI
 reliability 一次成功率 mean / pass^k
 per_case    case_id / category / difficulty / answerable / expected / 实际回答全文 /
