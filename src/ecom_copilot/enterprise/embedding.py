@@ -5,6 +5,7 @@
 """
 import threading
 import time
+from typing import Optional, Tuple
 
 import httpx
 import numpy as np
@@ -12,27 +13,114 @@ import numpy as np
 from .config import load_config
 
 _lock = threading.Lock()
-_state = {"checked_at": 0.0, "ok": False}
+_state = {"checked_at": 0.0, "ok": False, "model": "", "dim": 0}
 OK_TTL = 10.0
 FAIL_TTL = 10.0
 
 
-def available() -> bool:
-    """探测嵌入服务健康状态，结果短时间缓存，避免每条查询都探测。"""
+def _probe() -> Tuple[bool, str, int]:
+    """探测嵌入服务，返回 (可用, 模型名, 维度)，结果 TTL 缓存。
+
+    一并取回模型标识：索引缓存必须知道"这批向量是哪个模型算的"，
+    否则换模型后会误用旧向量，而这种错误不报错、只会让检索悄悄变差。
+    """
     now = time.monotonic()
     with _lock:
         if now < _state["checked_at"]:
-            return _state["ok"]
-    ok = False
+            return _state["ok"], _state["model"], _state["dim"]
+    ok, model, dim = False, "", 0
     try:
-        r = httpx.get(load_config().embed_service_url.rstrip("/") + "/health", timeout=1.5, trust_env=False)
-        ok = r.status_code == 200 and r.json().get("status") == "ok"
+        r = httpx.get(load_config().embed_service_url.rstrip("/") + "/health",
+                  timeout=1.5, trust_env=False)
+        data = r.json() if r.status_code == 200 else {}
+        ok = r.status_code == 200 and data.get("status") == "ok"
+        model = str(data.get("model") or "")
+        dim = int(data.get("dim") or 0)
     except Exception:
-        ok = False
+        ok, model, dim = False, "", 0
     with _lock:
         _state["ok"] = ok
+        _state["model"] = model
+        _state["dim"] = dim
         _state["checked_at"] = now + (OK_TTL if ok else FAIL_TTL)
-    return ok
+    return ok, model, dim
+
+
+def available() -> bool:
+    """嵌入服务是否可用（探测结果短时间缓存，避免每条查询都探测）。"""
+    return _probe()[0]
+
+
+def model_signature() -> str:
+    """嵌入模型标识 ``model:dim``；取不到返回空串，调用方据此跳过缓存。"""
+    ok, model, dim = _probe()
+    return f"{model}:{dim}" if ok and dim else ""
+
+
+def to_vector(raw) -> Optional[np.ndarray]:
+    """把库里读回的向量统一成 float32 数组；无法识别返回 None。
+
+    读回形态取决于 pgvector-python 是否注册：注册后为 Vector（可转 numpy），
+    未注册时为文本；历史 bytea 列也可能是字节串。放这里是为了让"向量怎么
+    存、怎么读"只有一个实现。
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, np.ndarray):
+        return raw.astype("float32", copy=False)
+    to_numpy = getattr(raw, "to_numpy", None)
+    if callable(to_numpy):
+        try:
+            return to_numpy().astype("float32", copy=False)
+        except Exception:
+            return None
+    if isinstance(raw, (bytes, bytearray, memoryview)) and len(raw) % 4 == 0:
+        return np.frombuffer(raw, dtype="float32")
+    return None
+
+
+def to_vector(raw) -> Optional[np.ndarray]:
+    """把库里读回的向量统一成 float32 数组；无法识别返回 None。
+
+    读回形态取决于 pgvector-python 是否注册：注册后为 Vector（可转 numpy），
+    未注册时为文本；历史 bytea 列也可能是字节串。放在本模块是为了让"向量怎么
+    存、怎么读"只有一个实现——缓存与检索共用它。
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, np.ndarray):
+        return raw.astype("float32", copy=False)
+    to_numpy = getattr(raw, "to_numpy", None)
+    if callable(to_numpy):
+        try:
+            return to_numpy().astype("float32", copy=False)
+        except Exception:
+            return None
+    if isinstance(raw, (bytes, bytearray, memoryview)) and len(raw) % 4 == 0:
+        return np.frombuffer(raw, dtype="float32")
+    return None
+
+
+def to_vector(raw) -> Optional[np.ndarray]:
+    """把库里读回的向量统一成 float32 数组；无法识别返回 None。
+
+    读回形态取决于 pgvector-python 是否注册：注册后为 Vector（可转 numpy），
+    未注册时为文本；历史 bytea 列也可能是字节串。放在本模块是为了让"向量怎么
+    存、怎么读"只有一个实现——缓存与检索共用它。
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, np.ndarray):
+        return raw.astype("float32", copy=False)
+    to_numpy = getattr(raw, "to_numpy", None)
+    if callable(to_numpy):
+        try:
+            return to_numpy().astype("float32", copy=False)
+        except Exception:
+            return None
+    if isinstance(raw, (bytes, bytearray, memoryview)) and len(raw) % 4 == 0:
+        return np.frombuffer(raw, dtype="float32")
+    return None
 
 
 def _post(texts: list[str], instruct: bool) -> np.ndarray:

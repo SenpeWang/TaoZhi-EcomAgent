@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-"""全量重算 chunks.embedding：嵌入输入从纯正文改为"文档标题 + 正文"后的一次性回填。
+"""全量重算 chunks.embedding：嵌入口径变更后的一次性回填。
 
-口径与入库（worker._embed_chunks）、检索侧惰性补算（retriever._semantic_matrix）
-一致，三者共用 embedding.embedding_input。标题只进向量：chunks.text 列不动，
-ES 不动（BM25 走 ik 分词，与向量是互补信号）。
+口径与入库（worker）、检索侧惰性补算（retriever._semantic_matrix）一致，
+三者共用 embedding.embedding_input；向量经 index_cache 缓存，重跑同一批
+语料不会重复消耗嵌入算力。
 
 用法（项目根目录，生产口径）：
   PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python scripts/backfill_embeddings.py --dry-run
@@ -15,19 +15,19 @@ ES 不动（BM25 走 ik 分词，与向量是互补信号）。
 """
 import argparse
 import sys
-
-import numpy as np
+from collections import defaultdict
 
 from ecom_copilot.enterprise.config import load_config
 from ecom_copilot.enterprise.db import database_connection, fetch_all
 from ecom_copilot.enterprise.embedding import available as embed_available
-from ecom_copilot.enterprise.embedding import embedding_input, encode_passages
+from ecom_copilot.enterprise.index_cache import encode_index
 
 QUERY = """
-SELECT c.id, c.text, d.title
+SELECT c.id, c.tenant_id, c.text, d.title
 FROM chunks c JOIN documents d ON d.id = c.document_id
 ORDER BY c.id
 """
+DIM = 512
 
 
 def main() -> int:
@@ -48,21 +48,29 @@ def main() -> int:
     if args.dry_run or total == 0:
         return 0
 
+    # 缓存键按租户隔离，所以按租户分批，避免跨租户混批
+    by_tenant = defaultdict(list)
+    for r in rows:
+        by_tenant[r["tenant_id"]].append(r)
+
     done = 0
     with database_connection() as conn:  # 单事务：中途失败整体回滚，重跑即可
-        for start in range(0, total, args.batch):
-            batch = rows[start:start + args.batch]
-            vecs = encode_passages([embedding_input(r["title"], r["text"]) for r in batch])
-            if len(vecs) != len(batch):
-                print(f"批次 {start}-{start + len(batch)} 向量数不匹配（{len(vecs)}/{len(batch)}），终止", file=sys.stderr)
-                return 3
-            if vecs.shape[1] != 512:
-                print(f"嵌入维度 {vecs.shape[1]} 与 PG 列 vector(512) 不一致，终止", file=sys.stderr)
-                return 3
-            for r, v in zip(batch, vecs):
-                conn.execute("UPDATE chunks SET embedding=%s WHERE id=%s", (np.asarray(v, dtype="float32"), r["id"]))
-            done += len(batch)
-            print(f"已重算 {done}/{total}", flush=True)
+        for tenant_id, items in by_tenant.items():
+            for start in range(0, len(items), args.batch):
+                batch = items[start:start + args.batch]
+                vecs = encode_index(conn, tenant_id,
+                                    [(r["title"], r["text"]) for r in batch])
+                if vecs is None:
+                    print(f"批次 {tenant_id}/{start} 嵌入服务不可用，终止", file=sys.stderr)
+                    return 3
+                if vecs.shape[1] != DIM:
+                    print(f"嵌入维度 {vecs.shape[1]} 与 PG 列 vector({DIM}) 不一致，终止",
+                          file=sys.stderr)
+                    return 3
+                for r, v in zip(batch, vecs):
+                    conn.execute("UPDATE chunks SET embedding=%s WHERE id=%s", (v, r["id"]))
+                done += len(batch)
+                print(f"已重算 {done}/{total}", flush=True)
     print(f"完成：{done} 条切片已按'标题+正文'口径重算")
     return 0
 

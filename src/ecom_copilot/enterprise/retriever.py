@@ -15,6 +15,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 from rank_bm25 import BM25Okapi
 from .config import load_config
 from .db import fetch_all
+from .embedding import to_vector
+from .index_cache import encode_index
 from .policy import can_read
 from .privacy import redact
 
@@ -34,48 +36,37 @@ def _ranks(scores):
     ranks[order]=np.arange(1,len(scores)+1)
     return ranks
 
-def _vec(raw):
-    """把 chunks.embedding 读回的值统一成 numpy float32 数组；无法识别返回 None。
+def _semantic_matrix(conn, tenant_id, chunks, dim):
+    """返回与 chunks 对齐的向量矩阵及存在标记；缺失向量补算并写缓存，失败返回 None。
 
-    读回形态：pgvector-python 注册后为 Vector 对象；未注册时为文本；历史 bytea 为字节串。
-    """
-    if raw is None:return None
-    if isinstance(raw,np.ndarray):return raw.astype("float32",copy=False)
-    to_numpy=getattr(raw,"to_numpy",None)
-    if callable(to_numpy):
-        try:return to_numpy().astype("float32",copy=False)
-        except Exception:return None
-    if isinstance(raw,(bytes,bytearray,memoryview)) and len(raw)%4==0:
-        return np.frombuffer(raw,dtype="float32")
-    return None
-
-def _semantic_matrix(conn,chunks,dim):
-    """返回与 chunks 对齐的向量矩阵及存在标记；缺失向量惰性补算（限流），失败返回 None。
-
-    补算口径与入库一致：文档标题前缀 + 正文（chunks 行需带 doc_title，缺失退化为纯正文，
-    与回填前的历史向量兼容）。
+    补算口径与入库完全一致：文档标题前缀 + 正文（chunks 行需带 doc_title）。
+    走 index_cache 后同一批切片重复查询不再重复编码，历史向量也可直接复用。
     """
     try:
-        from .embedding import available as embed_available,encode_passages,embedding_input
-        if not embed_available():return None
-        mats=[None]*len(chunks);missing=[]
-        for i,c in enumerate(chunks):
-            v=_vec(c.get("embedding"))
-            if v is not None and len(v)==dim:mats[i]=v
-            else:missing.append(i)
+        mats = [to_vector(c.get("embedding")) for c in chunks]
+        mats = [v if (v is not None and len(v) == dim) else None for v in mats]
+        missing = [i for i, v in enumerate(mats) if v is None]
         if missing:
-            picked=missing[:BACKFILL_LIMIT]
-            vecs=encode_passages([embedding_input(chunks[i].get("doc_title"),chunks[i]["text"]) for i in picked])
-            for i,v in zip(picked,vecs):
-                mats[i]=v
+            picked = missing[:BACKFILL_LIMIT]
+            vecs = encode_index(conn, tenant_id,
+                                [(chunks[i].get("doc_title"), chunks[i]["text"])
+                                 for i in picked])
+            if vecs is None:
+                return None
+            for i, v in zip(picked, vecs):
+                mats[i] = np.asarray(v, dtype="float32")
                 try:
                     # 独立连接写回：补算失败只损失增量向量，不污染调用方检索事务
                     from .db import database_connection
-                    with database_connection() as bc:bc.execute("UPDATE chunks SET embedding=%s WHERE id=%s",(v,chunks[i]["id"]))
-                except Exception:pass
-        rows=[m for m in mats if m is not None]
-        if not rows:return None
-        return np.stack(rows),[m is not None for m in mats]
+                    with database_connection() as bc:
+                        bc.execute("UPDATE chunks SET embedding=%s WHERE id=%s",
+                                   (mats[i], chunks[i]["id"]))
+                except Exception:
+                    pass
+        rows = [m for m in mats if m is not None]
+        if not rows:
+            return None
+        return np.stack(rows), [m is not None for m in mats]
     except Exception:
         return None
 
@@ -221,7 +212,7 @@ def search_documents(conn,p,query,limit=8,hyde_vector=None):
         if not chunks:return []
         chunks=_dedup_text(chunks)
         # ANN 相关性闸门：top-k 中无任何切片足够接近即判资料不足（无查询向量时闸门不生效）
-        vecs=[_vec(c.get("embedding")) for c in chunks]
+        vecs=[to_vector(c.get("embedding")) for c in chunks]
         chunks,vecs=_ann_gate(chunks,vecs,qv,load_config().ann_max_distance)
         if not chunks:return []
         signals=[_es_rank_signal(bm25_rank or {},chunks),_es_rank_signal(ann_rank or {},chunks)]
@@ -251,7 +242,7 @@ def search_documents(conn,p,query,limit=8,hyde_vector=None):
     chunks=_dedup_text(chunks)
     # ANN 相关性闸门（与主链路一致；无查询向量时不生效）
     if qv is not None:
-        vecs=[_vec(c.get("embedding")) for c in chunks]
+        vecs=[to_vector(c.get("embedding")) for c in chunks]
         chunks,vecs=_ann_gate(chunks,vecs,qv,load_config().ann_max_distance)
         if not chunks:return []
     tokens=[words(c["text"]) for c in chunks];terms=words(query);termset=set(terms)
@@ -265,7 +256,7 @@ def search_documents(conn,p,query,limit=8,hyde_vector=None):
     signals=[scores,dense,overlap]
     if qv is not None:
         try:
-            packed=_semantic_matrix(conn,chunks,qv.shape[1])
+            packed=_semantic_matrix(conn,p.tenant_id,chunks,qv.shape[1])
             if packed is not None:
                 matrix,present=packed
                 idx=[i for i,ok in enumerate(present) if ok]

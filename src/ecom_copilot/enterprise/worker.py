@@ -6,6 +6,7 @@ from .db import database_connection,fetch_one,fetch_all,as_jsonb
 from .policy import (Denied, can_write, get_document, load_principal, sources_valid)
 from .services import approval,invalidate_authorization
 from .storage import get_blob_store
+from .index_cache import encode_index
 STOP=threading.Event()
 WORKER="worker_"+secrets.token_hex(8)
 def claim_next_job():
@@ -23,22 +24,6 @@ def renew_job_lease(job,done):
                 c.execute("INSERT INTO worker_heartbeats(id) VALUES(%s) ON CONFLICT(id) DO UPDATE SET updated_at=now()",(wid,))
                 c.execute("UPDATE jobs SET lease_until=now()+(%s*interval '1 second') WHERE id=%s AND run_version=%s AND worker_id=%s AND state='running'",(load_config().lease_seconds,job["id"],job["run_version"],wid))
         except Exception:pass
-def _embed_chunks(title, chunks):
-    """入库时计算语义向量；嵌入服务不可用时不阻断解析，留待检索侧惰性补算。
-
-    嵌入输入带文档标题前缀（contextual retrieval），与检索侧惰性补算、全量回填
-    脚本共用 embedding.embedding_input，保证全库向量口径一致；标题只进向量，
-    chunks.text 列仍存纯正文。
-    """
-    if not chunks:
-        return None
-    try:
-        from .embedding import available as embed_available, encode_passages, embedding_input
-        if not embed_available():
-            return None
-        return encode_passages([embedding_input(title, ch["text"]) for ch in chunks])
-    except Exception:
-        return None
 def process_ingestion_job(job):
     from .ingest import parse,split
     from .pipeline import validate_task_execution
@@ -51,7 +36,9 @@ def process_ingestion_job(job):
     if v["blob_name"]:body,pages=parse(get_blob_store().open_blob(p.tenant_id,v["blob_name"]),v["mime_type"])
     else:body,pages=v["body"],[(0,v["body"])]
     chunks=split(pages,d["id"],d["current_version"])
-    vectors=_embed_chunks(d["title"],chunks)
+    # 走索引缓存：正文没变的切片直接复用向量，只有新文本才烧嵌入算力
+    with database_connection() as c:
+        vectors=encode_index(c,p.tenant_id,[(d["title"],ch["text"]) for ch in chunks])
     validate_task_execution(state,"建立版本索引与发布申请",75)
     with database_connection() as c:
         locked=fetch_one(c,"SELECT * FROM jobs WHERE id=%s FOR UPDATE",(job["id"],))
