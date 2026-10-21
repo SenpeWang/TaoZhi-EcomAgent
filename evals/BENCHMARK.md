@@ -199,7 +199,7 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
 |---|---|---|
 | `hit@k` | 前 k 条中至少 1 条是金标准 | 只回答"找没找到"，不反映排序 |
 | `recall@k` | 前 k 条覆盖的金标准数 / 金标准总数 | 多文档用例分母 > 1（金标准是集合） |
-| `precision@k` | 前 k 条中金标准占比 | **分母固定 = k**，同时记录实际返回条数 `[待接线：现为实际返回条数]`。不设门禁：16 篇迷你语料上分母有结构性上限（单预期文档 1/8、双预期 0.25），衡量的是语料结构而非系统质量，回归检测由 recall/hit/MRR 承担 |
+| `precision@k` | 前 k 条中金标准占比 | **分母固定 = k**，同时记录实际返回条数 `[待接线：现为实际返回条数]`。不设门禁：32 篇小语料上分母有结构性上限（单预期文档 1/8、双预期 0.25），衡量的是语料结构而非系统质量，回归检测由 recall/hit/MRR 承担 |
 | `mrr` | 首条命中的倒数排名，无命中 0 | — |
 | `ndcg@k` | 二值相关性的位置折损 | 只惩罚位置，不区分相关项之间权重 |
 
@@ -225,7 +225,8 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
 ## 8. 判定协议
 
 - **声明级分解**：faithfulness 必须拆原子声明逐条判定，禁止整段二元结论。
-- **判定输入必须是引用原文** `[待接线：现为引用文档标题]`：judge 拿不到原文就只能凭自身知识判断，声明级忠实度不成立。
+- **判定输入是引用原文**（2026-10-21 接线）：judge 收到 `{标题, 正文}`，正文截断 400 字。
+  此前只给标题，judge 只能凭自身知识判断，声明级忠实度不成立——那份分数不可用。
 - **judge 配置固定**：temperature=0、模型名与版本写入报告，保证可复现。
 - **judge 结果缓存**：key = `case_id` + answer hash + judge 模型 + prompt 版本。
 - **每条判定输出**：`verdict` + `reason`（≤40 字）+ 依据片段，供人复核。
@@ -246,8 +247,14 @@ coverage    可评估率（不可评估用例单列）
 retrieval   hit@{1,3,8} precision@k recall@k mrr ndcg@k  + bootstrap CI
 generation  faithfulness(micro/macro) relevancy correctness similarity + CI
 reliability 一次成功率 mean / pass^k
-per_case    case_id / category / difficulty / answerable / expected / 实际回答全文 /
-            检索上下文（原文 + document_id + chunk_id）/ 参考答案 / verdict / reason / 评分依据片段
+retrieval.per_case  case_id / category / question / expected_document_ids /
+            retrieved[{rank, document_id, chunk_id, title, score, rerank_score,
+                       in_expected, quote}] / metrics{hit@1,hit@3,hit@8,recall@8,precision@8,mrr,ndcg@8}
+behavior.detail     id / pass / why / verdict{pass,faithful,relevant,abstain} /
+            claims / supported / answer / citations[{title, chunk_id, document_id, quote}]
+
+两层各自带逐例证据，不合成顶层 `per_case`：检索层按 case_id 带 chunk 级证据，
+行为层按 case_id 带答案与引用原文，形态不同硬合并只会让消费方各自再拆一遍。
 ops         延迟 p50/p95 / token / 成本
 ```
 
@@ -266,6 +273,24 @@ ops         延迟 p50/p95 / token / 成本
 - **`reference_answer`** `[待接线]`：`answer correctness` 与 `semantic similarity` 的必要输入。
 - 对抗集的语料溯源必须挂在 spec 夹具上，不引用生产库文档 id。
 
+### 10.1 类别与专属契约
+
+| 类别 | 归属层 | 专属契约 |
+|---|---|---|
+| product / compat / aftersale / multi_doc / insufficient / conflict / troubleshoot / timeliness / citation / long_context | retrieval + behavior | 必给 `expected_documents` + `expected_facts` |
+| role / grant / revocation / injection / leakage | behavior | 必给 `pass_criteria`；禁区含真实存在的金丝雀 |
+| **ambiguous** | behavior | 必给 `pass_criteria`（判"是否澄清或分情况"），不要求单点答案 |
+| **robust** | behavior | 锚点与基准问法一致，只变问法（同义/错字/缩写/口语/冗余），掉分即输入鲁棒性缺口 |
+| **multi_turn** | behavior | 必给 `turns`（前置轮）；判定只针对最后一轮；短追问下限 4 字；同会话靠 `conversation_id` 隔离 |
+| **parsing** | behavior | 夹具来自 `spec/parsing.yaml` → `dataset/parsing.py` 渲染真实 PDF/DOCX → 入库解析器读回；正文为空或 `facts` 缺失即生成失败 |
+
+每条用例另带五维标注（answerability / qtype / difficulty / source / risk），取值、覆盖下限
+与判定方式见 `dataset/README.md`（唯一归属，此处不复述）。报告同时按**类别**与**五维**聚合：
+坏例可以同时按"考的是哪种能力"和"业务风险多高"两个口径定位。
+
+多轮的实现边界：`/api/tasks` 的 `Question` 带 `conversation_id`，命中同一会话才继承上文证据；
+空值退回关键词启发式（历史行为）。跨会话不串证据，这条由 `jobs.conversation_id` 索引保证。
+
 ---
 
 ## 11. 落地清单（尚未接线的部分）
@@ -275,7 +300,7 @@ ops         延迟 p50/p95 / token / 成本
 3. 取消 `quick/full` 两套组合语义，收敛为单一入口 + 层参数
 4. `six_metrics` 改名（名说六项、实际八项）
 5. `reference_answer` 字段：spec → 生成 → 数据集
-6. judge：声明级输入改为引用原文 + 结果缓存 + 模型版本记录
+6. judge：~~声明级输入改为引用原文~~ ✅ 2026-10-21 接线（正文 400 字）；结果缓存与模型版本记录仍未做
 7. k=3 与 pass^k 接线
 8. SUT 适配器（检索 / 生成）抽出，指标层与项目解耦
 9. preflight 前置自检
@@ -283,3 +308,46 @@ ops         延迟 p50/p95 / token / 成本
 11. **用例标签 `difficulty` / `answerable`** `[待接线]`（F7-5 分层分析的前提）
 12. **吞吐量（并发）指标** `[待接线]`
 13. **`answer relevancy` 补完整度维度** `[待接线]`（三元组第 3 维）
+14. ✅ 运行间比较改配对 bootstrap（`metrics.paired_delta`）+ 门禁拆三类语义（第 12 节）
+15. ✅ 逐例证据落盘（检索 chunk 正文 / 答案 / 引用原文），失败归因可离线做
+16. ✅ judge 校准工具 `evals/calibrate.py`（导出 + kappa 评分）——**待人工标注落地**
+
+
+---
+
+## 12. 门禁语义与 judge 校准（2026-10-21）
+
+### 12.1 三类判定，只有两类阻塞
+
+| 判定 | 来源 | 阻塞 | 说明 |
+|---|---|---|---|
+| 硬底线 | `HARD_FLOORS`（faithfulness 0.85） | 是 | 业务红线，与基线无关，跌破即停 |
+| 显著回归 | `compare()` 配对 bootstrap | 是 | 相对基线，差值 95%CI 整体落在负区 |
+| 目标线 | `TARGETS`（relevancy 0.80 / recall@8 0.80） | 否 | 业界经验值，只显示差距 |
+
+目标线不阻塞的理由：本项目的 `relevant_rate` 是 judge 二元通过率，与 RAGAS
+`answer_relevancy`（答案反推问句 + 嵌入相似度）不是同一个度量。跨口径套阈值的结果是
+门禁永远红（基线 0.654 < 0.80），而"永远红"等于没有门禁。
+
+### 12.2 为什么不再"跌了就报回归"
+
+49 例检索集上 hit@1 的 95% 置信区间为 [0.612, 0.857]，宽 0.245。按符号判回归，
+±0.24 的自然抖动都会被打成退化；跑几次之后团队就不看这个信号了。改用配对 bootstrap
+（同一 `case_id` 前后做差再重采样），消掉用例难度这一层方差，只有差值 CI 整体落在
+负区才算显著下降。用例集变了（新增/删除/改金标准）配对不成立，此时明确报"无法对比"，
+不退回符号判定——把"没数据做检验"显示成"无回归"是假绿。
+
+### 12.3 judge 校准（必须人工做）
+
+```
+.venv/bin/python evals/calibrate.py --export 60        # 分层抽样：一半失败一半通过
+# 人工填 human.pass / faithful / relevant（true/false；拿不准留 null，评分时跳过）
+.venv/bin/python evals/calibrate.py --score <sheet>
+```
+
+判据：Cohen's kappa ≥ 0.6 可用、≥ 0.8 强；低于 0.6 的维度，其分数只能当参考，
+不能作门禁依据。结果存档 `evals/reports/calibration/<sheet>-stem-kappa.json`，
+随版本留存以便追溯"当时为什么信这个判据"。
+
+为什么校准放在归因链的前置位：归因四步里，第 2、3 步的判定都由 judge 产出。
+judge 未校准时，无法区分"系统答错了"和"judge 判错了"，第一步之后的结论全部没有依据。

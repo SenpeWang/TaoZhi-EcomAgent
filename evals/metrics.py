@@ -11,6 +11,10 @@
   延迟（run_evals.py 汇总，成本口径统一取自 observability.metrics.token_usage）。
 - 命中判定用集合包含，不做模糊匹配——宁可低估召回，也不要虚高。
 - 平均指标一律给出自举置信区间；样本量小的时候点估计没有决策价值。
+- 两次运行的比较用配对 bootstrap（同一批用例先做差再重采样），不用"固定阈值差"：
+  judge 分数天然有方差，固定阈值会把正常波动判成回归（见 paired_delta）。
+- judge 与人工标注的一致性用 Cohen's kappa 度量（见 cohen_kappa）：
+  0.6 是可用下限，低于此值的评分只能当参考，不能作门禁依据。
 """
 from __future__ import annotations
 
@@ -142,13 +146,20 @@ def accuracy_report(verdicts: Sequence[dict]) -> dict:
     n = len(verdicts)
     if not n:
         return {"n": 0, "accuracy": None, "grounded_rate": None,
-                "relevant_rate": None, "abstain_rate": None}
+                "relevant_rate": None, "abstain_rate": None, "ci95": {}}
     acc = sum(1 for v in verdicts if v.get("pass")) / n
     grounded = sum(1 for v in verdicts if v.get("faithful")) / n
     relevant = sum(1 for v in verdicts if v.get("relevant")) / n
     abstain = sum(1 for v in verdicts if v.get("abstain")) / n
+    # 置信区间：judge 是抽样判定，点估计单独看会把噪声当趋势
     return {"n": n, "accuracy": acc, "grounded_rate": grounded,
-            "relevant_rate": relevant, "abstain_rate": abstain}
+            "relevant_rate": relevant, "abstain_rate": abstain,
+            "ci95": {
+                "accuracy": _ci([1.0 if v.get("pass") else 0.0 for v in verdicts]),
+                "grounded_rate": _ci([1.0 if v.get("faithful") else 0.0 for v in verdicts]),
+                "relevant_rate": _ci([1.0 if v.get("relevant") else 0.0 for v in verdicts]),
+                "abstain_rate": _ci([1.0 if v.get("abstain") else 0.0 for v in verdicts]),
+            }}
 
 
 def cost_report(before: dict, after: dict, n: int = 0) -> dict:
@@ -194,3 +205,97 @@ def faithfulness_report(cases: Sequence[dict]) -> dict:
     sum_s = sum(min(c["claims"], c.get("supported") or 0) for c in tot_cases)
     return {"n": len(tot_cases), "micro": sum_s / sum_c, "macro": float(np.mean(per)),
             "claims": int(sum_c), "supported": int(sum_s)}
+
+
+# ─────────────── 运行间比较：配对 bootstrap ───────────────
+
+def _ci(values: Sequence[float], bootstrap: int = DEFAULT_BOOTSTRAP):
+    """把 summarize 的置信区间压成 [low, high]；样本不足时返回 None，不编造。"""
+    st = summarize(values, bootstrap)
+    if st["ci95_low"] is None:
+        return None
+    return [st["ci95_low"], st["ci95_high"]]
+
+
+def paired_delta(baseline: Sequence[float], current: Sequence[float],
+                 n_boot: int = DEFAULT_BOOTSTRAP, seed: int = DEFAULT_SEED,
+                 higher_is_better: bool = True, min_pairs: int = 5) -> dict:
+    """配对 bootstrap：同一批用例两次运行的差值，是否显著偏离 0。
+
+    为什么不比"固定阈值差"：检索打分与 judge 判定都带方差。本项目 49 例检索集上
+    hit@1 的 95% 置信区间宽达 0.245，也就是说 ±0.24 的自然抖动完全正常；用
+    "跌了就算回归"会在正常波动时反复误报，几次之后门禁就没人看了。
+    配对做差能消掉"用例本身难易"这一层方差，只保留同一用例前后真实的变化。
+
+    判定：差值的 95% 置信区间整体落在 0 的一侧才算显著。区间跨 0 → stable。
+    """
+    a = np.asarray(list(baseline), dtype="float64")
+    b = np.asarray(list(current), dtype="float64")
+    n = int(min(a.size, b.size))
+    if n < min_pairs:
+        return {"n": n, "delta": None, "ci95_low": None, "ci95_high": None,
+                "significant": False, "verdict": "insufficient_data"}
+    d = b[:n] - a[:n]
+    mean_d = float(d.mean())
+    if n_boot <= 0:
+        return {"n": n, "delta": mean_d, "ci95_low": None, "ci95_high": None,
+                "significant": False, "verdict": "no_ci"}
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, n, size=(n_boot, n))
+    boots = d[idx].mean(axis=1)
+    lo, hi = float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5))
+    worse = hi < 0 if higher_is_better else lo > 0
+    better = lo > 0 if higher_is_better else hi < 0
+    return {"n": n, "delta": mean_d, "ci95_low": lo, "ci95_high": hi,
+            "significant": bool(worse or better),
+            "verdict": "regression" if worse else ("improved" if better else "stable")}
+
+
+# ─────────────── judge 校准：Cohen's kappa ───────────────
+
+KAPPA_GUIDE = ((0.8, "强"), (0.6, "可用"), (0.4, "勉强"), (float("-inf"), "不可用"))
+
+
+def cohen_kappa(human: Sequence, judge: Sequence,
+                bootstrap: int = 300, seed: int = DEFAULT_SEED) -> dict:
+    """judge 与人工标注的一致性，用 Cohen's kappa（已扣除随机一致）。
+
+    为什么不用简单一致率：两类样本不平衡时，judge 全判"通过"就能拿到很高的
+    原始一致率，kappa 会把这份"蒙对"扣掉。业界门槛：0.6 可用、0.8 强。
+    混淆矩阵一并返回，方便看偏差方向（judge 偏松还是偏严）。
+    """
+    h = [str(x) for x in human]
+    j = [str(x) for x in judge]
+    n = min(len(h), len(j))
+    if n == 0:
+        return {"n": 0, "kappa": None, "agreement": None, "ci95_low": None,
+                "ci95_high": None, "labels": [], "matrix": [], "verdict": "no_data"}
+    h, j = h[:n], j[:n]
+    labels = sorted(set(h) | set(j))
+    ix = {lab: i for i, lab in enumerate(labels)}
+    k = len(labels)
+    hi = np.array([ix[x] for x in h])
+    ji = np.array([ix[x] for x in j])
+
+    def _kappa(sel) -> tuple:
+        m = np.zeros((k, k), dtype="float64")
+        np.add.at(m, (hi[sel], ji[sel]), 1.0)
+        tot = float(len(sel))
+        po = float(np.trace(m) / tot)
+        pe = float((m.sum(axis=1) / tot) @ (m.sum(axis=0) / tot))
+        return ((1.0 if po >= 1.0 else 0.0) if pe >= 1.0 else (po - pe) / (1.0 - pe)), po
+
+    kappa, po = _kappa(np.arange(n))
+    lo = hi_ = None
+    if bootstrap > 0 and n >= 10:
+        rng = np.random.default_rng(seed)
+        samples = [idx for idx in rng.integers(0, n, size=(bootstrap, n))]
+        vals = [_kappa(idx)[0] for idx in samples]
+        lo, hi_ = float(np.percentile(vals, 2.5)), float(np.percentile(vals, 97.5))
+    verdict = next(t for cut, t in KAPPA_GUIDE if kappa >= cut)
+    # 混淆矩阵：行=人工，列=judge
+    mat = np.zeros((k, k), dtype="int64")
+    np.add.at(mat, (hi, ji), 1)
+    return {"n": n, "kappa": float(kappa), "agreement": po, "ci95_low": lo,
+            "ci95_high": hi_, "labels": labels, "matrix": mat.tolist(),
+            "verdict": verdict}

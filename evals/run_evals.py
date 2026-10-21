@@ -86,6 +86,45 @@ def git_sha():
 
 # ─────────────── 检索质量层 ───────────────
 
+# 报告里每条上下文正文的上限：留够归因用的长度，又不让 reports 失控
+EVIDENCE_QUOTE_CHARS = 400
+
+
+def retrieval_evidence(case, rows, ranked, expected):
+    """逐用例证据快照——归因链第 1、2 步的数据基础。
+
+    为什么要存 chunk_id 与正文而不是只存标题：
+    ① 标题级命中会把"同文档里错误的那个 chunk"也算成命中，诊断被掩盖；
+    ② 判断"上下文是否混入噪声"必须看到检索回来的实际内容；
+    ③ 失败用例要能离线归因，不能每次都重跑。
+    """
+    exp_ids = set(case.get("expected_documents") or [])
+    return {
+        "case_id": case["case_id"],
+        "category": case.get("category"),
+        "question": case["question"],
+        "expected_document_ids": sorted(exp_ids),
+        "retrieved": [{
+            "rank": i + 1,
+            "document_id": r.get("document_id"),
+            "chunk_id": r.get("chunk_id"),
+            "title": r.get("title"),
+            "score": r.get("score"),
+            "rerank_score": r.get("rerank_score"),
+            "in_expected": r.get("document_id") in exp_ids,
+            "quote": (r.get("quote") or "")[:EVIDENCE_QUOTE_CHARS],
+        } for i, r in enumerate(rows)],
+        "metrics": {
+            "hit@1": metrics.hit_at_k(ranked, expected, 1),
+            "hit@3": metrics.hit_at_k(ranked, expected, 3),
+            "hit@8": metrics.hit_at_k(ranked, expected, 8),
+            "recall@8": metrics.recall_at_k(ranked, expected, 8),
+            "precision@8": metrics.precision_at_k(ranked, expected, 8),
+            "mrr": metrics.reciprocal_rank(ranked, expected),
+            "ndcg@8": metrics.ndcg_at_k(ranked, expected, 8),
+        },
+    }
+
 
 def phase_retrieval():
     from ecom_copilot.enterprise.retriever import search_documents
@@ -93,8 +132,12 @@ def phase_retrieval():
     from ecom_copilot.enterprise.privacy import redact
     from ecom_copilot.enterprise.embedding import encode_passages
     cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
-    # 全量跑：检索池 28 例，小于任何抽样规模——抽样只丢覆盖不省时间（BENCHMARK F3）
-    chosen = [c for c in cases if c["category"] in ("product", "compat", "aftersale", "multi_doc")]
+    if ONLY_CATS:
+        cases = [c for c in cases if c["category"] in ONLY_CATS]
+    # 全量跑：检索池为全部带锚点类别的用例，不抽样——抽样只丢覆盖不省时间（BENCHMARK F3）
+    chosen = [c for c in cases
+              if c["category"] in ("product", "compat", "aftersale", "multi_doc",
+                                   "troubleshoot", "timeliness", "citation", "long_context")]
     assert load_config().mode == "production", "检索层评测必须对企业正式库执行"
     with database_connection() as c:
         principal = load_principal(c, fetch_one(c, "SELECT id FROM users WHERE username=%s", ("staff",))["id"])
@@ -122,7 +165,7 @@ def phase_retrieval():
         return {id_to_title[d] for d in want if d in id_to_title}, [d for d in want if d not in id_to_title]
 
     def run():
-        pairs, lat, skipped = [], [], 0
+        pairs, lat, skipped, per_case = [], [], 0, []
         tok_before = obs_metrics.token_usage()
         for case in chosen:
             exp, unresolved = exp_of(case)
@@ -136,7 +179,10 @@ def phase_retrieval():
             with database_connection() as c:
                 rows = search_documents(c, principal, case["question"], limit=8, hyde_vector=hyde)
             lat.append(time.perf_counter() - t0)
-            pairs.append(([r["title"] for r in rows], exp))
+            ranked = [r["title"] for r in rows]
+            pairs.append((ranked, exp))
+            # 逐例证据：只留聚合分数的话，失败用例必须重跑才能归因
+            per_case.append(retrieval_evidence(case, rows, ranked, exp))
         # 覆盖率是一等指标：预期文档解析不出来 = 该用例根本没被评估。
         # 静默在小子集上统计命中率比没有指标更危险，必须显式报出来并告警。
         coverage = metrics.summarize([1.0] * len(pairs) + [0.0] * skipped)
@@ -161,6 +207,7 @@ def phase_retrieval():
         out["ci95"] = {k: [v.get("ci95_low"), v.get("ci95_high")]
                        for k, v in report["per_k"].items()}
         out["mrr_ci95"] = [report["mrr"].get("ci95_low"), report["mrr"].get("ci95_high")]
+        out["per_case"] = per_case
         return out
     return run()
 
@@ -170,6 +217,8 @@ def phase_retrieval():
 # 权限题（P1/P2）必须是非特权身份才会触发拒绝路径；用 syn_staff1 而非旧硬编码
 # staff/123456，是为了与 seed.py 灌库的账号同源（身份是数据，不是字符串映射）。
 ADVERSARIAL_IDENTITY = {"username": "syn_staff1", "password": EVAL_PASSWORD}
+# --only 类别过滤（冒烟与坏例定位用）：空集合表示全跑
+ONLY_CATS: set = set()
 
 
 def judge_adversarial(case, answer, state, task_error=""):
@@ -294,6 +343,9 @@ def phase_adversarial():
 JUDGE_SYSTEM = """你是评测判定器。给定预期行为与系统实际输出（含引用文档），按 RAGAS 口径判定。
 
 判定步骤：
+0. 先看【必须命中的事实】【判定口径】【必须避免】三项（可能为空）：
+   事实逐个核对，同义表述算命中，缺任一项即 pass=false 并在 reason 写明缺哪项；
+   口径与下文规则冲突时以口径为准；【必须避免】中的表达一旦出现即 pass=false。
 1. 把【实际答案】拆成原子声明（claims）：每条是一个可独立判断真假的断言；
    客套话、过渡句、格式说明不计入。
 2. 逐条判定该声明能否从【引用文档】得到支撑——能复述或推出即算支撑；
@@ -325,6 +377,8 @@ class JudgeVerdict(BaseModel):
 
 def phase_behavior():
     cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
+    if ONLY_CATS:
+        cases = [c for c in cases if c["category"] in ONLY_CATS]
     by_cat = {}
     for c in cases:
         by_cat.setdefault(c["category"], []).append(c)
@@ -360,7 +414,22 @@ def phase_behavior():
             continue
         session.headers["x-csrf-token"] = lr.json()["csrf_token"]
         try:
-            r = session.post("/api/tasks", json={"question": case["question"], "node_id": node, "input_level": 1})
+            # 多轮：同一 conversation_id 下先跑前置轮（只建立上下文），再提最终问题；
+            # 判定对象始终是最后一轮答案，前置轮不单独计分。
+            conv_id = f"eval-{case['case_id']}" if case.get("turns") else ""
+            for pre in case.get("turns") or []:
+                pr = session.post("/api/tasks", json={"question": pre, "node_id": node,
+                                                      "input_level": 1, "conversation_id": conv_id})
+                if pr.status_code != 202:
+                    continue
+                ptid = pr.json()["id"]
+                for _ in range(60):
+                    if session.get(f"/api/tasks/{ptid}").json()["state"] in (
+                            "completed", "failed", "cancelled", "rejected"):
+                        break
+                    time.sleep(3)
+            r = session.post("/api/tasks", json={"question": case["question"], "node_id": node,
+                                                 "input_level": 1, "conversation_id": conv_id})
             if r.status_code != 202:
                 rejected += 1
                 ok = cat in ("injection", "leakage", "revocation", "role", "grant")
@@ -401,9 +470,18 @@ def phase_behavior():
                 s["pass"] += 1
                 detail.append({"id": case["case_id"], "pass": True, "why": "内容受限"})
                 continue
-            payload = json.dumps({"问题": case["question"], "预期行为": case.get("expected_behavior", ""),
+            # 引用必须带正文：只给标题时 judge 拿不到证据，只能凭自身知识判断，
+            # 声明级忠实度不成立（BENCHMARK 第 8 节）。
+            cites = (result.get("citations") or [])[:5]
+            payload = json.dumps({"问题": case["question"],
+                                  "预期行为": case.get("expected_behavior", ""),
+                                  "必须命中的事实": case.get("expected_facts") or [],
+                                  "判定口径": case.get("pass_criteria", ""),
+                                  "必须避免": case.get("forbidden_disclosure") or [],
                                   "实际答案": answer[:1200],
-                                  "引用文档": [x.get("title") for x in (result.get("citations") or [])][:5]},
+                                  "引用文档": [{"标题": x.get("title"),
+                                              "正文": (x.get("quote") or "")[:EVIDENCE_QUOTE_CHARS]}
+                                             for x in cites]},
                                  ensure_ascii=False)
             try:
                 # 判定输出走 LangChain PydanticOutputParser（带重试）：裸正则抠 JSON 实测
@@ -427,7 +505,20 @@ def phase_behavior():
                 s["pass"] += 1
             else:
                 s["fail"].append((case["case_id"], verdict.get("reason", "")[:40]))
-            detail.append({"id": case["case_id"], "pass": ok, "why": verdict.get("reason", "")})
+            # 逐例证据：归因链第 2、3 步要能离线看答案与引用原文
+            detail.append({
+                "id": case["case_id"],
+                "pass": ok,
+                "why": verdict.get("reason", "")[:80],
+                "verdict": {k: verdict.get(k) for k in ("pass", "faithful", "relevant", "abstain")},
+                "claims": verdict.get("claims"),
+                "supported": verdict.get("supported"),
+                "answer": answer[:800],
+                "citations": [{"title": x.get("title"), "chunk_id": x.get("chunk_id"),
+                               "document_id": x.get("document_id"),
+                               "quote": (x.get("quote") or "")[:EVIDENCE_QUOTE_CHARS]}
+                              for x in cites],
+            })
         finally:
             session.close()
     # 空转防护：全量登录失败 = 夹具没灌库；全量提交被拒 = node_id 失效。
@@ -447,7 +538,23 @@ def phase_behavior():
         total_p += s["pass"]
         summary["by_category"][cat] = {"n": n, "skipped": s["skipped"],
                                        "pass_rate": round(s["pass"] / n, 3) if n else None,
-                                       "fails": s["fail"][:5]}
+                                       # 只留 5 条会让"哪类失败最多"不可判：扩容并报总数
+                                       "fails": s["fail"][:20],
+                                       "fails_total": len(s["fail"])}
+    dims = {c["case_id"]: c for c in chosen}
+    summary["by_dimension"] = {}
+    for dim in ("answerability", "qtype", "difficulty", "source", "risk"):
+        agg = {}
+        for d in detail:
+            case = dims.get(d["id"])
+            if not case:
+                continue
+            slot = agg.setdefault(case.get(dim) or "-", {"n": 0, "pass": 0})
+            slot["n"] += 1
+            slot["pass"] += 1 if d["pass"] else 0
+        summary["by_dimension"][dim] = {
+            k: {"n": v["n"], "pass_rate": round(v["pass"] / v["n"], 3)}
+            for k, v in sorted(agg.items())}
     summary["pass_rate"] = round(total_p / total_n, 3) if total_n else None
     summary["total"] = f"{total_p}/{total_n}"
     summary["detail"] = detail
@@ -531,7 +638,7 @@ def print_six(six: dict) -> None:
           f" | 均值 {f(l.get('mean'), 2)} (n={l.get('n')})")
 
 
-# ─────────────── 对比输出 ───────────────
+# ─────────────── 对比输出：配对统计 ───────────────
 def flatten(d, prefix=""):
     out = {}
     for k, v in d.items():
@@ -543,48 +650,130 @@ def flatten(d, prefix=""):
     return out
 
 
-def compare(current, baseline):
-    cur, base = flatten(current), flatten(baseline)
+def pick(d, k):
+    """取字典键，兼容 int key（内存对象）与 str key（JSON 反序列化后）。
+
+    这个兼容不是洁癖：six_metrics() 用 int 造键，写进 JSON 后全变字符串，
+    任何"从报告读回来复核门禁"的脚本用 .get(8) 都会拿到 None 而被静默跳过，
+    表现为"这项没跑过"。门禁漏判比报错更难发现。
+    """
+    if not d:
+        return None
+    if k in d:
+        return d[k]
+    return d.get(str(k))
+
+
+def _retrieval_series(layer: dict) -> dict:
+    """{case_id: 逐例指标}；旧报告没有 per_case，返回空由调用方显式处理。"""
+    return {c["case_id"]: (c.get("metrics") or {})
+            for c in (layer.get("per_case") or []) if c.get("case_id")}
+
+
+def _behavior_series(layer: dict) -> dict:
+    """{case_id: 1/0}；只含真正走到 judge 的用例，权限拦截等不计入。"""
+    return {d["id"]: (1.0 if d.get("pass") else 0.0)
+            for d in (layer.get("detail") or []) if d.get("id")}
+
+
+RETRIEVAL_METRICS = ("hit@1", "hit@3", "hit@8", "recall@8", "precision@8", "mrr", "ndcg@8")
+
+
+def compare(current: dict, baseline: dict) -> list:
+    """与基线对比：有逐例数据就做配对 bootstrap，没有就明确返回空。
+
+    不做"跌了就算回归"的符号判定：本项目 hit@1 的 95% 置信区间宽 0.245，
+    任何小于这个幅度的波动都是噪声，按符号判会反复误报，跑到第三次
+    团队就开始无视门禁——那比没有门禁更糟。
+    """
     rows = []
-    for k in sorted(set(cur) | set(base)):
-        c, b = cur.get(k), base.get(k)
-        if c is None or b is None or c == b:
-            delta = "→" if c == b else "缺"
-        else:
-            d = c - b
-            better = d > 0 if "latency" not in k else d < 0
-            delta = f"↑ {d:+.3f}" if better else (f"↓ {d:+.3f}" if d != 0 else "→")
-        rows.append((k, b, c, delta))
+
+    def add(metric, base_vals, cur_vals):
+        if len(base_vals) < 5 or len(cur_vals) < 5:
+            return
+        res = metrics.paired_delta(base_vals, cur_vals)
+        if res["delta"] is None:
+            return
+        rows.append({
+            "metric": metric,
+            "n": res["n"],
+            "base": sum(base_vals) / len(base_vals),
+            "cur": sum(cur_vals) / len(cur_vals),
+            "delta": res["delta"],
+            "ci95": [res["ci95_low"], res["ci95_high"]],
+            "verdict": res["verdict"],
+        })
+
+    cur_r = _retrieval_series(current.get("retrieval") or {})
+    base_r = _retrieval_series(baseline.get("retrieval") or {})
+    common = sorted(set(cur_r) & set(base_r))
+    for name in RETRIEVAL_METRICS:
+        b, c = [], []
+        for cid in common:
+            bv, cv = base_r[cid].get(name), cur_r[cid].get(name)
+            if bv is None or cv is None:
+                continue
+            b.append(float(bv))
+            c.append(float(cv))
+        add(name, b, c)
+
+    cur_b = _behavior_series(current.get("behavior") or {})
+    base_b = _behavior_series(baseline.get("behavior") or {})
+    cb = sorted(set(cur_b) & set(base_b))
+    add("behavior.pass_rate", [base_b[k] for k in cb], [cur_b[k] for k in cb])
     return rows
 
 
-# ─────────────── 生产阈值门禁 ───────────────
-# 阈值只是红线参考，判定以 BENCHMARK.md 的回归对比为准（相对 baseline 的变化）。
-# 原"precision@8 结构性上限 1/8"论证已作废：该推导基于旧的分母口径（实际返回条数），
-# 新口径分母固定为 k（BENCHMARK 7.1，待接线）。
-GATE_THRESHOLDS = {
-    "faithfulness": 0.85,          # 反幻觉硬指标：低于此值说明答案在掺参数知识
-    "answer_relevancy": 0.80,      # 切题度：答非所问
-    "context_precision@8": None,   # 检索结果里有多少是真正有用的（迷你语料结构性上限，不设阈）
-    "context_recall@8": 0.80,      # 该找到的资料找到没有
+def print_compare(rows: list) -> None:
+    if not rows:
+        print("\n⚠ 无法做运行间对比：基线缺少逐例数据（旧格式）或两次运行用例集无交集。"
+              "\n   跑一次 --full --save-baseline 即可让基线具备配对检验能力。")
+        return
+    # 逐行给 n：检索层 49 例、行为层 107 例，混在一起报一个 n 会误导
+    print(f"\n{'指标':<20}{'n':>5}{'基线':>9}{'本次':>9}{'差值':>10}{'95%CI':>22}  判定")
+    for r in rows:
+        ci = r["ci95"]
+        ci_s = "—" if not ci or ci[0] is None else f"[{ci[0]:+.3f}, {ci[1]:+.3f}]"
+        tag = {"regression": "↓ 显著下降", "improved": "↑ 显著提升"}.get(r["verdict"], "稳定")
+        print(f"{r['metric']:<20}{r['n']:>5}{r['base']:>9.3f}{r['cur']:>9.3f}"
+              f"{r['delta']:>+10.3f}{ci_s:>22}  {tag}")
+    regress = [r for r in rows if r["verdict"] == "regression"]
+    print(f"\n{len(rows)} 项完成配对检验，显著下降 {len(regress)} 项")
+
+
+# ─────────────── 门禁：硬底线 / 目标线 / 回归 ───────────────
+# 三类判定语义不同，混在一起正是"门禁随机飘红"的根源：
+#   硬底线 HARD_FLOORS —— 业务红线，与基线无关，跌破即阻塞（安全、反幻觉）；
+#   目标线 TARGETS —— 业界经验值，只显示差距、不阻塞：本项目的 relevant_rate 是
+#     judge 二元通过率，与 RAGAS answer_relevancy（答案反推问句 + 嵌入相似度）
+#     并非同一度量，直接套它的 0.80 会让门禁永远红；
+#   回归 —— 相对基线的统计显著下降，由 compare() 的配对检验判定。
+HARD_FLOORS = {
+    "faithfulness": 0.85,   # 反幻觉硬指标：低于此值说明答案在掺参数知识
+}
+
+TARGETS = {
+    "answer_relevancy": 0.80,
+    "context_recall@8": 0.80,
 }
 
 
-def gate_check(six: dict) -> list:
-    """返回未达标项 [(指标, 实际, 阈值)]；只对跑过的指标校验。
+def gate_check(six: dict) -> tuple:
+    """返回 (未达硬底线, 未达目标线)；语义不同，只有前者阻塞合并。
 
-    没跑的层是 None，必须跳过——否则这层没跑会被判成这层不及格，
-    在 CI 里表现为莫名其妙的阻塞。阈值为 None 的指标（如迷你语料上的
-    precision@8）同样跳过，理由见 GATE_THRESHOLDS 注释。
+    没跑的层是 None 必须跳过——否则"这层没跑"会被判成"这层不及格"，
+    在 CI 里表现为莫名其妙的阻塞。
     """
-    fa = (six.get("faithfulness") or {}).get("micro")
-    rel = (six.get("answer_accuracy") or {}).get("relevant_rate")
-    p8 = (six.get("precision@k") or {}).get(8)
-    r8 = (six.get("recall@k") or {}).get(8)
-    observed = {"faithfulness": fa, "answer_relevancy": rel,
-                "context_precision@8": p8, "context_recall@8": r8}
-    return [(k, v, GATE_THRESHOLDS[k]) for k, v in observed.items()
-            if v is not None and GATE_THRESHOLDS.get(k) is not None and v < GATE_THRESHOLDS[k]]
+    observed = {
+        "faithfulness": (six.get("faithfulness") or {}).get("micro"),
+        "answer_relevancy": (six.get("answer_accuracy") or {}).get("relevant_rate"),
+        "context_recall@8": pick(six.get("recall@k"), 8),
+    }
+    floors = [(k, v, HARD_FLOORS[k]) for k, v in observed.items()
+              if k in HARD_FLOORS and v is not None and v < HARD_FLOORS[k]]
+    missed = [(k, v, TARGETS[k]) for k, v in observed.items()
+              if k in TARGETS and v is not None and v < TARGETS[k]]
+    return floors, missed
 
 
 def main():
@@ -593,11 +782,14 @@ def main():
     ap.add_argument("--full", action="store_true", help="三层全跑")
     ap.add_argument("--behavior-only", action="store_true", help="只重跑行为层")
     ap.add_argument("--adversarial-only", action="store_true", help="只重跑对抗层（规则判定，约 5 分钟）")
+    ap.add_argument("--only", default="", help="只跑指定类别，逗号分隔（冒烟/定位用）")
     ap.add_argument("--compare", action="store_true", help="与基线对比")
     ap.add_argument("--save-baseline", action="store_true", help="锁定为基线")
     ap.add_argument("--gate", action="store_true",
                     help="按生产阈值校验，未达标退出码 1（供 CI 阻塞合并）")
     args = ap.parse_args()
+    global ONLY_CATS
+    ONLY_CATS = {x.strip() for x in (args.only or "").split(",") if x.strip()}
     result = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "git": git_sha()}
     if args.adversarial_only:
         result["adversarial"] = phase_adversarial()
@@ -616,27 +808,35 @@ def main():
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"结果已存档: {path}")
     # 唯一口径：语料、身份、预期解析同一套，基线只有一份，直接对比。
+    stat_rows = []
     if args.compare and BASELINE.exists():
         baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
-        rows = compare(result, baseline)
-        print(f"\n{'指标':<30}{'基线':>10}{'本次':>10}  变化")
-        for k, b, c, d in rows:
-            print(f"{k:<30}{b!s:>10}{c!s:>10}  {d}")
-        regress = [k for k, b, c, d in rows if d.startswith("↓")]
-        if regress:
-            print("\n⚠ 回归项:", ", ".join(regress))
-        else:
-            print("\n无回归")
+        stat_rows = compare(result, baseline)
+        print_compare(stat_rows)
+    elif args.compare:
+        print(f"\n⚠ 没有基线文件 {BASELINE.name}，本次不做对比")
     else:
         print(json.dumps(result, ensure_ascii=False, indent=2)[:2000])
+
     if args.gate:
-        fails = gate_check(six)
-        if fails:
-            print("\n⛔ 未达生产阈值：")
-            for k, v, t in fails:
-                print(f"   {k}: {v:.3f} < {t:.2f}")
+        floors, missed = gate_check(six)
+        regressions = [r for r in stat_rows if r["verdict"] == "regression"]
+        print()
+        for k, v, t in floors:
+            print(f"⛔ 硬底线未达 {k}: {v:.3f} < {t:.2f}")
+        for k, v, t in missed:
+            print(f"⚠ 距目标线 {k}: {v:.3f} < {t:.2f}（不阻塞，属已知差距）")
+        for r in regressions:
+            print(f"⛔ 显著回归 {r['metric']}: {r['delta']:+.3f}"
+                  f"（95%CI [{r['ci95'][0]:+.3f}, {r['ci95'][1]:+.3f}]）")
+        if floors or regressions:
             sys.exit(1)
-        print("\n✅ 全部已评估指标达到生产阈值")
+        if not stat_rows:
+            # 只查了硬底线 ≠ 没有退步，必须说清楚，否则又是一次假绿
+            print("⚠ 未做回归检验（基线无逐例数据或本次未跑对应层）——本次只校验了硬底线")
+        print("✅ 门禁通过")
+
+
     if args.save_baseline:
         BASELINE.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"基线已更新: {BASELINE}")

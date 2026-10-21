@@ -105,3 +105,75 @@ def test_retrieval_report_handles_empty_input():
     report = retrieval_report([], ks=(1,), bootstrap=0)
     assert report["n"] == 0
     assert report["per_k"] == {}
+
+
+
+# ─────────── 运行间比较与 judge 校准（2026-10-21 新增） ───────────
+
+from metrics import accuracy_report, cohen_kappa, paired_delta  # noqa: E402
+
+
+def test_paired_delta_flags_uniform_drop():
+    base = [1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
+    cur = [0.0] * 10
+    res = paired_delta(base, cur)
+    assert res["verdict"] == "regression"
+    assert res["significant"] is True
+    assert res["delta"] == pytest.approx(-0.7)
+    assert res["ci95_high"] < 0
+
+
+def test_paired_delta_ignores_small_fluctuation():
+    """小幅抖动不能让门禁飘红——这是把符号判定换成配对检验的全部理由。"""
+    base = [1.0, 0.0] * 25
+    cur = [0.0, 1.0] * 25          # 均值相同，只是逐例对调
+    res = paired_delta(base, cur)
+    assert res["delta"] == pytest.approx(0.0)
+    assert res["verdict"] == "stable"
+    assert res["ci95_low"] < 0 < res["ci95_high"]
+
+
+def test_paired_delta_requires_enough_pairs():
+    res = paired_delta([1.0, 0.0], [0.0, 0.0])
+    assert res["verdict"] == "insufficient_data"
+    assert res["delta"] is None
+
+
+def test_paired_delta_supports_lower_is_better():
+    """延迟类指标升高是退步：同一个 +1.0 的差值，方向语义要能翻转。"""
+    base = [1.0] * 10
+    cur = [2.0] * 10
+    assert paired_delta(base, cur)["verdict"] == "improved"
+    assert paired_delta(base, cur, higher_is_better=False)["verdict"] == "regression"
+
+
+def test_cohen_kappa_perfect_agreement():
+    human = [True] * 10 + [False] * 10
+    res = cohen_kappa(human, human)
+    assert res["kappa"] == pytest.approx(1.0)
+    assert res["agreement"] == pytest.approx(1.0)
+
+
+def test_cohen_kappa_penalises_chance_agreement():
+    """judge 全判通过时原始一致率有 0.25，kappa 必须把这份蒙对扣成 0。"""
+    human = [True] * 5 + [False] * 15      # 25% 通过
+    judge = [True] * 20                     # 全判通过
+    res = cohen_kappa(human, judge)
+    assert res["agreement"] == pytest.approx(0.25)
+    assert res["kappa"] == pytest.approx(0.0, abs=1e-9)
+    assert res["verdict"] == "不可用"
+
+
+def test_cohen_kappa_empty_input():
+    res = cohen_kappa([], [])
+    assert res["n"] == 0
+    assert res["kappa"] is None
+
+
+def test_accuracy_report_carries_confidence_interval():
+    verdicts = [{"pass": True, "faithful": True, "relevant": True, "abstain": False}] * 8 + \
+               [{"pass": False, "faithful": False, "relevant": False, "abstain": False}] * 4
+    rep = accuracy_report(verdicts)
+    ci = rep["ci95"]["accuracy"]
+    assert ci[0] <= rep["accuracy"] <= ci[1]
+    assert rep["ci95"]["relevant_rate"] is not None
