@@ -1,8 +1,9 @@
 PYTHON := .venv/bin/python
+PHOENIX_PY := $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
 PROJECT_ROOT := $(CURDIR)
 SUPERVISOR_CONFIG := $(HOME)/.local/share/ecom-agent/supervisor.conf
 
-.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline
+.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-sync evals-pipeline
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -19,6 +20,8 @@ help:
 	@echo "make evals-tests    只跑评估代码自身的单元测试（不需要在线服务）"
 	@echo "make evals-quick    评估：检索+对抗层（需企业服务在线；对比基线并过门禁）"
 	@echo "make evals-full     评估：三层全跑（需企业服务在线；对比基线并过门禁）"
+	@echo "make evals-sync     评估集与最新报告同步到 Phoenix（旁路；Phoenix 离线只跳过）"
+	@echo "make evals-pipeline 三层评估 + 同步 Phoenix，一条命令走完整流程"
 	@echo "make check          检查 Python 语法"
 	@echo "make build-web      构建并切换前端"
 	@echo "make clean          清除项目 Python 与 pytest 缓存"
@@ -74,3 +77,15 @@ evals-full:
 
 evals-baseline:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --full --save-baseline
+
+# Phoenix 客户端装在独立 venv，不进项目 .venv：观测依赖不污染生产环境
+evals-sync:
+	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
+	$(PHOENIX_PY) evals/sync_phoenix.py --all
+
+# 门禁没过也要同步：失败样例正是最需要被看到、被归因的那批
+evals-pipeline:
+	@$(MAKE) --no-print-directory evals-full || { code=$$?; \
+	  echo "评估未过门禁（退出码 $$code），仍同步结果供归因"; \
+	  $(MAKE) --no-print-directory evals-sync; exit $$code; }
+	@$(MAKE) --no-print-directory evals-sync
