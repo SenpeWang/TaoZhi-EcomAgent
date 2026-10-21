@@ -11,10 +11,13 @@ evals/ 的产物一直是文件：``datasets/generated/latest/cases.jsonl`` 是�
 本脚本只把已有产物搬进 Phoenix 供人查看与横向对比。Phoenix 没起时评估照常产出
 报告，本脚本报一句警告退出 0——观测是旁路，不能反过来卡住评估。
 
-两个入口
+三个入口
 --------
 ``--dataset``  用例集 → Phoenix Datasets（每例 input / output / metadata）
 ``--report``   一次报告的逐例结果 → Phoenix Experiment（run + evaluation 分数）
+``--follow``   跟随 run_evals.py 的逐例进度文件，边跑边推（约 2 小时的跑批期间
+               界面上能持续看到新用例）。experiment 名字与 ``--report`` 算同一个，
+               所以跑完再同步是"已存在，跳过"而不是写第二份。
 
 幂等设计
 --------
@@ -40,12 +43,15 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CASES_PATH = REPO_ROOT / "evals/datasets/generated/latest/cases.jsonl"
 REPORTS_DIR = REPO_ROOT / "evals/reports"
+# run_evals.py 逐例追加的实时进度文件（跑完才有的 reports/*.json 不能用于实时观看）
+LIVE_PATH = REPORTS_DIR / "live.jsonl"
 
 DEFAULT_URL = os.environ.get("ECOM_PHOENIX_URL", "http://127.0.0.1:6006")
 DEFAULT_DATASET = os.environ.get("ECOM_PHOENIX_DATASET", "taozhi-eval-generated-v2")
@@ -113,6 +119,73 @@ def case_to_example(c: dict) -> dict:
 
 # ─────────────────────── 报告 → 逐例结果 ───────────────────────
 
+def slot(results: dict, cid: str) -> dict:
+    return results.setdefault(cid, {"output": {}, "evaluations": []})
+
+
+def apply_behavior(results: dict, d: dict) -> None:
+    """一条行为层逐例结果 → 该用例的 output / evaluations。"""
+    cid = d.get("id")
+    if not cid:
+        return
+    s = slot(results, cid)
+    verdict = d.get("verdict") or {}
+    s["output"].update({
+        "answer": (d.get("answer") or "")[:ANSWER_CHARS],
+        "verdict": verdict,
+        "claims": d.get("claims"),
+        "supported": d.get("supported"),
+        # quote 必须带上：界面上判断"这句话有没有依据"靠的就是引用原文。
+        # 只留标题只能看到"引了哪篇"，看不到"引了哪段"，归因会退回重跑。
+        "citations": [{"title": c.get("title"), "chunk_id": c.get("chunk_id"),
+                       "document_id": c.get("document_id"),
+                       "quote": (c.get("quote") or "")[:EVIDENCE_CHARS]}
+                      for c in (d.get("citations") or [])],
+    })
+    passed = d.get("pass")
+    s["evaluations"].append({
+        "name": "answer_pass", "kind": "LLM",
+        "score": 1.0 if passed else 0.0,
+        "label": "PASS" if passed else "FAIL",
+        "explanation": (d.get("why") or "")[:500],
+    })
+    for name, key in (("answer_relevant", "relevant"), ("abstain", "abstain")):
+        if key in verdict:
+            val = bool(verdict.get(key))
+            s["evaluations"].append({
+                "name": name, "kind": "LLM",
+                "score": 1.0 if val else 0.0,
+                "label": ("YES" if val else "NO") if key != "abstain"
+                         else ("ABSTAIN" if val else "ANSWER"),
+                "explanation": None,
+            })
+    claims = d.get("claims") or 0
+    supported = d.get("supported") or 0
+    if claims:
+        s["evaluations"].append({
+            "name": "faithfulness_decl", "kind": "LLM",
+            "score": supported / claims,
+            "label": None,
+            "explanation": f"{supported}/{claims} 条声明有引用原文支撑",
+        })
+
+
+def apply_retrieval(results: dict, c: dict) -> None:
+    """一条检索层逐例结果 → retrieval.* 指标。"""
+    cid = c.get("case_id")
+    if not cid:
+        return
+    s = slot(results, cid)
+    metrics = c.get("metrics") or {}
+    s["output"].setdefault("retrieval", metrics)
+    for m, v in metrics.items():
+        if isinstance(v, (int, float)):
+            s["evaluations"].append({
+                "name": f"retrieval.{m}", "kind": "CODE",
+                "score": float(v), "label": None, "explanation": None,
+            })
+
+
 def collect_results(report: dict) -> dict:
     """把三层报告拍平成 {case_id: {output, evaluations}}。
 
@@ -121,68 +194,10 @@ def collect_results(report: dict) -> dict:
     合并到同一个 case_id 下，Phoenix 里一个用例就能看到"检索第几、答得对不对"。
     """
     out: dict = {}
-
-    def slot(cid: str) -> dict:
-        return out.setdefault(cid, {"output": {}, "evaluations": []})
-
     for d in (report.get("behavior") or {}).get("detail") or []:
-        cid = d.get("id")
-        if not cid:
-            continue
-        s = slot(cid)
-        verdict = d.get("verdict") or {}
-        s["output"].update({
-            "answer": (d.get("answer") or "")[:ANSWER_CHARS],
-            "verdict": verdict,
-            "claims": d.get("claims"),
-            "supported": d.get("supported"),
-            # quote 必须带上：界面上判断"这句话有没有依据"靠的就是引用原文。
-            # 只留标题只能看到"引了哪篇"，看不到"引了哪段"，归因会退回重跑。
-            "citations": [{"title": c.get("title"), "chunk_id": c.get("chunk_id"),
-                           "document_id": c.get("document_id"),
-                           "quote": (c.get("quote") or "")[:EVIDENCE_CHARS]}
-                          for c in (d.get("citations") or [])],
-        })
-        passed = d.get("pass")
-        s["evaluations"].append({
-            "name": "answer_pass", "kind": "LLM",
-            "score": 1.0 if passed else 0.0,
-            "label": "PASS" if passed else "FAIL",
-            "explanation": (d.get("why") or "")[:500],
-        })
-        for name, key in (("answer_relevant", "relevant"), ("abstain", "abstain")):
-            if key in verdict:
-                val = bool(verdict.get(key))
-                s["evaluations"].append({
-                    "name": name, "kind": "LLM",
-                    "score": 1.0 if val else 0.0,
-                    "label": ("YES" if val else "NO") if key != "abstain"
-                             else ("ABSTAIN" if val else "ANSWER"),
-                    "explanation": None,
-                })
-        claims = d.get("claims") or 0
-        supported = d.get("supported") or 0
-        if claims:
-            s["evaluations"].append({
-                "name": "faithfulness_decl", "kind": "LLM",
-                "score": supported / claims,
-                "label": None,
-                "explanation": f"{supported}/{claims} 条声明有引用原文支撑",
-            })
-
+        apply_behavior(out, d)
     for c in (report.get("retrieval") or {}).get("per_case") or []:
-        cid = c.get("case_id")
-        if not cid:
-            continue
-        s = slot(cid)
-        metrics = c.get("metrics") or {}
-        s["output"].setdefault("retrieval", metrics)
-        for m, v in metrics.items():
-            if isinstance(v, (int, float)):
-                s["evaluations"].append({
-                    "name": f"retrieval.{m}", "kind": "CODE",
-                    "score": float(v), "label": None, "explanation": None,
-                })
+        apply_retrieval(out, c)
 
     # 对抗层刻意不在此同步：它跑的是 evals/datasets/golden_adversarial.json，
     # id 形如 Z1/N1/C1，与评估集 case_id（GEN-T-*）实测零交集（18/18 全不匹配）。
@@ -240,8 +255,8 @@ def sync_dataset(client, cases: list, name: str, dry_run: bool) -> None:
                                                timeout=HTTP_TIMEOUT)
 
 
-def _experiment_exists(client, dataset_id: str, name: str) -> bool:
-    """同名实验是否已存在。
+def _find_experiment(client, dataset_id: str, name: str):
+    """按名字找 experiment，返回对象或 None。
 
     ``experiments.list()`` 的 dataset_id 是必填关键字参数（不传直接 TypeError）。
     这里刻意**不吞异常**：上一版用 ``except Exception: return False`` 兜底，结果
@@ -249,7 +264,69 @@ def _experiment_exists(client, dataset_id: str, name: str) -> bool:
     报错，别把"判断失败"伪装成"判断为否"。
     """
     items = client.experiments.list(dataset_id=dataset_id, timeout=HTTP_TIMEOUT)
-    return any(_attr(x, "name") == name for x in items)
+    for x in items:
+        if _attr(x, "name") == name:
+            return x
+    return None
+
+
+def experiment_name(at: str, git: str) -> str:
+    """experiment 命名。实时跟随与事后同步共用同一套规则，名字对上才不会重复建。
+
+    ``at`` 是评估开跑时间（报告里的 ``at``，也是 live.jsonl 头部的 ``at``）：
+    用它而不是报告文件名里的落盘时间，两个入口才能算出同一个名字。
+    """
+    try:
+        start = datetime.strptime(at, "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        start = datetime.now()
+    return f"eval-{start:%Y%m%d-%H%M%S}-{(git or 'nogit')[:7]}"
+
+
+def _log_case(client, exp_id: str, example_id: str, payload: dict,
+              start: datetime, end: datetime) -> int:
+    """写一条 run + 它名下全部 evaluation，返回 evaluation 条数（已存在返回 -1）。
+
+    实时跟随与事后同步共用：先 run 后 evaluation 的顺序、字段口径只此一处，
+    两个入口产出的数据才可比。
+
+    409 = 同一 (dataset_example_id, repetition) 已有 run。服务端拿它当冲突拒掉，
+    对跟随进程来说这正是"这条已经推过"，跳过即可——断线重连后一定会撞上。
+    """
+    try:
+        run = client.experiments.log_run(
+            experiment_id=exp_id, dataset_example_id=example_id,
+            output=payload["output"], start_time=start, end_time=end,
+            timeout=HTTP_TIMEOUT,
+        )
+    except Exception as exc:
+        if getattr(getattr(exc, "response", None), "status_code", None) == 409:
+            return -1
+        raise
+    run_id = _attr(run, "id")
+    for ev in payload["evaluations"]:
+        client.experiments.log_evaluation(
+            experiment_run_id=run_id, name=ev["name"],
+            annotator_kind=ev["kind"], score=ev["score"],
+            label=ev["label"], explanation=ev["explanation"],
+            start_time=start, end_time=end, timeout=HTTP_TIMEOUT,
+        )
+    return len(payload["evaluations"])
+
+
+def _logged_example_ids(client, exp_id: str) -> set:
+    """已有 experiment 里已经推过的 dataset_example_id。
+
+    跟随进程重启时靠它补写缺口而不是重写全文。读不到就明说——重复的 run 会污染
+    界面上"一共跑了多少例"的判断，但比直接崩掉更可接受，所以只告警不抛。
+    """
+    try:
+        ran = client.experiments.get_experiment(experiment_id=exp_id)
+        runs = _attr(ran, "task_runs") or []
+    except Exception as exc:
+        print(f"⚠ 读不到已有实验的 run 列表（可能重复推送）：{type(exc).__name__}: {exc}")
+        return set()
+    return {r["dataset_example_id"] for r in runs if r.get("dataset_example_id")}
 
 
 def sync_report(client, report_path: Path, report: dict, name: str,
@@ -284,15 +361,17 @@ def sync_report(client, report_path: Path, report: dict, name: str,
     try:
         start = datetime.strptime(at, "%Y-%m-%d %H:%M:%S")
     except ValueError:
+        # 老报告没有可解析的 at：退回文件时间，并把它写回 at 供命名使用
         start = datetime.fromtimestamp(report_path.stat().st_mtime)
+        at = f"{start:%Y-%m-%d %H:%M:%S}"
     end = datetime.fromtimestamp(report_path.stat().st_mtime)
     if end < start:
         end = start
 
-    base = f"eval-{start:%Y%m%d-%H%M%S}-{(report.get('git') or 'nogit')[:7]}"
+    base = experiment_name(at, report.get("git"))
     dataset_id = _attr(ds, "id")
     exp_name, seq = base, 1
-    while _experiment_exists(client, dataset_id, exp_name):
+    while _find_experiment(client, dataset_id, exp_name) is not None:
         if not force:
             print(f"[experiment] {exp_name} 已存在，跳过（--force 可另建一份）")
             return
@@ -321,23 +400,151 @@ def sync_report(client, report_path: Path, report: dict, name: str,
 
     runs = evals = 0
     for cid in matched:
-        payload = results[cid]
-        run = client.experiments.log_run(
-            experiment_id=exp_id, dataset_example_id=by_case[cid],
-            output=payload["output"], start_time=start, end_time=end,
-            timeout=HTTP_TIMEOUT,
-        )
+        evals += _log_case(client, exp_id, by_case[cid], results[cid], start, end)
         runs += 1
-        for ev in payload["evaluations"]:
-            client.experiments.log_evaluation(
-                experiment_run_id=_attr(run, "id"), name=ev["name"],
-                annotator_kind=ev["kind"], score=ev["score"],
-                label=ev["label"], explanation=ev["explanation"],
-                start_time=start, end_time=end, timeout=HTTP_TIMEOUT,
-            )
-            evals += 1
     print(f"[experiment] 完成：{runs} 条 run / {evals} 条 evaluation")
     print(f"[url] {url}/datasets/{_attr(ds, 'id')}/experiments")
+
+
+# ─────────────────────── 实时跟随 ───────────────────────
+
+def _dataset_index(client, name: str):
+    """(dataset 对象, {case_id: node_id})；数据集不存在返回 (None, {})。"""
+    try:
+        ds = client.datasets.get_dataset(dataset=name, timeout=HTTP_TIMEOUT)
+    except ValueError:
+        return None, {}
+    by_case = {}
+    for e in ds:
+        cid = (_attr(e, "metadata") or {}).get("case_id")
+        if cid:
+            by_case[cid] = _attr(e, "node_id")
+    return ds, by_case
+
+
+def follow_live(client, live_path: Path, name: str, url: str,
+                poll: float, idle_timeout: float, dry_run: bool) -> None:
+    """跟随 run_evals.py 的 live.jsonl，每完成一例就推一条 run。
+
+    为什么不复用 ``--report``：报告要等全量跑完才写，行为层 108 例串行 judge
+    约 2 小时，那期间 Phoenix 里什么都没有，"实时看"就无从谈起。
+    live.jsonl 是逐例追加的，这里按行消费即可；两类记录（retrieval / behavior）
+    合并到同一个 case 下，与事后同步的 collect_results 口径完全一致。
+
+    失败一律降级：读不到文件就等，断开就重试一轮，idle 超时就退出——观测不能
+    反过来把评测搞挂（评测是另一个进程，这里退出不影响它）。
+    """
+    ds, by_case = _dataset_index(client, name)
+    if ds is None:
+        print(f"[follow] Phoenix 里没有数据集 {name}，先跑一次 `--dataset`")
+        return
+    dataset_id = _attr(ds, "id")
+
+    results: dict = {}
+    meta = {"at": "", "git": ""}
+    exp_id, exp_name = None, ""
+    logged: set = set()
+    done = 0
+    ended = False
+    last_data = time.time()
+    start = datetime.now()
+
+    if not live_path.is_file():
+        print(f"[follow] 等评估开跑（{live_path.name} 尚未生成）…", flush=True)
+    while not live_path.is_file():
+        if time.time() - last_data > idle_timeout:
+            print(f"[follow] 等了 {idle_timeout:.0f}s 仍没有 {live_path.name}，退出")
+            return
+        time.sleep(max(poll, 5))
+
+    # 按字节读：UTF-8 多字节序列里不会出现 0x0A，行边界可靠；
+    # 写入方一行一次 write + flush，读到半行说明还没写完，退回去等下一轮。
+    with live_path.open("rb") as f:
+        while True:
+            raw = f.readline()
+            if raw and not raw.endswith(b"\n"):
+                f.seek(f.tell() - len(raw))
+                raw = b""
+            if not raw:
+                if ended:
+                    break
+                if time.time() - last_data > idle_timeout:
+                    print(f"[follow] {idle_timeout:.0f}s 无新数据，先退出"
+                          f"（评估可能仍在跑，稍后再跟或跑完用 --report 同步）")
+                    return
+                time.sleep(poll)
+                continue
+            last_data = time.time()
+            try:
+                rec = json.loads(raw)
+            except json.JSONDecodeError:
+                continue          # 半行/坏行：跳过，下一轮会读到完整行
+            kind = rec.get("type")
+            if kind == "header":
+                meta.update(at=rec.get("at") or "", git=rec.get("git") or "")
+                try:
+                    start = datetime.strptime(meta["at"], "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    start = datetime.now()
+                exp_name = experiment_name(meta["at"], meta["git"])
+                if dry_run:
+                    print(f"[follow] （dry-run）将写入 experiment {exp_name}")
+                    continue
+                exist = _find_experiment(client, dataset_id, exp_name)
+                if exist is None:
+                    exp = client.experiments.create(
+                        dataset_id=dataset_id, experiment_name=exp_name,
+                        experiment_description=f"实时跟随评估进度（起于 {meta['at']}），"
+                                               f"git {meta['git']}",
+                        experiment_metadata={"git": meta["git"], "at": meta["at"],
+                                             "live": True},
+                        timeout=HTTP_TIMEOUT,
+                    )
+                    exp_id = _attr(exp, "id")
+                    print(f"[follow] 新建 experiment {exp_name}")
+                else:
+                    exp_id = _attr(exist, "id")
+                    logged = _logged_example_ids(client, exp_id)
+                    print(f"[follow] 接入已有 experiment {exp_name}"
+                          f"（已推 {len(logged)} 例，只补缺口）")
+                continue
+            if kind == "retrieval":
+                apply_retrieval(results, rec)
+                continue
+            if kind == "behavior":
+                d = rec.get("detail") or {}
+                apply_behavior(results, d)
+                cid = d.get("id")
+                if not cid:
+                    continue
+                node = by_case.get(cid)
+                if not node:
+                    print(f"[follow] 跳过 {cid}：评估集里没有这个 case_id")
+                    continue
+                # logged 存的是 dataset_example_id（Phoenix 的 run 主键），不是 case_id
+                if node in logged:
+                    continue
+                if dry_run:
+                    done += 1
+                    continue
+                if exp_id is None:
+                    print("[follow] 还没拿到 header，暂不写入本批"
+                          "（等下一轮或检查 live.jsonl 首行）")
+                    continue
+                ev_n = _log_case(client, exp_id, node, results[cid], start, datetime.now())
+                logged.add(node)
+                done += 1
+                if ev_n < 0:
+                    print(f"[follow] {done:>3}. {cid} 已存在，跳过", flush=True)
+                else:
+                    print(f"[follow] {done:>3}. {cid} "
+                          f"{'PASS' if d.get('pass') else 'FAIL'} +{ev_n} 项", flush=True)
+                continue
+            if kind == "end":
+                ended = True
+
+    if exp_name:
+        print(f"[follow] 结束：共推送 {done} 例 → {url}/datasets/{dataset_id}/experiments")
 
 
 # ─────────────────────── 入口 ───────────────────────
@@ -348,6 +555,12 @@ def main() -> int:
     ap.add_argument("--report", nargs="?", const="latest", metavar="PATH",
                     help="把一次评估报告同步为 Experiment（缺省取最新）")
     ap.add_argument("--all", action="store_true", help="数据集 + 最新报告")
+    ap.add_argument("--follow", nargs="?", const=str(LIVE_PATH), metavar="PATH",
+                    help="跟随 run_evals.py 的实时进度文件，逐例推送（缺省 "
+                         "evals/reports/live.jsonl）")
+    ap.add_argument("--poll", type=float, default=5.0, help="跟随轮询间隔秒（默认 5）")
+    ap.add_argument("--idle-timeout", type=float, default=1200.0,
+                    help="跟随模式下多久没有新数据就退出（默认 1200s）")
     ap.add_argument("--dry-run", action="store_true", help="只打印计划，不写入")
     ap.add_argument("--force", action="store_true", help="同名 experiment 已存在时另建")
     ap.add_argument("--strict", action="store_true", help="连接失败时退出码 1")
@@ -355,7 +568,7 @@ def main() -> int:
     ap.add_argument("--dataset-name", default=DEFAULT_DATASET)
     args = ap.parse_args()
 
-    if not (args.dataset or args.report or args.all):
+    if not (args.dataset or args.report or args.all or args.follow):
         ap.print_help()
         return 0
 
@@ -389,6 +602,10 @@ def main() -> int:
                 sys.exit(f"报告不存在：{path}")
             sync_report(client, path, json.loads(path.read_text(encoding="utf-8")),
                         args.dataset_name, args.url, args.force, args.dry_run)
+
+        if args.follow:
+            follow_live(client, Path(args.follow), args.dataset_name, args.url,
+                        args.poll, args.idle_timeout, args.dry_run)
     except Exception as exc:
         # 中途断网/服务重启会从这里出去。打一行摘要而不是整页栈：观测失败时
         # 读者最需要知道的是"评估没坏"，栈只会让人以为评估炸了。

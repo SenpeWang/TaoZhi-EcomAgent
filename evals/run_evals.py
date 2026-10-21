@@ -13,7 +13,7 @@
 
 用法（需企业正式环境服务在线）：
   python evals/run_evals.py --quick            # 对抗+检索，约 5 分钟
-  python evals/run_evals.py --full             # 三层全跑，约 40 分钟
+  python evals/run_evals.py --full             # 三层全跑，约 2 小时（108 例逐题 judge，串行）
   python evals/run_evals.py --quick --compare  # 运行后与 evals/baseline.json 对比
   python evals/run_evals.py --quick --save-baseline  # 将本次结果锁定为基线
   python evals/run_evals.py --behavior-only    # 只重跑行为层（LLM judge）
@@ -22,6 +22,8 @@
 用例与语料来自独立数据包（evals/dataset/：spec → generate → seed 灌库，检索走 PG/ES）；
 跑评测前先灌库：PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed。
 结果落盘 evals/reports/<时间戳>-<git短SHA>.json；基线随代码进 Git。
+跑的过程中每完成一例就追加一行到 evals/reports/live.jsonl（不动报告本身），
+供 `evals/sync_phoenix.py --follow` 增量推 Phoenix 实时观看。
 """
 import argparse
 import json
@@ -40,6 +42,11 @@ OUT_DIR = EVALS / "reports"
 CASES = EVALS / "datasets/generated/latest/cases.jsonl"
 GOLDEN = EVALS / "datasets/golden_adversarial.json"
 BASELINE = EVALS / "baseline.json"
+# 实时进度通道：报告要等全量跑完才落盘，而行为层是 108 例串行 judge（约 2 小时），
+# 期间外部看不到任何数据。这里逐例追加一行 JSON，供 sync_phoenix.py --follow 增量推送。
+# 独立文件而非改写报告：报告只写一次，写完即完整，避免出现"半份报告"被当成结果。
+LIVE = OUT_DIR / "live.jsonl"
+_LIVE_META = {"at": "", "git": ""}
 
 import metrics  # noqa: E402
 
@@ -82,6 +89,30 @@ def git_sha():
                               capture_output=True, text=True, check=True).stdout.strip()
     except Exception:
         return "unknown"
+
+
+# ─────────────── 实时进度通道 ───────────────
+# 格式：首行 header（at/git，跟随者据此对齐 experiment 名字，与最终报告同名），
+# 之后每条一行 {"type":"retrieval"|"behavior", ...}，末行 {"type":"end"}。
+# 只用追加写 + flush：跟随者按行读，半行不会出现（单行远小于一次 write 的原子性上限）。
+
+def live_start(at: str, git: str) -> None:
+    """开跑时重建进度文件。上一轮的残留必须先清掉，否则跟随者会先看到旧数据。"""
+    _LIVE_META.update(at=at, git=git)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    LIVE.write_text(json.dumps({"type": "header", "at": at, "git": git},
+                               ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def live_emit(rec: dict) -> None:
+    """追加一条进度。写失败不能影响评测本身——评测结果才是主产物。"""
+    try:
+        line = json.dumps(rec, ensure_ascii=False) + "\n"
+        with LIVE.open("a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+    except Exception as exc:      # 磁盘满、权限、被杀：都只警告一次量级的打印
+        print(f"⚠ 实时进度写入失败（不影响评测）：{type(exc).__name__}: {exc}", flush=True)
 
 
 # ─────────────── 检索质量层 ───────────────
@@ -182,7 +213,9 @@ def phase_retrieval():
             ranked = [r["title"] for r in rows]
             pairs.append((ranked, exp))
             # 逐例证据：只留聚合分数的话，失败用例必须重跑才能归因
-            per_case.append(retrieval_evidence(case, rows, ranked, exp))
+            ev = retrieval_evidence(case, rows, ranked, exp)
+            per_case.append(ev)
+            live_emit({"type": "retrieval", **ev})
         # 覆盖率是一等指标：预期文档解析不出来 = 该用例根本没被评估。
         # 静默在小子集上统计命中率比没有指标更危险，必须显式报出来并告警。
         coverage = metrics.summarize([1.0] * len(pairs) + [0.0] * skipped)
@@ -391,6 +424,11 @@ def phase_behavior():
     judge_stats = {"grounded": 0, "relevant": 0, "abstain": 0, "judge_n": 0}
     stats, detail = {}, []
     verdicts = []
+
+    def record(rec: dict) -> None:
+        """逐例结果同时进报告与实时通道，两条路的口径永远一致。"""
+        detail.append(rec)
+        live_emit({"type": "behavior", "detail": rec})
     login_failures, rejected = [], 0
     tok_before = obs_metrics.token_usage()
     for case in chosen:
@@ -462,13 +500,13 @@ def phase_behavior():
             if task["state"] == "failed" and "权限" in (task.get("error") or ""):
                 s["n"] += 1
                 s["pass"] += 1
-                detail.append({"id": case["case_id"], "pass": True, "why": "权限中止"})
+                record({"id": case["case_id"], "pass": True, "why": "权限中止"})
                 continue
             verdict = {"pass": False, "faithful": False, "relevant": False, "abstain": False, "reason": ""}
             if result is None or task.get("restricted"):
                 s["n"] += 1
                 s["pass"] += 1
-                detail.append({"id": case["case_id"], "pass": True, "why": "内容受限"})
+                record({"id": case["case_id"], "pass": True, "why": "内容受限"})
                 continue
             # 引用必须带正文：只给标题时 judge 拿不到证据，只能凭自身知识判断，
             # 声明级忠实度不成立（BENCHMARK 第 8 节）。
@@ -506,7 +544,7 @@ def phase_behavior():
             else:
                 s["fail"].append((case["case_id"], verdict.get("reason", "")[:40]))
             # 逐例证据：归因链第 2、3 步要能离线看答案与引用原文
-            detail.append({
+            record({
                 "id": case["case_id"],
                 "pass": ok,
                 "why": verdict.get("reason", "")[:80],
@@ -791,15 +829,21 @@ def main():
     global ONLY_CATS
     ONLY_CATS = {x.strip() for x in (args.only or "").split(",") if x.strip()}
     result = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "git": git_sha()}
-    if args.adversarial_only:
-        result["adversarial"] = phase_adversarial()
-    elif args.behavior_only:
-        result["behavior"] = phase_behavior()
-    else:
-        result["retrieval"] = phase_retrieval()
-        result["adversarial"] = phase_adversarial()
-        if args.full:
+    live_start(result["at"], result["git"])
+    try:
+        if args.adversarial_only:
+            result["adversarial"] = phase_adversarial()
+        elif args.behavior_only:
             result["behavior"] = phase_behavior()
+        else:
+            result["retrieval"] = phase_retrieval()
+            result["adversarial"] = phase_adversarial()
+            if args.full:
+                result["behavior"] = phase_behavior()
+    finally:
+        # 无论正常结束还是中途硬失败（夹具没灌库会 SystemExit），都发终止标记：
+        # 跟随者靠它退出，否则要等 idle 超时才走，看起来像卡住了。
+        live_emit({"type": "end", "at": result["at"]})
     six = six_metrics(result)
     result["six_metrics"] = six
     print_six(six)

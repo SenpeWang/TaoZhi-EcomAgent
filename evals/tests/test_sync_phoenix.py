@@ -16,7 +16,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "evals"))
 
-from sync_phoenix import case_to_example, collect_results  # noqa: E402
+from datetime import datetime  # noqa: E402
+
+from sync_phoenix import (  # noqa: E402
+    _log_case, apply_behavior, apply_retrieval, case_to_example, collect_results,
+    experiment_name,
+)
 
 
 def test_case_to_example_splits_three_parts():
@@ -102,3 +107,73 @@ def test_collect_results_ignores_adversarial_layer():
 
 def test_collect_results_on_empty_report():
     assert collect_results({}) == {}
+
+
+def test_apply_behavior_and_retrieval_share_one_slot():
+    """实时跟随按条喂、事后同步按报告喂，两条路必须落到同一个结构上。
+
+    这是 --follow 与 --report 产出可比的前提：若两条路各写一套字段，
+    界面上同一个用例在"跑的过程中"和"跑完之后"长得不一样。
+    """
+    res: dict = {}
+    apply_retrieval(res, {"case_id": "C9", "metrics": {"hit@8": 1.0, "mrr": 0.5}})
+    apply_behavior(res, {"id": "C9", "pass": True, "why": "有据",
+                         "verdict": {"relevant": True, "abstain": False},
+                         "claims": 2, "supported": 2, "answer": "140W"})
+    ev = {e["name"]: e for e in res["C9"]["evaluations"]}
+    assert ev["retrieval.hit@8"]["score"] == 1.0
+    assert ev["answer_pass"]["score"] == 1.0
+    assert ev["faithfulness_decl"]["score"] == 1.0
+    assert res["C9"]["output"]["answer"] == "140W"
+    assert res["C9"]["output"]["retrieval"]["mrr"] == 0.5
+    # 与同一份内容走报告口径的结果逐项相等。比分数映射而不是比列表：
+    # 实时路径先拿到检索记录、事后路径先读行为记录，evaluation 的先后本就不同，
+    # Phoenix 按 (run,name) 存也无所谓顺序。
+    report = {"behavior": {"detail": [{"id": "C9", "pass": True, "why": "有据",
+                                       "verdict": {"relevant": True, "abstain": False},
+                                       "claims": 2, "supported": 2, "answer": "140W"}]},
+              "retrieval": {"per_case": [{"case_id": "C9",
+                                          "metrics": {"hit@8": 1.0, "mrr": 0.5}}]}}
+    want = collect_results(report)["C9"]
+    assert res["C9"]["output"] == want["output"]
+    assert ({e["name"]: (e["score"], e["label"]) for e in res["C9"]["evaluations"]}
+            == {e["name"]: (e["score"], e["label"]) for e in want["evaluations"]})
+
+
+def test_apply_helpers_ignore_records_without_id():
+    res: dict = {}
+    apply_behavior(res, {"pass": True})
+    apply_retrieval(res, {"metrics": {"hit@8": 1.0}})
+    assert res == {}
+
+
+def test_experiment_name_matches_report_and_live_header():
+    """实时跟随用 live 头部时间、事后同步用报告 at，两者必须算出同一个名字。
+
+    对不上就会写两份：一份跑的过程中逐例推，一份跑完再整份推。
+    """
+    assert experiment_name("2026-10-21 18:30:05", "abcdef1234") == "eval-20261021-183005-abcdef1"
+    # git 缺失也要能出名字，不能抛
+    assert experiment_name("2026-10-21 18:30:05", "") == "eval-20261021-183005-nogit"
+
+
+def test_log_case_treats_409_as_already_logged():
+    """断线重连时服务端对重复 run 回 409，必须当成"已推过"而不是中断跟随。
+
+    这是真踩到的：跟随进程重启后按 case_id 去重（该比 dataset_example_id），
+    去重失败 → 重推 → 409 → 整个跟随进程退出，界面上不再更新。
+    """
+    class Conflict(Exception):
+        def __init__(self):
+            self.response = type("R", (), {"status_code": 409})()
+
+    class Experiments:
+        def log_run(self, **kw):
+            raise Conflict()
+
+        def log_evaluation(self, **kw):
+            raise AssertionError("409 之后不该继续写 evaluation")
+
+    client = type("C", (), {"experiments": Experiments()})()
+    now = datetime.now()
+    assert _log_case(client, "e1", "node-1", {"output": {}, "evaluations": []}, now, now) == -1

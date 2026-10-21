@@ -67,6 +67,7 @@ ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_e
 
 ```bash
 make evals-sync          # 数据集 + 最新报告
+make evals-follow        # 跟随跑批进度逐例推（另一个终端，评估在跑时用）
 make evals-pipeline      # 三层评估后自动同步
 
 # 直接调用（Phoenix 客户端在独立 venv，项目 .venv 里没有）
@@ -78,6 +79,22 @@ ECOM_PHOENIX_URL=http://127.0.0.1:6006 \
 |---|---|---|
 | `--dataset` | Phoenix **Datasets** | 108 例：input=问题/身份/多轮，output=预期行为/金标准文档/必备事实/禁披露，metadata=类别/难度/风险 |
 | `--report` | Phoenix **Experiment** | 逐例 run（答案 + 引用标题/chunk_id/**引用正文**）+ evaluation（answer_pass / faithfulness_decl / answer_relevant / abstain / retrieval.*） |
+| `--follow` | Phoenix **Experiment**（同一次跑、边跑边写） | 同上，只是按"每完成一例"推送而不是整份报告 |
+
+**实时观看**：`run_evals.py` 每完成一例就往 `evals/reports/live.jsonl` 追加一行
+（检索层一行、行为层一行，末行 `end`）。`sync_phoenix.py --follow` 只读这个文件，
+边跑边推。两段式用法：
+
+```bash
+# 终端 1：跑批（约 2 小时）
+make evals-baseline
+# 终端 2：跟随（评估没开始时它会等，超时 20 分钟无新数据则退出）
+make evals-follow
+```
+
+跟随用的 experiment 名与 `--report` 算同一个（都用 `live.jsonl` 头部的开跑时间 +
+git 短 SHA），所以跑完之后再跑 `make evals-sync` 是"已存在，跳过"，不会写第二份。
+`live.jsonl` 在 `evals/reports/` 下，与本目录其他产物一样不入 Git。
 
 幂等三条：数据集按 `metadata.case_id` 去重，只补新增；experiment 按名字
 `eval-<报告时间>-<git>` 去重，已存在则跳过（`--force` 另建 `-r2`）；

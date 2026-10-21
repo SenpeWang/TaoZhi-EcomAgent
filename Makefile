@@ -3,7 +3,7 @@ PHOENIX_PY := $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
 PROJECT_ROOT := $(CURDIR)
 SUPERVISOR_CONFIG := $(HOME)/.local/share/ecom-agent/supervisor.conf
 
-.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-sync evals-pipeline
+.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-sync evals-pipeline evals-follow
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -22,6 +22,7 @@ help:
 	@echo "make evals-full     评估：三层全跑（需企业服务在线；对比基线并过门禁）"
 	@echo "make evals-sync     评估集与最新报告同步到 Phoenix（旁路；Phoenix 离线只跳过）"
 	@echo "make evals-pipeline 三层评估 + 同步 Phoenix，一条命令走完整流程"
+	@echo "make evals-follow   跟随评估进度逐例推 Phoenix（另开一个终端，跑批时用）"
 	@echo "make check          检查 Python 语法"
 	@echo "make build-web      构建并切换前端"
 	@echo "make clean          清除项目 Python 与 pytest 缓存"
@@ -82,6 +83,11 @@ evals-baseline:
 evals-sync:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
 	$(PHOENIX_PY) evals/sync_phoenix.py --all
+
+# 跟随逐例进度实时推送：评估跑批约 2 小时，report 结束才落盘，这条通道补那段空窗
+evals-follow:
+	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
+	$(PHOENIX_PY) evals/sync_phoenix.py --follow
 
 # 门禁没过也要同步：失败样例正是最需要被看到、被归因的那批
 evals-pipeline:
