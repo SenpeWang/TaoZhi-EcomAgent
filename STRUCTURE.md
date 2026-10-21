@@ -24,6 +24,7 @@
 | `src/ecom_copilot/enterprise/` | 在线权限、会话、文档、业务服务、工作流及 Worker |
 | `src/ecom_copilot/graph/` | 本地图谱与共享图能力 |
 | `evals/` | 评估模块（独立单元）：口径说明、数据集、指标、运行器、基线与报告 |
+| `evals/baseline/` | 基线只读归档：一次全量跑批一份快照（文件名=开跑时间），只增不改 |
 | `evals/dataset/` | 独立评测数据包：规格、契约校验、确定性生成与幂等灌库 |
 | `evals/dataset/spec/` | 数据包规格（组织/夹具/语料/模板），唯一事实来源 |
 | `evals/datasets/` | 评测数据集与口径说明，随代码进 Git 可 diff |

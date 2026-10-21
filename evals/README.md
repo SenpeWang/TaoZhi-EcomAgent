@@ -114,6 +114,22 @@ evaluation 由服务端按 `(run, name)` upsert。`--dry-run` 只打印计划不
 - **Traces**：项目代码没有 OTel 埋点，Traces 页不会自动出现线上调用链，
   需要另行接 instrumentor。
 
+## 基线归档（只读）
+
+`evals/baseline.json` 是"当前基线"，每次 `make evals-baseline` 都会整份覆盖；
+历史值只活在 git log 里，要对比某次跑批得先翻提交。归档目录把这件事摊平：
+
+```bash
+make evals-archive         # 把当前 baseline.json 复制成 evals/baseline/<开跑时间>.json
+make evals-archive-check  # 逐条比对 md5（校验在 evals/baseline/ARCHIVE.md）
+```
+
+- 一次跑批一份快照，文件名=开跑时间，与 Phoenix experiment 名
+  `eval-<开跑时间>-<git>` 对齐，横向对比不用做映射；
+- 快照写完即 `chmod 444` 并登记 md5：改一个字节都会被 `evals-archive-check`
+  抓到。不是防人，是防"某次手改了基线却没人发现"；
+- 归档**只增不改**：要新基线就跑批后追加一条，旧快照一律保留。
+
 ## 改动后的验证流程
 
 评判标准只有这一套。任何改动——检索参数、合成链路、提示词、判定规则本身——都按

@@ -3,7 +3,7 @@ PHOENIX_PY := $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
 PROJECT_ROOT := $(CURDIR)
 SUPERVISOR_CONFIG := $(HOME)/.local/share/ecom-agent/supervisor.conf
 
-.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-sync evals-pipeline evals-follow
+.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -23,6 +23,8 @@ help:
 	@echo "make evals-sync     评估集与最新报告同步到 Phoenix（旁路；Phoenix 离线只跳过）"
 	@echo "make evals-pipeline 三层评估 + 同步 Phoenix，一条命令走完整流程"
 	@echo "make evals-follow   跟随评估进度逐例推 Phoenix（另开一个终端，跑批时用）"
+	@echo "make evals-archive  把当前 baseline.json 归档成只读快照（进 Git 留档）"
+	@echo "make evals-archive-check  校验归档快照与登记一致（不符退出码 1）"
 	@echo "make check          检查 Python 语法"
 	@echo "make build-web      构建并切换前端"
 	@echo "make clean          清除项目 Python 与 pytest 缓存"
@@ -88,6 +90,15 @@ evals-sync:
 evals-follow:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
 	$(PHOENIX_PY) evals/sync_phoenix.py --follow
+
+# 基线归档：一次跑批一份只读快照进 Git。baseline.json 会被下次跑批覆盖，
+# 归档目录保留"当时跑出来是什么"，横向对比不用翻 git log。
+evals-archive:
+	$(PYTHON) scripts/archive_baseline.py archive
+
+# 归档完整性：md5 不符说明有人动过历史基线，必须在 CI 里红出来
+evals-archive-check:
+	$(PYTHON) scripts/archive_baseline.py check
 
 # 门禁没过也要同步：失败样例正是最需要被看到、被归因的那批
 evals-pipeline:
