@@ -15,14 +15,7 @@
 | `scripts/` | 部署、数据管理、构建与运维；不含评估逻辑 |
 | `src/` | Python 源码根目录 |
 | `src/ecom_copilot/` | 共享能力与在线入口，保持统一授权路径 |
-| `src/ecom_copilot/agents/` | 已有离线 Agent 编排与共享组件 |
-| `src/ecom_copilot/api/` | 兼容入口与隔离的旧接口测试 |
-| `src/ecom_copilot/api/routes/` | 旧离线路由，不作为在线授权旁路 |
-| `src/ecom_copilot/business/` | 只读业务抽象与离线回归 |
-| `src/ecom_copilot/context/` | 上下文构造 |
-| `src/ecom_copilot/debate/` | 离线证据讨论 |
 | `src/ecom_copilot/enterprise/` | 在线权限、会话、文档、业务服务、工作流及 Worker |
-| `src/ecom_copilot/graph/` | 本地图谱与共享图能力 |
 | `evals/` | 评估模块（独立单元）：口径说明、数据集、指标、运行器、基线与报告 |
 | `evals/baseline/` | 基线只读归档：一次全量跑批一份快照（文件名=开跑时间），只增不改 |
 | `evals/dataset/` | 独立评测数据包：规格、契约校验、确定性生成与幂等灌库 |
@@ -32,17 +25,9 @@
 | `evals/datasets/generated/latest/` | 独立包生成产物目录，generate 直接写入（唯一一份，版本由 Git 承担） |
 | `evals/reports/` | 运行产物不入库（.gitignore 全忽略） |
 | `evals/tests/` | 评估代码自身的单元测试，必须进 CI |
-| `src/ecom_copilot/hypothesis/` | 离线假设管理 |
-| `src/ecom_copilot/ingestion/` | 资料来源与入库共享工具 |
+| `src/ecom_copilot/ingestion/` | 语料文本抽取与注入防护（guard） |
 | `src/ecom_copilot/llm/` | 模型客户端、路由与直连控制 |
-| `src/ecom_copilot/memory/` | 旧离线记忆；在线来源权限由 enterprise 管理 |
-| `src/ecom_copilot/observability/` | 脱敏追踪与可观测性 |
-| `src/ecom_copilot/parsing/` | 文档格式解析 |
-| `src/ecom_copilot/retrieval/` | 共享本地检索与排序 |
-| `src/ecom_copilot/safety/` | 输入与证据安全 |
-| `src/ecom_copilot/schemas/` | 共享结构和类型 |
-| `src/ecom_copilot/security/` | 旧鉴权隔离回归，不作为在线入口 |
-| `src/ecom_copilot/storage/` | 离线持久化，不用于在线权限和队列 |
+| `src/ecom_copilot/observability/` | 指标与事件观测（审计落 enterprise/policy.audit） |
 | `tests/` | 单元与企业边界验收，测试事实自行构造 |
 | `web/` | 前端依赖、锁与构建配置 |
 | `web/src/` | Vue 页面、类型、样式与 API 调用 |

@@ -120,11 +120,11 @@ def decide(conn,p,aid,approve,comment):
     audit(conn,p,"批准申请" if approve else "拒绝申请",a["target_id"],a["node_id"],system=kind in ("membership","user","org"),detail={"kind":kind,"decision":"approved" if approve else "rejected"})
     return {"message":"申请已批准" if approve else "申请已拒绝"}
 
-def create_job(conn,p,kind,node,payload,question="",level=1,key=None):
+def create_job(conn,p,kind,node,payload,question="",level=1,key=None,conversation_id=""):
     if node not in p.nodes or (not p.boss and not any(p.overlaps(m["node_id"],node) and not (m["role"]=="employee" and p.nodes.get(m["node_id"],{}).get("kind")=="company" and node!=m["node_id"]) for m in p.memberships) and node!=p.root):
         raise Denied("不属于该组织范围")
     import json
-    fingerprint=hashlib.sha256(json.dumps(dict(kind=kind,node=node,payload=payload,question=question,level=level),sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    fingerprint=hashlib.sha256(json.dumps(dict(kind=kind,node=node,payload=payload,question=question,level=level,conversation=conversation_id),sort_keys=True,ensure_ascii=False).encode()).hexdigest()
     if key:
         existing=fetch_one(conn,"SELECT * FROM jobs WHERE tenant_id=%s AND owner_id=%s AND idempotency_key=%s",(p.tenant_id,p.id,key))
         if existing:
@@ -138,8 +138,8 @@ def create_job(conn,p,kind,node,payload,question="",level=1,key=None):
             return existing
     count=fetch_one(conn,"SELECT count(*) AS n FROM jobs WHERE tenant_id=%s AND state IN ('queued','running')",(p.tenant_id,))["n"]
     if count>=load_config().max_pending:raise Denied("任务较多，请稍后重试","QUEUE_FULL",429)
-    job=fetch_one(conn,"INSERT INTO jobs(id,tenant_id,owner_id,owner_version,node_id,kind,question,input_level,payload,idempotency_key,fingerprint) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
-      (generate_id("task"),p.tenant_id,p.id,p.version,node,kind,question,level,as_jsonb(payload),key,fingerprint))
+    job=fetch_one(conn,"INSERT INTO jobs(id,tenant_id,owner_id,owner_version,node_id,kind,question,input_level,conversation_id,payload,idempotency_key,fingerprint) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
+      (generate_id("task"),p.tenant_id,p.id,p.version,node,kind,question,level,conversation_id,as_jsonb(payload),key,fingerprint))
     if load_config().kafka_enabled:  # outbox 同事务落库，relay 异步投递 Kafka
         conn.execute("INSERT INTO task_outbox(job_id) VALUES(%s)",(job["id"],))
     audit(conn,p,"提交问答" if kind=="ask" else "提交资料解析",job["id"],node,level,detail={"kind":kind})

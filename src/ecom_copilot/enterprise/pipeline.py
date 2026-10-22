@@ -213,7 +213,7 @@ def retrieval_node(state):
         hyde_vector=_hyde_vector(c,p,job,state)
         evidence=[e for e in search_documents(c,p,state["question"],10,hyde_vector=hyde_vector) if not detect_injection(e["quote"])[0]]
         from .memory import get_followup_context
-        recalled,recalled_sources=get_followup_context(c,p,state["question"],job["input_level"])
+        recalled,recalled_sources=get_followup_context(c,p,state["question"],job["input_level"],job.get("conversation_id") or "")
         if recalled:
             seen={e["chunk_id"] for e in evidence}
             evidence=[e for e in recalled if e["chunk_id"] not in seen and not detect_injection(e["quote"])[0]]+evidence

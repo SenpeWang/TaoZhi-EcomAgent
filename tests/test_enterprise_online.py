@@ -311,10 +311,10 @@ def test_production_forbids_demo_password(monkeypatch,clients):
     r=clients["staff"].post("/api/auth/login",json={"username":"staff","password":"123456"})
     assert r.status_code==403 and "演示口令" in r.text
 def test_canonical_api_cannot_use_legacy_identity(monkeypatch,clients):
-    import ecom_copilot.api.main as canonical
-    monkeypatch.setenv("ECOM_LEGACY_TEST","false")
-    assert canonical.create_app().title=="企业智能协作工作台"
-    c=TestClient(canonical.create_app())
+    # 旧 api 包（含 legacy_main 与路由）已下线，生产 app 就是 enterprise.api
+    from ecom_copilot.enterprise.api import app as canonical_app
+    assert canonical_app.title=="企业智能协作工作台"
+    c=TestClient(canonical_app)
     assert c.get("/api/documents",headers={"Authorization":"Bearer arbitrary-legacy-token"}).status_code==401
     assert c.get("/api/graph").status_code==404
 

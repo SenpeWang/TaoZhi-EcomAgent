@@ -80,6 +80,7 @@ class Question(Input):
     platforms:list[str]=Field(default_factory=list,max_length=8)
     node_id:str=""
     input_level:int=Field(default=1,ge=1,le=3)
+    conversation_id:str=Field(default="",max_length=64,pattern=r"^[A-Za-z0-9_-]*$")
     require_review:bool=False
     allow_external:bool=True
     sku_id:str=Field(default="",max_length=64,pattern=r"^[A-Za-z0-9_-]*$")
@@ -359,10 +360,11 @@ def decision(aid:str,payload:Decision,p=Depends(identity)):
 @app.post("/api/tasks",status_code=202)
 def ask(payload:Question,idempotency_key:str|None=Header(default=None,max_length=128),p=Depends(identity)):
     node=payload.node_id or next((m["node_id"] for m in p.memberships if m["role"] in ("leader","employee")),p.root)
-    data=payload.model_dump(exclude={"question","node_id","input_level"})
+    data=payload.model_dump(exclude={"question","node_id","input_level","conversation_id"})
     if payload.input_level>=3 and not p.boss:data["allow_external"]=False
     with database_connection() as c:
-        job=create_job(c,p,payload.kind,node,data,payload.question,payload.input_level,idempotency_key)
+        job=create_job(c,p,payload.kind,node,data,payload.question,payload.input_level,idempotency_key,
+                       conversation_id=payload.conversation_id)
         return {"id":job["id"],"task_id":job["id"],"state":job["state"],"message":"任务已提交"}
 @app.get("/api/research/tasks")
 @app.get("/api/tasks")

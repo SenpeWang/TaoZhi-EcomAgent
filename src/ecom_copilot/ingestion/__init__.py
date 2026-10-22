@@ -1,6 +1,9 @@
-"""数据采集层（PRD 模块 A）。"""
+"""数据采集层：只保留注入防护。
 
-from .base import FetchRequest, SourceAdapter  # noqa: F401
+抓取适配器（base / sources）随离线调研链路一并下线——它们依赖已删除的
+schemas 与本地索引，生产链路只从 guard 取注入检测。
+"""
+
 from .guard import (  # noqa: F401
     assert_tool_allowed,
     allowed_tools,
@@ -8,20 +11,4 @@ from .guard import (  # noqa: F401
     is_safe,
     sanitize,
 )
-from .sources import (  # noqa: F401
-    LocalCorpusAdapter,
-    ManualSourceAdapter,
-    PolicyNoticeAdapter,
-    ProductPageAdapter,
-    ReviewFeedAdapter,
-    adapters_by_name,
-    default_adapters,
-)
-
-__all__ = [
-    "FetchRequest", "SourceAdapter",
-    "assert_tool_allowed", "allowed_tools", "detect_injection", "is_safe", "sanitize",
-    "ProductPageAdapter", "ReviewFeedAdapter", "PolicyNoticeAdapter",
-    "ManualSourceAdapter", "LocalCorpusAdapter",
-    "adapters_by_name", "default_adapters",
-]
+__all__ = ["assert_tool_allowed", "allowed_tools", "detect_injection", "is_safe", "sanitize"]

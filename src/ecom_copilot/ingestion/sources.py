@@ -19,12 +19,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..config import Settings, get_settings
 from ..schemas.common import DocType, SourceDocument
 from .base import FetchRequest, SourceAdapter
+from .corpus import (
+    _DOCX_SUFFIXES,
+    _PDF_SUFFIXES,
+    _TEXT_SUFFIXES,
+    read_corpus_text as _read_corpus_text,
+)
 
 logger = logging.getLogger(__name__)
-
-_TEXT_SUFFIXES = {".md", ".txt", ".markdown"}
-_PDF_SUFFIXES = {".pdf"}
-
 
 def _doc(title: str, text: str, url: str = "", published: str = "",
          doc_type: DocType = DocType.OTHER, **meta: Any) -> SourceDocument:
@@ -45,23 +47,6 @@ def _query_terms(request: FetchRequest) -> List[str]:
     """查询词：关键词 + 商品类目 / 产品线 / 品牌。"""
     return [t for t in list(request.keywords)
             + [request.category, request.product_line, request.brand] if t]
-
-
-def _read_corpus_text(path: Path) -> str:
-    """读取文档文本：md/txt 直接读取；pdf 尽力用 pypdf 抽取（未安装则留空）。"""
-    if path.suffix.lower() in _PDF_SUFFIXES:
-        try:
-            from pypdf import PdfReader  # noqa: PLC0415
-
-            return "\n".join((page.extract_text() or "") for page in PdfReader(str(path)).pages)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("PDF 文本抽取失败，已跳过内容: %s (%s)", path, exc)
-            return ""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.warning("文档读取失败，已跳过: %s (%s)", path, exc)
-        return ""
 
 
 # ───────────────────────── 通用骨架：企业真实入库目录 ─────────────────────────
