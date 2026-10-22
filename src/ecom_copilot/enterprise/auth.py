@@ -3,7 +3,7 @@ from datetime import datetime,timezone,timedelta
 from fastapi import Request
 from .db import database_connection,fetch_one
 from .config import load_config
-from .passwords import verify_password,hash_password
+from .passwords import WEAK_PASSWORDS,verify_password,hash_password
 from .policy import Denied,load_principal,audit
 SESSION_COOKIE="ecom_session_"+load_config().mode
 CSRF_COOKIE="ecom_csrf_"+load_config().mode
@@ -35,7 +35,7 @@ def login(username,password,ip,tenant_code):
         cfg=load_config()
         # 内网快捷登录（ECOM_QUICK_LOGIN + ECOM_QUICK_LOGIN_PASSWORD）开启时放行默认口令；
         # 其余生产部署继续拒绝演示口令，防止弱口令进入正式环境。
-        if cfg.mode=="production" and not (cfg.quick_login and cfg.quick_login_password) and verify_password("123456",fresh["password_hash"]):raise Denied("正式环境禁止演示口令，请通过管理员申请重置","DEMO_PASSWORD_FORBIDDEN",403)
+        if cfg.mode=="production" and not (cfg.quick_login and cfg.quick_login_password) and any(verify_password(w,fresh["password_hash"]) for w in WEAK_PASSWORDS):raise Denied("正式环境禁止演示口令，请通过管理员申请重置","DEMO_PASSWORD_FORBIDDEN",403)
         sid,csrf=secrets.token_urlsafe(32),secrets.token_urlsafe(32)
         expires=now+timedelta(hours=2)
         c.execute("INSERT INTO sessions(id,tenant_id,user_id,user_version,csrf_hash,expires_at) VALUES(%s,%s,%s,%s,%s,%s)",(hash_token(sid),p.tenant_id,p.id,p.version,hash_token(csrf),expires))

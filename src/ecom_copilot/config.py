@@ -1,7 +1,14 @@
 """电商商品知识智能问答系统 —— 全局配置（Pydantic Settings v2）。
 
 配置优先级：环境变量 > .env 文件 > 代码默认值。
-优先读取项目 .env，再回退上级目录；可通过环境变量 ENV_FILE 覆盖。
+
+两份文件叠加读取，后者优先：
+1. 项目根 .env —— LLM 服务层配置所在地（BASE_URL / API_KEY / MODEL）。
+   企业链路刻意不读它，只认 ECOM_ENV_FILE，两边键名不重叠；
+2. ECOM_ENV_FILE 指向的环境文件 —— 让切环境时（make test 用 .env.test）
+   本层配置也能跟着切。
+
+只认 ECOM_ENV_FILE：仓库里没有第二个名字，别再发明 ENV_FILE 这类开关。
 """
 
 from __future__ import annotations
@@ -19,16 +26,19 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 # <...>/00_base/.env
 DEFAULT_ENV_FILE: Path = PROJECT_ROOT.parent / ".env"
 
-_ENV_FILE = os.getenv("ENV_FILE") or (
+_ENV_FILES = [
     str(PROJECT_ROOT / ".env") if (PROJECT_ROOT / ".env").exists() else str(DEFAULT_ENV_FILE)
-)
+]
+_ecom_env_file = os.getenv("ECOM_ENV_FILE")
+if _ecom_env_file:
+    _ENV_FILES.append(_ecom_env_file)
 
 
 class Settings(BaseSettings):
     """系统级配置。所有字段均可在 .env / 环境变量中覆盖。"""
 
     model_config = SettingsConfigDict(
-        env_file=_ENV_FILE,
+        env_file=tuple(_ENV_FILES),
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,

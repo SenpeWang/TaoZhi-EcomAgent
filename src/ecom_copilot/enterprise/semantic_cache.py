@@ -6,6 +6,10 @@
 2. 毫秒级命中返回：相似度 >= 阈值（默认 0.92）直接返回权威答案与引用，时延 < 5ms，消耗 0 LLM Token；
 3. 租户与权限隔离：严格按 tenant_id 隔离，且校验 input_level 密级防越权；
 4. 动态失效与 LRU：支持 TTL 自动过期与最大容量 LRU 淘汰。
+
+密级与脱敏是两件事，必须各判各的：缓存里存的是"当初那位提问者"看到的文本，
+boss 看到的是未脱敏原文（手机号、身份证、收货地址）。按密级放行会让 staff 用
+一个相似问题拿到 boss 那份原文，所以命中时还要做一次脱敏对齐（见 get()）。
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from .embedding import available as embedding_available, encode_query
+from .privacy import redact
 
 logger = logging.getLogger("ecom_copilot.enterprise.semantic_cache")
 
@@ -36,6 +41,9 @@ class CacheEntry:
     input_level: int
     created_at: float
     hits: int = 0
+    # 存进去的 answer / citations 是否已脱敏。False 表示当初是 boss 问的、
+    # 内容是未脱敏原文；命中者不是 boss 时必须重新脱敏后再返回。
+    redacted: bool = False
 
 
 class SemanticCache:
@@ -74,6 +82,7 @@ class SemanticCache:
         tenant_id: str,
         query: str,
         input_level: int = 1,
+        boss: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """检索语义缓存。
 
@@ -81,6 +90,8 @@ class SemanticCache:
             tenant_id: 租户 ID。
             query: 用户提问。
             input_level: 当前用户密级上限（缓存内容不能高于此密级）。
+            boss: 命中者是否老板。决定要不要对未脱敏的缓存内容重新脱敏；
+                默认 False，即缺省按最严格口径处理。
 
         Returns:
             若命中则返回包含 answer, citations, sources, similarity 的字典，未命中返回 None。
@@ -123,6 +134,18 @@ class SemanticCache:
 
             # 检查相似度阈值与密级隔离
             if best_sim >= self.similarity_threshold and best_entry.input_level <= input_level:
+                # 脱敏对齐：缓存存的是"当初那位提问者"看到的文本。boss 的答案是
+                # 未脱敏原文，staff 用相似问题命中后必须重新脱敏；反过来 boss 命中
+                # staff 那条已脱敏的残缺内容也没意义，直接当未命中走完整链路。
+                if boss and best_entry.redacted:
+                    self._misses += 1
+                    return None
+                answer = best_entry.answer
+                citations = best_entry.citations
+                if not boss and not best_entry.redacted:
+                    answer = redact(answer)
+                    citations = [dict(c, quote=redact(c["quote"])) if c.get("quote") else c
+                                 for c in citations]
                 best_entry.hits += 1
                 self._hits += 1
                 elapsed = (time.monotonic() - t0) * 1000
@@ -132,8 +155,8 @@ class SemanticCache:
                     "cache_hit": True,
                     "matched_query": best_entry.query,
                     "similarity": round(best_sim, 4),
-                    "answer": best_entry.answer,
-                    "citations": best_entry.citations,
+                    "answer": answer,
+                    "citations": citations,
                     "sources": best_entry.sources,
                     "latency_ms": round(elapsed, 2),
                 }
@@ -149,8 +172,12 @@ class SemanticCache:
         citations: List[Dict[str, Any]],
         sources: List[Dict[str, Any]],
         input_level: int = 1,
+        redacted: bool = False,
     ) -> bool:
-        """将高质量权威答案与证据写入语义缓存。"""
+        """将高质量权威答案与证据写入语义缓存。
+
+        redacted 记的是这批内容有没有脱敏过（boss 的答案没有），命中时据此对齐。
+        """
         if not embedding_available() or not answer.strip():
             return False
 
@@ -177,6 +204,7 @@ class SemanticCache:
                 sources=sources,
                 input_level=input_level,
                 created_at=time.monotonic(),
+                redacted=redacted,
             )
             entries.append(entry)
             self._rebuild_matrix(tenant_id)

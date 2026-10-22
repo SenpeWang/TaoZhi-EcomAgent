@@ -1,12 +1,14 @@
 import hashlib,hmac,secrets,threading
 from .policy import Denied
 _slots=threading.BoundedSemaphore(4)
+# 设定侧封禁与登录侧拦截必须共用这一份：只在一处改，另一侧就会漏出口令。
+WEAK_PASSWORDS=('123456','123456789012','password123456','admin12345678')
 def hash_password(value,mode,allow_weak=False):
     """生成口令哈希。allow_weak 仅用于内网快捷登录的默认口令，正式账号一律禁用。"""
     minimum=6 if (mode=="test" or allow_weak) else 12
     if not isinstance(value,str) or not minimum<=len(value)<=128:
         raise Denied("测试环境密码须至少 6 位；生产环境密码须至少 12 位","INVALID_PASSWORD",400)
-    if mode=="production" and not allow_weak and value in ('123456','123456789012','password123456','admin12345678'):
+    if mode=="production" and not allow_weak and value in WEAK_PASSWORDS:
         raise Denied("生产环境禁止使用常见弱口令","INVALID_PASSWORD",400)
     salt=secrets.token_bytes(16)
     with _slots:

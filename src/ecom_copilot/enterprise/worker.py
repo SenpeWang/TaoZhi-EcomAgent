@@ -69,11 +69,15 @@ def process_question_job(job):
     # 1. 语义缓存层（大促高并发热点削峰拦截，时延 < 15ms，0 LLM 开销）
     from .semantic_cache import get_semantic_cache
     cache = get_semantic_cache()
-    cached = cache.get(job["tenant_id"], job["question"], input_level=job["input_level"])
+    # 先取身份再查缓存：命中与否取决于密级，返回的文本脱不脱敏取决于是不是 boss。
+    with database_connection() as c:
+        p = load_principal(c, job["owner_id"])
+        cached = cache.get(job["tenant_id"], job["question"], input_level=job["input_level"], boss=p.boss)
     if cached:
         with database_connection() as c:
-            p = load_principal(c, job["owner_id"])
-            if sources_valid(c, p, cached.get("sources", [])):
+            # 来源为空的条目谁都能命中（all([]) 为真），这里显式拒绝，
+            # 不放过任何"无来源却带答案"的缓存项。
+            if cached.get("sources") and sources_valid(c, p, cached.get("sources", [])):
                 result = dict(
                     answer=cached["answer"],
                     citations=cached["citations"],
@@ -123,7 +127,9 @@ def process_question_job(job):
     # 缓存密级必须用答案提升后的 input_level（含 L2/L3 引用时不得低于该密级）。
     if not state.get("hard_block") and not state.get("review") and state.get("answer") and not state.get("data_result"):
         try:
-            cache.put(job["tenant_id"], job["question"], state["answer"], citations, state.get("sources", []), state.get("input_level", job["input_level"]))
+            cache.put(job["tenant_id"], job["question"], state["answer"], citations,
+                      state.get("sources", []), state.get("input_level", job["input_level"]),
+                      redacted=not p.boss)
         except Exception:
             pass
 def process_research_job(job):
