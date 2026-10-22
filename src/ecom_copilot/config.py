@@ -23,12 +23,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # <...>/TaoZhi-EcomAgent
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
-# <...>/00_base/.env
-DEFAULT_ENV_FILE: Path = PROJECT_ROOT.parent / ".env"
 
-_ENV_FILES = [
-    str(PROJECT_ROOT / ".env") if (PROJECT_ROOT / ".env").exists() else str(DEFAULT_ENV_FILE)
-]
+# 只读仓库内的 .env，缺了就当没有：不回落到上级目录那种仓库外、非版本控制
+# 的文件——读到一个来路不明的 .env 比读不到更难排查。
+_ENV_FILES = [str(PROJECT_ROOT / ".env")] if (PROJECT_ROOT / ".env").exists() else []
 _ecom_env_file = os.getenv("ECOM_ENV_FILE")
 if _ecom_env_file:
     _ENV_FILES.append(_ecom_env_file)
