@@ -26,18 +26,12 @@ PG 主键 (tenant_id, model_tag, digest)：
 """
 from __future__ import annotations
 
-import hashlib
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
 from .db import fetch_all
-from .embedding import embedding_input, encode_passages, model_signature, to_vector
-
-
-def digest(text: str) -> str:
-    """文本指纹（sha256）：决定这段文本要不要重新编码。"""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+from .embedding import digest, embedding_input, encode_passages, model_signature, to_vector
 
 
 def _lookup(conn, tenant_id: str, tag: str, digests: Sequence[str],

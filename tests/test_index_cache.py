@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from ecom_copilot.enterprise import index_cache
+from ecom_copilot.enterprise import embedding, index_cache
 from ecom_copilot.enterprise.config import load_config
 from ecom_copilot.enterprise.db import database_connection, fetch_all
 from ecom_copilot.enterprise.embedding import embedding_input
@@ -14,6 +14,7 @@ DIM = 512
 def _env():
     cfg = load_config()
     assert cfg.mode == "test" and cfg.dsn.endswith("/ecom_test")
+    embedding.clear_query_cache()
 
 
 def _stub(monkeypatch, calls):
@@ -23,6 +24,20 @@ def _stub(monkeypatch, calls):
         return np.tile(np.arange(DIM, dtype="float32"), (len(texts), 1))
     monkeypatch.setattr(index_cache, "model_signature", lambda: f"test-model:{DIM}")
     monkeypatch.setattr(index_cache, "encode_passages", fake)
+
+
+def _stub_query(monkeypatch, calls, tag="test-model:512"):
+    """替掉 _post：只用于验证查询向量是否命中缓存。
+
+    返回值必须随输入变化——否则"不同问题"也会拿到同一个向量，
+    断言 `not allclose` 就成了假失败。
+    """
+    def fake_post(texts, instruct=False):
+        calls.append((list(texts), instruct))
+        seed = float(abs(hash("|".join(texts))) % 900 + 1)
+        return np.tile(np.arange(DIM, dtype="float32") + seed, (len(texts), 1))
+    monkeypatch.setattr(embedding, "model_signature", lambda: tag)
+    monkeypatch.setattr(embedding, "_post", fake_post)
 
 
 def _count(conn, tenant):
@@ -93,3 +108,32 @@ def test_encode_index_needs_embedding_service(monkeypatch):
 def test_encode_index_empty_pairs():
     with database_connection() as conn:
         assert index_cache.encode_index(conn, "tenant_index_cache_f", []) is None
+
+
+def test_query_embedding_cache_hits(monkeypatch):
+    """同一进程内同问只编码一次；换问题不算命中。"""
+    calls = []
+    _stub_query(monkeypatch, calls)
+    first = embedding.encode_query("LX-20 多少钱")
+    second = embedding.encode_query("LX-20 多少钱")
+    other = embedding.encode_query("另一个问题")
+    assert np.allclose(first, second)
+    assert not np.allclose(first, other)
+    assert len(calls) == 2
+    assert all(instruct for _, instruct in calls)      # 查询必须走 instruct 前缀
+    assert embedding.query_cache_stats()["hits"] == 1
+
+
+def test_query_embedding_cache_evicts_oldest(monkeypatch):
+    """LRU 有上限：超容量时淘汰最久未用的那条。"""
+    monkeypatch.setattr(embedding, "_post",
+                        lambda texts, instruct=False: np.tile(
+                            np.arange(DIM, dtype="float32"), (len(texts), 1)))
+    monkeypatch.setattr(embedding, "QUERY_CACHE_MAX", 3)
+    calls = []
+    for i in range(5):
+        embedding.encode_query(f"问题{i}")
+    embedding.encode_query("问题0")      # 把 0 提到最新
+    embedding.encode_query("问题5")      # 被淘汰的应是 1
+    assert embedding.query_cache_stats()["size"] == 3
+    assert embedding.digest("问题1") not in " ".join(embedding._query_cache)
