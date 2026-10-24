@@ -452,6 +452,16 @@ small {
 .el-form .el-checkbox {
   margin-bottom: 14px;
 }
+.account-level-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+.level-hint {
+  font-size: 13px;
+  color: var(--el-text-color-secondary, #909399);
+}
 .submit-question {
   margin-top: 20px;
   width: 100%;

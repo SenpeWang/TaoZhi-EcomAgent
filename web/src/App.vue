@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { requestApi } from './api'
 import BiView from './views/BiView.vue'
@@ -239,6 +239,26 @@ const tree = computed(() => {
 const level = (n: number) =>
   (({ 1: '员工级', 2: '组长级', 3: '老板级' }) as Record<number, string>)[n] || '待确认'
 /**
+ * 根据当前登录账号的身份权限自动确定问题密级（老板为3，组长为2，员工为1）。
+ */
+const currentUserLevel = computed(() => {
+  if (!user.value) return 1
+  return user.value.is_boss ? 3 : user.value.is_leader ? 2 : 1
+})
+watch(
+  user,
+  (newUser) => {
+    if (newUser) {
+      askForm.input_level = newUser.is_boss ? 3 : newUser.is_leader ? 2 : 1
+      askForm.allow_external = !newUser.is_boss
+    } else {
+      askForm.input_level = 1
+      askForm.allow_external = true
+    }
+  },
+  { immediate: true },
+)
+/**
  * 将任务、资料与审批状态转为中文；未知状态不冒充成功。
  * @param s - 后端状态码。
  * @returns 中文显示文本。
@@ -454,6 +474,7 @@ async function submitResearch() {
  */
 async function submitQuestion() {
   if (!askForm.question.trim()) return ElMessage.warning('请先填写你的问题')
+  askForm.input_level = currentUserLevel.value
   await action(async () => {
     const r = await api<CreatedResource>('/tasks', 'POST', askForm)
     activeTask.value = await api<Task>('/tasks/' + r.id)
@@ -1195,16 +1216,23 @@ onUnmounted(() => {
                     placeholder="请说明商品型号、适配机型或需要核对的业务事项"
                 /></el-form-item>
                 <div class="form-columns">
-                  <el-form-item label="问题内容密级"
-                    ><el-select
-                      v-model="askForm.input_level"
-                      @change="askForm.allow_external = askForm.input_level < 3"
-                      ><el-option
-                        v-for="l in [1, 2, 3]"
-                        :key="l"
-                        :label="level(l)"
-                        :value="l" /></el-select
-                  ></el-form-item>
+                  <el-form-item label="问题内容密级">
+                    <div class="account-level-badge">
+                      <el-tag
+                        :type="
+                          askForm.input_level === 3
+                            ? 'danger'
+                            : askForm.input_level === 2
+                              ? 'warning'
+                              : 'info'
+                        "
+                        effect="plain"
+                      >
+                        {{ level(askForm.input_level) }}
+                      </el-tag>
+                      <span class="level-hint">（根据登录账号权限自动确定）</span>
+                    </div>
+                  </el-form-item>
                 </div>
                 <div class="form-columns">
                   <el-form-item label="商品编号（选填）"

@@ -93,6 +93,27 @@ def test_csrf_and_forged_identity(clients):
     staff.headers["X-CSRF-Token"]=token
     assert staff.post("/api/tasks",json={"question":"商品规格","user_id":"boss","role":"boss"}).status_code==422
     assert staff.post("/api/tasks",json={"question":"商品规格"},headers={"Origin":"https://other.example"}).status_code==403
+
+
+def test_question_input_level_strictly_determined_by_account_role(clients):
+    """验证智能问答中密级严格根据账号权限自动确定，禁止前端越权篡改。"""
+    r_staff = clients["staff"].post("/api/tasks", json={"question": "员工提问测试", "input_level": 3})
+    assert r_staff.status_code == 202
+    tid_staff = r_staff.json()["id"]
+    job_staff = clients["staff"].get(f"/api/tasks/{tid_staff}").json()
+    assert job_staff["input_level"] == 1
+
+    r_leader = clients["leader"].post("/api/tasks", json={"question": "组长提问测试", "input_level": 1})
+    assert r_leader.status_code == 202
+    tid_leader = r_leader.json()["id"]
+    job_leader = clients["leader"].get(f"/api/tasks/{tid_leader}").json()
+    assert job_leader["input_level"] == 2
+
+    r_boss = clients["boss"].post("/api/tasks", json={"question": "老板提问测试"})
+    assert r_boss.status_code == 202
+    tid_boss = r_boss.json()["id"]
+    job_boss = clients["boss"].get(f"/api/tasks/{tid_boss}").json()
+    assert job_boss["input_level"] == 3
 def test_admin_cannot_self_promote(clients):
     u,n=ids();a=clients["admin"].post("/api/users/"+u["admin"]+"/memberships",json={"node_id":n["公司"],"role":"boss"})
     assert a.status_code==202

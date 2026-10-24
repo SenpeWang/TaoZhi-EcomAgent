@@ -354,18 +354,49 @@ def approvals(p=Depends(identity)):
             result.append(dict(**{k:a[k] for k in ("id","kind","target_id","requested_by","required_role","state","created_at","comment")},label=label,title=title,can_decide=responsible,payload=payload))
         return {"items":result}
 @app.post("/api/approvals/{aid}/decision")
-def decision(aid:str,payload:Decision,p=Depends(identity)):
-    with database_connection() as c:return decide(c,p,aid,payload.approve,payload.comment)
-@app.post("/api/research/task",status_code=202)
-@app.post("/api/tasks",status_code=202)
-def ask(payload:Question,idempotency_key:str|None=Header(default=None,max_length=128),p=Depends(identity)):
-    node=payload.node_id or next((m["node_id"] for m in p.memberships if m["role"] in ("leader","employee")),p.root)
-    data=payload.model_dump(exclude={"question","node_id","input_level","conversation_id"})
-    if payload.input_level>=3 and not p.boss:data["allow_external"]=False
+def decision(aid: str, payload: Decision, p=Depends(identity)):
     with database_connection() as c:
-        job=create_job(c,p,payload.kind,node,data,payload.question,payload.input_level,idempotency_key,
-                       conversation_id=payload.conversation_id)
-        return {"id":job["id"],"task_id":job["id"],"state":job["state"],"message":"任务已提交"}
+        return decide(c, p, aid, payload.approve, payload.comment)
+
+
+@app.post("/api/research/task", status_code=202)
+@app.post("/api/tasks", status_code=202)
+def ask(
+    payload: Question,
+    idempotency_key: str | None = Header(default=None, max_length=128),
+    p=Depends(identity),
+):
+    """提交智能问答或协同调研任务。
+
+    问题内容密级严格根据当前登录账号权限自动确定（老板为3，组长为2，员工为1），
+    不接受客户端自由篡改，以杜绝越权访问。
+
+    Args:
+        payload: 问答任务参数载荷。
+        idempotency_key: 幂等性控制标识。
+        p: 当前经过身份验证的用户主体。
+
+    Returns:
+        包含任务标识与初始状态的响应字典。
+    """
+    node = payload.node_id or next((m["node_id"] for m in p.memberships if m["role"] in ("leader", "employee")), p.root)
+    data = payload.model_dump(exclude={"question", "node_id", "input_level", "conversation_id"})
+    input_level = 3 if p.boss else (2 if p.leader else 1)
+    if input_level >= 3 and not p.boss:
+        data["allow_external"] = False
+    with database_connection() as c:
+        job = create_job(
+            c,
+            p,
+            payload.kind,
+            node,
+            data,
+            payload.question,
+            input_level,
+            idempotency_key,
+            conversation_id=payload.conversation_id,
+        )
+        return {"id": job["id"], "task_id": job["id"], "state": job["state"], "message": "任务已提交"}
 @app.get("/api/research/tasks")
 @app.get("/api/tasks")
 def tasks(p=Depends(identity)):
