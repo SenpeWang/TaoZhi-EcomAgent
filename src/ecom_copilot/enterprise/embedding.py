@@ -95,6 +95,11 @@ def to_vector(raw) -> Optional[np.ndarray]:
             return None
     if isinstance(raw, (bytes, bytearray, memoryview)) and len(raw) % 4 == 0:
         return np.frombuffer(raw, dtype="float32")
+    if isinstance(raw, str) and raw.startswith("[") and raw.endswith("]"):
+        try:
+            return np.fromstring(raw[1:-1], sep=",", dtype="float32")
+        except Exception:
+            return None
     return None
 
 

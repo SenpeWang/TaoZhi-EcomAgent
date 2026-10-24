@@ -62,6 +62,7 @@ orjson==3.11.9
 ormsgpack==1.12.2
 packaging==26.3
 pandas==2.3.3
+pgvector==0.5.1
 pillow==9.0.1
 playwright==1.63.0
 pluggy==1.6.0
