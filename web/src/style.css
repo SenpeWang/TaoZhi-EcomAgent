@@ -694,3 +694,197 @@ small {
   color: #536780;
   font-size: 12px;
 }
+
+/* ==========================================================================
+   Antigravity 多智能体协同中心与富交互样式
+   ========================================================================== */
+.research-agent-panel {
+  background: linear-gradient(135deg, #ffffff 0%, #f6f9fe 100%);
+  border: 1px solid #dbe6f8;
+  position: relative;
+  overflow: hidden;
+}
+.research-agent-panel:before {
+  content: '';
+  position: absolute;
+  top: -60px;
+  right: -60px;
+  width: 160px;
+  height: 160px;
+  background: radial-gradient(circle, rgba(36, 90, 216, 0.08) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.panel-header-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.team-subtext {
+  color: #64748b;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+.preset-pills-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.preset-label,
+.platform-label,
+.slash-label,
+.outline-label,
+.artifact-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+.preset-chip {
+  font-size: 11px;
+  color: #245ad8;
+  background: #edf3fd;
+  border: 1px solid #d5e3fc;
+  padding: 3px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.preset-chip:hover {
+  background: #245ad8;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+.research-platforms {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+.slash-commands-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.slash-cmd-chip {
+  font-size: 11px;
+  color: #0f766e;
+  background: #f0fdfa;
+  border: 1px solid #ccfbf1;
+  padding: 3px 9px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.slash-cmd-chip:hover {
+  background: #0f766e;
+  color: #ffffff;
+  border-color: #0f766e;
+}
+.research-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.subagents-roster-box {
+  margin: 14px 0;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.roster-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #1e293b;
+}
+.roster-header small {
+  color: #64748b;
+  font-size: 11px;
+}
+.subagents-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.subagent-roster-card {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
+}
+.subagent-roster-card:hover {
+  border-color: #245ad8;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(36, 90, 216, 0.08);
+}
+.subagent-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.subagent-role-name {
+  font-weight: 600;
+  font-size: 12px;
+  color: #0f172a;
+}
+.subagent-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #64748b;
+}
+.subagent-tier-badge {
+  background: #f1f5f9;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+.research-outline-bar,
+.artifacts-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  flex-wrap: wrap;
+}
+.chapter-pill {
+  font-size: 11px;
+}
+.artifact-pill {
+  font-size: 11px;
+  font-family: monospace;
+}
+.research-markdown-view {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 18px 22px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: #1e293b;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 520px;
+  overflow-y: auto;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
+}

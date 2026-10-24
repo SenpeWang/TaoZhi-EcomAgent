@@ -88,11 +88,24 @@ export interface ResearchPlatform {
   brief?: string
   items_count: number
 }
+export interface ResearchSubagent {
+  id: string
+  type_name: string
+  role: string
+  model_tier?: string
+  status: string
+  elapsed?: number
+  artifacts?: string[]
+}
 export interface TaskResult {
   answer?: string
   report?: string
   outline?: string[]
   platforms?: ResearchPlatform[]
+  subagents?: ResearchSubagent[]
+  artifacts?: string[]
+  elapsed?: number
+  model_calls?: number
   specialists?: { name: string; count: number }[]
   missing?: string[]
   citations?: Citation[]

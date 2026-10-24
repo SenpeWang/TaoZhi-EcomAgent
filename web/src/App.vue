@@ -384,8 +384,45 @@ async function navigate(name: string) {
     })
   else await action(load)
 }
-const researchForm = reactive({ keyword: '', platforms: ['p1688'] })
+const researchForm = reactive({ keyword: '', platforms: ['web', 'p1688'] })
 const researching = ref(false)
+const presetKeywords = [
+  '磁吸充电宝',
+  '骨传导耳机',
+  '筋膜枪',
+  '桌面加湿器',
+  '空气炸锅',
+  '智能保温杯',
+]
+/**
+ * 选择热门预设品类关键词并填入输入框。
+ * @param kw 选中的预设关键词。
+ */
+function selectPresetKeyword(kw: string) {
+  researchForm.keyword = kw
+}
+const slashCommands = [
+  { cmd: '/plan', label: '规划', desc: '结构化排期与分步推演' },
+  { cmd: '/learn', label: '记忆', desc: '学习并沉淀操作规范与业务偏好' },
+  { cmd: '/compact', label: '压实', desc: '压缩对话上下文释放窗口' },
+  { cmd: '/goal', label: '深潜', desc: '深度持续自愈执行直到目标达成' },
+]
+/**
+ * 应用智能体斜杠指令前缀到提问输入框。
+ * @param cmd 斜杠指令名称（如 /plan）。
+ */
+function applySlashCommand(cmd: string) {
+  askForm.question = cmd + ' ' + askForm.question.replace(/^\/\w+\s*/, '')
+}
+/**
+ * 复制当前选中的多智能体调研研报 Markdown 全文到剪贴板。
+ */
+function copyReport() {
+  if (activeTask.value?.result?.report) {
+    navigator.clipboard.writeText(activeTask.value.result.report)
+    ElMessage.success('研报已复制到剪贴板')
+  }
+}
 /**
  * 提交平台调研任务：派多平台智能体并行抓取并生成调研报告。
  * @returns 无返回值；关键词或平台为空时提示且不创建任务。
@@ -1049,22 +1086,45 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="dashboard-grid">
-            <section class="panel ask-promo">
-              <el-tag effect="plain">多智能体平台调研</el-tag>
-              <h2>调研什么品类？</h2>
-              <el-input
-                v-model="researchForm.keyword"
-                placeholder="例如：牙刷"
-                @keyup.enter="submitResearch"
-              />
-              <div class="research-platforms">
-                <el-checkbox-group v-model="researchForm.platforms"
-                  ><el-checkbox value="p1688">1688</el-checkbox></el-checkbox-group
+            <section class="panel ask-promo research-agent-panel">
+              <div class="panel-header-badge">
+                <el-tag effect="dark" type="primary">🤖 Antigravity 多智能体协同调研中心</el-tag>
+                <small class="team-subtext"
+                  >Coordinator 调度 · Web 全网搜罗 · 1688 探厂 · Verifier 验真 · Reporter
+                  交付</small
                 >
               </div>
+              <h2>调研什么电商爆品类目？</h2>
+              <el-input
+                v-model="researchForm.keyword"
+                placeholder="例如：智能保温杯、磁吸充电宝、筋膜枪..."
+                clearable
+                @keyup.enter="submitResearch"
+              />
+              <div class="preset-pills-bar">
+                <span class="preset-label">🔥 热门品类：</span>
+                <span
+                  v-for="kw in presetKeywords"
+                  :key="kw"
+                  class="preset-chip"
+                  @click="selectPresetKeyword(kw)"
+                  >{{ kw }}</span
+                >
+              </div>
+              <div class="research-platforms">
+                <span class="platform-label">探查数据源：</span>
+                <el-checkbox-group v-model="researchForm.platforms">
+                  <el-checkbox value="web">🌐 全网搜索 (DuckDuckGo/网关)</el-checkbox>
+                  <el-checkbox value="p1688">🏭 1688 批发工厂源头</el-checkbox>
+                </el-checkbox-group>
+              </div>
               <div class="panel-actions">
-                <el-button type="primary" :loading="researching" @click="submitResearch"
-                  >派出智能体调研</el-button
+                <el-button
+                  type="primary"
+                  size="large"
+                  :loading="researching"
+                  @click="submitResearch"
+                  >🚀 派出多智能体团队调研</el-button
                 >
               </div>
             </section>
@@ -1112,8 +1172,20 @@ onUnmounted(() => {
         <template v-else-if="page === '智能问答'"
           ><div class="question-grid">
             <section class="panel">
-              <el-form label-position="top"
-                ><el-form-item label="问题"
+              <el-form label-position="top">
+                <div class="slash-commands-bar">
+                  <span class="slash-label">⚡ 智能体指令：</span>
+                  <span
+                    v-for="cmd in slashCommands"
+                    :key="cmd.cmd"
+                    class="slash-cmd-chip"
+                    :title="cmd.desc"
+                    @click="applySlashCommand(cmd.cmd)"
+                  >
+                    <strong>{{ cmd.cmd }}</strong> {{ cmd.label }}
+                  </span>
+                </div>
+                <el-form-item label="问题">
                   ><el-input
                     v-model="askForm.question"
                     type="textarea"
@@ -1512,8 +1584,13 @@ onUnmounted(() => {
           type="warning"
           :closable="false"
         /><template v-if="activeTask.result"
-          ><template v-if="activeTask.kind === 'research'"
-            ><h3>调研报告</h3>
+          ><template v-if="activeTask.kind === 'research'">
+            <div class="research-header-row">
+              <h3>📈 Antigravity 多智能体协同调研研报</h3>
+              <el-button size="small" type="primary" plain @click="copyReport"
+                >📋 复制研报 Markdown</el-button
+              >
+            </div>
             <div class="detail-meta">
               <el-tag
                 v-for="pl in activeTask.result.platforms || []"
@@ -1522,8 +1599,77 @@ onUnmounted(() => {
                 effect="plain"
                 >{{ pl.label }} · {{ pl.state_label }}</el-tag
               >
+              <el-tag v-if="activeTask.result.elapsed" type="warning" effect="plain"
+                >⏱️ 协同耗时 {{ activeTask.result.elapsed }}s</el-tag
+              >
+              <el-tag v-if="activeTask.result.model_calls" type="info" effect="plain"
+                >🧠 模型调度 {{ activeTask.result.model_calls }} 次</el-tag
+              >
             </div>
-            <pre class="answer-body">{{ activeTask.result.report }}</pre></template
+
+            <!-- 多智能体协作阵容墙 (Subagents Roster) -->
+            <div v-if="activeTask.result.subagents?.length" class="subagents-roster-box">
+              <div class="roster-header">
+                <strong
+                  >🤖 参战子智能体协同梯队 ({{ activeTask.result.subagents.length }} 位)</strong
+                >
+                <small>事件总线反应式协同 · 双轨记忆与 Scratch 隔离</small>
+              </div>
+              <div class="subagents-card-grid">
+                <div
+                  v-for="sa in activeTask.result.subagents"
+                  :key="sa.id || sa.type_name"
+                  class="subagent-roster-card"
+                >
+                  <div class="subagent-card-top">
+                    <span class="subagent-role-name">{{ sa.role }}</span>
+                    <el-tag
+                      size="small"
+                      :type="sa.status === 'completed' ? 'success' : 'info'"
+                      effect="light"
+                    >
+                      {{ sa.status }}
+                    </el-tag>
+                  </div>
+                  <div class="subagent-card-bottom">
+                    <span class="subagent-tier-badge">{{ sa.type_name }}</span>
+                    <small v-if="sa.elapsed">{{ sa.elapsed }}s</small>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 调研大纲章节标签 -->
+            <div v-if="activeTask.result.outline?.length" class="research-outline-bar">
+              <span class="outline-label">📑 研报大纲章节：</span>
+              <el-tag
+                v-for="(ch, idx) in activeTask.result.outline"
+                :key="idx"
+                size="small"
+                effect="light"
+                class="chapter-pill"
+              >
+                {{ ch }}
+              </el-tag>
+            </div>
+
+            <!-- 交付工件链接 -->
+            <div v-if="activeTask.result.artifacts?.length" class="artifacts-bar">
+              <span class="artifact-label">📦 交付工件 (Artifacts)：</span>
+              <el-tag
+                v-for="(art, idx) in activeTask.result.artifacts"
+                :key="idx"
+                size="small"
+                type="info"
+                class="artifact-pill"
+              >
+                {{ art.split('/').pop() }}
+              </el-tag>
+            </div>
+
+            <pre class="answer-body research-markdown-view">{{
+              activeTask.result.report
+            }}</pre></template
           ><template v-else
             ><h3>核验结果</h3>
             <div class="detail-meta">

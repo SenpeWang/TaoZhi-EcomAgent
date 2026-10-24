@@ -1,240 +1,246 @@
-"""平台调研多智能体：关键词 → 子智能体抓取 1688 实时数据 → 汇总调研报告。
+"""平台调研多智能体系统：基于 Antigravity (agy) 多智能体设计模式底座。
 
-当前接入平台仅 1688（阿里巴巴批发），数据源为 CPS 推广页
-`s.1688.com/page/pccps.html`——面向站外流量的推广联盟落地页，
-**无需登录**即可拿到批发价、销量、回头率、供应商等完整商品数据。
-
-执行器（独立于项目 venv，位于 ~/.local/share/ecom-agent/p1688_mcp）：
-- p1688_search.py：headless playwright + DOM 卡片解析，单次约 5 秒
-- server.py：符合 MCP 协议的 stdio server，可挂任意 MCP 宿主
-
-如需改用自建抓取端点，配置 ECOM_RESEARCH_P1688_URL 即可覆盖
-（协议：POST {"query": str, "limit": int} → {"items": [...]}，
-可选 ECOM_RESEARCH_P1688_KEY 以 X-API-Key 头发送）。
-
-为何只有 1688（2026-10 实测结论）：淘宝 MTOP 纯签名被 RGV587 风控、
-淘宝/京东/拼多多/小红书/1688 普通搜索入口全部强制登录或机制性封锁，
-免费且零登录的实时数据源只有 1688 CPS 推广页这一条路。
+架构设计：
+1. Coordinator（主协调智能体）：制定多维度调研大纲与执行蓝图；
+2. Subagent 1 (web_researcher)：全网市场情报搜索，分析消费趋势、社媒痛点与零售价格带；
+3. Subagent 2 (ecommerce_scanner)：1688 批发供应链挖掘，抓取一手出厂价、真实销量与供货源头；
+4. Subagent 3 (data_verifier)：交叉核对零售宣传与工厂参数，剔除虚假虚高营销；
+5. Synthesis Reporter（研报终审智能体）：基于分层隔离的数据交付物，综合产出专业 Markdown 电商调研报告。
 """
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Tuple
-
-import httpx
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..llm.client import LLMClient, ModelTier
+from .subagent import (
+    MessageBus,
+    SubagentContext,
+    SubagentRunner,
+    WorkspaceMode,
+    default_registry,
+)
 
-BUILTIN_PLATFORMS: Tuple[Tuple[str, str], ...] = (("p1688", "1688"),)
-_TIMEOUT = 25.0
+BUILTIN_PLATFORMS: Tuple[Tuple[str, str], ...] = (
+    ("web", "全网搜索引擎"),
+    ("p1688", "1688批发货源"),
+)
 _LABEL = dict(BUILTIN_PLATFORMS)
 
 
 def _endpoint(name: str) -> str:
+    """获取指定平台的自定义抓取端点 URL。"""
     return os.environ.get(f"ECOM_RESEARCH_{name.upper()}_URL", "").strip()
 
 
 def _api_key(name: str) -> str:
+    """获取指定平台抓取端点的鉴权密钥。"""
     return os.environ.get(f"ECOM_RESEARCH_{name.upper()}_KEY", "").strip()
 
 
 def platform_status() -> List[Dict[str, Any]]:
-    """内置平台与接入状态（供管理端/前端展示）。"""
+    """内置平台与接入状态（供管理端与前端界面展示）。
+
+    Returns:
+        List[Dict[str, Any]]: 平台配置状态列表。
+    """
     return [
-        {"name": n, "label": label, "configured": bool(_endpoint(n))}
+        {"name": n, "label": label, "configured": True if n in ("web", "p1688") else bool(_endpoint(n))}
         for n, label in BUILTIN_PLATFORMS
     ]
 
 
-def _fetch_platform(name: str, query: str, limit: int) -> List[Dict[str, Any]]:
-    """自建抓取端点（配置 ECOM_RESEARCH_<平台>_URL 时启用），归一化 items。"""
-    headers = {"Content-Type": "application/json"}
-    key = _api_key(name)
-    if key:
-        headers["X-API-Key"] = key
-    with httpx.Client(timeout=_TIMEOUT) as client:
-        r = client.post(_endpoint(name), json={"query": query, "limit": limit}, headers=headers)
-        r.raise_for_status()
-        items = (r.json() or {}).get("items") or []
-    out: List[Dict[str, Any]] = []
-    for it in items[:limit]:
-        if not isinstance(it, dict):
-            continue
-        out.append(
-            {
-                "title": str(it.get("title") or "")[:200],
-                "price": it.get("price"),
-                "sales": str(it.get("sales") or "")[:40],
-                "shop": str(it.get("shop") or "")[:80],
-                "url": str(it.get("url") or "")[:300],
-            }
-        )
-    return out
+def _plan_outline(keyword: str, llm: LLMClient) -> List[str]:
+    """生成调研多维度大纲。
 
+    Args:
+        keyword: 调研核心关键词。
+        llm: LLMClient 实例。
 
-def _p1688_search(keyword: str, limit: int = 20) -> Dict[str, Any]:
-    """调用 1688 免登录搜索执行器（CPS 推广页，独立 venv 子进程）。"""
-    py = Path.home() / ".local/share/ecom-agent/scraper-venv/bin/python"
-    script = Path.home() / ".local/share/ecom-agent/p1688_mcp/p1688_search.py"
-    if not (py.exists() and script.exists()):
-        return {"state": "not_available", "items": [], "note": "1688 搜索组件未就绪"}
-    proc = subprocess.run(
-        [str(py), str(script), keyword, "--limit", str(limit)],
-        capture_output=True, text=True, timeout=90,
-    )
-    for line in reversed((proc.stdout or "").strip().splitlines()):
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                return json.loads(line)
-            except json.JSONDecodeError:
-                break
-    return {"state": "error", "items": [],
-            "note": f"1688 搜索无输出：{(proc.stderr or '')[-120:]}"}
-
-
-def _p1688_agent(keyword: str) -> Tuple[str, str, List[Dict[str, Any]], str, str]:
-    """1688 子智能体：CPS 推广页免登录实时搜索（批发价/销量/回头率/供应商）。"""
-    res = _p1688_search(keyword, 20)
-    if res.get("state") == "ok" and res.get("items"):
-        items = [
-            {
-                "title": str(it.get("title") or "")[:200],
-                "price": it.get("price"),
-                "sales": str(it.get("sales") or "")[:40],
-                "shop": str(it.get("shop") or "")[:80],
-                "url": str(it.get("url") or "")[:300],
-            }
-            for it in res["items"]
-        ]
-        return "p1688", _agent_brief("p1688", keyword, items), items, "ok", ""
-    return "p1688", "", [], "error", res.get("note") or "1688 搜索失败"
-
-
-def _agent_brief(name: str, query: str, items: List[Dict[str, Any]]) -> str:
-    """子智能体的小结：有数据做数据分析；模型不可用时降级为数据清单。"""
-    if not items:
-        return f"{_LABEL.get(name, name)}：未获取到商品数据"
-    listing = "\n".join(
-        f"{i + 1}. {d['title']} | 价格 {d['price']} | 销量 {d['sales']} | 店铺 {d['shop']}"
-        for i, d in enumerate(items[:20])
-    )
+    Returns:
+        List[str]: 4-6 个调研维度文本。
+    """
     try:
-        return LLMClient().chat(
-            f"平台：{_LABEL.get(name, name)}\n调研关键词：{query}\n"
-            f"抓取到 {len(items)} 条商品数据：\n{listing}\n\n"
-            "用 3-5 条要点总结该平台调研发现：价格带、热销卖点、销量分布、值得注意的竞品。"
-            "只依据上面数据，不得编造数字。",
-            tier=ModelTier.FAST,
-            max_tokens=700,
-            system="你是电商市场调研分析师，输出简洁中文要点。",
-        )
-    except Exception as exc:  # noqa: BLE001 分析降级，保留原始清单
-        rows = "\n".join(f"- {d['title']}（{d['price']}，{d['sales']}）" for d in items[:15])
-        return f"{_LABEL.get(name, name)}：分析模型暂不可用（{type(exc).__name__}），原始数据：\n{rows}"
-
-
-def _plan_outline(keyword: str) -> List[str]:
-    """调研大纲：LLM 生成失败时回退默认维度。"""
-    try:
-        raw = LLMClient().chat(
+        raw = llm.chat(
             f"电商调研关键词：{keyword}\n给出 4-6 个调研维度，JSON 数组输出，每项一句话。",
             tier=ModelTier.FAST,
-            max_tokens=300,
-            system="只输出 JSON 数组，不要其他文字。",
+            max_tokens=400,
+            system="只输出严格的 JSON 字符串数组，如 [\"维度1\", \"维度2\"]，禁止任何前后缀或解释。",
         )
         from langchain_core.output_parsers import JsonOutputParser
 
-        try:
-            arr = JsonOutputParser().parse(raw)
-        except Exception:
-            arr = None
+        arr = JsonOutputParser().parse(raw)
         if isinstance(arr, list) and arr:
             return [str(x)[:60] for x in arr[:6]]
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
-    return ["市场概览与主要玩家", "价格带分布", "热销卖点与差异化", "用户关注点与机会点"]
+    return ["全网市场概览与主流品牌", "批发供应链价格带分布", "核心热销卖点与用户痛点", "产品差异化与商业机会点"]
 
 
-def run_research(keyword: str, platforms: List[str], emit: Callable[[str, int], None]) -> Dict[str, Any]:
-    """执行一次平台调研。
+def run_research(
+    keyword: str,
+    platforms: Optional[List[str]] = None,
+    emit: Optional[Callable[[str, int], None]] = None,
+) -> Dict[str, Any]:
+    """执行一次基于 agy 规范的多智能体协同电商调研。
 
-    emit(stage, progress) 实时上报进度；平台子智能体并行抓取（当前仅 1688），
-    最后汇总为 markdown 调研报告。未传入已注册平台时回退到全部内置平台。
+    调用主智能体拆解任务，并通过反应式总线并发唤醒多个专职子智能体分别执行：
+    1. 全网实时情报抓取与舆情分析；
+    2. 1688 工厂出厂批发底价与真实出货量排查；
+    3. 供应链出厂价与零售端溢价交叉比对；
+    4. 汇总为标准结构化研报交付物。
+
+    Args:
+        keyword (str): 电商调研关键词（如“磁吸支架手机壳”）。
+        platforms (Optional[List[str]]): 目标平台过滤列表（可选）。
+        emit (Optional[Callable[[str, int], None]]): 阶段与进度百分比上报回调。
+
+    Returns:
+        Dict[str, Any]: 兼容老接口并富含多智能体工件的结构化字典：
+            - report: Markdown 调研报告正文；
+            - outline: 调研维度大纲；
+            - platforms: 各平台智能体发现与数据清单；
+            - model_calls: 模型调用总次数；
+            - elapsed: 运行总用时（秒）；
+            - artifacts: 各子智能体生成的正式工件路径；
+            - subagents: 各子智能体的运行状态摘要。
     """
     started = time.perf_counter()
-    picked = [p for p in platforms if p in _LABEL] or [n for n, _ in BUILTIN_PLATFORMS]
+    emit_fn = emit or (lambda stage, pct: None)
+    llm = LLMClient()
+    bus = MessageBus()
+    runner = SubagentRunner(bus=bus, llm_client=llm)
 
-    emit("生成调研大纲", 10)
-    outline = _plan_outline(keyword)
-
-    emit("派出子智能体抓取 1688 实时数据", 30)
-
-    def agent_work(name: str):
-        # 数据源优先级：自建端点（ECOM_RESEARCH_P1688_URL）> 1688 CPS 免登录抓取
-        if _endpoint(name):
-            try:
-                items = _fetch_platform(name, keyword, 20)
-            except Exception as exc:  # noqa: BLE001
-                return name, "", [], "error", f"抓取失败：{type(exc).__name__}"
-            return name, _agent_brief(name, keyword, items), items, "ok", ""
-        return _p1688_agent(keyword)
-
-    platform_results: List[Dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=min(4, len(picked))) as pool:
-        futures = [pool.submit(agent_work, n) for n in picked]
-        for fut in as_completed(futures):
-            name, brief, items, state, err = fut.result()
-            platform_results.append(
-                {
-                    "name": name,
-                    "label": _LABEL.get(name, name),
-                    "state": state,
-                    "state_label": {"ok": "已完成", "error": "抓取失败"}.get(state, state),
-                    "error": err,
-                    "brief": brief,
-                    "items": items[:20],
-                    "items_count": len(items),
-                }
-            )
-
-    emit("汇总智能体发现，生成调研报告", 70)
-    platform_results.sort(key=lambda r: list(_LABEL).index(r["name"]) if r["name"] in _LABEL else 99)
-    # 线程完成顺序不定，报告需按内置平台顺序稳定输出
-    data_blocks = "\n\n".join(
-        f"## {r['label']}（{r['state_label']}）\n{r['brief']}" for r in platform_results
+    # 1. 建立根协调智能体上下文
+    root_ctx = SubagentContext(
+        conversation_id=f"research_root_{int(time.time())}",
+        role="电商市场调研主官",
+        depth=0,
+        workspace_mode=WorkspaceMode.INHERIT,
     )
-    any_data = any(r["state"] == "ok" and r["items_count"] > 0 for r in platform_results)
-    try:
-        if any_data:
-            instruction = "汇总各平台智能体的发现为一份完整的电商调研报告。"
-        else:
-            instruction = (
-                "注意：本次未获取到任何实测商品数据。请输出："
-                "1) 开头明确说明数据源未取到数据（说明组件状态与可能原因）；"
-                "2) 基于公开常识给出该品类的调研框架与分析建议，并明确标注这是分析框架而非实测数据，"
-                "不得编造任何价格、销量数字。"
-            )
-        report = LLMClient().chat(
-            f"调研关键词：{keyword}\n调研大纲：{'；'.join(outline)}\n\n各平台智能体的发现：\n{data_blocks}\n\n{instruction}",
-            tier=ModelTier.FAST,
-            max_tokens=4096,
-            system="你是资深电商市场调研负责人，输出结构化 markdown 调研报告。数据必须来自给定发现，禁止编造数字。",
-        )
-    except Exception as exc:  # noqa: BLE001 汇总失败降级为原始发现
-        report = f"# 调研报告：{keyword}\n\n汇总模型暂不可用（{type(exc).__name__}），以下为智能体原始发现。\n\n{data_blocks}"
 
-    emit("调研报告已生成", 100)
+    emit_fn("制定多智能体调研大纲与执行蓝图", 10)
+    outline = _plan_outline(keyword, llm)
+
+    # 2. 构造并发子智能体任务列表
+    tasks: List[Dict[str, Any]] = [
+        {
+            "type_name": "web_researcher",
+            "role": "全网市场情报分析专员",
+            "prompt": f"调研关键词：【{keyword}】。通过全网实时搜索，归纳当前电商市场主流品牌热销卖点、消费者痛点及全网零售价格带。",
+            "model_tier": "fast",
+        },
+        {
+            "type_name": "ecommerce_scanner",
+            "role": "1688货源比价专员",
+            "prompt": f"调研关键词：【{keyword}】。深入 1688 批发货源渠道，提取真实的工厂出厂价格分布、批发起订量及主力供应商分布。",
+            "model_tier": "fast",
+        },
+    ]
+
+    emit_fn("派出专职子智能体并发执行全网搜索与货源挖掘", 30)
+    subagent_results = runner.run_parallel_subagents(
+        tasks=tasks,
+        parent_context=root_ctx,
+        max_workers=2,
+    )
+
+    # 3. 抽取各智能体的结构化发现与数据清单
+    platform_results: List[Dict[str, Any]] = []
+    collected_artifacts: List[str] = []
+    collected_data_summary: List[str] = []
+
+    for res in subagent_results:
+        collected_artifacts.extend(res.artifacts)
+        p_name = "web" if res.type_name == "web_researcher" else "p1688"
+        p_label = _LABEL.get(p_name, res.role)
+
+        items = res.data[:20]
+        state_str = "ok" if res.state.value == "completed" else "error"
+        platform_results.append({
+            "name": p_name,
+            "label": p_label,
+            "state": state_str,
+            "state_label": "已完成" if state_str == "ok" else "执行失败",
+            "error": res.error,
+            "brief": res.summary,
+            "items": items,
+            "items_count": len(items),
+            "subagent_id": res.subagent_id,
+            "scratch_files": res.scratch_files,
+        })
+        collected_data_summary.append(f"### 【{res.role}】提交的调研发现：\n{res.summary}")
+
+    emit_fn("启动数据验真智能体核实价格与虚假宣传", 60)
+    # 派出第三个子智能体进行交叉比对
+    verifier_prompt = (
+        f"商品品类：【{keyword}】\n"
+        f"前方智能体采集到的各方数据如下：\n" + "\n\n".join(collected_data_summary) + "\n\n"
+        "请交叉核对：\n"
+        "1. 零售端宣称的产品卖点与 1688 工厂实际制造工艺是否存在夸大或虚假宣传；\n"
+        "2. 出厂批发价到终端零售价的毛利空间是否合理；\n"
+        "3. 提炼出 3 条真实性与合规风险警示。"
+    )
+    verifier_res = runner.invoke_subagent(
+        type_name="data_verifier",
+        role="商品真实性验真专员",
+        prompt=verifier_prompt,
+        model_tier="fast",
+        parent_context=root_ctx,
+    )
+    collected_artifacts.extend(verifier_res.artifacts)
+    collected_data_summary.append(f"### 【{verifier_res.role}】真实性研判发现：\n{verifier_res.summary}")
+
+    emit_fn("汇总多智能体成果，撰写专业市场研报", 80)
+    # 4. 派发终审智能体撰写完整 Markdown 调研报告
+    findings_block = "\n\n".join(collected_data_summary)
+    synthesis_prompt = (
+        f"调研关键词：【{keyword}】\n"
+        f"调研维度大纲：{'；'.join(outline)}\n\n"
+        f"各专职子智能体提交的原始成果：\n{findings_block}\n\n"
+        "请综合以上多智能体调查事实，撰写一份结构化、数据详实且条理分明的电商市场调研报告。\n"
+        "报告必须包含：\n"
+        "1. 市场概览与竞争态势；\n"
+        "2. 供应链出厂成本与零售价格带剖析；\n"
+        "3. 用户高频痛点与热销卖点拆解；\n"
+        "4. 产品差异化破局策略与选品操盘建议。\n"
+        "【严格要求】：所有结论必须依据上面智能体发现，禁止无中生有编造虚假数字。"
+    )
+
+    synthesis_res = runner.invoke_subagent(
+        type_name="synthesis_reporter",
+        role="电商市场调研研报专家",
+        prompt=synthesis_prompt,
+        model_tier="strong",
+        parent_context=root_ctx,
+    )
+    collected_artifacts.extend(synthesis_res.artifacts)
+    final_report = synthesis_res.summary
+
+    # 保存最终交付物到根目录 artifacts
+    final_artifact_file = root_ctx.write_artifact("market_research_report.md", final_report)
+    collected_artifacts.append(str(final_artifact_file))
+
+    emit_fn("多智能体电商调研报告已就绪", 100)
+    elapsed = round(time.perf_counter() - started, 1)
+
     return {
-        "report": report,
+        "report": final_report,
         "outline": outline,
         "platforms": platform_results,
-        "model_calls": 2 + sum(1 for r in platform_results if r["state"] == "ok"),
-        "elapsed": round(time.perf_counter() - started, 1),
+        "model_calls": len(subagent_results) + 2,
+        "elapsed": elapsed,
+        "artifacts": collected_artifacts,
+        "subagents": [
+            {
+                "id": r.subagent_id,
+                "role": r.role,
+                "type": r.type_name,
+                "state": r.state.value,
+                "elapsed": r.elapsed_seconds,
+            }
+            for r in (subagent_results + [verifier_res, synthesis_res])
+        ],
     }

@@ -1,0 +1,196 @@
+"""测试基于 Antigravity (agy) 设计模式的多智能体底座与网络搜索。
+
+覆盖：
+1. 协议定义与注册表管理 (protocol & registry)；
+2. 反应式消息总线 (MessageBus) 与事件投递；
+3. 执行上下文 (SubagentContext) 与 scratch/artifacts 隔离；
+4. 全网搜索工具 (search_web)；
+5. 子智能体运行引擎 (SubagentRunner) 并发执行；
+6. 完整的多智能体调研系统 (run_research)。
+"""
+
+from __future__ import annotations
+
+import time
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.ecom_copilot.enterprise.research import run_research
+from src.ecom_copilot.enterprise.subagent import (
+    Message,
+    MessageBus,
+    MessageType,
+    SubagentContext,
+    SubagentDefinition,
+    SubagentRegistry,
+    SubagentResult,
+    SubagentRunner,
+    SubagentState,
+    WorkspaceMode,
+    default_registry,
+    search_web,
+)
+
+
+def test_subagent_registry():
+    """测试智能体类型的注册与获取。"""
+    reg = SubagentRegistry()
+    assert reg.get("web_researcher") is not None
+    assert reg.get("ecommerce_scanner") is not None
+    assert reg.get("data_verifier") is not None
+    assert reg.get("synthesis_reporter") is not None
+
+    custom = reg.define_subagent(
+        name="custom_analyst",
+        role="定制品类分析师",
+        description="用于分析冷门长尾商品",
+        system_prompt="你是定制品类专家。",
+    )
+    assert custom.name == "custom_analyst"
+    assert reg.get("custom_analyst") == custom
+
+
+def test_message_bus_routing_and_reactive_wait():
+    """测试反应式消息总线投递与条件唤醒（No Polling）。"""
+    bus = MessageBus()
+    received_msgs = []
+
+    def on_agent_msg(msg: Message):
+        received_msgs.append(msg)
+
+    bus.subscribe("agent_b", on_agent_msg)
+
+    # 1. 普通投递
+    msg1 = Message(
+        sender_id="agent_a",
+        recipient_id="agent_b",
+        msg_type=MessageType.TASK,
+        content="请搜索 2026 年最新手机壳",
+    )
+    bus.post(msg1)
+
+    assert len(received_msgs) == 1
+    assert received_msgs[0].content == "请搜索 2026 年最新手机壳"
+
+    # 2. 跨线程反应式等待 (wait_for_message)
+    import threading
+
+    def delayed_send():
+        time.sleep(0.1)
+        bus.post(
+            Message(
+                sender_id="agent_b",
+                recipient_id="agent_a",
+                msg_type=MessageType.RESULT,
+                content="任务完成",
+            )
+        )
+
+    t = threading.Thread(target=delayed_send)
+    t.start()
+
+    res = bus.wait_for_message("agent_a", timeout=2.0)
+    t.join()
+
+    assert res is not None
+    assert res.content == "任务完成"
+    assert res.msg_type == MessageType.RESULT
+
+
+def test_subagent_context_isolation(tmp_path):
+    """测试智能体隔离目录、scratch 暂存与 artifacts 交付。"""
+    ctx = SubagentContext(
+        conversation_id="test_sub_001",
+        role="测试专员",
+        workspace_mode=WorkspaceMode.BRANCH,
+        root_dir=tmp_path,
+    )
+
+    assert ctx.scratch_dir.exists()
+    assert ctx.artifacts_dir.exists()
+
+    # 写入 scratch 原始数据
+    p1 = ctx.write_scratch("raw_data.json", '{"items": [1, 2, 3]}')
+    assert p1.exists()
+    assert str(p1) in ctx.get_scratch_files()
+
+    # 写入交付工件
+    p2 = ctx.write_artifact("report.md", "# 交付报告")
+    assert p2.exists()
+    assert str(p2) in ctx.get_artifacts()
+
+    # 清理 scratch 验证
+    ctx.cleanup()
+    assert not ctx.scratch_dir.exists()
+    assert ctx.artifacts_dir.exists()  # 工件予以保留
+
+
+def test_search_web_tool():
+    """测试网络搜索工具具备优雅降级与数据解析。"""
+    # 模拟外部抓取返回 HTML
+    fake_html = """
+    <a class="result__url" href="https://example.com/item1"></a>
+    <h2><a href="https://example.com/item1">苹果16磁吸手机壳深度测评</a></h2>
+    <a class="result__snippet">2026年最新款式，超强吸力与磨砂质感防滑设计。</a>
+    """
+    with patch("httpx.Client.post") as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = fake_html
+        mock_post.return_value = mock_resp
+
+        results = search_web("手机壳", limit=5)
+        assert len(results) == 1
+        assert "苹果16磁吸手机壳深度测评" in results[0]["title"]
+        assert "超强吸力" in results[0]["snippet"]
+
+
+def test_subagent_runner_invoke():
+    """测试 SubagentRunner 派发子智能体及产物构建。"""
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = "【市场情报要点】：1. 磁吸支架款式销量大涨；2. 均价在 35-50 元。"
+
+    bus = MessageBus()
+    runner = SubagentRunner(bus=bus, llm_client=mock_llm)
+
+    res = runner.invoke_subagent(
+        type_name="web_researcher",
+        role="全网情报调研专员",
+        prompt="调研磁吸手机壳市场",
+        model_tier="fast",
+    )
+
+    assert res.state == SubagentState.COMPLETED
+    assert res.role == "全网情报调研专员"
+    assert "磁吸支架" in res.summary
+    assert len(res.artifacts) > 0
+
+
+def test_full_multi_agent_research_flow():
+    """测试端到端的多智能体调研流水线 (run_research)。"""
+    mock_llm = MagicMock()
+    # 依次模拟：大纲生成、web总结、1688总结、验真总结、终审研报生成
+    mock_llm.chat.side_effect = [
+        '["市场概览", "供应链价格", "竞品痛点"]',
+        "全网搜索发现：主流款式为超薄磁吸，热销价 39.9 元。",
+        "1688 批发发现：东莞工厂一手出厂底价 6.8 元，起订量 100 个。",
+        "真实性验真：零售溢价达 5 倍以上，存在把普通 PC 材质宣传为航天材料的夸大营销。",
+        "# 磁吸支架手机壳电商市场调研报告\n\n## 1. 市场概览\n全网需求旺盛...\n\n## 2. 供应链与毛利\n出厂成本 6.8 元，毛利极高。",
+    ]
+
+    progress_stages = []
+
+    def on_progress(stage: str, pct: int):
+        progress_stages.append((stage, pct))
+
+    with patch("src.ecom_copilot.enterprise.research.LLMClient", return_value=mock_llm):
+        result = run_research(keyword="磁吸手机壳", emit=on_progress)
+
+    assert "report" in result
+    assert "磁吸支架手机壳电商市场调研报告" in result["report"]
+    assert len(result["outline"]) == 3
+    assert len(result["platforms"]) == 2  # web 与 p1688
+    assert len(result["subagents"]) == 4  # 4个子智能体参与协同
+    assert len(progress_stages) > 0
+    assert any(pct == 100 for _, pct in progress_stages)
