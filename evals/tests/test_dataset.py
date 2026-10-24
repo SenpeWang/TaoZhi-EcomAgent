@@ -64,15 +64,41 @@ def test_generation_is_deterministic():
 def test_committed_snapshot_matches_current_spec():
     """磁盘快照必须与当前 spec 重新生成的结果一致——改了 spec 忘了重新生成会被挡住。"""
     cases, dataset, _org, fixtures, corpus = gen_mod.generate()
-    assert dataset == "generated/v1"
+    assert dataset == "generated/v2"
     committed = generated_cases()
     assert len(committed) == len(cases)
     for got, want in zip(committed, cases):
         assert got == want, f"快照与 spec 不一致：{want['case_id']}（需重跑 python -m evals.dataset.generate）"
-    assert load_jsonl(GEN_LATEST / "corpus_docs.jsonl") == gen_mod.emit_corpus_docs(fixtures, corpus)
+    # 语料快照 = 纯文本语料 + 解析层夹具（PDF/DOCX 渲染后解析出的正文）
+    base = gen_mod.emit_corpus_docs(fixtures, corpus)
+    committed_docs = load_jsonl(GEN_LATEST / "corpus_docs.jsonl")
+    assert committed_docs[:len(base)] == base, "语料快照与 spec 不一致（重跑 generate）"
+    parsed, problems = gen_mod.parsing_docs()
+    assert not problems, problems
+    assert len(committed_docs) == len(base) + len(parsed), "解析层夹具数量与快照不一致"
 
 
 # ─────────────────── 性质二：契约完整 ───────────────────
+def test_every_case_carries_five_dimensions():
+    """五维标注是报告归因的前提：缺一维，报告就说不清"哪类问题不行"。"""
+    cases, _dataset, _org, _fixtures, _corpus = gen_mod.generate()
+    from evals.dataset.schema import DIM_VALUES
+    for c in cases:
+        for dim, allowed in DIM_VALUES.items():
+            assert c.get(dim) in allowed, f"{c['case_id']} 维度 {dim}={c.get(dim)!r} 非法"
+    manifest = json.loads((GEN_LATEST / "manifest.json").read_text(encoding="utf-8"))
+    by_dim = manifest["counts"]["by_dimension"]
+    for dim in DIM_VALUES:
+        assert sum(by_dim[dim].values()) == len(cases), f"{dim} 分布合计与用例数不符"
+
+
+def test_dimension_coverage_meets_floor():
+    """覆盖下限：不足即失败，避免"覆盖五维"退化成文档口号。"""
+    cases, _dataset, _org, _fixtures, _corpus = gen_mod.generate()
+    from evals.dataset.schema import validate_coverage
+    assert validate_coverage(cases) == []
+
+
 def test_committed_cases_pass_schema():
     errs = schema_mod.validate_cases(generated_cases())
     assert not errs, "契约问题:\n" + "\n".join(errs[:20])

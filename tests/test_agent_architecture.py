@@ -1,4 +1,4 @@
-"""Antigravity (agy) 多智能体全栈设计规范验收测试。
+"""自研多智能体全栈设计规范验收测试（Multi-Agent Architecture Tests）。
 
 覆盖：
 1. 双轨记忆轨迹（Transcript Memory: compact vs full line-indexing）
@@ -12,9 +12,12 @@
 9. 工件元数据与富排版辅助器（ArtifactMetadata, Alerts, Mermaid, Carousel）
 """
 
+from __future__ import annotations
+
 import json
 import time
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -23,7 +26,9 @@ from ecom_copilot.enterprise.subagent import (
     ArtifactMetadata,
     ContextCompactor,
     LongTermMemoryStore,
+    Message,
     MessageBus,
+    MessageType,
     RulesEngine,
     Skill,
     SkillRegistry,
@@ -105,7 +110,6 @@ def test_long_term_memory_and_rules(tmp_path: Path):
 
 def test_rules_engine_discovery_and_formatting(tmp_path: Path):
     """测试分层规范文档发现、去重与 <user_rules> 提示词格式化。"""
-    # 模拟项目根目录结构
     root = tmp_path / "repo"
     root.mkdir()
     (root / "AGENTS.md").write_text("# 交流原则\n每次回复叫用户Senpe\n", encoding="utf-8")
@@ -176,12 +180,11 @@ def test_subagent_manager_and_cascade_kill(tmp_path: Path):
     bus = MessageBus()
     mgr = SubagentManager(bus=bus)
 
-    # 创建父子两个上下文
     p_ctx = SubagentContext(conversation_id="parent_01", root_dir=tmp_path)
     c_ctx = SubagentContext(conversation_id="child_01", parent_id="parent_01", root_dir=tmp_path)
 
-    mgr.register_subagent(p_ctx, type_name="coordinator", role="总指挥")
-    mgr.register_subagent(c_ctx, type_name="web_researcher", role="数据采集", parent_id="parent_01")
+    mgr.register_subagent(p_ctx, type_name="coordinator_agent", role="调研协同总指挥")
+    mgr.register_subagent(c_ctx, type_name="web_researcher_agent", role="数据采集", parent_id="parent_01")
 
     assert len(mgr.list_subagents()) == 2
 
@@ -218,8 +221,6 @@ def test_agent_scheduler_timer_and_condition_cancel():
         timer_condition="sensor_subagent",
     )
 
-    # 模拟传感器子智能体发来消息，定时器应当被提前取消
-    from ecom_copilot.enterprise.subagent.protocol import Message, MessageType
     bus.post(
         Message(
             sender_id="sensor_subagent",
@@ -274,14 +275,12 @@ def test_context_artifact_formatting_helpers(tmp_path: Path):
 
 def test_subagent_runner_full_architecture(tmp_path: Path):
     """测试 SubagentRunner 统合双轨日志、工件元数据与管理器的全生命周期调度。"""
-    from unittest.mock import MagicMock
-
     mock_llm = MagicMock()
     mock_llm.chat.return_value = "【验真结论】：毛利率达 71.9%，供应链可信度高。"
 
     runner = SubagentRunner(llm_client=mock_llm)
     res = runner.invoke_subagent(
-        type_name="data_verifier",
+        type_name="data_verifier_agent",
         role="验真分析师",
         prompt="验证【智能水杯】零售价 89 元与 1688 批发价 25 元的利润空间",
     )

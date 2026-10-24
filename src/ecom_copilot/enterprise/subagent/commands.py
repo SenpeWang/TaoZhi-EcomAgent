@@ -1,10 +1,10 @@
 """斜杠指令系统（Slash Commands System）。
 
-遵循 Antigravity (agy) 设计规范：
+自研斜杠指令交互架构：
 1. 提供标准指令集：/compact, /learn, /plan, /goal, /teamwork, /grill-me, /schedule, /browser；
 2. 规范化提示词注入（<slash_commands> 架构块）；
 3. 支持指令解析与专用 Handler 调度执行；
-4. 严格遵循 Google Style Docstring 规范。
+4. 严格遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ class SlashCommandRegistry:
         self._register_default_commands()
 
     def _register_default_commands(self) -> None:
-        """注册 agy 标准的全部核心斜杠指令。"""
+        """注册全部核心斜杠指令。"""
 
         # 1. /compact
         def _handle_compact(arg: str, ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -200,7 +200,7 @@ class SlashCommandRegistry:
         return None
 
     def build_slash_commands_prompt_block(self) -> str:
-        """生成 Antigravity 规范的 <slash_commands> 提示词上下文说明。
+        """生成自研规范的 <slash_commands> 提示词上下文说明。
 
         Returns:
             str: 格式化的 <slash_commands> 上下文块。

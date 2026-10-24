@@ -1,10 +1,10 @@
 """跨会话长效记忆与学习规则存储（Long-Term Memory Store）。
 
-遵循 Antigravity (agy) 设计规范：
+自研长效记忆存储架构：
 1. 跨会话持久化沉淀已学习规则 (/learn)、用户偏好与业务实体事实；
 2. 支持实体三元组 (Subject, Predicate, Object) 事实库检索；
 3. 支持关键词模糊检索与按类别过滤；
-4. 严格遵循 Google Style Docstring 规范。
+4. 严格遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations

@@ -1,10 +1,10 @@
 """会话轨迹双轨日志记录器（Transcript Memory Logger）。
 
-遵循 Antigravity (agy) 设计规范：
+自研双轨记忆日志架构：
 1. 紧凑日志 (transcript.jsonl) 与全量日志 (transcript_full.jsonl) 双轨并行；
 2. 行号严格对齐（Line-Indexed），紧凑日志按需截断并标记 truncated_fields；
 3. 支持高保真回溯、特定步长检索与上下文预算控制；
-4. 严格遵循 Google Style Docstring 规范。
+4. 严格遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations

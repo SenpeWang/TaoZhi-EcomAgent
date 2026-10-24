@@ -1,10 +1,11 @@
 """多智能体协议与数据契约定义。
 
-遵循 Antigravity (agy) 多智能体设计规范：
+自研多智能体架构设计规范：
 1. 子智能体角色与能力定义 (SubagentDefinition)；
 2. 反应式消息总线事件对象 (Message, MessageType)；
 3. 子智能体运行结果与工件包装 (SubagentResult)；
-4. 生命周期状态与隔离级别枚举 (SubagentState, WorkspaceMode)。
+4. 生命周期状态与隔离级别枚举 (SubagentState, WorkspaceMode)；
+5. 注释与接口定义遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ class SubagentState(str, Enum):
 
 
 class WorkspaceMode(str, Enum):
-    """工作区隔离模式（对照 agy 的 inherit / branch / share）。"""
+    """工作区隔离模式（支持 inherit / branch / share 模式）。"""
 
     INHERIT = "inherit"  # 共享父级工作区上下文
     BRANCH = "branch"   # 完全独立的分支沙箱（隔离 scratch 与临时文件）
@@ -70,10 +71,10 @@ class Message:
 
 @dataclass
 class SubagentDefinition:
-    """子智能体类型定义契约（对照 agy 的 define_subagent）。
+    """子智能体类型定义契约。
 
     Attributes:
-        name: 智能体类型唯一名称（如 web_researcher, ecommerce_scanner）。
+        name: 智能体类型唯一名称（统一采用 _agent 后缀，如 web_researcher_agent）。
         role: 角色称谓（2-5 字短语，如 '全网市场调研专员'）。
         description: 职责与应用场景说明。
         system_prompt: 角色系统设定与核心原则。
@@ -95,7 +96,7 @@ class SubagentDefinition:
 
 @dataclass
 class SubagentResult:
-    """子智能体执行终态产物（对照 agy 的 Subagent 结果）。
+    """子智能体执行终态产物。
 
     Attributes:
         subagent_id: 子智能体实例 ID。

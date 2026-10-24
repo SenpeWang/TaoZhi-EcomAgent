@@ -1,11 +1,11 @@
 """渐进式技能系统（Progressive Disclosure Skills System）。
 
-遵循 Antigravity (agy) 设计规范：
+自研技能架构设计：
 1. 技能以文件夹承载，核心由带 YAML Frontmatter 的 SKILL.md 定义；
 2. 初始阶段仅向提示词注入名称与描述摘要（极低 Token 占用）；
 3. 执行时按需调阅 SKILL.md 完整指令并运行其 scripts/ 辅助脚本；
 4. 内置电商专属技能与工作区外部技能动态扫描；
-5. 严格遵循 Google Style Docstring 规范。
+5. 严格遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations
@@ -84,8 +84,6 @@ class SkillRegistry:
             self.workspace_root / ".agent" / "skills",
             # 2. 用户全局技能
             Path.home() / ".agents" / "skills",
-            # 3. agy 自带技能
-            Path.home() / ".gemini" / "antigravity-cli" / "builtin" / "skills",
         ]
 
         for s_dir in scan_paths:
@@ -163,7 +161,7 @@ class SkillRegistry:
         return list(self._skills.values())
 
     def build_skills_prompt_block(self) -> str:
-        """构建 Antigravity 规范的 <skills> 渐进披露上下文块。
+        """构建自研规范的 <skills> 渐进披露上下文块。
 
         Returns:
             str: 格式化的 <skills> 文本。

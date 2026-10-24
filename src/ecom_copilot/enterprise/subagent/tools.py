@@ -1,9 +1,9 @@
 """多智能体专属工具库（Web Search & E-Commerce Crawling Tools）。
 
-遵循 Antigravity (agy) 设计规范：
+自研工具集架构设计：
 1. 粒度明确的原子工具；
-2. 异常自愈与多路降级（支持 DuckDuckGo 纯纯 HTML 抓取、1688 批发平台、自建抓取网关）；
-3. 严格遵循 Google Style Docstring 注释。
+2. 异常自愈与多路降级（支持 DuckDuckGo 纯 HTML 抓取、1688 批发平台、自建抓取网关）；
+3. 严格遵循 Google Python Style Guide 注释。
 """
 
 from __future__ import annotations

@@ -1,9 +1,10 @@
 """子智能体类型定义与全局注册表（Subagent Registry）。
 
-遵循 Antigravity (agy) 设计规范：
+自研多智能体协同底座：
 1. define_subagent 动态注册机制；
-2. 预置全网调研、货源挖掘、交叉验真、综合报告等核心智能体类型；
-3. 工具集合与模型梯度按角色严格绑定。
+2. 预置全网情报、供应链比价、数据验真与研报架构等核心智能体类型（均以 _agent 命名）；
+3. 工具集合与模型梯度按角色严格绑定；
+4. 注释与接口遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations
@@ -33,10 +34,10 @@ class SubagentRegistry:
         enable_write: bool = True,
         enable_subagent: bool = False,
     ) -> SubagentDefinition:
-        """动态注册一个新的子智能体类型（对照 agy 的 define_subagent）。
+        """动态注册一个新的子智能体类型。
 
         Args:
-            name: 类型唯一英文字符串标识。
+            name: 类型唯一英文字符串标识（智能体统一采用 _agent 后缀）。
             role: 2-5 字中文岗位名称。
             description: 智能体应用场景与目标说明。
             system_prompt: 专门定制的 System 指令。
@@ -65,12 +66,15 @@ class SubagentRegistry:
         """获取已注册的智能体定义。
 
         Args:
-            name: 智能体类型名称。
+            name: 智能体类型名称（支持带或不带 _agent 后缀查找）。
 
         Returns:
             Optional[SubagentDefinition]: 定义对象；未找到返回 None。
         """
-        return self._definitions.get(name)
+        if name in self._definitions:
+            return self._definitions[name]
+        alt_name = f"{name}_agent" if not name.endswith("_agent") else name[:-6]
+        return self._definitions.get(alt_name)
 
     def list_all(self) -> List[SubagentDefinition]:
         """列出当前所有已注册的智能体类型。
@@ -81,10 +85,25 @@ class SubagentRegistry:
         return list(self._definitions.values())
 
     def _register_builtins(self) -> None:
-        """注册内置的电商调研子智能体家族。"""
-        # 1. 全网趋势与竞品搜索智能体
+        """注册内置的电商调研子智能体家族（统一命名以 _agent 为后缀）。"""
+        # 1. 协同总指挥智能体
         self.define_subagent(
-            name="web_researcher",
+            name="coordinator_agent",
+            role="调研协同总指挥",
+            description="负责解析用户调研诉求、制定调研大纲、协同派发工作区与多智能体并行调度。",
+            system_prompt=(
+                "你是自研电商多智能体中台的协同总指挥。你的任务是统筹全景调研：\n"
+                "1. 分解品类调研维度（市场、价格带、供应链、差异化）；\n"
+                "2. 组织专业专职智能体并发作业；\n"
+                "3. 保持全流程数据准确与实事求是原则。"
+            ),
+            tools=[],
+            model_tier="fast",
+        )
+
+        # 2. 全网趋势与竞品搜索智能体
+        self.define_subagent(
+            name="web_researcher_agent",
             role="全网市场情报分析专员",
             description="负责全网搜索电商商品的最新行业趋势、社媒痛点、主流品牌卖点与用户舆论。",
             system_prompt=(
@@ -98,9 +117,9 @@ class SubagentRegistry:
             model_tier="fast",
         )
 
-        # 2. 1688 批发货源与工厂成本挖掘智能体
+        # 3. 1688 批发货源与工厂成本挖掘智能体
         self.define_subagent(
-            name="ecommerce_scanner",
+            name="ecommerce_scanner_agent",
             role="1688货源比价专员",
             description="专门深入 1688 批发平台抓取真实出厂价格、工厂销量、起批量及供应商分布。",
             system_prompt=(
@@ -114,9 +133,9 @@ class SubagentRegistry:
             model_tier="fast",
         )
 
-        # 3. 真实性与虚假宣传交叉验真智能体
+        # 4. 真实性与虚假宣传交叉验真智能体
         self.define_subagent(
-            name="data_verifier",
+            name="data_verifier_agent",
             role="商品真实性验真专员",
             description="交叉比对零售宣称卖点与供应链实际出厂参数，剔除夸大与虚假营销信息。",
             system_prompt=(
@@ -129,9 +148,9 @@ class SubagentRegistry:
             model_tier="fast",
         )
 
-        # 4. 终审汇总与研报撰写智能体
+        # 5. 终审汇总与研报撰写智能体
         self.define_subagent(
-            name="synthesis_reporter",
+            name="synthesis_reporter_agent",
             role="电商市场调研研报专家",
             description="聚合各专职智能体的结构化发现与工件，撰写专业严谨的 Markdown 调研报告。",
             system_prompt=(

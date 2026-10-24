@@ -1,11 +1,11 @@
 """上下文压实引擎（Context Compaction Engine）。
 
-遵循 Antigravity (agy) 设计规范：
+自研上下文压缩治理架构：
 1. 监控上下文窗口预算与 Token 占用；
 2. 触发时将冗长历史转译为结构化的 <CONTEXT_SUMMARY> 架构块；
 3. 保留高价值业务决策、用户需求序列、关键约束与下一步计划；
 4. 剪枝庞大的工具输出与过程思考，保留 transcript_full 的行号指针；
-5. 严格遵循 Google Style Docstring 规范。
+5. 严格遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations

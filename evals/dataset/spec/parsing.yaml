@@ -1,0 +1,100 @@
+# 解析层夹具规格：真实 PDF/DOCX 的版面特征（表格 / 页眉页脚 / 多页）。
+#
+# 为什么单独一份 spec：检索语料测的是"找到没有"，这里测的是"读进来还在不在"。
+# facts 是必须出现在解析结果里的字符串——丢了就说明解析链路退化了，
+# generate 阶段直接报错，不允许带着空正文灌库。
+version: 1
+
+documents:
+  - doc_id: SYN_PARSE_PDF_T01
+    title: LX-30 120W 氮化镓充电器规格表（PDF）
+    format: pdf
+    header: 内部资料 请勿外传
+    rows:
+      - ["功率", "120W"]
+      - ["接口", "双 C 口"]
+      - ["协议", "PD3.0"]
+    facts: ["120W", "双 C 口", "PD3.0"]
+
+  - doc_id: SYN_PARSE_PDF_T02
+    title: 退款政策（PDF 页眉页脚版）
+    format: pdf
+    header: 售后制度 版本 V2.1
+    footer: 生效日期 2026-09-01
+    rows:
+      - ["退款时限", "48 小时"]
+      - ["审批层级", "逐级上报"]
+    facts: ["V2.1", "48 小时", "生效日期 2026-09-01"]
+
+  - doc_id: SYN_PARSE_PDF_T03
+    title: LX-21 140W 充电器参数（PDF 多页）
+    format: pdf
+    pages: 2
+    rows:
+      - ["重量", "210g"]
+      - ["价格", "299 元"]
+      - ["场景", "笔记本与手机同充"]
+    facts: ["210g", "299 元"]
+
+  - doc_id: SYN_PARSE_PDF_T04
+    title: iPhone 15 快充兼容表（PDF）
+    format: pdf
+    header: 兼容性速查 V1.4
+    rows:
+      - ["机型", "iPhone 15"]
+      - ["结论", "支持 PD 快充，峰值 65W"]
+    facts: ["iPhone 15", "峰值 65W"]
+
+  - doc_id: SYN_PARSE_PDF_T05
+    title: 换货流程说明（PDF）
+    format: pdf
+    footer: 客服中心 2026 年修订
+    rows:
+      - ["换货周期", "15 天"]
+      - ["运费", "包邮"]
+    facts: ["15 天", "包邮"]
+
+  - doc_id: SYN_PARSE_DOCX_T01
+    title: LX-21 140W 充电器规格表（DOCX 表格）
+    format: docx
+    rows:
+      - ["功率", "140W"]
+      - ["接口", "三 C 口"]
+      - ["协议", "PD3.1 EPR"]
+    facts: ["140W", "三 C 口", "PD3.1 EPR"]
+
+  - doc_id: SYN_PARSE_DOCX_T02
+    title: 商品资料备案（DOCX 页眉页脚）
+    format: docx
+    header: 备案编号 BA-2026-0917
+    footer: 版本 V3.0
+    rows:
+      - ["备案主体", "绿联数码"]
+      - ["有效期", "三年"]
+    facts: ["BA-2026-0917", "V3.0", "三年"]
+
+  - doc_id: SYN_PARSE_DOCX_T03
+    title: 售后政策（DOCX）
+    format: docx
+    rows:
+      - ["退款时限", "24 小时"]
+      - ["无理由期限", "7 天"]
+    facts: ["24 小时", "7 天"]
+
+  - doc_id: SYN_PARSE_DOCX_T04
+    title: MC-500 磁吸线参数（DOCX 表格）
+    format: docx
+    rows:
+      - ["重量", "46g"]
+      - ["线长", "1.5m"]
+      - ["功率", "240W"]
+    facts: ["46g", "1.5m", "240W"]
+
+  - doc_id: SYN_PARSE_DOCX_T05
+    title: 保修条款（DOCX）
+    format: docx
+    header: 保修政策 2026 版
+    rows:
+      - ["保修期", "12 个月"]
+      - ["受理渠道", "官方旗舰店"]
+    facts: ["12 个月", "官方旗舰店", "保修政策 2026 版"]

@@ -1,10 +1,10 @@
 """子智能体生命周期管理器（Subagent Lifecycle Manager）。
 
-遵循 Antigravity (agy) 设计规范：
-1. 对应 manage_subagents 契约（list, status, kill, kill_all, send_input）；
+自研生命周期治理架构：
+1. 实现完整的生命周期管理契约（list, status, kill, kill_all, send_input）；
 2. 支持树状级联销毁（Killing a subagent also kills its descendants）；
 3. 自动回收分支工作区（Branch Workspace），完好保留产物与日志；
-4. 严格遵循 Google Style Docstring 规范。
+4. 严格遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations

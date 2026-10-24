@@ -1,11 +1,11 @@
 """分层规则发现与渐进注入引擎（Hierarchical Rules Engine）。
 
-遵循 Antigravity (agy) 设计规范：
+自研治理规则引擎架构：
 1. 向上遍历工作区发现项目级 AGENTS.md、GEMINI.md 与 .agents/rules/*.md；
 2. 规范化路径并严格去重（Deduplication）；
 3. 支持渐进式披露（Progressive Disclosure：always_on 始终加载，model_decision 按需激活）；
 4. 格式化生成标准的 <user_rules> 提示词上下文；
-5. 严格遵循 Google Style Docstring 规范。
+5. 严格遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations

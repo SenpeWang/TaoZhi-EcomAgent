@@ -154,8 +154,9 @@ def seed_documents(conn, tenant_id, creator_id, docs):
             (d["doc_id"], tenant_id, node_id, creator_id, d["title"], d["scope"], d["level"], d["ai_allowed"], d["state"]))
         conn.execute(
             "INSERT INTO document_versions(tenant_id,document_id,version,title,body,content_hash,mime_type,created_by) "
-            "VALUES(%s,%s,1,%s,%s,%s,'text/markdown',%s)",
-            (tenant_id, d["doc_id"], d["title"], body, content_hash, creator_id))
+            "VALUES(%s,%s,1,%s,%s,%s,%s,%s)",
+            (tenant_id, d["doc_id"], d["title"], body, content_hash,
+             d.get("mime_type") or "text/markdown", creator_id))
         chunks = split([(0, body)], d["doc_id"], 1)
         vecs = encode_passages([embedding_input(d["title"], c["text"]) for c in chunks])
         for c, v in zip(chunks, vecs):

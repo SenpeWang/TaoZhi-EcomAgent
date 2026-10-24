@@ -83,6 +83,9 @@ def build_context(org, fixtures, corpus):
     for d in corpus.get("conflict_docs", []):
         raw[d["doc_id"]] = dict(d, kind="conflict", scope="company", level=1,
                                 state="published", node="SYN_NODE_OP", ai_allowed=True)
+    for d in corpus.get("guides", []):
+        raw[d["doc_id"]] = dict(d, kind="guide", scope="company", level=1,
+                                state="published", node="SYN_NODE_OP", ai_allowed=True)
     docs = _wrap(raw)   # 外层也必须是 A：模板里 docs.SYN_XXX 靠属性访问取值
     products = _wrap({p["key"]: p for p in corpus.get("products", [])})
     # 键只允许字母数字下划线：模板里 compatibilities.LX21_MacBook_Pro_16 是
@@ -126,13 +129,17 @@ def emit_corpus_docs(fixtures, corpus):
         out.append(dict(doc_id=d["doc_id"], title=d["title"], body=d["body"],
                         scope="company", level=1, state="published",
                         node="SYN_NODE_OP", ai_allowed=True, kind="conflict"))
+    for d in corpus.get("guides", []):
+        out.append(dict(doc_id=d["doc_id"], title=d["title"], body=d["body"],
+                        scope="company", level=1, state="published",
+                        node="SYN_NODE_OP", ai_allowed=True, kind="guide"))
     return out
 
 
 def generate():
     org, fixtures, corpus, templates = load_specs()
     ctx, docs = build_context(org, fixtures, corpus)
-    version = "v1"
+    version = "v2"
     dataset = f"generated/{version}"
     cases, seq = [], 0
     for tpl in templates["templates"]:
@@ -166,17 +173,47 @@ def generate():
                     "note": "测试身份由 spec/org.yaml 建档，seed.py 灌库；登录名与角色一一对应",
                 },
                 "question": render(tpl["question"], local),
+                "turns": [render(t, local) for t in tpl.get("turns", [])],
                 "expected_documents": [render(d, local) for d in tpl.get("expected_documents", [])],
                 "expected_facts": [render(f, local) for f in tpl.get("expected_facts", [])],
                 "expected_behavior": render(tpl["expected_behavior"], local),
                 "forbidden_disclosure": [render(w, local) for w in tpl.get("forbidden", [])],
-                "allowed_citations": [render(d, local) for d in tpl.get("expected_documents", [])],
                 "pass_criteria": tpl.get("pass_criteria", ""),
                 "evidence_location": render(tpl.get("evidence", ""), local),
-                "state_changes": tpl.get("state_changes", []),
+                # 五维标注写进用例本体：维度不能只活在文档里，报告要按维度聚合
+                "answerability": tpl["answerability"],
+                "qtype": tpl["qtype"],
+                "difficulty": tpl["difficulty"],
+                "source": tpl["source"],
+                "risk": tpl["risk"],
             }
             cases.append(case)
     return cases, dataset, org, fixtures, corpus
+
+
+def parsing_docs():
+    """解析层夹具：渲染 PDF/DOCX → 用入库解析器读回 → 正文带真实文件名与 mime。
+
+    解析失败必须硬失败（返回非零退出码）：带着空正文或丢事实的文档灌进库，
+    表现出来是"检索命中不到"，会被误判成检索问题而不是解析问题。
+    """
+    from .parsing import build_all
+
+    spec_path = SPEC / "parsing.yaml"
+    if not spec_path.exists():
+        return [], []
+    entries = yaml.safe_load(spec_path.read_text(encoding="utf-8")).get("documents", [])
+    built, problems = build_all(entries)
+    out = []
+    for e in entries:
+        _, text = built[e["doc_id"]]
+        out.append(dict(doc_id=e["doc_id"], title=e["title"], body=text, scope="company",
+                        level=1, state="published", node="SYN_NODE_OP", ai_allowed=True,
+                        kind="parsing",
+                        mime_type=("application/pdf" if e["format"] == "pdf" else
+                                   "application/vnd.openxmlformats-officedocument."
+                                   "wordprocessingml.document")))
+    return out, problems
 
 
 def sha256_file(p: Path) -> str:
@@ -192,14 +229,28 @@ def main() -> int:
 
     cases, dataset, org, fixtures, corpus = generate()
     corpus_docs = emit_corpus_docs(fixtures, corpus)
+    parsed, problems = parsing_docs()
+    if problems:
+        print("解析层夹具不合格（正文为空或丢事实）：", file=sys.stderr)
+        for x in problems:
+            print("  -", x, file=sys.stderr)
+        return 2
+    corpus_docs += parsed
     by_cat = {}
     for c in cases:
         by_cat[c["category"]] = by_cat.get(c["category"], 0) + 1
+    by_dim = {}
+    for dim in ("answerability", "qtype", "difficulty", "source", "risk"):
+        agg = {}
+        for c in cases:
+            agg[c[dim]] = agg.get(c[dim], 0) + 1
+        by_dim[dim] = dict(sorted(agg.items()))
     manifest = {
         "dataset": dataset,
         "seed": SEED,
         "spec_sha256": {f.name: sha256_file(f) for f in sorted(SPEC.glob("*.yaml"))},
         "counts": {"cases": len(cases), "by_category": dict(sorted(by_cat.items())),
+                   "by_dimension": by_dim,
                    "templates": len(yaml.safe_load((SPEC / "templates.yaml").read_text(encoding="utf-8"))["templates"])},
         "docs": {"total": len(corpus_docs),
                  "by_kind": {k: sum(1 for d in corpus_docs if d["kind"] == k)
@@ -221,6 +272,7 @@ def main() -> int:
 
     print(f"生成 {len(cases)} 条用例 / {len(corpus_docs)} 篇语料文档 → {out}")
     print("类别分布:", dict(sorted(by_cat.items())))
+    print("维度分布:", by_dim)
     return 0
 
 

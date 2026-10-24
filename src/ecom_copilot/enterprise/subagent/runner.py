@@ -1,12 +1,12 @@
 """子智能体执行引擎（Subagent Runner）。
 
-遵循 Antigravity (agy) 设计规范：
+自研执行引擎核心架构：
 1. invoke_subagent 调度隔离执行并接入 Transcript 双轨日志；
 2. 接入 SubagentManager 纳管生命周期与级联销毁；
 3. 反应式总线发布进度与终态结果，支持交互干预与条件唤醒；
 4. 大容量原始数据自动落盘 Scratch，上下文仅保留高密度 Summary；
 5. 自动集成 RulesEngine 规范、SkillRegistry 技能与 ContextCompactor 压实；
-6. 严格遵循 Google Style Docstring 规范。
+6. 严格遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations
@@ -80,10 +80,10 @@ class SubagentRunner:
         custom_tools: Optional[List[Callable]] = None,
         on_progress: Optional[Callable[[str, int], None]] = None,
     ) -> SubagentResult:
-        """派发并执行单个子智能体（对照 agy 的 invoke_subagent）。
+        """派发并执行单个子智能体任务。
 
         Args:
-            type_name: 智能体类型名（如 web_researcher, ecommerce_scanner）。
+            type_name: 智能体类型名（统一采用 _agent 后缀）。
             role: 本次执行的具体角色说明。
             prompt: 具体且可落地的任务指令（明确预期输出格式）。
             model_tier: 可选覆盖默认模型档次 (fast / strong / vision)。

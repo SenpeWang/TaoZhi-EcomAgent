@@ -1,34 +1,78 @@
 {
-  "dataset": "generated/v1",
+  "dataset": "generated/v2",
   "seed": 20261018,
   "spec_sha256": {
-    "corpus.yaml": "f4d8e1ed0b9b69164d9232124ea7a2f91afcbaabca4a21879fa576d5930aac83",
+    "corpus.yaml": "df04aa82c490ec4e08e08c3e055aa088b26e5a05058f669013ca21ca88e60784",
     "fixtures.yaml": "ef6127d6f39c40adea649977e124e838332d3005f3907ba5ded8af2fa25a2ca9",
     "org.yaml": "f2c83b49afaa9966f05ebb31e58aba951b22c8235fc056f83a474b520b6139e0",
-    "templates.yaml": "1391accf2b08daf4a655af16e2e57abb2a902042b4646c48a99e1b546d387781"
+    "parsing.yaml": "8ad8d16f49a395ca2e2039fb9857a244c30498c0c79f0cd062f806765d1f3f2d",
+    "templates.yaml": "98a2461a4096e658c9cf4ad20ca9ae5ad82205116670af67e5521b1d86f7b988"
   },
   "counts": {
-    "cases": 44,
+    "cases": 108,
     "by_category": {
-      "aftersale": 3,
+      "aftersale": 6,
+      "ambiguous": 5,
+      "citation": 2,
       "compat": 10,
-      "conflict": 2,
+      "conflict": 3,
+      "edge": 5,
       "grant": 2,
       "injection": 2,
-      "insufficient": 2,
+      "insufficient": 4,
       "leakage": 2,
-      "multi_doc": 3,
-      "product": 12,
+      "long_context": 2,
+      "multi_doc": 8,
+      "multi_turn": 10,
+      "parsing": 10,
+      "product": 13,
       "revocation": 2,
-      "role": 4
+      "robust": 10,
+      "role": 4,
+      "timeliness": 3,
+      "troubleshoot": 5
     },
-    "templates": 26
+    "by_dimension": {
+      "answerability": {
+        "answerable": 78,
+        "partial": 11,
+        "unanswerable": 19
+      },
+      "qtype": {
+        "ambiguous": 5,
+        "compare": 10,
+        "edge": 5,
+        "fact": 59,
+        "multihop": 5,
+        "process": 5,
+        "security": 14,
+        "troubleshoot": 5
+      },
+      "difficulty": {
+        "easy": 36,
+        "hard": 30,
+        "medium": 42
+      },
+      "source": {
+        "adversarial": 4,
+        "badcase": 5,
+        "synthetic": 99
+      },
+      "risk": {
+        "high": 19,
+        "low": 75,
+        "medium": 14
+      }
+    },
+    "templates": 90
   },
   "docs": {
-    "total": 16,
+    "total": 32,
     "by_kind": {
       "conflict": 2,
       "fixture": 5,
+      "guide": 6,
+      "parsing": 10,
       "policy": 3,
       "product": 6
     }

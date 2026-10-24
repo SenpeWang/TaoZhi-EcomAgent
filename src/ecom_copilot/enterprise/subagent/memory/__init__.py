@@ -1,4 +1,4 @@
-"""Antigravity (agy) 规范记忆子系统（Memory Package）。
+"""自研记忆子系统（Memory Package）。
 
 导出双轨日志记录器、上下文压实引擎与长效持久化存储。
 """

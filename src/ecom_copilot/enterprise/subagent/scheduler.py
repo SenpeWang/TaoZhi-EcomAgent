@@ -1,11 +1,11 @@
 """反应式定时调度器（Reactive Agent Scheduler）。
 
-遵循 Antigravity (agy) 设计规范：
-1. 对应 schedule 工具规范（单次定时器 DurationSeconds 与周期 CronExpression）；
+自研调度器架构设计：
+1. 定时任务与周期调度；
 2. 支持条件取消（TimerCondition: 'never', 'any', 或指定 sender_id）；
 3. 定时到达时通过反应式总线发布高优先级提示词通知；
 4. 杜绝 busy-polling，基于条件变量与底层线程等待；
-5. 严格遵循 Google Style Docstring 规范。
+5. 严格遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ class AgentScheduler:
         timer_condition: str = "never",
         recipient_id: str = "coordinator",
     ) -> str:
-        """注册一个单次定时唤醒作业（对照 agy 的 DurationSeconds 定时器）。
+        """注册一个单次定时唤醒作业。
 
         Args:
             prompt: 唤醒时投递的消息。

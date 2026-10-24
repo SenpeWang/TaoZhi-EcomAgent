@@ -1,9 +1,10 @@
 """多智能体反应式事件消息总线（Reactive Message Bus）。
 
-遵循 Antigravity (agy) 设计规范：
-1. 彻底弃用 While 轮询（No Polling）；
+自研反应式架构设计：
+1. 彻底弃用 While 轮询（No Polling），采用条件变量与事件唤醒；
 2. 事件驱动（Event-Driven）精准投递与唤醒通知；
-3. 父子智能体解耦，支持广播 (broadcast) 与点对点通道 (peer-to-peer)。
+3. 父子智能体解耦，支持广播 (broadcast) 与点对点信道 (peer-to-peer)；
+4. 注释规范遵循 Google Python Style Guide。
 """
 
 from __future__ import annotations

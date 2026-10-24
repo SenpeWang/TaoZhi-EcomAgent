@@ -1,4 +1,4 @@
-"""测试基于 Antigravity (agy) 设计模式的多智能体底座与网络搜索。
+"""测试自研多智能体协同底座与电商网络搜索流水线。
 
 覆盖：
 1. 协议定义与注册表管理 (protocol & registry)；
@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
@@ -34,21 +35,21 @@ from src.ecom_copilot.enterprise.subagent import (
 
 
 def test_subagent_registry():
-    """测试智能体类型的注册与获取。"""
+    """测试智能体类型的注册与获取（统一以 _agent 为后缀）。"""
     reg = SubagentRegistry()
-    assert reg.get("web_researcher") is not None
-    assert reg.get("ecommerce_scanner") is not None
-    assert reg.get("data_verifier") is not None
-    assert reg.get("synthesis_reporter") is not None
+    assert reg.get("web_researcher_agent") is not None
+    assert reg.get("ecommerce_scanner_agent") is not None
+    assert reg.get("data_verifier_agent") is not None
+    assert reg.get("synthesis_reporter_agent") is not None
 
     custom = reg.define_subagent(
-        name="custom_analyst",
+        name="custom_analyst_agent",
         role="定制品类分析师",
         description="用于分析冷门长尾商品",
         system_prompt="你是定制品类专家。",
     )
-    assert custom.name == "custom_analyst"
-    assert reg.get("custom_analyst") == custom
+    assert custom.name == "custom_analyst_agent"
+    assert reg.get("custom_analyst_agent") == custom
 
 
 def test_message_bus_routing_and_reactive_wait():
@@ -74,8 +75,6 @@ def test_message_bus_routing_and_reactive_wait():
     assert received_msgs[0].content == "请搜索 2026 年最新手机壳"
 
     # 2. 跨线程反应式等待 (wait_for_message)
-    import threading
-
     def delayed_send():
         time.sleep(0.1)
         bus.post(
@@ -128,7 +127,6 @@ def test_subagent_context_isolation(tmp_path):
 
 def test_search_web_tool():
     """测试网络搜索工具具备优雅降级与数据解析。"""
-    # 模拟外部抓取返回 HTML
     fake_html = """
     <a class="result__url" href="https://example.com/item1"></a>
     <h2><a href="https://example.com/item1">苹果16磁吸手机壳深度测评</a></h2>
@@ -155,14 +153,14 @@ def test_subagent_runner_invoke():
     runner = SubagentRunner(bus=bus, llm_client=mock_llm)
 
     res = runner.invoke_subagent(
-        type_name="web_researcher",
-        role="全网情报调研专员",
+        type_name="web_researcher_agent",
+        role="全网市场情报分析专员",
         prompt="调研磁吸手机壳市场",
         model_tier="fast",
     )
 
     assert res.state == SubagentState.COMPLETED
-    assert res.role == "全网情报调研专员"
+    assert res.role == "全网市场情报分析专员"
     assert "磁吸支架" in res.summary
     assert len(res.artifacts) > 0
 
@@ -170,7 +168,6 @@ def test_subagent_runner_invoke():
 def test_full_multi_agent_research_flow():
     """测试端到端的多智能体调研流水线 (run_research)。"""
     mock_llm = MagicMock()
-    # 依次模拟：大纲生成、web总结、1688总结、验真总结、终审研报生成
     mock_llm.chat.side_effect = [
         '["市场概览", "供应链价格", "竞品痛点"]',
         "全网搜索发现：主流款式为超薄磁吸，热销价 39.9 元。",

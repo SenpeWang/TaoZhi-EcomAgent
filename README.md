@@ -62,22 +62,22 @@ flowchart TD
 | **`Support`** | **售后支持质保** | 严格核验 730 天保修、退换凭证与政策合规，严禁大模型幻觉越权承诺退款。 |
 | **`Verifier`** | **事实溯源核验门禁** | 终审门禁，逐句核对 100% 原始文档切片出处，执行四级密级防越权拦截。 |
 
-## Antigravity (agy) 规范多智能体协同底座（Multi-Agent Foundation）
+## 淘智自研多智能体协同底座（TaoZhi Multi-Agent Foundation）
 
-本项目将 Google Antigravity (`agy`) 核心智能体设计规范完整作为底层通用基础设施，全面赋能跨平台全网检索、工厂货源探查与长效业务研判：
+本项目构建了一套自主可控的企业级多智能体协同基础设施（TaoZhi Multi-Agent Framework），全面赋能跨平台全网检索、工厂货源探查、价格带对撞与长效业务研判：
 
 ```mermaid
 flowchart TD
-    Coordinator["🎯 协同总指挥 (Coordinator)<br>任务拆解 · 大纲制定 · 梯队派发"]
+    Coordinator["🎯 协同总指挥 (coordinator_agent)<br>任务拆解 · 大纲制定 · 梯队派发"]
 
     subgraph MultiAgents["专职子智能体作业梯队 (Subagents)"]
-        WebAgent["🌐 全网情报专员 (Web Researcher)<br>DuckDuckGo 纯文本解析 / 自建网关 · 零售价格带"]
-        ScannerAgent["🏭 1688 货源专员 (E-Commerce Scanner)<br>一手工厂探查 · 起订阶梯 · 出厂底价挖掘"]
-        VerifierAgent["⚖️ 交叉验真分析师 (Data Verifier)<br>零售溢价对比 · 虚假营销排查 · 真实毛利测算"]
-        ReporterAgent["📑 研报架构师 (Synthesis Reporter)<br>ModelTier.STRONG 驱动 · 生成全景 Markdown 交付物"]
+        WebAgent["🌐 全网情报专员 (web_researcher_agent)<br>DuckDuckGo 纯文本解析 / 自建网关 · 零售价格带"]
+        ScannerAgent["🏭 1688 货源专员 (ecommerce_scanner_agent)<br>一手工厂探查 · 起订阶梯 · 出厂底价挖掘"]
+        VerifierAgent["⚖️ 交叉验真分析师 (data_verifier_agent)<br>零售溢价对比 · 虚假营销排查 · 真实毛利测算"]
+        ReporterAgent["📑 研报架构师 (synthesis_reporter_agent)<br>ModelTier.STRONG 驱动 · 生成全景 Markdown 交付物"]
     end
 
-    subgraph AgCore["Antigravity 底层四梁八柱 (Core Architecture)"]
+    subgraph CoreArch["淘智多智能体底层四梁八柱 (Core Architecture)"]
         Bus["⚡ 反应式消息总线 (MessageBus)<br>零 busy-polling · 条件变量唤醒"]
         Transcript["📜 双轨行号索引记忆 (TranscriptLogger)<br>transcript.jsonl (紧凑) + transcript_full.jsonl (全量)"]
         Compactor["🗜️ 上下文压实引擎 (ContextCompactor)<br>预算监控 · 自动提炼 &lt;CONTEXT_SUMMARY&gt;"]
@@ -95,7 +95,7 @@ flowchart TD
     ScannerAgent --> VerifierAgent
     VerifierAgent --> ReporterAgent
 
-    MultiAgents -.-> AgCore
+    MultiAgents -.-> CoreArch
 ```
 
 ### 1. 核心底座模块清单
@@ -111,12 +111,12 @@ flowchart TD
 | **分层规则引擎** | `enterprise/subagent/rules.py` | `RulesEngine`：向上冒泡发现 `AGENTS.md`、`GEMINI.md` 与 `.agents/rules/*.md`，路径去重注入。 |
 | **渐进式技能** | `enterprise/subagent/skills.py` | `SkillRegistry`：基于目录与 `SKILL.md` 的 YAML Frontmatter 实现低 Token 占用懒加载。 |
 | **斜杠指令集** | `enterprise/subagent/commands.py` | `SlashCommandRegistry`：支持 `/compact`、`/learn`、`/plan`、`/goal`、`/schedule` 等标准指令解析分发。 |
-| **生命周期纳管** | `enterprise/subagent/manager.py` | `SubagentManager`：对应 `manage_subagents`，提供 `list`、`status`、`kill`（级联清理沙箱）、`send_input`。 |
-| **定时任务调度** | `enterprise/subagent/scheduler.py` | `AgentScheduler`：对应 `schedule`，支持单次延时与 Cron，集成 `TimerCondition` 条件变量提前取消。 |
+| **生命周期纳管** | `enterprise/subagent/manager.py` | `SubagentManager`：对应管理契约，提供 `list`、`status`、`kill`（级联清理沙箱）、`send_input`。 |
+| **定时任务调度** | `enterprise/subagent/scheduler.py` | `AgentScheduler`：对应调度契约，支持单次延时与 Cron，集成 `TimerCondition` 条件变量提前取消。 |
 
 ### 2. 现代前端多智能体中台界面优化
 
-- **Antigravity 协同调研工作台**：
+- **淘智协同调研工作台**：
   - 接入全网实时搜索与 1688 批发工厂源头双向切换；
   - 动态预设热门品类快捷填充芯片（磁吸充电宝、骨传导耳机、筋膜枪、智能保温杯等）；
   - 智能问答输入区集成 `⚡ 斜杠指令快捷触发条`（`/plan`, `/learn`, `/compact`, `/goal`）；

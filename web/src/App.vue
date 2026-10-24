@@ -1088,7 +1088,7 @@ onUnmounted(() => {
           <div class="dashboard-grid">
             <section class="panel ask-promo research-agent-panel">
               <div class="panel-header-badge">
-                <el-tag effect="dark" type="primary">🤖 Antigravity 多智能体协同调研中心</el-tag>
+                <el-tag effect="dark" type="primary">🤖 淘智多智能体协同调研中心</el-tag>
                 <small class="team-subtext"
                   >Coordinator 调度 · Web 全网搜罗 · 1688 探厂 · Verifier 验真 · Reporter
                   交付</small
@@ -1586,7 +1586,7 @@ onUnmounted(() => {
         /><template v-if="activeTask.result"
           ><template v-if="activeTask.kind === 'research'">
             <div class="research-header-row">
-              <h3>📈 Antigravity 多智能体协同调研研报</h3>
+              <h3>📈 淘智多智能体协同调研研报</h3>
               <el-button size="small" type="primary" plain @click="copyReport"
                 >📋 复制研报 Markdown</el-button
               >

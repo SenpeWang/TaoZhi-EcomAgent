@@ -1,11 +1,11 @@
 """子智能体运行上下文与工件隔离存储（Subagent Context & Artifacts System）。
 
-遵循 Antigravity (agy) 设计规范：
+自研架构设计：
 1. 隔离上下文（SubagentContext）避免子级海量原始抓取污染父级上下文；
 2. Scratch 目录暂存大容量中间态（Raw Scraped Data、临时脚本）；
 3. Artifacts 交付区管理高价值成果，附带元数据契约（Summary, UserFacing, RequestFeedback）；
 4. 提供规范的 GitHub 提示框（Alerts）、Mermaid 图表、走马灯（Carousel）与行级文件超链接生成器；
-5. 严格遵循 Google Style Docstring 规范。
+5. 严格遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from .protocol import WorkspaceMode
 
 
 class ArtifactMetadata:
-    """定义工件元数据属性（符合 agy 产物规范）。"""
+    """定义工件元数据属性契约。"""
 
     def __init__(
         self,
@@ -220,7 +220,7 @@ class SubagentContext:
 
     @staticmethod
     def build_mermaid(diagram_type: str, body: str) -> str:
-        """构建 Antigravity 规范支持的 Mermaid 图表代码块。
+        """构建标准 Mermaid 图表代码块。
 
         支持图表：flowchart TD/LR, sequenceDiagram, stateDiagram-v2, erDiagram, xychart-beta.
 
@@ -253,7 +253,7 @@ class SubagentContext:
         end_line: Optional[int] = None,
         label: Optional[str] = None,
     ) -> str:
-        """生成符合 agy 规范的带行号锚点绝对路径超链接。
+        """生成带行号锚点绝对路径超链接。
 
         Args:
             file_path: 目标文件路径。
