@@ -143,7 +143,7 @@ def test_every_category_has_cases():
 
 def test_eval_password_survives_production_policy():
     """灌库口令必须过生产弱口令校验：否则 seed 失败、行为层全量登录失败。"""
-    from ecom_copilot.enterprise.passwords import hash_password
+    from taozhi.server.passwords import hash_password
     assert hash_password(EVAL_PASSWORD, "production").startswith("scrypt$")
 
 

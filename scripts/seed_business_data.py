@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ecom_copilot.enterprise.db import database_connection, fetch_one  # noqa: E402
+from taozhi.knowledge.db import database_connection, fetch_one  # noqa: E402
 
 SEED = 20261015
 DAYS_BACK = 183          # 2026-04-15 起

@@ -14,10 +14,31 @@
 | `migrations/versions/` | 只追加已验证的数据库升级版本 |
 | `scripts/` | 部署、数据管理、构建与运维；不含评估逻辑 |
 | `src/` | Python 源码根目录 |
-| `src/ecom_copilot/` | 共享能力与在线入口，保持统一授权路径 |
-| `src/ecom_copilot/enterprise/` | 在线权限、会话、文档、业务服务、工作流及 Worker |
-| `src/ecom_copilot/enterprise/subagent/` | 淘智自研多智能体协同引擎、反应式总线、生命周期、技能与指令 |
-| `src/ecom_copilot/enterprise/subagent/memory/` | 双轨行号索引记忆、上下文压实引擎与跨会话长效记忆库 |
+| `src/taozhi/` | 淘智 (TaoZhi) 智能体工程核心根包 |
+| `src/taozhi/schemas/` | 请求响应契约 DTO、Agent 状态与全链路 Trace 规范 |
+| `src/taozhi/api/` | 接入层接口：同步问答、流式传输、会话管理与健康检查 |
+| `src/taozhi/orchestration/` | 编排层：显式 5 节点迭代闭环状态机、意图路由与防死锁控制 |
+| `src/taozhi/agent/` | 智能体核心层 (Harness 执行引擎) |
+| `src/taozhi/agent/tools/` | 受控工具层：面向非人类消费者的有界工具与检索/搜索适配 |
+| `src/taozhi/rag/` | RAG 能力层：离线数据管道、在线多路检索与独立评估 |
+| `src/taozhi/rag/retrieval/` | 在线多路混合检索器 (BM25+ANN+RRF) 与带锚点上下文构建器 |
+| `src/taozhi/rag/evaluation/` | 独立评估模块：HitRate/MRR 检索指标与生成忠实度校验器 |
+| `src/taozhi/infrastructure/` | 基础设施与存储层：数据库仓储、向量库、缓存与队列 |
+| `src/taozhi/infrastructure/cache/` | 基础设施缓存：独立语义向量缓存与会话状态隔离 |
+| `src/taozhi/infrastructure/mcp/` | 电商与情报类 MCP 标准服务端与智能体适配器 |
+| `src/taozhi/observability/` | 可观测性横切能力：全链路树状 Trace 收集器与指标埋点 |
+| `src/taozhi/ai/` | 大模型客户端、Embedding 向量化、用量统计与结构化解析 |
+| `src/taozhi/core/` | 核心引擎与底层基础设施 |
+| `src/taozhi/core/agent/` | 智能体核心循环、生命周期状态机、上下文与事件总线 |
+| `src/taozhi/core/compaction/` | 阶梯式上下文治理管线、切分点检测与事实硬兜底 |
+| `src/taozhi/core/tools/` | 工业级工具管理、行边界保持截断与流式转存累加器 |
+| `src/taozhi/core/memory/` | 租户物理隔离长效记忆库与双轨会话日志 |
+| `src/taozhi/core/session/` | 会话持久化管理器与动态上下文投影 |
+| `src/taozhi/core/skills/` | 渐进式技能发现与指令解析 |
+| `src/taozhi/core/commands/` | 业务快捷斜杠指令系统 |
+| `src/taozhi/agents/` | 专职电商子智能体模板定义与统一注册中心 |
+| `src/taozhi/server/` | FastAPI 接口服务、异步 Worker 守护进程与权限策略 |
+| `src/taozhi/knowledge/` | 知识库切片入库、混合检索器与数据库连接池 |
 | `evals/` | 评估模块（独立单元）：口径说明、数据集、指标、运行器、基线与报告 |
 | `evals/baseline/` | 基线只读归档：一次全量跑批一份快照（文件名=开跑时间），只增不改 |
 | `evals/dataset/` | 独立评测数据包：规格、契约校验、确定性生成与幂等灌库 |
@@ -27,12 +48,10 @@
 | `evals/datasets/generated/latest/` | 独立包生成产物目录，generate 直接写入（唯一一份，版本由 Git 承担） |
 | `evals/reports/` | 运行产物不入库（.gitignore 全忽略） |
 | `evals/tests/` | 评估代码自身的单元测试，必须进 CI |
-| `src/ecom_copilot/ingestion/` | 语料文本抽取与注入防护（guard） |
-| `src/ecom_copilot/llm/` | 模型客户端、路由与直连控制 |
-| `src/ecom_copilot/observability/` | 指标与事件观测（审计落 enterprise/policy.audit） |
 | `tests/` | 单元与企业边界验收，测试事实自行构造 |
 | `web/` | 前端依赖、锁与构建配置 |
 | `web/src/` | Vue 页面、类型、样式与 API 调用 |
+| `web/src/assets/` | 静态图片与品牌图标资源 |
 | `web/src/views/` | BI 看板与问数等业务页面组件 |
 
 ## 根文件

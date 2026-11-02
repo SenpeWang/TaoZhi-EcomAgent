@@ -15,9 +15,9 @@ import sys
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 
-from ecom_copilot.enterprise.config import load_config
-from ecom_copilot.enterprise.db import database_connection, fetch_all
-from ecom_copilot.enterprise.storage import LocalBlobStore, get_blob_store
+from taozhi.config import load_config
+from taozhi.knowledge.db import database_connection, fetch_all
+from taozhi.knowledge.storage import LocalBlobStore, get_blob_store
 
 
 def main() -> int:

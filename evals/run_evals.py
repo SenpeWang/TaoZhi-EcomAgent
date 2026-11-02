@@ -54,10 +54,10 @@ import httpx  # noqa: E402
 
 from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
-from ecom_copilot.enterprise.config import load_config  # noqa: E402
-from ecom_copilot.observability import metrics as obs_metrics  # noqa: E402
-from ecom_copilot.enterprise.db import database_connection, fetch_all, fetch_one  # noqa: E402
-from ecom_copilot.enterprise.policy import load_principal  # noqa: E402
+from taozhi.config import load_config  # noqa: E402
+from taozhi.ai import observability as obs_metrics  # noqa: E402
+from taozhi.knowledge.db import database_connection, fetch_all, fetch_one  # noqa: E402
+from taozhi.server.policy import load_principal  # noqa: E402
 from evals.dataset.seed import EVAL_PASSWORD  # noqa: E402  # 评测账号口令与 seed.py 同源
 
 
@@ -158,10 +158,10 @@ def retrieval_evidence(case, rows, ranked, expected):
 
 
 def phase_retrieval():
-    from ecom_copilot.enterprise.retriever import search_documents
-    from ecom_copilot.llm.client import LLMClient, ModelTier
-    from ecom_copilot.enterprise.privacy import redact
-    from ecom_copilot.enterprise.embedding import encode_passages
+    from taozhi.knowledge.retriever import search_documents
+    from taozhi.ai.client import LLMClient, ModelTier
+    from taozhi.server.privacy import redact
+    from taozhi.knowledge.embedding import encode_passages
     cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
     if ONLY_CATS:
         cases = [c for c in cases if c["category"] in ONLY_CATS]
@@ -419,7 +419,7 @@ def phase_behavior():
     chosen = [c for items in by_cat.values() for c in items]
     with database_connection() as c:
         node = resolve_eval_node(c)
-    from ecom_copilot.llm.client import LLMClient, ModelTier
+    from taozhi.ai.client import LLMClient, ModelTier
     client = LLMClient()
     judge_stats = {"grounded": 0, "relevant": 0, "abstain": 0, "judge_n": 0}
     stats, detail = {}, []
@@ -476,6 +476,8 @@ def phase_behavior():
                     s["pass"] += 1
                 else:
                     s["fail"].append((case["case_id"], f"提交被拒 {r.status_code}"))
+                # 提交被拒也要落明细：10-21 全量曾因不落记录导致归因黑洞
+                record({"id": case["case_id"], "pass": ok, "why": f"提交被拒 {r.status_code}"})
                 continue
             tid = r.json()["id"]
             task = {}
@@ -496,6 +498,10 @@ def phase_behavior():
             if leak:
                 s["n"] += 1
                 s["fail"].append((case["case_id"], f"泄漏 {leak}"))
+                # 泄漏分支必须落明细：10-21 全量 J1-041 因无记录导致 107/108 对不上
+                record({"id": case["case_id"], "pass": False, "why": f"金丝雀泄漏 {leak}",
+                        "verdict": {"pass": False, "faithful": False, "relevant": False, "abstain": False},
+                        "answer": answer[:800], "citations": []})
                 continue
             if task["state"] == "failed" and "权限" in (task.get("error") or ""):
                 s["n"] += 1
@@ -524,16 +530,27 @@ def phase_behavior():
             try:
                 # 判定输出走 LangChain PydanticOutputParser（带重试）：裸正则抠 JSON 实测
                 # 一次成功率仅 94%、pass^k 88%，而结构化链路实测 8/8。
+                # max_tokens 150 实测偏紧（截断→解析失败），放宽到 240。
                 obj = client.chat_json(payload, schema=JudgeVerdict, tier=ModelTier.FAST,
-                                       system=JUDGE_SYSTEM, retries=3, max_tokens=150)
-                if obj is not None:
+                                       system=JUDGE_SYSTEM, retries=3, max_tokens=240)
+                if isinstance(obj, dict):
+                    # chat_json 部分降级路径会返回 dict：按别名/字段名双向收敛成契约，
+                    # 消灭 "'dict' object has no attribute 'model_dump'"（10-21 全量 5 例）。
+                    fixed = {}
+                    for k, v in obj.items():
+                        fixed["pass_" if k == "pass" else k] = v
+                    try:
+                        obj = JudgeVerdict.model_validate(fixed)
+                    except Exception:
+                        obj = None
+                if obj is None:
+                    verdict["reason"] = "judge 三次均未产出可解析 JSON"
+                else:
                     verdict = obj.model_dump(by_alias=True)
                     judge_stats["judge_n"] += 1
                     judge_stats["grounded"] += 1 if verdict.get("faithful") else 0
                     judge_stats["relevant"] += 1 if verdict.get("relevant") else 0
                     judge_stats["abstain"] += 1 if verdict.get("abstain") else 0
-                else:
-                    verdict["reason"] = "judge 三次均未产出可解析 JSON"
             except Exception as e:
                 verdict["reason"] = f"judge 异常 {e}"[:40]
             ok = bool(verdict.get("pass"))
@@ -556,6 +573,12 @@ def phase_behavior():
                                "document_id": x.get("document_id"),
                                "quote": (x.get("quote") or "")[:EVIDENCE_QUOTE_CHARS]}
                               for x in cites],
+                # 归因字段：期望文档被引用几篇（0=引用面没送到 → 查检索/上下文组装）
+                "expected_documents": sorted(set(case.get("expected_documents") or [])),
+                "cited_expected": len({x.get("document_id") for x in cites}
+                                      & set(case.get("expected_documents") or [])),
+                # 关联 Phoenix 执行轨迹（worker 回传），badcase 可逐例下钻到节点 span
+                "trace_id": result.get("trace_id") or "",
             })
         finally:
             session.close()

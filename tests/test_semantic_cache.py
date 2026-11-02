@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
-from ecom_copilot.enterprise import semantic_cache as sc  # noqa: E402
-from ecom_copilot.enterprise.semantic_cache import SemanticCache  # noqa: E402
+from taozhi.knowledge import semantic_cache as sc  # noqa: E402
+from taozhi.knowledge.semantic_cache import SemanticCache  # noqa: E402
 
 PHONE = "13812345678"
 RAW_ANSWER = f"客户联系电话 {PHONE}，可以正常退货。"

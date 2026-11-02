@@ -21,7 +21,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ecom_copilot.enterprise.subagent import (
+from taozhi.core.agent import (
     AgentScheduler,
     ArtifactMetadata,
     ContextCompactor,
@@ -183,8 +183,8 @@ def test_subagent_manager_and_cascade_kill(tmp_path: Path):
     p_ctx = SubagentContext(conversation_id="parent_01", root_dir=tmp_path)
     c_ctx = SubagentContext(conversation_id="child_01", parent_id="parent_01", root_dir=tmp_path)
 
-    mgr.register_subagent(p_ctx, type_name="coordinator_agent", role="调研协同总指挥")
-    mgr.register_subagent(c_ctx, type_name="web_researcher_agent", role="数据采集", parent_id="parent_01")
+    mgr.register_subagent(p_ctx, type_name="main_agent", role="调研协同总指挥")
+    mgr.register_subagent(c_ctx, type_name="web_agent", role="数据采集", parent_id="parent_01")
 
     assert len(mgr.list_subagents()) == 2
 
@@ -280,7 +280,7 @@ def test_subagent_runner_full_architecture(tmp_path: Path):
 
     runner = SubagentRunner(llm_client=mock_llm)
     res = runner.invoke_subagent(
-        type_name="data_verifier_agent",
+        type_name="verifier_agent",
         role="验真分析师",
         prompt="验证【智能水杯】零售价 89 元与 1688 批发价 25 元的利润空间",
     )

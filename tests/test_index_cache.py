@@ -2,10 +2,10 @@
 import numpy as np
 import pytest
 
-from ecom_copilot.enterprise import embedding, index_cache
-from ecom_copilot.enterprise.config import load_config
-from ecom_copilot.enterprise.db import database_connection, fetch_all
-from ecom_copilot.enterprise.embedding import embedding_input
+from taozhi.knowledge import embedding, index_cache
+from taozhi.config import load_config
+from taozhi.knowledge.db import database_connection, fetch_all
+from taozhi.knowledge.embedding import embedding_input
 
 DIM = 512
 

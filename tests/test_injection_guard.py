@@ -2,7 +2,7 @@
 
 MCP 工具链路与旧 API 一并下线，这里只留与生产链路相关的注入检测。
 """
-from ecom_copilot.ingestion.guard import detect_injection, sanitize
+from taozhi.knowledge.guard import detect_injection, sanitize
 
 
 def test_guard_zero_width_sanitization_and_detection():

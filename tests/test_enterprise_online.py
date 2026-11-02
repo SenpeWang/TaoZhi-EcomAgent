@@ -3,13 +3,13 @@ import os,json,time
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
-from ecom_copilot.enterprise.config import load_config
-from ecom_copilot.enterprise.db import database_connection,fetch_one,fetch_all,as_jsonb
-from ecom_copilot.enterprise.api import app
-from ecom_copilot.enterprise.policy import Denied,load_principal,source_valid,can_read
-from ecom_copilot.enterprise.worker import claim_next_job,process_question_job,process_next_job
-from ecom_copilot.enterprise.pipeline import validate_task_execution
-from ecom_copilot.enterprise.services import create_job
+from taozhi.config import load_config
+from taozhi.knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
+from taozhi.server.api import app
+from taozhi.server.policy import Denied,load_principal,source_valid,can_read
+from taozhi.server.worker import claim_next_job,process_question_job,process_next_job
+from taozhi.server.pipeline import validate_task_execution
+from taozhi.server.services import create_job
 import importlib.util
 spec=importlib.util.spec_from_file_location("v3_setup",Path(__file__).resolve().parents[1]/"scripts/manage_database.py")
 setup=importlib.util.module_from_spec(spec);spec.loader.exec_module(setup)
@@ -17,7 +17,7 @@ setup=importlib.util.module_from_spec(spec);spec.loader.exec_module(setup)
 def reset(monkeypatch):
     assert load_config().mode=="test" and load_config().dsn.endswith("/ecom_test")
     with database_connection() as c:c.execute("TRUNCATE tenants CASCADE");c.execute("TRUNCATE login_attempts")
-    from ecom_copilot.enterprise.semantic_cache import get_semantic_cache
+    from taozhi.knowledge.semantic_cache import get_semantic_cache
     get_semantic_cache().clear()
     # 固定的合成测试事实，与部署 data/ 及真实产品文档无关。
     monkeypatch.setattr(setup,"corpus",lambda:{"synthetic_product":[{
@@ -49,13 +49,14 @@ def task_id(client,question="MC-500 的切幅是多少？",**extra):
     assert r.status_code==202,r.text
     return r.json()["id"]
 def fake_model(monkeypatch,seen=None):
-    from ecom_copilot.llm.client import LLMClient
-    import ecom_copilot.config as cfg
+    from taozhi.ai.client import LLMClient
+    import taozhi.config as cfg
     settings=cfg.get_settings().model_copy(update={"api_key":"offline-test-placeholder"})
     monkeypatch.setattr(cfg,"get_settings",lambda:settings)
     def chat(self,prompt,**kw):
         if seen is not None:seen.append(prompt)
-        data=json.loads(prompt);ev=data["授权资料"]
+        raw_json=prompt.split("\n\n")[0] if "\n\n" in prompt else prompt
+        data=json.loads(raw_json);ev=data["授权资料"]
         return json.dumps({"findings":[{"claim":ev[0]["quote"],"evidence_index":0,"quote":ev[0]["quote"]}],"missing":[]},ensure_ascii=False) if ev else '{"findings":[],"missing":[]}'
     monkeypatch.setattr(LLMClient,"chat",chat)
 def test_chinese_info_login_cookie(clients):
@@ -151,7 +152,7 @@ def test_cross_tenant_documents_tasks_and_tools(clients):
     with database_connection() as c:
         c.execute("INSERT INTO tenants(id,code,name,mode) VALUES('foreign','other','另一企业','test')")
         nodes=setup.organization(c,"foreign","另一企业")
-        from ecom_copilot.enterprise.passwords import hash_password
+        from taozhi.server.passwords import hash_password
         c.execute("INSERT INTO users(id,tenant_id,username,display_name,password_hash,must_change) VALUES('foreign_user','foreign','owner','其他老板',%s,false)",(hash_password("123456","test"),))
         c.execute("INSERT INTO memberships VALUES('foreign','foreign_user',%s,'boss',true)",(nodes["公司"],))
         setup.add_doc(c,"foreign","foreign_user","foreign_doc","其他企业机密","跨企业秘密标记",nodes["公司"],"company",3)
@@ -246,7 +247,7 @@ def test_audit_redaction_and_validation_errors(clients):
     assert r.status_code==422 and "secret-marker" not in r.text and "输入格式" in r.text
 
 def test_active_revocation_stops_publication_and_events(monkeypatch,clients):
-    from ecom_copilot.llm.client import LLMClient
+    from taozhi.ai.client import LLMClient
     fake_model(monkeypatch)
     original=LLMClient.chat
     users,_=ids()
@@ -283,8 +284,8 @@ def test_admin_permission_metadata_excludes_secret_body(clients):
 
 def test_business_row_scope_and_field_masks(monkeypatch,clients):
     import httpx
-    import ecom_copilot.config as cfg
-    from ecom_copilot.enterprise.business import lookup
+    import taozhi.config as cfg
+    from taozhi.knowledge.business import lookup
     from datetime import datetime,timezone
     users,nodes=ids()
     settings=cfg.get_settings().model_copy(update={"business_api_url":"https://business.invalid/api","business_api_token":"offline-placeholder"})
@@ -333,7 +334,7 @@ def test_production_forbids_demo_password(monkeypatch,clients):
     assert r.status_code==403 and "演示口令" in r.text
 def test_canonical_api_cannot_use_legacy_identity(monkeypatch,clients):
     # 旧 api 包（含 legacy_main 与路由）已下线，生产 app 就是 enterprise.api
-    from ecom_copilot.enterprise.api import app as canonical_app
+    from taozhi.server.api import app as canonical_app
     assert canonical_app.title=="企业智能协作工作台"
     c=TestClient(canonical_app)
     assert c.get("/api/documents",headers={"Authorization":"Bearer arbitrary-legacy-token"}).status_code==401
@@ -343,7 +344,7 @@ def test_personal_memory_revocation_and_no_cross_user(monkeypatch,clients):
     fake_model(monkeypatch)
     tid=task_id(clients["staff"]);process_next_job()
     users,_=ids()
-    from ecom_copilot.enterprise.memory import get_followup_context
+    from taozhi.core.memory.service import get_followup_context
     with database_connection() as c:
         recalled,refs=get_followup_context(c,load_principal(c,users["staff"]),"它的参数是什么？",1)
         assert recalled and refs
@@ -385,8 +386,8 @@ def test_document_exception_cannot_grant_employee_or_cross_team_write(clients):
 
 def test_business_nested_fields_cannot_smuggle_private_payload(monkeypatch,clients):
     import httpx
-    import ecom_copilot.config as cfg
-    from ecom_copilot.enterprise.business import lookup
+    import taozhi.config as cfg
+    from taozhi.knowledge.business import lookup
     from datetime import datetime,timezone
     users,nodes=ids()
     settings=cfg.get_settings().model_copy(update={"business_api_url":"https://business.invalid/api","business_api_token":"offline-placeholder"})
@@ -408,8 +409,8 @@ def _principal():
 
 def test_semantic_retrieval_degrades_to_lexical(monkeypatch,clients):
     """嵌入服务不可用时检索自动降级为词法两路：仍能命中、分数降序、不抛错。"""
-    import ecom_copilot.enterprise.embedding as emb
-    from ecom_copilot.enterprise.retriever import search_documents
+    import taozhi.knowledge.embedding as emb
+    from taozhi.knowledge.retriever import search_documents
     monkeypatch.setenv("ECOM_EMBED_SERVICE_URL","http://127.0.0.1:9")
     monkeypatch.setattr(emb,"_state",{"checked_at":0.0,"ok":False})
     assert not emb.available()
@@ -421,8 +422,8 @@ def test_semantic_retrieval_degrades_to_lexical(monkeypatch,clients):
 
 def test_semantic_retrieval_backfills_and_scores(monkeypatch,clients):
     """嵌入服务在线时：语义路参与融合，存量切片向量被惰性补算，未授权内容不出现。"""
-    import ecom_copilot.enterprise.embedding as emb
-    from ecom_copilot.enterprise.retriever import search_documents
+    import taozhi.knowledge.embedding as emb
+    from taozhi.knowledge.retriever import search_documents
     monkeypatch.delenv("ECOM_EMBED_SERVICE_URL",raising=False)
     monkeypatch.setattr(emb,"_state",{"checked_at":0.0,"ok":False})
     if not emb.available():pytest.skip("本地嵌入服务未运行")
@@ -438,7 +439,7 @@ def test_semantic_retrieval_backfills_and_scores(monkeypatch,clients):
 def test_ann_distance_gate_blocks_irrelevant():
     """ANN 距离闸门单元行为：超距剔除、无向量豁免、无查询向量不生效、阈值全放过。"""
     import numpy as np
-    from ecom_copilot.enterprise.retriever import _ann_gate
+    from taozhi.knowledge.retriever import _ann_gate
     chunks=[{"id":"close"},{"id":"far"},{"id":"novector"}]
     vecs=[np.ones(512,dtype="float32"),np.zeros(512,dtype="float32"),None]
     qv=np.ones(512,dtype="float32")  # close 距离 0，far 距离 1

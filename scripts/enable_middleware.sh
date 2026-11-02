@@ -13,7 +13,7 @@ curl -fsS -o /dev/null http://127.0.0.1:9200/
 .venv/bin/python - <<'EOF'
 import sys; sys.path.insert(0, "src")
 from kafka import KafkaProducer
-from ecom_copilot.enterprise.config import load_config
+from taozhi.config import load_config
 p = KafkaProducer(bootstrap_servers=load_config().kafka_brokers.split(","))
 p.close(timeout=5)
 EOF

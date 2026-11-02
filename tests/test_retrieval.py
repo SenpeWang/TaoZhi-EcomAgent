@@ -4,8 +4,8 @@ import pytest
 
 import numpy as np
 
-from ecom_copilot.enterprise import embedding as ent_embedding
-from ecom_copilot.enterprise import retriever as ent_retriever
+from taozhi.knowledge import embedding as ent_embedding
+from taozhi.knowledge import retriever as ent_retriever
 
 
 class _Cfg:

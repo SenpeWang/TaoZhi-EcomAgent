@@ -110,6 +110,13 @@ export interface TaskResult {
   missing?: string[]
   citations?: Citation[]
 }
+export interface TaskEventItem {
+  id: number
+  stage: string
+  progress: number
+  status: string
+  created_at?: string | null
+}
 export interface Task {
   id: string
   question: string
@@ -127,6 +134,7 @@ export interface Task {
   restricted: boolean
   can_review: boolean
   can_cancel: boolean
+  events?: TaskEventItem[]
 }
 export interface ApprovalPayload {
   user_id?: string
@@ -146,6 +154,8 @@ export interface ApprovalPayload {
   active?: boolean
   system_admin?: boolean
   name?: string
+  expected_version?: number
+  expected_acl?: number
 }
 export interface Approval {
   id: string

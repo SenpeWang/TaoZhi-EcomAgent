@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ecom_copilot.enterprise.db import database_connection, fetch_one, as_jsonb  # noqa: E402
+from taozhi.knowledge.db import database_connection, fetch_one, as_jsonb  # noqa: E402
 
 # (key, 名称, 别名, 口径模板, 维度, 主表, 单位, 格式, 密级, scope, 说明)
 METRICS = [

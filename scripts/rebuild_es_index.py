@@ -13,8 +13,8 @@ import sys
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 
-from ecom_copilot.enterprise.db import database_connection, fetch_all
-from ecom_copilot.enterprise import es_index
+from taozhi.knowledge.db import database_connection, fetch_all
+from taozhi.enterprise import es_index
 
 
 def main() -> int:
@@ -22,7 +22,7 @@ def main() -> int:
     parser.add_argument("--drop", action="store_true", help="重建前删除整个索引")
     args = parser.parse_args()
 
-    from ecom_copilot.enterprise.config import load_config
+    from taozhi.config import load_config
     if not load_config().es_enabled:
         print("ES 未启用：请设置 ECOM_ES_ENABLED=\"true\" 后重试")
         return 1

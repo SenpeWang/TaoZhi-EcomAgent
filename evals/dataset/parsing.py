@@ -74,7 +74,7 @@ def build(entry: dict, out_dir: Path) -> tuple[Path, str]:
 
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-    from ecom_copilot.ingestion.corpus import read_corpus_text
+    from taozhi.knowledge.corpus import read_corpus_text
 
     return path, read_corpus_text(path)
 

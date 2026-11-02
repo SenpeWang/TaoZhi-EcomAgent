@@ -3,10 +3,10 @@ import os,sys,json,secrets,subprocess,sqlite3,hashlib,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
-from ecom_copilot.enterprise.db import database_connection,fetch_one,fetch_all,as_jsonb
-from ecom_copilot.enterprise.services import generate_id
-from ecom_copilot.enterprise.passwords import hash_password
-from ecom_copilot.enterprise.ingest import split
+from taozhi.knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
+from taozhi.server.services import generate_id
+from taozhi.server.passwords import hash_password
+from taozhi.knowledge.ingest import split
 RUNTIME=Path.home()/".local/share/ecom-agent/runtime"
 STATE=Path.home()/".local/share/ecom-agent"
 TEMPLATE=[
@@ -30,7 +30,7 @@ def add_doc(c,tenant,creator,did,title,body,node,scope="company",level=1,state="
     c.execute("INSERT INTO document_versions(tenant_id,document_id,version,title,body,content_hash,created_by,policy) VALUES(%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",(tenant,did,version,title,body,hashlib.sha256(body.encode()).hexdigest(),creator,as_jsonb(dict(node_id=node,scope=scope,level=level))))
     for ch in split([(0,body)],did,version):
         c.execute("INSERT INTO chunks(id,tenant_id,document_id,version,ordinal,page,text) VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",(ch["id"],tenant,did,version,ch["ordinal"],ch["page"],ch["text"]))
-    from ecom_copilot.enterprise.facts import index_mentions
+    from taozhi.knowledge.facts import index_mentions
     index_mentions(c,tenant,did,version,split([(0,body)],did,version))
 def corpus():
     path=ROOT/"data/index/chunks.json"
@@ -94,7 +94,7 @@ def migrate():
     print("旧账号、资料权限与任务档案已迁移；旧会话未迁移")
 def seed_test():
     """初始化测试库：企业租户、四种身份账号与密级样文档（仅 test 模式，供在线验收使用）。"""
-    from ecom_copilot.enterprise.config import load_config
+    from taozhi.config import load_config
     if load_config().mode!="test":
         raise RuntimeError("测试初始化仅允许测试环境")
     with database_connection() as c:
@@ -182,7 +182,7 @@ def quick_passwords():
     仅在 ECOM_QUICK_LOGIN=true 且已配置 ECOM_QUICK_LOGIN_PASSWORD 时执行；该口令为弱口令，
     仅供内网演示与验收，上线公网前必须重新为每个账号设置强口令。
     """
-    from ecom_copilot.enterprise.config import load_config
+    from taozhi.config import load_config
     cfg=load_config()
     if not cfg.quick_login or not cfg.quick_login_password:
         raise SystemExit("需同时开启 ECOM_QUICK_LOGIN 并配置 ECOM_QUICK_LOGIN_PASSWORD")

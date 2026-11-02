@@ -1,6 +1,6 @@
 # TaoZhi-EcomAgent（淘智）：电商商品多智能体智能问答与核验中台
 
-面向商品资料查询、适配咨询、客服售后与运营协作的企业级多智能体中台。Vue 3 提供登录、文档库、智能问答、组织管理和审核页面；FastAPI 统一执行权限；基于 LangGraph 与 Jev System-1 按问题调度专业智能体；PostgreSQL 与独立 Worker 保存任务、审核、来源及流程检查点。
+面向商品资料查询、适配咨询、客服售后与运营协作的企业级多智能体中台。Vue 3 提供登录、文档库、智能问答、组织管理和审核页面；FastAPI 统一执行权限；基于 LangGraph 与编排层决策路由引擎按问题调度专业智能体；PostgreSQL 与独立 Worker 保存任务、审核、来源及流程检查点。
 
 本仓库公开代码、维护规则和软件文档。**整个 `data/`、企业资料、私有配置、本机维护文件 `AGENTS.md` 与个人学习文件 `项目说明.md` 均不上传。** 克隆代码不会获得原部署的资料、账号或数据库。
 
@@ -11,7 +11,7 @@
 - 文档受限草稿、上传解析、版本、审批发布、私有附件与可核验引用。
 - **6 大专职智能体全阵容协同**：系统调度主脑 Main、业务研学教练 Coach、物理规格专家 Spec、细节攻坚专家 Details、售后质保专家 Support 与事实溯源核验门禁 Verifier 各司其职，彻底杜绝单一模型幻觉。
 - **高并发微秒级语义缓存中台**：自研向量矩阵点积近邻匹配引擎，大促热点高并发削峰（时延 < 15ms，0 LLM 开销），集成 Transactional Outbox 异步持久化与严格的 ACL 来源权限动态校验。
-- **Jev System-1 毫秒级决策核**：实现强类型离散选择（Choice）、连续打分（Score）与布尔断言（Noul）原语，提供离线与机密任务零模型调用安全屏障与本地启发式规则兜底。
+- **编排层离散决策引擎**：实现强类型离散选择（Choice）、连续打分（Score）与布尔断言（Verify）原语，提供本地语义向量近邻、规则兜底与离线任务零模型调用安全屏障。
 - **四路混合检索与 HyDE**：限定授权候选后，由 BM25、本地字符 TF-IDF、本地语义向量与 HyDE 假设性文档四路信号经 RRF 融合排序；本地回环嵌入不可用时秒级降级。
 - 身份与来源在任务、审核、发布、历史答案和追问中重新验证，撤权后不能继续使用旧答案。
 - 同源 HttpOnly 会话 Cookie、写操作 CSRF 校验、独立环境、审计及任务崩溃恢复。
@@ -27,7 +27,7 @@
 
 ## 多智能体团队编制（Multi-Agent Roster）
 
-系统采用 LangGraph 编排与 Jev System-1 离散决策机制，由 6 位专职智能体协同作业，各司其职，杜绝单一模型幻觉：
+系统采用 LangGraph 编排与编排层决策路由机制，由 6 位专职智能体协同作业，各司其职，杜绝单一模型幻觉：
 
 ```mermaid
 flowchart TD
@@ -68,13 +68,13 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Coordinator["🎯 协同总指挥 (coordinator_agent)<br>任务拆解 · 大纲制定 · 梯队派发"]
+    Coordinator["🎯 协同总指挥 (main_agent)<br>任务拆解 · 大纲制定 · 梯队派发"]
 
     subgraph MultiAgents["专职子智能体作业梯队 (Subagents)"]
-        WebAgent["🌐 全网情报专员 (web_researcher_agent)<br>DuckDuckGo 纯文本解析 / 自建网关 · 零售价格带"]
-        ScannerAgent["🏭 1688 货源专员 (ecommerce_scanner_agent)<br>一手工厂探查 · 起订阶梯 · 出厂底价挖掘"]
-        VerifierAgent["⚖️ 交叉验真分析师 (data_verifier_agent)<br>零售溢价对比 · 虚假营销排查 · 真实毛利测算"]
-        ReporterAgent["📑 研报架构师 (synthesis_reporter_agent)<br>ModelTier.STRONG 驱动 · 生成全景 Markdown 交付物"]
+        WebAgent["🌐 全网网页情报专员 (web_agent)<br>DuckDuckGo 纯文本解析 / 自建网关 · 全网网页检索"]
+        ScannerAgent["🏭 货源比价专员 (scanner_agent)<br>1688一手工厂探查 + 海外亚马逊跨境比价 (双工具)"]
+        VerifierAgent["⚖️ 交叉验真分析师 (verifier_agent)<br>零售溢价对比 · 虚假营销排查 · 真实毛利测算"]
+        ReporterAgent["📑 研报架构师 (reporter_agent)<br>ModelTier.STRONG 驱动 · 生成全景 Markdown 交付物"]
     end
 
     subgraph CoreArch["淘智多智能体底层四梁八柱 (Core Architecture)"]
@@ -130,7 +130,7 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  A[登录身份与权限] --> B[Jev System-1 离散规划]
+  A[登录身份与权限] --> B[动态意图理解与专家路由]
   B --> C[四路混合检索与授权资料]
   C --> D[专业专家并发协同]
   D --> E[事实溯源与引用门禁]
@@ -149,7 +149,7 @@ flowchart LR
 | --- | --- |
 | 前端 | Vue 3、TypeScript、Element Plus（简体中文） |
 | 后端 | FastAPI，`/api`，统一会话和权限 |
-| 决策核 | Jev System-1，离散 Choice、Score、Noul 原语 |
+| 决策核 | 编排层 DecisionEngine，离散 Choice、Score、Verify 原语 |
 | 语义缓存 | 自研向量矩阵点积引擎 + Transactional Outbox 异步削峰 |
 | Agent 编排 | LangGraph，多角色并发、证据核验、审核门禁 |
 | 持久化 | PostgreSQL，Alembic 迁移 |
@@ -157,8 +157,8 @@ flowchart LR
 | 部署 | Linux 用户目录运行时、Supervisor、单机多进程 |
 
 ```text
-src/ecom_copilot/enterprise/   在线业务、权限、语义缓存、Jev 决策核与工作流
-src/ecom_copilot/             共享能力和隔离的离线模块
+src/taozhi/server/           在线业务、权限、FastAPI 服务与工作流
+src/taozhi/                  淘智 (TaoZhi) 智能体工程核心根包
 web/src/                     中文工作台、类型与同源 API
 evals/                       评测数据集、指标实现、基线对比运行器与报告
 .github/workflows/           main 推送的 CI 与提交范围检查
@@ -251,7 +251,7 @@ make build-web        # TypeScript 检查与生产构建（0 错误）
   ```text
   feat(enterprise/cache): 引入微秒级向量语义缓存中台
 
-  src/ecom_copilot/enterprise/
+  src/taozhi/infrastructure/cache/
      semantic_cache.py: 实现基于点积相似度的本地向量缓存与 LRU 淘汰
      worker.py: 在任务执行前注入缓存命中判定与 ACL 权限重验
   tests/

@@ -38,7 +38,7 @@ redirect_stderr=true
 for mode,port in (("production",18080),):
  for kind in ("worker","api"):
   name=kind+"-"+mode
-  command=f"{python} -m ecom_copilot.enterprise.worker" if kind=="worker" else f"{python} -m uvicorn ecom_copilot.enterprise.api:app --host 127.0.0.1 --port {port} --no-access-log"
+  command=f"{python} -m taozhi.server.worker" if kind=="worker" else f"{python} -m uvicorn taozhi.server.api:app --host 127.0.0.1 --port {port} --no-access-log"
   parts.append(f"""[program:{name}]
 command={command}
 directory={ROOT}

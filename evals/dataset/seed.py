@@ -30,15 +30,15 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import yaml  # noqa: E402
 
-from ecom_copilot.enterprise.config import load_config  # noqa: E402
-from ecom_copilot.enterprise.db import database_connection, fetch_all, fetch_one  # noqa: E402
-from ecom_copilot.enterprise.ingest import split  # noqa: E402
-from ecom_copilot.enterprise.passwords import hash_password, verify_password  # noqa: E402
-from ecom_copilot.enterprise.policy import can_read, load_principal  # noqa: E402
+from taozhi.config import load_config  # noqa: E402
+from taozhi.knowledge.db import database_connection, fetch_all, fetch_one  # noqa: E402
+from taozhi.knowledge.ingest import split  # noqa: E402
+from taozhi.server.passwords import hash_password, verify_password  # noqa: E402
+from taozhi.server.policy import can_read, load_principal  # noqa: E402
 
 SPEC = Path(__file__).resolve().parent / "spec"
 GEN = ROOT / "evals/datasets/generated/latest"
-EVAL_PASSWORD = "Syn@Eval2026x"   # 评测环境专用口令：≥12 位且非弱口令，过生产校验
+EVAL_PASSWORD = "taozhi2026eval"   # 评测环境专用口令：14 位纯小写字母+数字（≥12 位且非弱口令），免特殊字符输错
 SYN_PREFIX = "SYN_"               # 夹具/语料/身份统一前缀，--clean 按它清除
 
 
@@ -129,12 +129,12 @@ def seed_users(conn, tenant_id, org):
 
 def seed_documents(conn, tenant_id, creator_id, docs):
     """写入文档/版本/切片/向量/ES。切片与入库口径一致：嵌入输入带标题前缀。"""
-    from ecom_copilot.enterprise.embedding import available as embed_available, encode_passages, embedding_input
-    from ecom_copilot.enterprise.facts import index_mentions
+    from taozhi.knowledge.embedding import available as embed_available, encode_passages, embedding_input
+    from taozhi.knowledge.facts import index_mentions
     if not embed_available():
         print("嵌入服务不可用，终止（不留无向量文档）", file=sys.stderr)
         raise SystemExit(2)
-    from ecom_copilot.enterprise import es_index
+    from taozhi.knowledge import es_index
     stats = {"inserted": 0, "updated": 0, "chunks": 0}
     for d in docs:
         body = d["body"]
@@ -246,7 +246,7 @@ def verify(conn, tenant_id, org, fixtures, user_ids):
 
 
 def clean(conn, tenant_id):
-    from ecom_copilot.enterprise import es_index
+    from taozhi.knowledge import es_index
     docs = [r["id"] for r in fetch_all(conn, "SELECT id FROM documents WHERE tenant_id=%s AND left(id,4)=%s", (tenant_id, "SYN_"))]
     for did in docs:
         conn.execute("DELETE FROM chunks WHERE document_id=%s", (did,))

@@ -17,8 +17,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.ecom_copilot.enterprise.research import run_research
-from src.ecom_copilot.enterprise.subagent import (
+from taozhi.orchestration.agent_system import execute_autonomous_agents
+from taozhi.core.agent import (
     Message,
     MessageBus,
     MessageType,
@@ -37,10 +37,17 @@ from src.ecom_copilot.enterprise.subagent import (
 def test_subagent_registry():
     """测试智能体类型的注册与获取（统一以 _agent 为后缀）。"""
     reg = SubagentRegistry()
-    assert reg.get("web_researcher_agent") is not None
-    assert reg.get("ecommerce_scanner_agent") is not None
-    assert reg.get("data_verifier_agent") is not None
-    assert reg.get("synthesis_reporter_agent") is not None
+    assert reg.get("main_agent") is not None
+    assert reg.get("web_agent") is not None
+    assert reg.get("scanner_agent") is not None
+    assert reg.get("verifier_agent") is not None
+    assert reg.get("reporter_agent") is not None
+    # 验证简写别名自适应映射
+    assert reg.get("main") is not None
+    assert reg.get("web") is not None
+    assert reg.get("scanner") is not None
+    assert reg.get("verifier") is not None
+    assert reg.get("reporter") is not None
 
     custom = reg.define_subagent(
         name="custom_analyst_agent",
@@ -153,7 +160,7 @@ def test_subagent_runner_invoke():
     runner = SubagentRunner(bus=bus, llm_client=mock_llm)
 
     res = runner.invoke_subagent(
-        type_name="web_researcher_agent",
+        type_name="web_agent",
         role="全网市场情报分析专员",
         prompt="调研磁吸手机壳市场",
         model_tier="fast",
@@ -181,8 +188,8 @@ def test_full_multi_agent_research_flow():
     def on_progress(stage: str, pct: int):
         progress_stages.append((stage, pct))
 
-    with patch("src.ecom_copilot.enterprise.research.LLMClient", return_value=mock_llm):
-        result = run_research(keyword="磁吸手机壳", emit=on_progress)
+    with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm):
+        result = execute_autonomous_agents(keyword="磁吸手机壳", emit_event_fn=on_progress)
 
     assert "report" in result
     assert "磁吸支架手机壳电商市场调研报告" in result["report"]

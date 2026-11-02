@@ -3,6 +3,11 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { requestApi } from './api'
 import BiView from './views/BiView.vue'
+import ResearchChatView from './views/ResearchChatView.vue'
+import DocumentManager from './views/DocumentManager.vue'
+import PolicyMatrix from './views/PolicyMatrix.vue'
+import TaskTimeline from './views/TaskTimeline.vue'
+import logoUrl from './assets/logo.svg'
 import type {
   User,
   WorkspaceInfo,
@@ -99,7 +104,6 @@ const runtimeStatus = ref<Partial<RuntimeStatus>>({}),
   permissionIdOpen = ref(false),
   permissionId = ref('')
 const accessId = ref(''),
-  searchTerm = ref(''),
   selectedFile = ref<File | null>(null),
   fileInput = ref<HTMLInputElement | null>(null)
 
@@ -178,7 +182,8 @@ const caps = computed<Partial<Capabilities>>(() => user.value?.capabilities || {
 const root = computed(() => orgs.value.find((n) => n.kind === 'company')?.id || '')
 const menus = computed(() => [
   '工作台',
-  '智能问答',
+  '智能调研',
+  '企业知识问答',
   '数据中台',
   '任务中心',
   '文档库',
@@ -193,7 +198,8 @@ const subtitles = computed(
     (
       ({
         工作台: '你获准访问的资料与任务。',
-        智能问答: '仅使用你有权访问的资料回答。',
+        智能调研: '多智能体深度协同调研与多轮对话中台。',
+        企业知识问答: '仅使用你有权访问的资料回答。',
         数据中台: '看板总览，自然语言问数。',
         任务中心: '查看进度、核验结果与引用来源。',
         文档库: '资料按组织范围与密级管理。',
@@ -206,20 +212,20 @@ const subtitles = computed(
       }) as Record<string, string>
     )[page.value],
 )
-const NAV_GLYPHS: Record<string, string> = {
-  工作台: '概',
-  智能问答: '问',
-  数据中台: '数',
-  任务中心: '任',
-  文档库: '文',
-  团队工作台: '协',
-  审核与授权: '审',
-  组织与人员: '组',
-  运行状态: '态',
-  审计记录: '迹',
-  个人设置: '我',
+const NAV_ICONS: Record<string, string> = {
+  工作台: '📊',
+  智能调研: '🤖',
+  企业知识问答: '💬',
+  数据中台: '📈',
+  任务中心: '📋',
+  文档库: '📚',
+  团队工作台: '👥',
+  审核与授权: '🛡️',
+  组织与人员: '🏢',
+  运行状态: '⚡',
+  审计记录: '📜',
+  个人设置: '⚙️',
 }
-const filteredDocs = computed(() => docs.value.filter((d) => d.title.includes(searchTerm.value)))
 const tree = computed(() => {
   const map = new Map(
     orgs.value.map((n) => [n.id, { ...n, label: n.name, children: [] } as OrganizationTree]),
@@ -404,70 +410,7 @@ async function navigate(name: string) {
     })
   else await action(load)
 }
-const researchForm = reactive({ keyword: '', platforms: ['web', 'p1688'] })
-const researching = ref(false)
-const presetKeywords = [
-  '磁吸充电宝',
-  '骨传导耳机',
-  '筋膜枪',
-  '桌面加湿器',
-  '空气炸锅',
-  '智能保温杯',
-]
-/**
- * 选择热门预设品类关键词并填入输入框。
- * @param kw 选中的预设关键词。
- */
-function selectPresetKeyword(kw: string) {
-  researchForm.keyword = kw
-}
-const slashCommands = [
-  { cmd: '/plan', label: '规划', desc: '结构化排期与分步推演' },
-  { cmd: '/learn', label: '记忆', desc: '学习并沉淀操作规范与业务偏好' },
-  { cmd: '/compact', label: '压实', desc: '压缩对话上下文释放窗口' },
-  { cmd: '/goal', label: '深潜', desc: '深度持续自愈执行直到目标达成' },
-]
-/**
- * 应用智能体斜杠指令前缀到提问输入框。
- * @param cmd 斜杠指令名称（如 /plan）。
- */
-function applySlashCommand(cmd: string) {
-  askForm.question = cmd + ' ' + askForm.question.replace(/^\/\w+\s*/, '')
-}
-/**
- * 复制当前选中的多智能体调研研报 Markdown 全文到剪贴板。
- */
-function copyReport() {
-  if (activeTask.value?.result?.report) {
-    navigator.clipboard.writeText(activeTask.value.result.report)
-    ElMessage.success('研报已复制到剪贴板')
-  }
-}
-/**
- * 提交平台调研任务：派多平台智能体并行抓取并生成调研报告。
- * @returns 无返回值；关键词或平台为空时提示且不创建任务。
- */
-async function submitResearch() {
-  const q = researchForm.keyword.trim()
-  if (!q) return void ElMessage.warning('请输入调研关键词')
-  if (!researchForm.platforms.length) return void ElMessage.warning('至少选择一个平台')
-  researching.value = true
-  try {
-    const r = await api<CreatedResource>('/tasks', 'POST', {
-      question: q,
-      kind: 'research',
-      platforms: [...researchForm.platforms],
-      input_level: 1,
-    })
-    ElMessage.success('调研任务已提交，智能体出动中')
-    page.value = '任务中心'
-    activeTask.value = await api<Task>('/tasks/' + r.id)
-    taskOpen.value = true
-    streamTask(r.id)
-  } finally {
-    researching.value = false
-  }
-}
+
 /**
  * 提交问答任务并打开获准进度；空问题不提交，审核前不自行显示答案。
  * @returns 操作完成；空问题时返回中文提示，不创建任务。
@@ -499,10 +442,24 @@ function streamTask(id: string) {
    */
   taskStream.onmessage = (ev) => {
     try {
-      const row = JSON.parse(ev.data) as { stage?: string; progress?: number }
+      const row = JSON.parse(ev.data) as {
+        id?: number
+        stage?: string
+        progress?: number
+        status?: string
+      }
       if (!activeTask.value || activeTask.value.id !== id) return
       if (row.stage) activeTask.value.stage = row.stage
       if (typeof row.progress === 'number') activeTask.value.progress = row.progress
+      if (!activeTask.value.events) activeTask.value.events = []
+      if (row.stage && !activeTask.value.events.some((e) => e.stage === row.stage)) {
+        activeTask.value.events.push({
+          id: row.id || Date.now(),
+          stage: row.stage,
+          progress: row.progress || 0,
+          status: row.status || 'running',
+        })
+      }
     } catch {}
   }
   taskStream.addEventListener('done', (ev) => {
@@ -534,10 +491,12 @@ async function openTask(id: string) {
 }
 /**
  * 提交审核决定并重新获取答案；批准不会把审核人的权限转给提问人。
- * @param approve - 批准或拒绝当前任务。
+ * @param approveOrTaskId - 批准决定或任务编号。
+ * @param maybeApprove - 可选的批准布尔决定。
  */
-async function reviewTask(approve: boolean) {
+async function reviewTask(approveOrTaskId: boolean | string, maybeApprove?: boolean) {
   if (!activeTask.value) return
+  const approve = typeof approveOrTaskId === 'boolean' ? approveOrTaskId : Boolean(maybeApprove)
   await action(async () => {
     await api('/tasks/' + activeTask.value!.id + '/review', 'POST', { approve, comment: '' })
     ElMessage.success(approve ? '答案已发布' : '答案未通过审核')
@@ -547,11 +506,42 @@ async function reviewTask(approve: boolean) {
 }
 /**
  * 请求取消当前任务；执行与取消权限由服务端再次核验。
+ * @param taskId - 可选的任务编号。
  */
-async function cancelTask() {
+async function cancelTask(taskId?: string) {
+  const tid = taskId || activeTask.value?.id
+  if (!tid) return
   await action(async () => {
-    await api('/tasks/' + activeTask.value!.id + '/cancel', 'POST')
+    await api('/tasks/' + tid + '/cancel', 'POST')
     ElMessage.success('已请求取消')
+    await load()
+  })
+}
+
+/**
+ * 重新发起任务排队与执行。
+ * @param taskId - 可选的任务编号。
+ */
+async function retryTask(taskId?: string) {
+  const tid = taskId || activeTask.value?.id
+  if (!tid) return
+  await action(async () => {
+    await api('/tasks/' + tid + '/retry', 'POST')
+    ElMessage.success('已重新发起任务排队')
+    await load()
+  })
+}
+
+/**
+ * 运行时向正在执行的任务注入中途动态干预指引。
+ * @param taskId - 任务编号。
+ * @param message - 干预指引正文。
+ */
+async function steerTask(taskId: string, message: string) {
+  if (!taskId || !message.trim()) return
+  await action(async () => {
+    await api('/tasks/' + taskId + '/steer', 'POST', { message: message.trim() })
+    ElMessage.success('干预指令已注入执行管道')
     await load()
   })
 }
@@ -903,38 +893,6 @@ async function manageById() {
   })
 }
 /**
- * 将公开的审批字段转为中文摘要；不展开机密正文或凭据。
- * @param row - 后端按权限筛选的申请。
- * @returns 仅包含获准字段的中文摘要。
- */
-function applicationSummary(row: Approval) {
-  const p = row.payload || {},
-    parts: string[] = []
-  if (p.user_id) parts.push('人员：' + personName(p.user_id))
-  if (p.role) parts.push((p.remove ? '移除任职：' : '任职：') + kind(p.role))
-  if (p.node_id) parts.push('范围：' + nodeName(p.node_id))
-  if (p.scope)
-    parts.push(
-      '共享方式：' +
-        ({ company: '公司共享', org: '所属组织', selected: '指定人员' } as Record<string, string>)[
-          p.scope
-        ],
-    )
-  if (p.level) parts.push('密级：' + level(p.level))
-  if ('ai_allowed' in p) parts.push('外部 AI 处理：' + (p.ai_allowed ? '允许' : '禁止'))
-  if ('download_allowed' in p) parts.push('常规下载：' + (p.download_allowed ? '允许' : '禁止'))
-  if ('can_download' in p) parts.push('单独下载：' + (p.can_download ? '允许' : '禁止'))
-  if ('can_write' in p) parts.push('单独编辑：' + (p.can_write ? '允许' : '禁止'))
-  if (p.effect) parts.push('访问：' + kind(p.effect))
-  if (p.expires_at) parts.push('到期：' + date(p.expires_at))
-  if (p.revoke) parts.push('撤销单独授权')
-  if (p.reset_password) parts.push('重置临时密码')
-  if ('active' in p) parts.push('状态：' + (p.active ? '启用' : '停用'))
-  if ('system_admin' in p) parts.push('管理员身份：' + (p.system_admin ? '授予' : '移除'))
-  if (p.name) parts.push('组织名称：' + p.name)
-  return parts.join('；') || '确认当前资料版本并发布'
-}
-/**
  * 修改本人密码后清空状态并重新登录；旧会话立即撤销。
  */
 async function changePassword() {
@@ -985,8 +943,8 @@ onUnmounted(() => {
   <div v-if="!user" class="login-shell">
     <aside class="login-story">
       <div class="brand">
-        <span class="brand-mark">协</span>
-        <div>配件智协<small>企业智能协作工作台</small></div>
+        <img :src="logoUrl" alt="淘智 Logo" class="brand-logo-img" />
+        <span class="brand-title">淘智</span>
       </div>
       <div class="story-content">
         <span class="eyebrow">知识 · 业务 · 协作</span>
@@ -999,7 +957,7 @@ onUnmounted(() => {
           <div>操作留痕<span>授权申请 · 审核记录</span></div>
         </div>
       </div>
-      <span class="story-foot">手机配件电商企业工作台</span>
+      <span class="story-foot">数字化电商工作台</span>
     </aside>
     <main class="login-main">
       <div class="login-card">
@@ -1049,32 +1007,46 @@ onUnmounted(() => {
   <div v-else class="app-shell">
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-mark">协</span>
-        <div>配件智协<small>企业智能协作工作台</small></div>
+        <img :src="logoUrl" alt="淘智 Logo" class="brand-logo-img" />
+        <div class="brand-meta">
+          <span class="brand-title">淘智</span>
+          <small class="brand-edition">数字化电商中台</small>
+        </div>
       </div>
-      <div class="workspace-label">企业空间</div>
-      <div class="tenant-label">{{ info.name }}</div>
-      <nav>
+      <div class="tenant-badge-box">
+        <span class="tenant-name-text">{{ info.name || '企业空间' }}</span>
+        <span class="tenant-online-dot"><span class="online-pulse"></span>已连接</span>
+      </div>
+      <nav class="sidebar-nav">
         <button
           v-for="name in menus"
           :key="name"
           :class="{ active: page === name }"
+          class="nav-item-btn"
           @click="navigate(name)"
         >
-          <span class="nav-glyph">{{ NAV_GLYPHS[name] }}</span
-          >{{ name }}
+          <span class="nav-icon">{{ NAV_ICONS[name] }}</span>
+          <span class="nav-label">{{ name }}</span>
         </button>
       </nav>
     </aside>
     <div class="main-shell">
       <header class="topbar">
-        <span>{{ page }}</span>
+        <div class="topbar-breadcrumb">
+          <span class="bc-platform">淘智</span>
+          <span class="bc-slash">/</span>
+          <span class="bc-current">{{ page }}</span>
+          <span class="bc-desc">{{ subtitles }}</span>
+        </div>
         <div class="topbar-right">
-          <span class="avatar">{{ user.display_name?.slice(0, 1) }}</span>
-          <div class="user-info">
-            {{ user.display_name }}<small>{{ user.roles.join(' / ') }}</small>
+          <div class="topbar-user-badge">
+            <span class="user-avatar-round">{{ user.display_name?.slice(0, 1) }}</span>
+            <div class="user-name-col">
+              <span class="user-realname">{{ user.display_name }}</span>
+              <small class="user-roles-text">{{ user.roles.join(' · ') }}</small>
+            </div>
           </div>
-          <el-button text @click="signOut">退出登录</el-button>
+          <el-button size="small" plain class="signout-btn" @click="signOut">退出登录</el-button>
         </div>
       </header>
       <main v-loading="loading" class="content">
@@ -1107,63 +1079,30 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="dashboard-grid">
-            <section class="panel ask-promo research-agent-panel">
-              <div class="panel-header-badge">
-                <el-tag effect="dark" type="primary">🤖 淘智多智能体协同调研中心</el-tag>
-                <small class="team-subtext"
-                  >Coordinator 调度 · Web 全网搜罗 · 1688 探厂 · Verifier 验真 · Reporter
-                  交付</small
-                >
-              </div>
-              <h2>调研什么电商爆品类目？</h2>
-              <el-input
-                v-model="researchForm.keyword"
-                placeholder="例如：智能保温杯、磁吸充电宝、筋膜枪..."
-                clearable
-                @keyup.enter="submitResearch"
-              />
-              <div class="preset-pills-bar">
-                <span class="preset-label">🔥 热门品类：</span>
-                <span
-                  v-for="kw in presetKeywords"
-                  :key="kw"
-                  class="preset-chip"
-                  @click="selectPresetKeyword(kw)"
-                  >{{ kw }}</span
-                >
-              </div>
-              <div class="research-platforms">
-                <span class="platform-label">探查数据源：</span>
-                <el-checkbox-group v-model="researchForm.platforms">
-                  <el-checkbox value="web">🌐 全网搜索 (DuckDuckGo/网关)</el-checkbox>
-                  <el-checkbox value="p1688">🏭 1688 批发工厂源头</el-checkbox>
-                </el-checkbox-group>
-              </div>
-              <div class="panel-actions">
-                <el-button
-                  type="primary"
-                  size="large"
-                  :loading="researching"
-                  @click="submitResearch"
-                  >🚀 派出多智能体团队调研</el-button
-                >
-              </div>
-            </section>
-            <section class="panel">
-              <h3>你的协作范围</h3>
-              <div class="scope-card">
-                <span>当前身份</span><strong>{{ user.roles.join(' / ') }}</strong>
-              </div>
-              <div class="scope-card">
-                <span>所属团队</span
-                ><strong>{{ stats.teams?.join('、') || '公司共享范围' }}</strong>
-              </div>
-              <div class="scope-card">
-                <span>企业模型</span><strong>{{ stats.model_ready ? '已配置' : '待配置' }}</strong>
-              </div>
-              <div class="scope-card">
-                <span>真实业务系统</span
-                ><strong>{{ stats.business_ready ? '已配置' : '未接入' }}</strong>
+            <section class="panel user-profile-panel">
+              <h3>👤 个人信息</h3>
+              <div class="scope-cards-grid">
+                <div class="scope-card">
+                  <span>登录账号</span><strong>{{ user.username }}</strong>
+                </div>
+                <div class="scope-card">
+                  <span>用户名称</span><strong>{{ user.display_name }}</strong>
+                </div>
+                <div class="scope-card">
+                  <span>当前身份</span><strong>{{ user.roles.join(' / ') }}</strong>
+                </div>
+                <div class="scope-card">
+                  <span>所属团队</span
+                  ><strong>{{ stats.teams?.join('、') || '公司共享范围' }}</strong>
+                </div>
+                <div class="scope-card">
+                  <span>企业模型</span
+                  ><strong>{{ stats.model_ready ? '已就绪' : '待配置' }}</strong>
+                </div>
+                <div class="scope-card">
+                  <span>业务集成</span
+                  ><strong>{{ stats.business_ready ? '已连接' : '未接入' }}</strong>
+                </div>
               </div>
             </section>
           </div>
@@ -1187,25 +1126,16 @@ onUnmounted(() => {
             <el-empty v-if="!docs.length" description="暂无资料" />
           </section>
         </template>
+        <template v-else-if="page === '智能调研'">
+          <ResearchChatView :user="user" :api="api" />
+        </template>
         <template v-else-if="page === '数据中台'">
           <BiView :user="user" :api="api" />
         </template>
-        <template v-else-if="page === '智能问答'"
+        <template v-else-if="page === '企业知识问答'"
           ><div class="question-grid">
             <section class="panel">
               <el-form label-position="top">
-                <div class="slash-commands-bar">
-                  <span class="slash-label">⚡ 智能体指令：</span>
-                  <span
-                    v-for="cmd in slashCommands"
-                    :key="cmd.cmd"
-                    class="slash-cmd-chip"
-                    :title="cmd.desc"
-                    @click="applySlashCommand(cmd.cmd)"
-                  >
-                    <strong>{{ cmd.cmd }}</strong> {{ cmd.label }}
-                  </span>
-                </div>
                 <el-form-item label="问题">
                   ><el-input
                     v-model="askForm.question"
@@ -1285,7 +1215,7 @@ onUnmounted(() => {
           ><section class="panel">
             <div class="section-heading">
               <h3>{{ page === '团队工作台' ? '团队任务与审核' : '我的可见任务' }}</h3>
-              <el-button type="primary" @click="page = '智能问答'">提出新问题</el-button>
+              <el-button type="primary" @click="page = '企业知识问答'">提出新问题</el-button>
             </div>
             <el-table :data="jobs"
               ><el-table-column label="问题" min-width="290"
@@ -1326,168 +1256,51 @@ onUnmounted(() => {
               ></el-table
             ><el-empty v-if="!jobs.length" description="暂无任务" /></section
         ></template>
-        <template v-else-if="page === '文档库'"
-          ><section class="panel">
-            <div class="section-heading">
-              <el-input
-                v-model="searchTerm"
-                class="search-box"
-                placeholder="搜索可访问资料"
-                clearable
-              />
-              <div>
-                <el-button v-if="caps.system" @click="permissionIdOpen = true"
-                  >按编号配置权限</el-button
-                ><el-button @click="accessOpen = true">申请资料访问</el-button>
-              </div>
-            </div>
-            <el-table :data="filteredDocs"
-              ><el-table-column label="资料名称" min-width="300"
-                ><template #default="{ row }"
-                  ><el-button text type="primary" class="table-question" @click="openDoc(row.id)">{{
-                    row.title
-                  }}</el-button></template
-                ></el-table-column
-              ><el-table-column label="组织范围" prop="node_name" min-width="150" /><el-table-column
-                label="密级"
-                width="110"
-                ><template #default="{ row }"
-                  ><el-tag
-                    :type="row.level === 3 ? 'danger' : row.level === 2 ? 'warning' : 'info'"
-                    >{{ level(row.level) }}</el-tag
-                  ></template
-                ></el-table-column
-              ><el-table-column label="版本" width="80"
-                ><template #default="{ row }"
-                  >第 {{ row.current_version }} 版</template
-                ></el-table-column
-              ><el-table-column label="状态" width="120"
-                ><template #default="{ row }">{{ state(row.state) }}</template></el-table-column
-              ><el-table-column label="操作" width="160"
-                ><template #default="{ row }"
-                  ><el-button text @click="openDoc(row.id)">查看</el-button
-                  ><el-button
-                    v-if="row.can_download"
-                    text
-                    tag="a"
-                    :href="'/api/documents/' + row.id + '/download'"
-                    >下载</el-button
-                  ></template
-                ></el-table-column
-              ></el-table
-            ><el-empty v-if="!filteredDocs.length" description="暂无匹配资料" /></section
-        ></template>
-        <template v-else-if="page === '审核与授权'"
-          ><section class="panel">
-            <el-alert
-              title="批准不会改变他人权限；资料或人员变化后请重新提交申请。"
-              type="info"
-              :closable="false"
-            /><el-table :data="requests"
-              ><el-table-column type="expand"
-                ><template #default="{ row }"
-                  ><p class="application-summary">{{ applicationSummary(row) }}</p></template
-                ></el-table-column
-              ><el-table-column label="申请类型" prop="label" width="140" /><el-table-column
-                label="相关资料或人员"
-                min-width="240"
-                ><template #default="{ row }"
-                  >{{ row.title || personName(row.payload?.user_id || row.target_id)
-                  }}<small class="cell-small">{{
-                    row.title
-                      ? ''
-                      : row.kind === 'membership'
-                        ? nodeName(row.payload.node_id) + ' · ' + kind(row.payload.role)
-                        : '受限详情按当前权限展示'
-                  }}</small></template
-                ></el-table-column
-              ><el-table-column label="申请人" width="130"
-                ><template #default="{ row }">{{
-                  personName(row.requested_by)
-                }}</template></el-table-column
-              ><el-table-column label="审批身份" width="110"
-                ><template #default="{ row }">{{
-                  row.required_role === 'boss' ? '老板' : '团队负责人'
-                }}</template></el-table-column
-              ><el-table-column label="状态" width="100"
-                ><template #default="{ row }">{{ state(row.state) }}</template></el-table-column
-              ><el-table-column label="操作" width="170"
-                ><template #default="{ row }"
-                  ><template v-if="row.can_decide && row.state === 'pending'"
-                    ><el-button text type="primary" @click="decideRequest(row, true)"
-                      >批准</el-button
-                    ><el-button text type="danger" @click="decideRequest(row, false)"
-                      >拒绝</el-button
-                    ></template
-                  ><span v-else class="muted">等待或已处理</span></template
-                ></el-table-column
-              ></el-table
-            ><el-empty v-if="!requests.length" description="暂无申请" /></section
-        ></template>
-        <template v-else-if="page === '组织与人员'"
-          ><div class="organization-grid">
-            <section class="panel">
-              <div class="section-heading">
-                <h3>公司组织架构</h3>
-                <el-button text type="primary" @click="newOrg">新增组织</el-button>
-              </div>
-              <el-tree :data="tree" node-key="id" default-expand-all :expand-on-click-node="false"
-                ><template #default="{ data }"
-                  ><div class="org-tree-row">
-                    <span>{{ data.name }}</span
-                    ><el-tag size="small" type="info">{{ kind(data.kind) }}</el-tag
-                    ><el-button
-                      v-if="data.kind !== 'company'"
-                      text
-                      size="small"
-                      @click="editOrg(data)"
-                      >调整</el-button
-                    >
-                  </div></template
-                ></el-tree
-              >
-            </section>
-            <section class="panel">
-              <div class="section-heading">
-                <h3>人员与任职</h3>
-                <el-button type="primary" @click="newAccount">新增账号</el-button>
-              </div>
-              <el-table :data="people"
-                ><el-table-column label="姓名 / 账号" min-width="160"
-                  ><template #default="{ row }"
-                    >{{ row.display_name
-                    }}<small class="cell-small">{{ row.username }}</small></template
-                  ></el-table-column
-                ><el-table-column label="任职与范围" min-width="210"
-                  ><template #default="{ row }"
-                    ><el-tag v-if="row.system_admin" size="small">管理员</el-tag>
-                    <div v-for="m in row.memberships" :key="m.node_id + m.role">
-                      {{ nodeName(m.node_id) }} · {{ kind(m.role) }}
-                    </div>
-                    <span v-if="!row.memberships?.length && !row.system_admin"
-                      >待分配</span
-                    ></template
-                  ></el-table-column
-                ><el-table-column label="状态" width="80"
-                  ><template #default="{ row }">{{
-                    row.active ? '正常' : '已停用'
-                  }}</template></el-table-column
-                ><el-table-column label="管理" width="220"
-                  ><template #default="{ row }"
-                    ><el-button text @click="membership(row)">任职</el-button
-                    ><el-button text @click="resetPassword(row)">重置</el-button
-                    ><el-button
-                      text
-                      :type="row.active ? 'danger' : 'primary'"
-                      @click="disableUser(row)"
-                      >{{ row.active ? '停用' : '启用' }}</el-button
-                    ></template
-                  ></el-table-column
-                ></el-table
-              >
-            </section>
-          </div></template
-        >
+        <template v-else-if="page === '文档库'">
+          <DocumentManager
+            :docs="docs"
+            :caps="caps"
+            @open-doc="openDoc"
+            @open-permission-id="permissionIdOpen = true"
+            @open-access="accessOpen = true"
+          />
+        </template>
+        <template v-else-if="page === '审核与授权'">
+          <PolicyMatrix
+            mode="approvals"
+            :requests="requests"
+            :tree="tree"
+            :people="people"
+            :caps="caps"
+            :person-name="personName"
+            :node-name="nodeName"
+            @decide-request="decideRequest"
+            @new-org="newOrg"
+            @edit-org="editOrg"
+            @new-account="newAccount"
+            @membership="membership"
+            @reset-password="resetPassword"
+            @disable-user="disableUser"
+          />
+        </template>
+        <template v-else-if="page === '组织与人员'">
+          <PolicyMatrix
+            mode="org"
+            :requests="requests"
+            :tree="tree"
+            :people="people"
+            :caps="caps"
+            :person-name="personName"
+            :node-name="nodeName"
+            @decide-request="decideRequest"
+            @new-org="newOrg"
+            @edit-org="editOrg"
+            @new-account="newAccount"
+            @membership="membership"
+            @reset-password="resetPassword"
+            @disable-user="disableUser"
+          />
+        </template>
         <template v-else-if="page === '审计记录'"
           ><section class="panel">
             <el-table :data="audits"
@@ -1590,160 +1403,15 @@ onUnmounted(() => {
         </div></template
       ></el-dialog
     >
-    <el-dialog v-model="taskOpen" title="任务详情" width="860px"
-      ><template v-if="activeTask"
-        ><h3>{{ activeTask.question }}</h3>
-        <div class="detail-meta">
-          <el-tag>{{ state(activeTask.state) }}</el-tag
-          ><span>{{ activeTask.stage }}</span
-          ><span>{{ level(activeTask.input_level) }}</span>
-        </div>
-        <el-progress
-          :percentage="activeTask.progress"
-          :status="activeTask.state === 'completed' ? 'success' : undefined"
-        /><el-alert
-          v-if="activeTask.error"
-          :title="activeTask.error"
-          type="error"
-          :closable="false"
-        /><el-alert
-          v-if="activeTask.restricted"
-          title="来源权限已变化，请重新查询。"
-          type="warning"
-          :closable="false"
-        /><template v-if="activeTask.result"
-          ><template v-if="activeTask.kind === 'research'">
-            <div class="research-header-row">
-              <h3>📈 淘智多智能体协同调研研报</h3>
-              <el-button size="small" type="primary" plain @click="copyReport"
-                >📋 复制研报 Markdown</el-button
-              >
-            </div>
-            <div class="detail-meta">
-              <el-tag
-                v-for="pl in activeTask.result.platforms || []"
-                :key="pl.name"
-                :type="pl.state === 'ok' ? 'success' : 'info'"
-                effect="plain"
-                >{{ pl.label }} · {{ pl.state_label }}</el-tag
-              >
-              <el-tag v-if="activeTask.result.elapsed" type="warning" effect="plain"
-                >⏱️ 协同耗时 {{ activeTask.result.elapsed }}s</el-tag
-              >
-              <el-tag v-if="activeTask.result.model_calls" type="info" effect="plain"
-                >🧠 模型调度 {{ activeTask.result.model_calls }} 次</el-tag
-              >
-            </div>
-
-            <!-- 多智能体协作阵容墙 (Subagents Roster) -->
-            <div v-if="activeTask.result.subagents?.length" class="subagents-roster-box">
-              <div class="roster-header">
-                <strong
-                  >🤖 参战子智能体协同梯队 ({{ activeTask.result.subagents.length }} 位)</strong
-                >
-                <small>事件总线反应式协同 · 双轨记忆与 Scratch 隔离</small>
-              </div>
-              <div class="subagents-card-grid">
-                <div
-                  v-for="sa in activeTask.result.subagents"
-                  :key="sa.id || sa.type_name"
-                  class="subagent-roster-card"
-                >
-                  <div class="subagent-card-top">
-                    <span class="subagent-role-name">{{ sa.role }}</span>
-                    <el-tag
-                      size="small"
-                      :type="sa.status === 'completed' ? 'success' : 'info'"
-                      effect="light"
-                    >
-                      {{ sa.status }}
-                    </el-tag>
-                  </div>
-                  <div class="subagent-card-bottom">
-                    <span class="subagent-tier-badge">{{ sa.type_name }}</span>
-                    <small v-if="sa.elapsed">{{ sa.elapsed }}s</small>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 调研大纲章节标签 -->
-            <div v-if="activeTask.result.outline?.length" class="research-outline-bar">
-              <span class="outline-label">📑 研报大纲章节：</span>
-              <el-tag
-                v-for="(ch, idx) in activeTask.result.outline"
-                :key="idx"
-                size="small"
-                effect="light"
-                class="chapter-pill"
-              >
-                {{ ch }}
-              </el-tag>
-            </div>
-
-            <!-- 交付工件链接 -->
-            <div v-if="activeTask.result.artifacts?.length" class="artifacts-bar">
-              <span class="artifact-label">📦 交付工件 (Artifacts)：</span>
-              <el-tag
-                v-for="(art, idx) in activeTask.result.artifacts"
-                :key="idx"
-                size="small"
-                type="info"
-                class="artifact-pill"
-              >
-                {{ art.split('/').pop() }}
-              </el-tag>
-            </div>
-
-            <pre class="answer-body research-markdown-view">{{
-              activeTask.result.report
-            }}</pre></template
-          ><template v-else
-            ><h3>核验结果</h3>
-            <div class="detail-meta">
-              <el-tag type="primary" effect="dark">🎯 Main 调度</el-tag>
-              <el-tag v-for="s in activeTask.result.specialists || []" :key="s.name" effect="plain"
-                >{{ s.name }} ·
-                {{ s.count ? '已核验 ' + s.count + ' 条原文' : '暂无支持结论' }}</el-tag
-              >
-              <el-tag type="success" effect="dark">🔍 Verifier 终审</el-tag>
-            </div>
-            <pre class="answer-body">{{ activeTask.result.answer }}</pre>
-            <div v-if="activeTask.result.missing?.length" class="missing-box">
-              <strong>尚需确认</strong>
-              <p v-for="m in activeTask.result.missing" :key="m">{{ m }}</p>
-            </div>
-            <h3 v-if="activeTask.result.citations?.length">引用来源</h3>
-            <el-collapse
-              ><el-collapse-item
-                v-for="(c, i) in activeTask.result.citations"
-                :key="c.chunk_id"
-                :title="'[' + (Number(i) + 1) + '] ' + c.title + ' · 第 ' + c.version + ' 版'"
-              >
-                <pre class="quote-body">{{ c.quote }}</pre>
-                <el-button text type="primary" @click="openDoc(c.document_id)"
-                  >查看授权原文</el-button
-                ></el-collapse-item
-              ></el-collapse
-            ></template
-          ></template
-        ><el-empty v-else-if="activeTask.state === 'review'" description="等待业务负责人审核" />
-        <div class="dialog-actions">
-          <template v-if="activeTask.state === 'review' && activeTask.can_review"
-            ><el-button type="primary" @click="reviewTask(true)">批准发布</el-button
-            ><el-button type="danger" plain @click="reviewTask(false)"
-              >拒绝发布</el-button
-            ></template
-          ><el-button
-            v-if="
-              ['queued', 'running', 'review'].includes(activeTask.state) && activeTask.can_cancel
-            "
-            @click="cancelTask"
-            >取消任务</el-button
-          >
-        </div></template
-      ></el-dialog
-    >
+    <TaskTimeline
+      v-model="taskOpen"
+      :task="activeTask"
+      @steer="steerTask"
+      @retry="retryTask"
+      @cancel="cancelTask"
+      @review="reviewTask"
+      @open-doc="openDoc"
+    />
     <el-dialog
       v-model="docEdit"
       :title="docForm.id ? '编辑资料新版本' : '新增资料草稿'"

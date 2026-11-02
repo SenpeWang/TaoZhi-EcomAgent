@@ -9,9 +9,9 @@ import urllib.request
 
 import numpy as np
 
-from ecom_copilot.enterprise.db import database_connection, fetch_all
-from ecom_copilot.enterprise.embedding import encode_query
-from ecom_copilot.enterprise.retriever import _pg_ann
+from taozhi.knowledge.db import database_connection, fetch_all
+from taozhi.knowledge.embedding import encode_query
+from taozhi.knowledge.retriever import _pg_ann
 
 # 1) ES 污染检查：只应存在生产租户
 body = json.dumps({"size": 0, "aggs": {"t": {"terms": {"field": "tenant_id"}}}}).encode()

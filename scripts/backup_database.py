@@ -2,7 +2,7 @@
 import os,sys,subprocess,json,datetime,hashlib
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/"src"))
-from ecom_copilot.enterprise.config import load_config
+from taozhi.config import load_config
 import psycopg
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict

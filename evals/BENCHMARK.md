@@ -15,10 +15,10 @@
 
 | 不属于 | 实际情况 |
 |---|---|
-| `src/ecom_copilot/enterprise/metrics.py` | 业务指标语义层（ChatBI 的 metric_key / dimensions / SQL 模板白名单），不是评估 |
-| `src/ecom_copilot/observability/metrics.py` | 运行时 token / 延迟观测，链路算成本依赖它 |
+| `src/taozhi/enterprise/metrics.py` | 业务指标语义层（ChatBI 的 metric_key / dimensions / SQL 模板白名单），不是评估 |
+| `src/taozhi/observability/metrics.py` | 运行时 token / 延迟观测，链路算成本依赖它 |
 | `migrations/versions/007_metrics.py`、`scripts/seed_*_metrics.py` | 建表迁移与业务数据灌入 |
-| `src/ecom_copilot/hypothesis/tracker.py` 的 `evaluate()` | 业务假设评估 |
+| `src/taozhi/hypothesis/tracker.py` 的 `evaluate()` | 业务假设评估 |
 | 一次性探针 / 阈值实证 / 消融对比脚本 | 实验属实验，不属评估：结论回写代码注释后脚本不再保留（已取消） |
 | 安全对抗（金丝雀 / 越权 / 注入 / 泄漏） | 独立 red-team 套件，单独跑、单独记分，不计入 RAG 有效性指标 |
 | `seed.py --verify` 的权限实测矩阵 | 灌库自检，属数据准备而非评估 |
