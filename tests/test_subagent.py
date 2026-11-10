@@ -173,14 +173,17 @@ def test_subagent_runner_invoke():
 
 
 def test_full_multi_agent_research_flow():
-    """测试端到端的多智能体调研流水线 (run_research)。"""
+    """测试端到端的多智能体调研流水线（边界隔离：非供应链诉求直接收敛到研报）。
+
+    关键词「磁吸手机壳」不含工厂/出厂/1688/跨境等供应链信号，主脑依据边界隔离
+    正确跳过 scanner_agent（1688/Amazon 越权探查）与 verifier_agent，仅委派
+    web_agent 采集全网口碑后直接收敛到 reporter_agent 编制研报，避免越权。
+    """
     mock_llm = MagicMock()
     mock_llm.chat.side_effect = [
-        '["市场概览", "供应链价格", "竞品痛点"]',
+        '["市场概览", "竞品痛点", "选品建议"]',
         "全网搜索发现：主流款式为超薄磁吸，热销价 39.9 元。",
-        "1688 批发发现：东莞工厂一手出厂底价 6.8 元，起订量 100 个。",
-        "真实性验真：零售溢价达 5 倍以上，存在把普通 PC 材质宣传为航天材料的夸大营销。",
-        "# 磁吸支架手机壳电商市场调研报告\n\n## 1. 市场概览\n全网需求旺盛...\n\n## 2. 供应链与毛利\n出厂成本 6.8 元，毛利极高。",
+        "# 磁吸支架手机壳电商市场调研报告\n\n## 1. 市场概览\n全网需求旺盛。\n\n## 2. 选品建议\n紧扣核心卖点。",
     ]
 
     progress_stages = []
@@ -194,7 +197,8 @@ def test_full_multi_agent_research_flow():
     assert "report" in result
     assert "磁吸支架手机壳电商市场调研报告" in result["report"]
     assert len(result["outline"]) == 3
-    assert len(result["platforms"]) == 2  # web 与 p1688
-    assert len(result["subagents"]) == 4  # 4个子智能体参与协同
+    # 边界隔离：未触发供应链探查，只保留 web 单渠道，子智能体收敛为 2 个（web + reporter）
+    assert len(result["platforms"]) == 1
+    assert len(result["subagents"]) == 2
     assert len(progress_stages) > 0
     assert any(pct == 100 for _, pct in progress_stages)

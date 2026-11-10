@@ -1,4 +1,4 @@
-"""OTel 执行轨迹：节点级 span 导出到 Phoenix（OTLP/HTTP）。
+"""Arize Phoenix 执行轨迹：节点级 span 导出到 Phoenix。
 
 设计边界：
 - 默认开启（Phoenix 常驻 127.0.0.1:6006），设 TAOZHI_TRACING=0 一键关闭；
@@ -76,7 +76,7 @@ def node_span(name: str, attrs: dict | None = None, context=None):
 
 
 def current_context():
-    """取当前 OTel 上下文（供线程池子任务挂父子关系）；未启用返回 None。"""
+    """取当前链路上下文（供线程池子任务挂父子关系）；未启用返回 None。"""
     if not _enabled():
         return None
     try:

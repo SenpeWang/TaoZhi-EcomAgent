@@ -3,7 +3,7 @@ PHOENIX_PY := $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
 PROJECT_ROOT := $(CURDIR)
 SUPERVISOR_CONFIG := $(HOME)/.local/share/ecom-agent/supervisor.conf
 
-.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
+.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -73,13 +73,16 @@ evals-tests:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.test" PYTHONPATH=src $(PYTHON) -m pytest evals/tests -q
 
 evals-quick:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --quick --compare --gate
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/rag_eval/run.py --quick --compare --gate
 
 evals-full:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --full --compare --gate
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/rag_eval/run.py --full --compare --gate
 
 evals-baseline:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/run_evals.py --full --save-baseline
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) evals/rag_eval/run.py --full --save-baseline
+
+evals-agent:
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) -m evals.agent_eval.runner
 
 # Phoenix 客户端装在独立 venv，不进项目 .venv：观测依赖不污染生产环境
 evals-sync:

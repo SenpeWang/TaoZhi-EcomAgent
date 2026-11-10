@@ -167,8 +167,8 @@ class _FakeConn:
 
 
 def _load_run_evals():
-    sys.path.insert(0, str(ROOT / "evals"))
-    import run_evals  # noqa: PLC0415
+    sys.path.insert(0, str(ROOT))
+    from evals.rag_eval import run as run_evals
     return run_evals
 
 
@@ -193,7 +193,7 @@ def test_run_evals_has_no_hardcoded_node():
     用 AST 而不是文本匹配：事故节点的 id 会保留在 docstring 里作为事故记录，
     文本匹配会误伤；只查"赋值给 org_ 字面量"与"node_id= 字面量"两种真实硬编码形态。
     """
-    tree = ast.parse((ROOT / "evals/run_evals.py").read_text(encoding="utf-8"))
+    tree = ast.parse((ROOT / "evals/rag_eval/run.py").read_text(encoding="utf-8"))
     bad = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -309,7 +309,7 @@ def test_phase_adversarial_marks_rejected_as_failure():
     （见 resolve_eval_node），文本匹配会误伤。这里直接验证代码路径——
     202 分支里 append 的结果字典 pass 必须是 False 常量。
     """
-    tree = ast.parse((ROOT / "evals/run_evals.py").read_text(encoding="utf-8"))
+    tree = ast.parse((ROOT / "evals/rag_eval/run.py").read_text(encoding="utf-8"))
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.FunctionDef) and n.name == "phase_adversarial")
     rejected_dicts = []

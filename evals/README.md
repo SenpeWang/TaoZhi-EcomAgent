@@ -7,13 +7,19 @@
 
 ```
 evals/
+├── rag_eval/                    ★企业知识库 RAG 三层评测运行器（检索 · 对抗 · 行为）
+│   └── run.py                   独立评测执行器（原 run_evals.py 已彻底迁入此处）
+├── agent_eval/                  ★电商真·自主多智能体（Supervisor Loop）质效评测体系
+│   ├── harness.py               单臂会话沙箱与链路追踪
+│   ├── judges.py                4 大声明式判定器（工具契约/交付大纲/去伪/动态干预）
+│   ├── cases.py                 10 大全场景基准测试用例集
+│   └── runner.py                CLI 批跑器（测试完成自动同步至 Phoenix）
 ├── dataset/                     独立评测数据包：规格 → 确定性生成 → 幂等灌库（见其 README）
 ├── datasets/                    数据集（随代码进 Git，可追溯、可 diff）
-│   ├── golden_adversarial.json  18 例对抗集（注入/越权/泄漏/冲突，每条带机读 judge
-│   │                             规则 + basis 语料溯源，全自动判定）
-│   └── generated/latest/         独立包生成产物：108 例 + 32 篇语料（含 10 篇 PDF/DOCX 解析夹具）
+│   ├── golden_adversarial.json  18 例对抗集（全自动规则判定）
+│   └── generated/latest/        独立包生成产物：108 例 + 32 篇语料
 ├── metrics.py                   指标实现（全项目唯一口径）
-├── run_evals.py                 三层评估运行器（检索 · 对抗 · 行为），--only 可按类别过滤
+├── sync_phoenix.py              Arize Phoenix 平台双轨数据同步中枢
 ├── BENCHMARK.md                 口径唯一来源：指标定义·判定协议·报告 schema·数据契约
 ├── reports/                     运行产物（Git 忽略）
 ├── baseline.json                唯一基线快照，随代码进 Git
@@ -43,25 +49,26 @@ behavior 层按类别覆盖三组专项：**robust**（同一事实的五种问�
 make evals-quick      # 检索 + 对抗，约 5 分钟
 make evals-full       # 三层全跑，约 3 小时（108 例逐题 judge；对比基线 + 门禁，不过则退出码 1）
 make evals-baseline   # 三层全跑后锁定为基线
+make evals-agent      # 多智能体自治调研评测（10大用例全跑，完成后自动同步至 Phoenix）
 make evals-tests      # 评估代码自身的单元测试（不需要在线服务）
 make evals-sync       # 评估集 + 最新报告 -> Phoenix（旁路；Phoenix 离线只跳过）
 make evals-pipeline   # evals-full 之后自动同步；门禁不过也同步，失败样例要可见
 
 # 只重跑某一层（迭代判定规则/修复单层时用）
-ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_evals.py --adversarial-only
-ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_evals.py --behavior-only
+ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --adversarial-only
+ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --behavior-only
 # 只跑某几类（冒烟/坏例定位；类别名见 cases.jsonl 的 category 字段）
-ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_evals.py --behavior-only --only robust,multi_turn,parsing
+ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --behavior-only --only robust,multi_turn,parsing
 
 # 直接调用（与 make 等价）
-ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/run_evals.py --quick --compare
+ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --quick --compare
 ```
 
 结果落盘 `evals/reports/<时间戳>-<git短SHA>.json`；`--compare` 与基线逐项对比、下降项报警。
 
 ## Phoenix 同步（可选旁路）
 
-评估本身不依赖 Phoenix：`run_evals.py` 纯离线算分、写 `reports/*.json`。
+评估本身不依赖 Phoenix：`evals/rag_eval/run.py` 纯离线算分、写 `reports/*.json`。
 `sync_phoenix.py` 只把已有产物搬进 Phoenix 供人查看与横向对比，**Phoenix 没起时
 评估照常产出报告**——同步脚本打一句警告、退出码 0，不阻断流水线。
 
@@ -81,7 +88,7 @@ ECOM_PHOENIX_URL=http://127.0.0.1:6006 \
 | `--report` | Phoenix **Experiment** | 逐例 run（答案 + 引用标题/chunk_id/**引用正文**）+ evaluation（answer_pass / faithfulness_decl / answer_relevant / abstain / retrieval.*） |
 | `--follow` | Phoenix **Experiment**（同一次跑、边跑边写） | 同上，只是按"每完成一例"推送而不是整份报告 |
 
-**实时观看**：`run_evals.py` 每完成一例就往 `evals/reports/live.jsonl` 追加一行
+**实时观看**：`evals/rag_eval/run.py` 每完成一例就往 `evals/reports/live.jsonl` 追加一行
 （检索层一行、行为层一行，末行 `end`）。`sync_phoenix.py --follow` 只读这个文件，
 边跑边推。两段式用法：
 
@@ -105,7 +112,7 @@ evaluation 由服务端按 `(run, name)` upsert。`--dry-run` 只打印计划不
 
 **不同步什么**
 
-- **门禁分数**：Phoenix 是观测层，不产出门禁分数。判定仍看 `run_evals.py` 的退出码
+- **门禁分数**：Phoenix 是观测层，不产出门禁分数。判定仍看 `evals/rag_eval/run.py` 的退出码
   与 `reports/*.json`，界面上的数字只供人看。
 - **对抗层（18 例）**：它跑的是 `evals/datasets/golden_adversarial.json`，id 形如
   `Z1` / `N1` / `C1`，与评估集 `case_id`（`GEN-T-*`）实测零交集。拍平进同一个

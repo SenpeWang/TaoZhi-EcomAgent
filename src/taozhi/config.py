@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     # ───────────────────── LLM 服务层（模型分级路由） ─────────────────────
     base_url: str = Field(default="https://token.sensenova.cn/v1", alias="BASE_URL")
     api_key: str = Field(default="", alias="API_KEY")
-    model: str = Field(default="sensenova-6.8-flash-lite", alias="MODEL")
+    model: str = Field(default="sensenova-6.8-flash", alias="MODEL")
 
     # 分级路由：日常解析用轻量模型，复杂研判用强模型，多模态用视觉模型
     llm_fast_model: str = ""

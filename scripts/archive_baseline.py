@@ -66,8 +66,8 @@ def snapshot_key(report: dict) -> str:
 def gate_summary(report: dict) -> str:
     """门禁摘要：硬底线是否过、目标线差哪几项。纯读报告，不调 LLM。
 
-    与 run_evals.gate_check 用同一套阈值：这里只做登记展示，判定仍以
-    run_evals 的退出码为准。
+    与 evals/rag_eval/run.py gate_check 用同一套阈值：这里只做登记展示，判定仍以
+    evals/rag_eval/run.py 的退出码为准。
     """
     six = report.get("six_metrics") or {}
     faith = (six.get("faithfulness") or {}).get("micro")

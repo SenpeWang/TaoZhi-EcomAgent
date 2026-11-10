@@ -12,12 +12,12 @@
                有据率 / 切题度 / 正确拒答
 
 用法（需企业正式环境服务在线）：
-  python evals/run_evals.py --quick            # 对抗+检索，约 5 分钟
-  python evals/run_evals.py --full             # 三层全跑，约 2 小时（108 例逐题 judge，串行）
-  python evals/run_evals.py --quick --compare  # 运行后与 evals/baseline.json 对比
-  python evals/run_evals.py --quick --save-baseline  # 将本次结果锁定为基线
-  python evals/run_evals.py --behavior-only    # 只重跑行为层（LLM judge）
-  python evals/run_evals.py --adversarial-only  # 只重跑对抗层（规则判定，约 5 分钟）
+  python -m evals.rag_eval.run --quick            # 对抗+检索，约 5 分钟
+  python -m evals.rag_eval.run --full             # 三层全跑，约 2 小时（108 例逐题 judge，串行）
+  python -m evals.rag_eval.run --quick --compare  # 运行后与 evals/baseline.json 对比
+  python -m evals.rag_eval.run --quick --save-baseline  # 将本次结果锁定为基线
+  python -m evals.rag_eval.run --behavior-only    # 只重跑行为层（LLM judge）
+  python -m evals.rag_eval.run --adversarial-only  # 只重跑对抗层（规则判定，约 5 分钟）
 
 用例与语料来自独立数据包（evals/dataset/：spec → generate → seed 灌库，检索走 PG/ES）；
 跑评测前先灌库：PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed。
@@ -33,7 +33,7 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "evals"))  # 指标实现在 evals/metrics.py，全项目只此一份
 sys.path.insert(0, str(ROOT))            # evals.dataset.*（灌库口令等）按包路径导入

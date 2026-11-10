@@ -1,7 +1,8 @@
 """LangGraph 问答流程：每个节点重验身份、来源、执行租约与外部处理授权。"""
 from __future__ import annotations
 import json,time,re,functools
-from typing import TypedDict
+from typing import TypedDict,List
+from pydantic import BaseModel,Field
 from concurrent.futures import ThreadPoolExecutor
 from ..knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
 from .policy import (Denied, load_principal, sources_valid)
@@ -46,6 +47,26 @@ def _norm_text(s) -> str:
     的结论误杀成空 findings，进而触发兜底贴原文（10-21 全量 48/107 次的帮凶）。
     """
     return "".join(str(s).split())
+
+
+class _SpecialistFinding(BaseModel):
+    evidence_index: int = Field(description="证据下标，从 0 开始，必须对应给定证据条目")
+    quote: str = Field(description="授权原文中的逐字引用片段")
+    claim: str = Field(description="基于该引用得出的业务结论")
+
+
+class SpecialistOutput(BaseModel):
+    """专家智能体结构化输出契约。
+
+    必须带 schema 走 PydanticOutputParser：无 schema 的 expect="object" 路径在
+    sensenova 网关上对应 json_object response_format，实测输出裹围栏/思维链
+    （10-19 实验 38% 成功率），3 次重试全灭返回 {} → findings 恒空 → 兜底全开
+    （11-02 全量 88/108 兜底、通过率 2.8% 的直接根因）。judge 用同款 schema
+    路径 107/107 有判定，是可靠通道。
+    """
+
+    findings: List[_SpecialistFinding] = Field(default_factory=list, description="结论列表，可为空")
+    missing: List[str] = Field(default_factory=list, description="资料缺失项，可为空")
 
 def validate_task_execution(state,stage,progress,external=False):
     with database_connection() as c:
@@ -354,11 +375,14 @@ def domain_node(state):
         outcome = "ok"
         client = LLMClient(settings.model_copy(update={"llm_timeout": 45, "llm_max_retries": 0, "llm_empty_retries": 0, "llm_max_concurrency": 2, "llm_max_tokens": 4096, "llm_output_cap": 4096}))
         try:
-            # 结构化输出必须走 chat_json（重试 3 次）：网关单次 JSON 成功率实测仅 ~38%
-            # （裹围栏/思维链），裸 chat+单次解析会让 findings 大面积清空、连锁触发
-            # 兜底贴原文——10-21 全量 48/107 次兜底的根因就在这里。
+            # 结构化输出必须走 chat_json + Pydantic schema（judge 同款可靠通道）。
+            # 禁用 expect="object"：该路径无 schema，网关 json_object 模式实测
+            # 输出裹围栏/思维链（10-19 实验 38% 成功率），重试全灭返回 {} 会让
+            # findings 恒空、兜底全开（11-02 全量 88/108 兜底、pass_rate 2.8% 根因）。
             data = client.chat_json(prompt, system=instruction, tier=ModelTier.FAST,
-                                    retries=3, expect="object", max_tokens=4096)
+                                    retries=3, schema=SpecialistOutput, max_tokens=4096)
+            if isinstance(data, SpecialistOutput):
+                data = data.model_dump()
             if not isinstance(data, dict):
                 raise ValueError()
             for f in (data.get("findings") or [])[:8]:
@@ -471,7 +495,7 @@ def publish_node(state):
     return {"answer":answer,"input_level":max([job["input_level"]]+[e["level"] for e in state["evidence"]]+[b.get("source",{}).get("level",1) for b in state["business"]])}
 
 def _traced(name, func):
-    """节点级 OTel span 包装：未启用观测时零开销直通。属性只放计数与枚举，不放原文。"""
+    """节点级 span 包装：未启用 Phoenix 观测时零开销直通。属性只放计数与枚举，不放原文。"""
     from ..observability.tracing import node_span
 
     @functools.wraps(func)

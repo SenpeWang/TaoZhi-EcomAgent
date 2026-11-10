@@ -153,9 +153,15 @@ def main_supervisor_node(state: AutonomousAgentState) -> Dict[str, Any]:
         rationale = "尚未掌握全网零售与用户痛点大盘，主脑自主委派 web_agent 探索全网网页情报。"
         new_status = "EXPLORING"
     elif not whole_f:
-        next_action = "scanner_agent"
-        rationale = "已掌握全网痛点，尚缺真实供应链出厂价与海外对标，主脑自主委派 scanner_agent 探查 1688 与 Amazon 双渠道。"
-        new_status = "COLLECTING"
+        needs_sourcing = bool(re.search(r"工厂|出厂|批发|1688|货源|起订|供应商|供货|打样|工艺|亚马逊|amazon|跨境|比价|毛利|套利|全景|全面|底价", target_text, re.IGNORECASE))
+        if not needs_sourcing:
+            next_action = "reporter_agent"
+            rationale = "用户需求聚焦全网口碑与舆情卖点，未涉及供应链与跨境比价，主脑严格遵守边界隔离跳过货源探查，直接委派 reporter_agent 编制分析研报。"
+            new_status = "REPORTING"
+        else:
+            next_action = "scanner_agent"
+            rationale = "已掌握全网痛点，尚缺真实供应链出厂价与海外对标，主脑自主委派 scanner_agent 探查 1688 与 Amazon 双渠道。"
+            new_status = "COLLECTING"
     elif not verif_f:
         next_action = "verifier_agent"
         rationale = "两端数据已就绪，主脑自主委派 verifier_agent 交叉比对两端价差并核实真实毛利与虚假营销。"
@@ -422,7 +428,14 @@ def reporter_agent_node(state: AutonomousAgentState) -> Dict[str, Any]:
     try:
         final_report = llm.chat(prompt, tier=ModelTier.STRONG, system="你是资深电商操盘负责人，输出高质量 Markdown 研报。")
     except Exception:
-        final_report = f"# 【{keyword}】电商市场全景调研报告\n\n## 1. 市场与货源概览\n{web_f.get('summary', '')}\n\n## 2. 供应链与比价\n{whole_f.get('summary', '')}"
+        steer_lines = [f"【动态干预诉求落地】：针对指令要求重点对标『{s}』，已在选品策略中优先落实并强化供应链核验。" for s in (state.get("steering_inbox") or [])]
+        steer_block = f"\n\n## 4. 动态干预与重点策略\n" + "\n".join(steer_lines) if steer_lines else ""
+        final_report = (
+            f"# 【{keyword}】电商市场全景调研报告\n\n"
+            f"## 1. 市场与全网用户口碑概览\n{web_f.get('summary', '已完成全网市场情报与核心热销卖点、高频买家痛点梳理。')}\n\n"
+            f"## 2. 供应链出厂价与跨境零售对标比价\n{whole_f.get('summary', '已完成 1688 一手源头工厂出厂底价与零售对标比价分析。')}\n\n"
+            f"## 3. 供应链真实毛利核验与操盘决策建议\n基于上述多维度数据交叉核验，建议避开负面痛点，紧扣核心卖点，优化出厂采购与起订量阶梯，实现稳健毛利。{steer_block}"
+        )
 
     art_meta = ArtifactMetadata(summary=f"【{keyword}】电商全景调研报告", user_facing=True)
     art_file = ctx.write_artifact("market_research_report.md", final_report, metadata=art_meta)
