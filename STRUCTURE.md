@@ -15,6 +15,8 @@
 | `scripts/` | 部署、数据管理、构建与运维；不含评估逻辑 |
 | `src/` | Python 源码根目录 |
 | `src/taozhi/` | 淘智 (TaoZhi) 智能体工程核心根包 |
+| `src/taozhi/domain/` | 领域层：核心实体、业务规则、权限判定与隐私策略（不依赖任何框架） |
+| `src/taozhi/infrastructure/persistence/` | 持久化实现：数据模型实现、仓储接口具体化 |
 | `src/taozhi/schemas/` | 请求响应契约 DTO、Agent 状态与全链路 Trace 规范 |
 | `src/taozhi/api/` | 接入层接口：同步问答、流式传输、会话管理与健康检查 |
 | `src/taozhi/orchestration/` | 编排层：显式 5 节点迭代闭环状态机、意图路由与防死锁控制 |
@@ -23,7 +25,7 @@
 | `src/taozhi/rag/` | RAG 能力层：离线数据管道、在线多路检索与独立评估 |
 | `src/taozhi/rag/retrieval/` | 在线多路混合检索器 (BM25+ANN+RRF) 与带锚点上下文构建器 |
 | `src/taozhi/rag/evaluation/` | 独立评估模块：HitRate/MRR 检索指标与生成忠实度校验器 |
-| `src/taozhi/infrastructure/` | 基础设施与存储层：数据库仓储、向量库、缓存与队列 |
+| `src/taozhi/infrastructure/` | 基础设施层：数据库仓储、向量库、缓存、队列与 SDK 适配 |
 | `src/taozhi/infrastructure/cache/` | 基础设施缓存：独立语义向量缓存与会话状态隔离 |
 | `src/taozhi/infrastructure/mcp/` | 电商与情报类 MCP 标准服务端与智能体适配器 |
 | `src/taozhi/observability/` | 可观测性横切能力：全链路树状 Trace 收集器与指标埋点 |
@@ -37,7 +39,7 @@
 | `src/taozhi/core/skills/` | 渐进式技能发现与指令解析 |
 | `src/taozhi/core/commands/` | 业务快捷斜杠指令系统 |
 | `src/taozhi/agents/` | 专职电商子智能体模板定义与统一注册中心 |
-| `src/taozhi/server/` | FastAPI 接口服务、异步 Worker 守护进程与权限策略 |
+| `src/taozhi/server/` | FastAPI 接口服务与异步 Worker 守护进程（仅做适配，权限判定在 domain） |
 | `src/taozhi/knowledge/` | 知识库切片入库、混合检索器与数据库连接池 |
 | `evals/` | 评估模块（独立单元）：口径说明、数据集、指标、运行器、基线与报告 |
 | `evals/rag_eval/` | 企业知识库 RAG 三层评测运行器与质量门禁 |
@@ -81,7 +83,7 @@ AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；
 
 ## 依赖与同步
 
-页面调用统一 API，API 加载当前会话并使用业务服务；权限集中 enterprise/policy.py。Worker 和 Agent 使用同一权限与来源门禁。PostgreSQL 保存在线状态、任务队列和 outbox；附件原件存 MinIO 桶 ecom-private（enterprise/storage.py，可回落本地私有目录）；任务事件经 Kafka ecom.tasks 主题分发（enterprise/queue.py，outbox 发布 + 幂等认领，轮询兜底）；检索切片同步 ES 索引 chunks（enterprise/es_index.py，ES 仅中文 BM25，ANN 语义走 PG pgvector HNSW，双路 RRF 融合并前置权限过滤，可回落本地五信号链路）。
+页面调用统一 API，API 加载当前会话并使用业务服务；权限判定集中在 taozhi/domain/access.py（纯规则），数据库取数与仓储在 taozhi/infrastructure/persistence/access_repo.py；Worker 和 Agent 使用同一权限与来源门禁。PostgreSQL 保存在线状态、任务队列和 outbox；附件原件存 MinIO 桶 ecom-private（enterprise/storage.py，可回落本地私有目录）；任务事件经 Kafka ecom.tasks 主题分发（enterprise/queue.py，outbox 发布 + 幂等认领，轮询兜底）；检索切片同步 ES 索引 chunks（enterprise/es_index.py，ES 仅中文 BM25，ANN 语义走 PG pgvector HNSW，双路 RRF 融合并前置权限过滤，可回落本地五信号链路）。
 
 原模块仍用于共享或离线回归；删除前检查全部引用。新在线能力不得另起旧 JWT、SQLite 或平行授权路径。
 

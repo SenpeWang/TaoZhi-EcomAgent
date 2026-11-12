@@ -1,5 +1,5 @@
 import hashlib,hmac,secrets,threading
-from .policy import Denied
+from taozhi.domain.errors import Denied
 _slots=threading.BoundedSemaphore(4)
 # 设定侧封禁与登录侧拦截必须共用这一份：只在一处改，另一侧就会漏出口令。
 WEAK_PASSWORDS=('123456','123456789012','password123456','admin12345678')

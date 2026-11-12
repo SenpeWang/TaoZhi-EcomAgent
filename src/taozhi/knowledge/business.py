@@ -1,7 +1,7 @@
 from datetime import datetime,timezone
 from urllib.parse import quote,urlparse
 import httpx,re
-from ..server.policy import Denied
+from taozhi.domain.errors import Denied
 def lookup(conn,p,kind,identifier,transport=None):
     from ..config import get_settings
     s=get_settings()

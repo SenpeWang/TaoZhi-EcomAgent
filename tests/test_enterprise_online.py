@@ -6,7 +6,8 @@ from fastapi.testclient import TestClient
 from taozhi.config import load_config
 from taozhi.knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
 from taozhi.server.api import app
-from taozhi.server.policy import Denied,load_principal,source_valid,can_read
+from taozhi.domain.errors import Denied
+from taozhi.infrastructure.persistence.access_repo import load_principal, source_valid, can_read
 from taozhi.server.worker import claim_next_job,process_question_job,process_next_job
 from taozhi.server.pipeline import validate_task_execution
 from taozhi.server.services import create_job

@@ -1,7 +1,7 @@
 """原文中的商品提及关系；不推断未在原文出现的产品属性。"""
 import re,hashlib
 from ..knowledge.db import fetch_all
-from ..server.policy import can_read
+from taozhi.infrastructure.persistence.access_repo import can_read
 def index_mentions(conn,tenant,doc_id,version,chunks):
     conn.execute("DELETE FROM knowledge_mentions WHERE document_id=%s AND version=%s",(doc_id,version))
     for chunk in chunks:

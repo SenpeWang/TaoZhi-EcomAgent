@@ -11,11 +11,12 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel,ConfigDict,Field,ValidationError
 from ..config import load_config, ROOT
 from ..knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
-from .policy import (Denied, audit, can_download, can_read, can_review, can_task, can_write, get_document, load_principal, require_document_read, require_system, sources_valid)
+from taozhi.domain.errors import Denied
+from taozhi.infrastructure.persistence.access_repo import (audit, can_download, can_read, can_review, can_task, can_write, get_document, load_principal, require_document_read, require_system, sources_valid)
 from .services import (approval, create_job, create_user, decide, edit_document, generate_id, invalidate_authorization, membership_request, new_document, present_job, public_user, user_request)
 from .auth import identity,login,hash_token,SESSION_COOKIE,CSRF_COOKIE
 from .passwords import hash_password,verify_password
-from .privacy import redact
+from taozhi.domain.privacy import redact
 from ..knowledge.storage import get_blob_store
 
 app=FastAPI(title="企业智能协作工作台",docs_url=None,redoc_url=None)

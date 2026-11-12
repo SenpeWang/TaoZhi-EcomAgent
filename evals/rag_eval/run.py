@@ -57,7 +57,7 @@ from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 from taozhi.config import load_config  # noqa: E402
 from taozhi.ai import observability as obs_metrics  # noqa: E402
 from taozhi.knowledge.db import database_connection, fetch_all, fetch_one  # noqa: E402
-from taozhi.server.policy import load_principal  # noqa: E402
+from taozhi.infrastructure.persistence.access_repo import load_principal  # noqa: E402
 from evals.dataset.seed import EVAL_PASSWORD  # noqa: E402  # 评测账号口令与 seed.py 同源
 
 
@@ -160,7 +160,7 @@ def retrieval_evidence(case, rows, ranked, expected):
 def phase_retrieval():
     from taozhi.knowledge.retriever import search_documents
     from taozhi.ai.client import LLMClient, ModelTier
-    from taozhi.server.privacy import redact
+    from taozhi.domain.privacy import redact
     from taozhi.knowledge.embedding import encode_passages
     cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
     if ONLY_CATS:

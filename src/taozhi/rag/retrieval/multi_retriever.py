@@ -60,7 +60,7 @@ class MultiRetriever:
             return []
 
         # 构造安全执行主体 (Principal)，确保权限过滤下推到 SQL/ES 过滤条件中
-        from ...server.policy import Principal
+        from taozhi.domain.entities import Principal
         principal = Principal(
             user_id="system_retriever",
             tenant_id=request.filter.tenant_id,

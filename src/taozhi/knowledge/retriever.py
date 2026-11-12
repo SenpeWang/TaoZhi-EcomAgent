@@ -17,8 +17,8 @@ from ..config import load_config
 from ..knowledge.db import fetch_all
 from ..knowledge.embedding import to_vector
 from ..knowledge.index_cache import encode_index
-from ..server.policy import can_read
-from ..server.privacy import redact
+from taozhi.infrastructure.persistence.access_repo import can_read
+from taozhi.domain.privacy import redact
 
 RRF_K=60
 RRF_FLOOR=0.0022

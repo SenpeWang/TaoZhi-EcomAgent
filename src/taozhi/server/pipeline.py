@@ -5,7 +5,8 @@ from typing import TypedDict,List
 from pydantic import BaseModel,Field
 from concurrent.futures import ThreadPoolExecutor
 from ..knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
-from .policy import (Denied, load_principal, sources_valid)
+from taozhi.domain.errors import Denied
+from taozhi.infrastructure.persistence.access_repo import (load_principal, sources_valid)
 from ..config import load_config
 from ..knowledge.retriever import search_documents
 from ..knowledge import metrics as metrics_mod
@@ -86,7 +87,7 @@ def validate_task_execution(state,stage,progress,external=False):
 def plan_node(state):
     p, job = validate_task_execution(state, "动态意图理解与多智能体路由规划", 10)
     q = job["question"]
-    from .privacy import redact
+    from taozhi.domain.privacy import redact
     from ..orchestration.decision import get_decision_engine
 
     options = {k: f"{v[0]}：{v[1]}" for k, v in SPECIALIST_AGENTS.items()}
@@ -224,7 +225,7 @@ def _hyde_vector(c,p,job,state):
         if not job["payload"].get("allow_external",True) or job["input_level"]>=3:return None
         if fetch_one(c,"SELECT count(*) AS n FROM model_calls WHERE job_id=%s",(job["id"],))["n"]>=load_config().max_model_calls:return None
         from ..ai.client import LLMClient,ModelTier
-        from .privacy import redact
+        from taozhi.domain.privacy import redact
         started=time.time()
         text=LLMClient().chat(redact(state["question"]),tier=ModelTier.FAST,system=_HYDE_SYSTEM,max_tokens=220)
         c.execute("INSERT INTO model_calls(tenant_id,job_id,role,elapsed_ms,outcome) VALUES(%s,%s,'hyde',%s,'ok')",
@@ -330,7 +331,7 @@ def domain_node(state):
     from ..config import get_settings
     from ..ai import LLMClient, ModelTier
     from langchain_core.output_parsers import JsonOutputParser
-    from .privacy import redact
+    from taozhi.domain.privacy import redact
     settings = get_settings()
     if not settings.api_key:
         return {"findings": [], "missing": ["模型尚未配置，保留授权原文。"]}
@@ -438,7 +439,7 @@ def quality_node(state):
     findings=[]
     for f in state["findings"]:
         e=state["evidence"][f["evidence_index"]]
-        from .privacy import redact
+        from taozhi.domain.privacy import redact
         if _norm_text(f["quote"]) in _norm_text(redact(e["quote"])) and not detect_injection(e["quote"])[0]:findings.append(f)
     # 问答基于账户查阅权限：检索前已按租户/组织树/密级过滤授权文档，答案直接发布。
     # 人工审核仅由调用方显式要求（require_review，API 级能力，测试在用）。

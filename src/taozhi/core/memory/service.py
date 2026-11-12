@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...knowledge.db import fetch_all, fetch_one
-from ...server.policy import sources_valid
-from ...server.privacy import redact
+from taozhi.infrastructure.persistence.access_repo import sources_valid
+from taozhi.domain.privacy import redact
 from .store import LongTermMemoryStore
 from .transcript import TranscriptLogger, TranscriptStep
 

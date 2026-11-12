@@ -34,7 +34,7 @@ from taozhi.config import load_config  # noqa: E402
 from taozhi.knowledge.db import database_connection, fetch_all, fetch_one  # noqa: E402
 from taozhi.knowledge.ingest import split  # noqa: E402
 from taozhi.server.passwords import hash_password, verify_password  # noqa: E402
-from taozhi.server.policy import can_read, load_principal  # noqa: E402
+from taozhi.infrastructure.persistence.access_repo import can_read, load_principal  # noqa: E402
 
 SPEC = Path(__file__).resolve().parent / "spec"
 GEN = ROOT / "evals/datasets/generated/latest"

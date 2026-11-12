@@ -91,7 +91,7 @@ class SubagentRunner:
         """初始化管道 B 默认的统一后处理出口责任链（脱敏 + 行边界截断）。"""
         def _default_redact_hook(tool_name: str, action: ToolResultAction, ctx: Any) -> ToolResultAction:
             try:
-                from ...server.privacy import redact
+                from taozhi.domain.privacy import redact
                 action.content = redact(action.content)
             except Exception:
                 pass

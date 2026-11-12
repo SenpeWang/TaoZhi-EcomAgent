@@ -109,7 +109,10 @@ src/taozhi/
 │   ├── tools/               工具执行器、1688/Amazon/Web 工具集、行边界保持截断
 │   └── skills/              渐进式技能中心与斜杠指令集
 ├── knowledge/               知识库切片入库、混合检索器、数据库连接与语义缓存
-├── server/                  FastAPI 路由服务、权限策略 (policy)、异步 Worker 守护进程
+├── domain/                  领域层：核心实体、权限规则与隐私策略（不依赖任何框架）
+├── application/             应用层：工作流、编排与契约
+├── infrastructure/          基础设施层：持久化仓储、检索实现与 SDK 适配
+├── server/                  FastAPI 路由服务、异步 Worker 守护进程（仅做适配）
 ├── schemas/                 请求响应 DTO、Agent 状态机契约与全链路 Trace 规范
 └── observability/           全链路树状 Trace 收集器 (tracer) 与 Arize Phoenix 导出器
 ```

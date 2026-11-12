@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from ..knowledge.embedding import available as embedding_available, encode_query
-from ..server.privacy import redact
+from taozhi.domain.privacy import redact
 
 logger = logging.getLogger("taozhi.server.semantic_cache")
 

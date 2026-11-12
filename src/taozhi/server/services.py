@@ -3,9 +3,10 @@ import hashlib,secrets,re
 from datetime import datetime,timezone
 from ..config import load_config
 from ..knowledge.db import fetch_one,fetch_all,as_jsonb
-from .policy import (Denied, audit, can_review, can_task, can_write, get_document, require_system, sources_valid)
+from taozhi.domain.errors import Denied
+from taozhi.infrastructure.persistence.access_repo import (audit, can_review, can_task, can_write, get_document, require_system, sources_valid)
 from .passwords import hash_password,verify_password
-from .privacy import redact
+from taozhi.domain.privacy import redact
 
 def generate_id(prefix):return prefix+"_"+secrets.token_hex(12)
 def invalidate_authorization(conn,tenant,user=None):

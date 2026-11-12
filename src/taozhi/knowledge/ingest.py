@@ -1,5 +1,5 @@
 import io,zipfile,hashlib
-from ..server.policy import Denied
+from taozhi.domain.errors import Denied
 def validate_upload(name,data):
     if not data or len(data)>20*1024*1024:raise Denied("附件大小须为 1 字节至 20 MB","UPLOAD_SIZE",400)
     suffix=name.lower().rsplit(".",1)[-1]

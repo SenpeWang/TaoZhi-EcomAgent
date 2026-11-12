@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from taozhi.knowledge.db import database_connection, fetch_one, fetch_all
 from taozhi.server.api import app
 from taozhi.server.services import present_job
-from taozhi.server.policy import load_principal
+from taozhi.infrastructure.persistence.access_repo import load_principal
 
 
 def _get_client_and_job():

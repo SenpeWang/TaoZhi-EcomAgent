@@ -4,7 +4,8 @@ from fastapi import Request
 from ..knowledge.db import database_connection,fetch_one
 from ..config import load_config
 from .passwords import WEAK_PASSWORDS,verify_password,hash_password
-from .policy import Denied,load_principal,audit
+from taozhi.domain.errors import Denied
+from taozhi.infrastructure.persistence.access_repo import load_principal, audit
 SESSION_COOKIE="ecom_session_"+load_config().mode
 CSRF_COOKIE="ecom_csrf_"+load_config().mode
 def hash_token(s):return hashlib.sha256(s.encode()).hexdigest()

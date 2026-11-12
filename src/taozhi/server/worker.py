@@ -3,7 +3,8 @@ import os,time,secrets,threading,signal,hashlib
 from datetime import datetime,timezone
 from ..config import load_config
 from ..knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
-from .policy import (Denied, can_write, get_document, load_principal, sources_valid)
+from taozhi.domain.errors import Denied
+from taozhi.infrastructure.persistence.access_repo import (can_write, get_document, load_principal, sources_valid)
 from .services import approval,invalidate_authorization
 from ..knowledge.storage import get_blob_store
 from ..knowledge.index_cache import encode_index
