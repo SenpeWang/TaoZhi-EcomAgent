@@ -191,3 +191,30 @@ cd web && npm run build
 - **限定 Type（11类）**：`feat|fix|refactor|perf|style|docs|build|ci|test|chore|revert`；
 - **树状多层级 Body**：必须从 `git diff` 出发，自底向上按文件逐项陈述具体变更，严禁“优化代码/更新”等空泛描述；
 - **推送铁律**：向 GitHub 推送前必须向 Senpe 展示提交摘要与 SHA 哈希并获得明确许可，严禁私自推送或强推。
+
+### 远端推送通道（SSH 经本地代理）
+
+WSL 直连 `github.com` 不通（`curl https://github.com` 返回 FAILED），但本机代理端口可用。
+因此远端推送统一走 **SSH + ProxyCommand**，不使用 HTTPS 令牌旁路。
+
+在 `~/.ssh/config` 的 `Host github.com` 段补充一行 `ProxyCommand`：
+
+```sshconfig
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    ProxyCommand nc -X 5 -x 127.0.0.1:7890 %h %p
+```
+
+配置后直接 `git push origin main` 即可，无需额外参数。临时等效写法（不改配置文件）：
+
+```bash
+GIT_SSH_COMMAND='ssh -o "ProxyCommand=nc -X 5 -x 127.0.0.1:7890 %h %p"' git push origin main
+```
+
+- `nc` 需支持 `-X 5`（SOCKS5）；HTTP 代理可用 `-X connect`。Ubuntu 自带 OpenBSD netcat 满足。
+- `7890` 为本机代理监听端口，`IdentityFile` 为示意值，两者均以本机实际配置为准。
+- 直连失败的症状：`Writing objects: 100%` 之后长时间无回执，最终报
+  `send-pack: unexpected disconnect while reading sideband packet`。
