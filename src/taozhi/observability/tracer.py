@@ -6,7 +6,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, Generator, List, Optional
 
-from ..schemas.trace import Span, TraceContext, TraceRecord
+from .models import Span, TraceContext, TraceRecord
 
 _current_trace: contextvars.ContextVar[Optional[TraceCollector]] = contextvars.ContextVar(
     "_current_trace", default=None

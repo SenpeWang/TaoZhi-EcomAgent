@@ -70,8 +70,8 @@ class SubagentRunner:
         if registry is not None:
             self.registry = registry
         else:
-            from ...agents.registry import default_registry
-            self.registry = default_registry
+            from .registry import get_default_registry
+            self.registry = get_default_registry()
 
         self.event_hub = event_hub or default_event_hub
         self._setup_default_hooks()

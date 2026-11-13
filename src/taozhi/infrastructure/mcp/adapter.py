@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from ...agent.tools.base import BaseTool, ToolContext, ToolResult
+from ...core.tools.base import BaseTool, ToolContext, ToolResult
 from ...observability.tracer import get_current_trace
 from .protocol import McpToolDefinition
 from .server import EcommerceMcpServer, default_mcp_server

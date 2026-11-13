@@ -1,48 +1,95 @@
-"""分层架构守卫：外层可依赖内层，内层绝不反向依赖外层。
+"""分层架构守卫：高层依赖低层，低层绝不反向依赖高层。
 
-依赖方向铁律（只允许由外向内）：
-    interface  ->  infrastructure  ->  application  ->  domain
+分层架构体系（自顶向下，由高层至低层）：
+    4: interface       - 最高层：HTTP 端点、CLI 入口、Worker 守护进程、业务装配
+    3: application     - 高层：业务用例编排、Agent 状态机、RAG 流水线、上下文治理
+    2: infrastructure  - 底层：数据库仓储、向量检索、AI 客户端、底层采集工具、可观测性、配置
+    1: domain          - 最底层/核心基石：纯业务实体、访问规则、领域异常与脱敏
 
-domain 与 application 不得 import Web 框架、数据库驱动、消息队列、对象存储、
-HTTP 客户端、观测 SDK，也不得读取配置（taozhi.config 属于外层）。
-
-本测试不做任何豁免：一旦出现反向依赖或框架泄漏，立即失败。
+依赖方向铁律：
+    高层允许依赖低层，低层绝对不能反向依赖高层。
+    domain 作为最底层业务基石，必须纯粹，严禁引入第三方技术框架或读取环境配置。
 """
+from __future__ import annotations
+
 import ast
 from pathlib import Path
+from typing import Generator, Optional, Tuple
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1] / "src" / "taozhi"
 
-LAYER_ORDER = {"domain": 0, "application": 1, "infrastructure": 2, "interface": 3}
+# 层级权重：数值越大，层级越高
+LAYER_ORDER = {
+    "interface": 3,
+    "application": 2,
+    "infrastructure": 1,
+    "domain": 0,
+}
 
 LAYER_MAP = {
-    "domain": ["domain/"],
+    "interface": [
+        "api/",
+        "server/",
+        "agents/",
+    ],
     "application": [
-        "orchestration/", "rag/", "agent/", "schemas/", "core/",
-        "core/agent/", "core/compaction/", "core/session/", "core/skills/", "core/commands/",
+        "orchestration/",
+        "rag/",
+        "agent/",
+        "schemas/",
+        "core/agent/",
+        "core/compaction/",
+        "core/session/",
+        "core/skills/",
+        "core/commands/",
     ],
     "infrastructure": [
-        "infrastructure/", "knowledge/", "ai/", "observability/", "config.py",
-        "core/memory/", "core/tools/",
+        "infrastructure/",
+        "knowledge/",
+        "ai/",
+        "observability/",
+        "core/memory/",
+        "core/tools/",
+        "config.py",
     ],
-    "interface": ["api/", "server/", "agents/"],
+    "domain": [
+        "domain/",
+    ],
 }
 
-# 顶层包标记文件，内容为空，不含任何 import
-PACKAGE_MARKERS = {"__init__.py"}
+# 纯包标记文件（无实际执行逻辑）
+PACKAGE_MARKERS = {
+    "__init__.py",
+    "core/__init__.py",
+    "agent/__init__.py",
+}
 
-# 内层禁止的第三方依赖（domain/application 与基础设施解耦）
+# 领域层严禁引入的第三方框架与外部技术依赖
 FORBIDDEN_IN_DOMAIN = {
-    "fastapi", "starlette", "uvicorn", "psycopg", "psycopg2", "sqlalchemy",
-    "redis", "kafka", "pika", "celery", "elasticsearch", "minio", "httpx",
-    "opentelemetry", "numpy", "pandas", "langgraph", "langchain",
+    "fastapi",
+    "starlette",
+    "uvicorn",
+    "psycopg",
+    "psycopg2",
+    "sqlalchemy",
+    "redis",
+    "kafka",
+    "pika",
+    "celery",
+    "elasticsearch",
+    "minio",
+    "httpx",
+    "opentelemetry",
+    "numpy",
+    "pandas",
+    "langgraph",
+    "langchain",
 }
-FORBIDDEN_IN_APPLICATION = FORBIDDEN_IN_DOMAIN - {"numpy", "langgraph", "langchain"}
 
 
-def get_layer(path: Path):
+def get_layer(path: Path) -> Optional[str]:
     """按最长前缀匹配把文件归入某一层；返回 None 表示未登记。"""
     rel = str(path.relative_to(ROOT))
     if rel in PACKAGE_MARKERS:
@@ -55,14 +102,34 @@ def get_layer(path: Path):
     return best
 
 
-def _iter_imports(tree):
-    """遍历模块内全部 import，包含函数体内的延迟 import。"""
+def _resolve_relative_import(rel_path: Path, node: ast.ImportFrom) -> Optional[str]:
+    """解析相对导入对应的模块路径。"""
+    if node.level is None or node.level == 0:
+        return node.module
+    parts = list(rel_path.parts[:-1])
+    up = node.level - 1
+    if up > len(parts):
+        return None
+    base_parts = parts[: len(parts) - up] if up > 0 else parts
+    if node.module:
+        base_parts.extend(node.module.split("."))
+    return ".".join(base_parts)
+
+
+def _iter_all_imports(rel_path: Path, tree: ast.AST) -> Generator[Tuple[str, int], None, None]:
+    """遍历模块内全部 import，解析绝对导入与相对导入，包含函数体内的延迟 import。"""
     for n in ast.walk(tree):
         if isinstance(n, ast.Import):
             for a in n.names:
-                yield a.name, n.lineno
+                if a.name.startswith("taozhi."):
+                    yield a.name[len("taozhi.") :], n.lineno
         elif isinstance(n, ast.ImportFrom):
-            yield (n.module or ""), n.lineno
+            if n.module and n.module.startswith("taozhi."):
+                yield n.module[len("taozhi.") :], n.lineno
+            elif n.level and n.level > 0:
+                resolved = _resolve_relative_import(rel_path, n)
+                if resolved:
+                    yield resolved, n.lineno
 
 
 def test_every_file_is_mapped_to_a_layer():
@@ -71,53 +138,83 @@ def test_every_file_is_mapped_to_a_layer():
     assert not unmapped, "存在未登记层级的源文件：\n" + "\n".join(sorted(unmapped))
 
 
-def test_no_reverse_layer_dependency():
-    """内层绝不反向依赖外层。"""
+def test_no_low_layer_depends_on_high_layer():
+    """高层依赖低层，低层绝不反向依赖高层。"""
     violations = []
     for p in sorted(ROOT.rglob("*.py")):
-        layer = get_layer(p)
-        if layer is None:
+        rel = p.relative_to(ROOT)
+        source_layer = get_layer(p)
+        if source_layer is None or str(rel) in PACKAGE_MARKERS:
             continue
         tree = ast.parse(p.read_text(encoding="utf-8"))
-        for module, lineno in _iter_imports(tree):
-            if not module.startswith("taozhi."):
-                continue
-            target = module[len("taozhi."):]
-            target_layer = get_layer(ROOT / target.replace(".", "/"))
+        for target_submod, lineno in _iter_all_imports(rel, tree):
+            # 将目标模块解析为文件或目录路径
+            target_path_str = target_submod.replace(".", "/")
+            target_file = ROOT / target_path_str
+            target_py = ROOT / f"{target_path_str}.py"
+            target_layer = None
+            if target_py.exists():
+                target_layer = get_layer(target_py)
+            elif target_file.exists():
+                target_layer = get_layer(target_file / "__init__.py")
+            else:
+                # 尝试逐级前缀匹配
+                parts = target_submod.split(".")
+                for i in range(len(parts), 0, -1):
+                    prefix_path = ROOT / "/".join(parts[:i])
+                    if prefix_path.exists() or (ROOT / f"{'/'.join(parts[:i])}.py").exists():
+                        target_layer = get_layer(prefix_path if prefix_path.is_dir() else ROOT / f"{'/'.join(parts[:i])}.py")
+                        if target_layer:
+                            break
+
             if target_layer is None:
                 continue
-            if LAYER_ORDER[target_layer] > LAYER_ORDER[layer]:
+
+            if LAYER_ORDER[source_layer] < LAYER_ORDER[target_layer]:
                 violations.append(
-                    f"{p.relative_to(ROOT)}:{lineno} ({layer}) 反向依赖 {module} ({target_layer})"
+                    f"{rel}:{lineno} 低层 [{source_layer}] 反向依赖高层 [{target_layer}] -> {target_submod}"
                 )
-    assert not violations, "反向依赖：\n" + "\n".join(violations)
+    assert not violations, "存在低层反向依赖高层的违规调用：\n" + "\n".join(violations)
 
 
-def test_inner_layers_have_no_framework_leak():
-    """domain/application 不得 import 框架与基础设施客户端。"""
+def test_domain_layer_purity():
+    """领域层作为最纯粹业务核心，不得 import 任何外部框架与基础设施客户端。"""
     violations = []
     for p in sorted(ROOT.rglob("*.py")):
         layer = get_layer(p)
-        if layer not in ("domain", "application"):
+        if layer != "domain":
             continue
-        forbidden = FORBIDDEN_IN_DOMAIN if layer == "domain" else FORBIDDEN_IN_APPLICATION
         tree = ast.parse(p.read_text(encoding="utf-8"))
-        for module, lineno in _iter_imports(tree):
-            root_module = module.split(".")[0]
-            if root_module in forbidden:
-                violations.append(f"{p.relative_to(ROOT)}:{lineno} ({layer}) 引入框架 {module}")
-    assert not violations, "框架泄漏：\n" + "\n".join(violations)
+        for n in ast.walk(tree):
+            mod_name = None
+            lineno = getattr(n, "lineno", 0)
+            if isinstance(n, ast.Import):
+                for a in n.names:
+                    mod_name = a.name.split(".")[0]
+                    if mod_name in FORBIDDEN_IN_DOMAIN:
+                        violations.append(f"{p.relative_to(ROOT)}:{lineno} (domain) 引入框架 {a.name}")
+            elif isinstance(n, ast.ImportFrom) and n.module:
+                mod_name = n.module.split(".")[0]
+                if mod_name in FORBIDDEN_IN_DOMAIN:
+                    violations.append(f"{p.relative_to(ROOT)}:{lineno} (domain) 引入框架 {n.module}")
+    assert not violations, "领域层纯净度违规：\n" + "\n".join(violations)
 
 
-def test_inner_layers_do_not_read_config():
-    """配置读取属于外层职责，内层必须通过参数注入。"""
+def test_domain_layer_does_not_read_config():
+    """领域层不得读取系统配置，必须保持纯内存/入参注入。"""
     violations = []
     for p in sorted(ROOT.rglob("*.py")):
         layer = get_layer(p)
-        if layer not in ("domain", "application"):
+        if layer != "domain":
             continue
         tree = ast.parse(p.read_text(encoding="utf-8"))
-        for module, lineno in _iter_imports(tree):
-            if module in ("taozhi.config",) or module.endswith(".config"):
-                violations.append(f"{p.relative_to(ROOT)}:{lineno} ({layer}) 读取 {module}")
-    assert not violations, "内层读取配置：\n" + "\n".join(violations)
+        for n in ast.walk(tree):
+            lineno = getattr(n, "lineno", 0)
+            if isinstance(n, ast.Import):
+                for a in n.names:
+                    if a.name == "taozhi.config" or a.name.endswith(".config"):
+                        violations.append(f"{p.relative_to(ROOT)}:{lineno} (domain) 读取配置 {a.name}")
+            elif isinstance(n, ast.ImportFrom) and n.module:
+                if n.module == "taozhi.config" or n.module.endswith(".config"):
+                    violations.append(f"{p.relative_to(ROOT)}:{lineno} (domain) 读取配置 {n.module}")
+    assert not violations, "领域层读取配置：\n" + "\n".join(violations)

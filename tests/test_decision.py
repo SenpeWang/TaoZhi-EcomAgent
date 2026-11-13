@@ -10,9 +10,10 @@ from taozhi.orchestration.decision import (
     get_decision_engine,
 )
 
-# 确保在 pytest 运行环境下正确继承 .env 中的 LLM 凭证
+# 仅在非 test 离线环境下允许从 .env 读取外部凭证
+_is_test_env = os.environ.get("ECOM_MODE") == "test" or os.environ.get("ECOM_ENV_FILE", "").endswith(".env.test")
 _env_path = Path(__file__).resolve().parents[1] / ".env"
-if _env_path.exists():
+if not _is_test_env and _env_path.exists():
     _cfg = dotenv_values(_env_path)
     if _cfg.get("API_KEY"):
         os.environ["API_KEY"] = _cfg["API_KEY"]
@@ -38,8 +39,8 @@ def test_decision_choice_semantic_fast_path():
         pytest.skip("本地向量嵌入服务未运行，跳过语义快道测试")
     engine = get_decision_engine()
 
-    # 预热选项向量缓存
-    engine.choice("预热初始化", SPECIALIST_OPTIONS, multi_select=False)
+    # 预热选项向量缓存（纯本地向量化，禁止调用外部 LLM）
+    engine.choice("预热初始化", SPECIALIST_OPTIONS, multi_select=False, allow_llm=False)
 
     # 明确的售后退换问题
     res = engine.choice("用了一周边缘起泡开胶了，给换新吗？", SPECIALIST_OPTIONS, multi_select=False)
@@ -50,6 +51,7 @@ def test_decision_choice_semantic_fast_path():
     assert "after_sales" in res.distribution
 
 
+@pytest.mark.slow
 def test_decision_choice_llm_multi_select():
     """测试多角色协同规划模型结构化决策。"""
     from taozhi.config import get_settings
@@ -67,6 +69,7 @@ def test_decision_choice_llm_multi_select():
     assert res.confidence > 0.0
 
 
+@pytest.mark.slow
 def test_decision_score_primitive():
     """测试连续打分评估原语。"""
     from taozhi.config import get_settings
@@ -85,6 +88,7 @@ def test_decision_score_primitive():
     assert len(res.rationale) > 0
 
 
+@pytest.mark.slow
 def test_decision_verify_primitive():
     """测试布尔事实断言核验原语（Verify）。"""
     from taozhi.config import get_settings

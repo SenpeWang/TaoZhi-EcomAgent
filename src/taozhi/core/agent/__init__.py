@@ -35,12 +35,13 @@ from ..skills.registry import Skill, SkillRegistry
 from ..commands.registry import SlashCommand, SlashCommandRegistry
 
 
-def __getattr__(name: str):
-    """支持延迟加载 SubagentRegistry 与 default_registry，避免循环依赖。"""
-    if name in ("SubagentRegistry", "default_registry"):
-        from ...agents.registry import SubagentRegistry, default_registry
-        return SubagentRegistry if name == "SubagentRegistry" else default_registry
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+from .registry import (
+    SubagentRegistry,
+    get_default_registry,
+    set_default_registry,
+)
+
+default_registry = get_default_registry()
 
 
 __all__ = [
