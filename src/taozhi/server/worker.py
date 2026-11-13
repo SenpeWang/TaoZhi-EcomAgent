@@ -153,11 +153,23 @@ def process_research_job(job):
             c.execute("UPDATE jobs SET stage=%s,progress=%s WHERE id=%s AND run_version=%s", (stage, progress, job["id"], job["run_version"]))
             c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,%s,'running')", (job["tenant_id"], job["id"], job["run_version"], stage, progress))
 
+    def check_cancel() -> bool:
+        with database_connection() as c:
+            r = fetch_one(c, "SELECT state, run_version, cancel_requested FROM jobs WHERE id=%s", (job["id"],))
+            return not r or r["state"] != "running" or r["run_version"] != job["run_version"] or bool(r["cancel_requested"])
+
+    def fetch_steering() -> list[str]:
+        with database_connection() as c:
+            r = fetch_one(c, "SELECT payload FROM jobs WHERE id=%s", (job["id"],))
+            items = ((r or {}).get("payload") or {}).get("steering_inputs") or []
+            return [str(x) for x in items]
+
+    cfg = load_config()
     conv_id = job.get("conversation_id") or (job.get("payload") or {}).get("conversation_id") or ""
     keyword = (job.get("payload") or {}).get("keyword") or job["question"]
     initial_steering = (job.get("payload") or {}).get("steering_inputs") or []
 
-    with PostgresSaver.from_conn_string(load_config().dsn) as saver:
+    with PostgresSaver.from_conn_string(cfg.dsn) as saver:
         saver.setup()
         result = execute_autonomous_agents(
             keyword=keyword,
@@ -169,7 +181,13 @@ def process_research_job(job):
             checkpointer=saver,
             emit_event_fn=emit,
             initial_steering=initial_steering,
+            timeout_seconds=float(cfg.llm_timeout or 180.0),
+            check_cancel_fn=check_cancel,
+            fetch_steering_fn=fetch_steering,
         )
+
+    if result.get("cancelled"):
+        raise Denied("任务已被用户取消", "CANCELLED", 409)
 
     stage_title = "调研报告已生成"
     with database_connection() as c:

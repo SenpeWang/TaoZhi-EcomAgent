@@ -548,7 +548,7 @@ def steer(task_id:str,payload:SteerInput,p=Depends(identity)):
             (payload.input, task_id)
         )
         audit(c,p,"中途动态干预",task_id,r["node_id"],r["input_level"])
-    # 2. 尝试向正在运行的 LangGraph 检查点追加 steering_inbox 状态
+    # 2. 尝试向正在运行的 LangGraph 检查点追加 steering_inbox 状态（主通道已持久化至 jobs.payload，此处为即时加速旁路）
     try:
         from langgraph.checkpoint.postgres import PostgresSaver
         from ..orchestration.agent_system import build_autonomous_agent_graph
@@ -557,8 +557,9 @@ def steer(task_id:str,payload:SteerInput,p=Depends(identity)):
             graph = build_autonomous_agent_graph(checkpointer=saver)
             thread_id = f"research_{task_id}_{run_ver}"
             graph.update_state({"configurable": {"thread_id": thread_id}}, {"steering_inbox": [payload.input]})
-    except Exception:
-        pass
+    except Exception as exc:
+        import logging
+        logging.getLogger("taozhi.server.api").warning("LangGraph 检查点即时注入失败（已由 DB 队列兜底）: %s", exc)
     return {"message":"中途干预指令已发送并生效","task_id":task_id,"input":payload.input}
 @app.post("/api/tasks/{task_id}/retry")
 def retry_task(task_id:str,p=Depends(identity)):
