@@ -96,6 +96,11 @@ class Settings(BaseSettings):
     rerank_enabled: bool = True
     cache_ttl_seconds: int = 300
 
+    # ───────────────────── 调研多智能体预算（可环境变量覆盖） ─────────────────────
+    research_max_turns: int = Field(default=5, ge=1, le=20)
+    research_max_parallel_subagents: int = Field(default=4, ge=1, le=8)
+    research_max_subagent_steps: int = Field(default=3, ge=1, le=8)
+
     # ───────────────────── 基础设施（均可降级为本地实现） ─────────────────────
     milvus_enabled: bool = False
     milvus_uri: str = "http://localhost:19530"

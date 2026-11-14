@@ -182,6 +182,9 @@ def process_research_job(job):
             emit_event_fn=emit,
             initial_steering=initial_steering,
             timeout_seconds=float(cfg.llm_timeout or 180.0),
+            max_turns=int(cfg.research_max_turns),
+            max_parallel_subagents=int(cfg.research_max_parallel_subagents),
+            max_subagent_steps=int(cfg.research_max_subagent_steps),
             check_cancel_fn=check_cancel,
             fetch_steering_fn=fetch_steering,
         )

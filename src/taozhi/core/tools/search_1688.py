@@ -14,21 +14,27 @@ from typing import Any, Dict, List
 
 import httpx
 
-def search_1688_wholesale(keyword: str, limit: int = 20) -> List[Dict[str, Any]]:
+def search_1688_wholesale(
+    keyword: str,
+    limit: int = 20,
+    timeout: float = 90.0,
+) -> List[Dict[str, Any]]:
     """搜索 1688 批发平台真实货源（优先 CPS 推广页免登录抓取）。
 
     Args:
         keyword (str): 检索关键词。
         limit (int): 返回的最大商品条数。
+        timeout (float): 超时预算（秒）。
 
     Returns:
         List[Dict[str, Any]]: 商品列表，包含 title, price, sales, shop, url 等。
     """
+    budget = max(1.0, float(timeout))
     # 优先检测自建 1688 端点
     custom_url = os.environ.get("ECOM_RESEARCH_P1688_URL", "").strip()
     if custom_url:
         try:
-            with httpx.Client(timeout=20.0) as client:
+            with httpx.Client(timeout=min(20.0, budget)) as client:
                 headers = {"Content-Type": "application/json"}
                 key = os.environ.get("ECOM_RESEARCH_P1688_KEY", "").strip()
                 if key:
@@ -46,7 +52,7 @@ def search_1688_wholesale(keyword: str, limit: int = 20) -> List[Dict[str, Any]]
         try:
             proc = subprocess.run(
                 [str(py), str(script), keyword, "--limit", str(limit)],
-                capture_output=True, text=True, timeout=90,
+                capture_output=True, text=True, timeout=min(90.0, budget),
             )
             for line in reversed((proc.stdout or "").strip().splitlines()):
                 line = line.strip()

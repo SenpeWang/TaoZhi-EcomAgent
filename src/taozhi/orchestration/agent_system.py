@@ -1,72 +1,169 @@
-"""专职电商真·自治多智能体系统（Application 编排层）。
+"""电商市场调研自治多智能体系统（Application 编排层，Orchestrator–Workers 架构）。
 
 核心架构原则：
-1. 严格遵守分层架构：本模块位于 application 层，仅依赖 domain 领域规则与 infrastructure 底层能力，
-   绝不反向依赖 interface 层（server/api/worker）或直接操作数据库；
-2. 全面基于 LangGraph 状态图与主管决策循环（Supervisor Agent Loop），进度以客观轮次推进；
-3. 生产级可审计工程规范：只记录工具名、入参、结果摘要、状态跃迁、决策理由 5 大信标；
-4. 真流式节点级事件广播（graph.stream）与运行期即时停止/动态干预（Mid-Flight Steering）：
-   - 领域层 ResearchScope / ResearchStoppingPolicy 统一裁决边界、超时、轮次与取消；
-   - 通过运行时回调注入解耦持久层，实现节点级取消止损与 DB 增量干预感知。
+1. 严格遵守四层单向依赖：仅依赖 domain 领域守卫与 infrastructure 底层工具/AI 能力，
+   绝不反向依赖 interface 层（server/api/worker）或直连数据库；
+2. 真·多智能体系统（非固定步骤 Workflow）：
+   - Lead Research Agent（主协调代理）基于黑板证据与中途 Steering 动态组队（spawn_subagents）；
+   - LangGraph Send 实现无冲突并行扇出（Parallel Fan-out / Fan-in Superstep）；
+   - 每个受派 Subagent 独立运行有界 ReAct 工具探索循环（search_web / fetch_web_page / 1688 / Amazon）；
+   - 领域层 ResearchScope / ResearchBudget / authorize_subagent_tasks / evaluate_hard_stop
+     硬锁越权工具、并发上限、全局超时、最大轮次与取消熔断；
+3. 真流式实时事件广播（graph.stream + 运行时线程安全回调注册表），支持取消止损与动态干预。
 """
 from __future__ import annotations
 
-import contextvars
 import json
 import operator
+import threading
 import time
-from dataclasses import dataclass
-from typing import Annotated, Any, Callable, Dict, List, Optional
+import uuid
+from dataclasses import dataclass, field
+from typing import Annotated, Any, Callable, Dict, List, Literal, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
+from pydantic import BaseModel, Field
 
 from ..ai.client import LLMClient, ModelTier
 from ..core.agent.context import ArtifactMetadata, SubagentContext
 from ..core.memory.service import get_memory_store
+from ..core.tools.outcome import ToolOutcome, execute_tool_with_outcome
 from ..core.tools.search_1688 import search_1688_wholesale
 from ..core.tools.search_amazon import search_amazon
 from ..core.tools.search_web import extract_search_keyword, search_web
+from ..core.tools.web_scraper import fetch_web_page
+from ..domain.errors import Denied
 from ..domain.research import (
-    ResearchSnapshot,
+    ALL_RESEARCH_TOOLS,
+    ResearchBudget,
+    ResearchScope,
+    SOURCING_TOOLS,
     StopReason,
+    SubagentTaskSpec,
+    WEB_TOOLS,
+    authorize_subagent_tasks,
     classify_research_scope,
     classify_steering_impact,
     enforce_tool_allowed,
-    evaluate_next_step,
+    evaluate_hard_stop,
 )
 
 
 # ============================================================================
-# 1. 运行时控制钩子上下文（不进入 LangGraph State，避免检查点序列化冲突）
+# 1. 运行时回调注册表（不进入 LangGraph State，兼容 PostgresSaver 与多线程 Send）
 # ============================================================================
 
 @dataclass
 class _RuntimeHooks:
     check_cancel_fn: Optional[Callable[[], bool]] = None
     fetch_steering_fn: Optional[Callable[[], List[str]]] = None
+    emit_fn: Optional[Callable[[str, int], None]] = None
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _progress: int = 0
 
 
-_runtime_hooks: contextvars.ContextVar[_RuntimeHooks] = contextvars.ContextVar(
-    "_research_runtime_hooks", default=_RuntimeHooks()
-)
+_HOOKS_LOCK = threading.Lock()
+_HOOKS_BY_RUN_ID: Dict[str, _RuntimeHooks] = {}
+
+
+def _get_hooks(hook_run_id: str) -> _RuntimeHooks:
+    if not hook_run_id:
+        return _RuntimeHooks()
+    with _HOOKS_LOCK:
+        return _HOOKS_BY_RUN_ID.get(hook_run_id) or _RuntimeHooks()
+
+
+def _emit_progress(hooks: _RuntimeHooks, stage: str, target_pct: Optional[int] = None) -> None:
+    """线程安全地单调推进并广播阶段事件。"""
+    with hooks._lock:
+        if target_pct is not None:
+            hooks._progress = max(hooks._progress, min(100, int(target_pct)))
+        pct = hooks._progress
+    if hooks.emit_fn is not None:
+        try:
+            hooks.emit_fn(stage, pct)
+        except Exception:
+            pass
+
+
+def _bump_progress(hooks: _RuntimeHooks, delta: int, cap: int, stage: str) -> None:
+    """在指定上限内单调递增进度并推送事件。"""
+    with hooks._lock:
+        if hooks._progress < cap:
+            hooks._progress = min(cap, hooks._progress + delta)
+        pct = hooks._progress
+    if hooks.emit_fn is not None:
+        try:
+            hooks.emit_fn(stage, pct)
+        except Exception:
+            pass
+
+
+def _is_cancelled(hooks: _RuntimeHooks, state_cancelled: bool = False) -> bool:
+    if state_cancelled or hooks.cancel_event.is_set():
+        hooks.cancel_event.set()
+        return True
+    if hooks.check_cancel_fn is not None:
+        try:
+            if hooks.check_cancel_fn():
+                hooks.cancel_event.set()
+                return True
+        except Exception:
+            pass
+    return False
 
 
 # ============================================================================
-# 2. 强类型可审计数据结构定义（Auditable Data Contracts）
+# 2. 结构化智能体决策契约（Pydantic Schemas for LLMClient.chat_json）
+# ============================================================================
+
+class _ProposedSubtaskSchema(BaseModel):
+    role: str = Field(description="子智能体角色名称，例如 全网痛点研究员 / 1688货源采购专员 / Amazon对标专员")
+    goal: str = Field(description="本轮指派给该子智能体的明确调查目标")
+    allowed_tools: List[str] = Field(description="授权工具名列表，只能从当前允许的白名单中选择")
+    seed_queries: List[str] = Field(default_factory=list, description="建议起步检索关键词或网址列表")
+    channel_hint: Literal["web", "sourcing", "verification", "general"] = "general"
+
+
+class _OrchestratorDecisionSchema(BaseModel):
+    action: Literal["spawn_subagents", "finish"] = Field(description="spawn_subagents 派发子智能体；finish 证据充分直接收敛写研报")
+    thought: str = Field(description="主脑基于当前黑板证据、缺口与纠偏指令做出的决策理由")
+    outline: List[str] = Field(default_factory=list, description="3-4个核心研报章节维度")
+    invalidate_evidence_ids: List[str] = Field(default_factory=list, description="需要作废的既有证据 ID（如被中途 Steering 推翻）")
+    subtasks: List[_ProposedSubtaskSchema] = Field(default_factory=list, description="当 action=spawn_subagents 时动态派发的并行子任务列表")
+
+
+class _SubagentStepSchema(BaseModel):
+    action: Literal["call_tool", "finish"] = Field(description="call_tool 调用授权工具探索；finish 证据足够交卷")
+    thought: str = Field(description="当前观察后的简短推理，说明为什么换词检索、深抓链接或可以结束")
+    tool_name: str = Field(default="", description="当 action=call_tool 时的工具名")
+    query_or_url: str = Field(default="", description="当 action=call_tool 时的搜索词或 fetch_web_page 目标 URL")
+    findings_summary: str = Field(default="", description="当 action=finish 时基于工具实测结果的客观结论摘要")
+    key_metrics: List[str] = Field(default_factory=list, description="从工具结果直接提取的关键数据事实（含价格/起订量/销量/痛点，严禁编造）")
+    gaps_or_errors: List[str] = Field(default_factory=list, description="客观存在的空结果、抓包失败或尚待补充的缺口")
+
+
+# ============================================================================
+# 3. 强类型可审计状态与黑板数据结构
 # ============================================================================
 
 class AuditableToolRecord(TypedDict):
-    """单次工具调用的客观审计记录（无 CoT 噪音）。"""
+    """单次工具调用的客观审计记录。"""
+
     tool_name: str
     parameters: Dict[str, Any]
+    status: str
     result_summary: str
     data_count: int
     elapsed: float
 
 
 class AuditableAgentTransition(TypedDict):
-    """智能体生命周期与状态跃迁审计记录。"""
+    """子智能体生命周期与状态跃迁审计记录。"""
+
     agent_id: str
     role: str
     type_name: str
@@ -78,54 +175,71 @@ class AuditableAgentTransition(TypedDict):
     scratch_files: List[str]
 
 
+class EvidenceRecord(TypedDict):
+    """子智能体回写黑板的结构化证据包。"""
+
+    evidence_id: str
+    subagent_id: str
+    role: str
+    channel: str
+    goal: str
+    summary: str
+    key_metrics: List[str]
+    gaps_or_errors: List[str]
+    platform_items: Dict[str, List[Dict[str, Any]]]
+    tool_counts: Dict[str, int]
+    status: str
+    elapsed: float
+
+
 class AutonomousAgentState(TypedDict):
-    """多智能体系统在各个状态机节点之间流转的全局自治状态。"""
+    """多智能体系统在状态图之间流转的全局黑板状态（支持并发增量合并）。"""
+
     job_id: str
     tenant_id: str
     run_version: int
     conversation_id: str
+    hook_run_id: str
     user_query: str
     keyword: str
 
-    # 动态中途干预专用信箱（支持 LangGraph update_state 与外部回调增量合并）
+    # 动态中途干预（Steering）信箱
     steering_inbox: Annotated[List[str], operator.add]
     processed_steering_count: int
 
-    # 自治协同认知与停止控制信标
+    # 硬预算与运行期控制信标（仅主协调节点/终态节点可写）
     system_status: str
-    active_agent: str
     next_action: str
     current_rationale: str
     turn_count: int
     max_turns: int
+    max_parallel_subagents: int
+    max_subagent_steps: int
     started_at: float
     timeout_seconds: float
     cancelled: bool
     stop_reason: str
-    web_retries: int
-    scanner_retries: int
-    max_empty_retries: int
 
-    # 结构化业务事实池（上下文隔离保护区）
+    # 主脑规划与黑板证据（并发子任务仅写累加通道，零写冲突）
     outline: List[str]
-    web_findings: Optional[Dict[str, Any]]
-    wholesale_findings: Optional[Dict[str, Any]]
-    verification_findings: Optional[Dict[str, Any]]
+    pending_tasks: List[Dict[str, Any]]
+    guard_notices: List[str]
+    evidence_pool: Annotated[List[EvidenceRecord], operator.add]
+    invalidated_evidence_ids: Annotated[List[str], operator.add]
 
-    # 可审计事件流与最终产物
+    # 可审计轨迹与最终交付物
     audit_trail: Annotated[List[AuditableAgentTransition], operator.add]
     artifacts: Annotated[List[str], operator.add]
     report: str
 
 
 # ============================================================================
-# 3. 核心专职智能体节点实现（Autonomous Agent Nodes）
+# 4. 辅助函数：干预收集、工具派发与 Fallback 构建
 # ============================================================================
 
-def _collect_new_steering(state: AutonomousAgentState) -> tuple[List[str], List[str]]:
-    """合并外部控制通道拉取的干预指令（去重防重），返回 (新增 delta 列表, 完整 inbox 列表)。"""
+def _collect_new_steering(state: AutonomousAgentState, hooks: _RuntimeHooks) -> tuple[List[str], List[str]]:
+    """拉取并去重外部动态干预指令，返回 (delta, 完整 inbox)。"""
     existing = list(state.get("steering_inbox") or [])
-    hooks = _runtime_hooks.get()
     delta: List[str] = []
     if hooks.fetch_steering_fn is not None:
         try:
@@ -137,407 +251,679 @@ def _collect_new_steering(state: AutonomousAgentState) -> tuple[List[str], List[
                     seen.add(item)
         except Exception:
             delta = []
-    all_items = existing + delta
-    return delta, all_items
+    return delta, existing + delta
 
 
-def main_supervisor_node(state: AutonomousAgentState) -> Dict[str, Any]:
-    """主脑决策智能体（main_agent）：感知环境、审查事实、响应干预并评估停止条件。"""
-    turn = state.get("turn_count", 0) + 1
+def _active_evidence(state: AutonomousAgentState) -> List[EvidenceRecord]:
+    invalidated = set(state.get("invalidated_evidence_ids") or [])
+    return [ev for ev in (state.get("evidence_pool") or []) if ev.get("evidence_id") not in invalidated]
+
+
+def _resolve_tool_callable(tool_name: str) -> Optional[Callable[..., Any]]:
+    """按名字解析模块级工具函数（支持单测 patch 模块变量）。"""
+    mapping: Dict[str, Optional[Callable[..., Any]]] = {
+        "search_web": globals().get("search_web"),
+        "fetch_web_page": globals().get("fetch_web_page"),
+        "search_1688_wholesale": globals().get("search_1688_wholesale"),
+        "search_amazon": globals().get("search_amazon"),
+    }
+    return mapping.get(tool_name)
+
+
+def _build_tool_kwargs(tool_name: str, query_or_url: str) -> Dict[str, Any]:
+    arg = (query_or_url or "").strip()
+    if tool_name == "search_web":
+        return {"query": arg, "limit": 15}
+    if tool_name == "fetch_web_page":
+        return {"url": arg, "max_chars": 4000}
+    if tool_name == "search_1688_wholesale":
+        return {"keyword": arg, "limit": 15}
+    if tool_name == "search_amazon":
+        return {"query": arg, "limit": 10}
+    return {"query": arg}
+
+
+def _default_fallback_tasks(keyword: str, scope: ResearchScope, steering: List[str]) -> List[SubagentTaskSpec]:
+    """当主脑结构化决策解析失败且黑板尚无证据时的安全起步任务生成（受 Domain Scope 约束）。"""
+    steer_suffix = f" {' '.join(steering[-2:])}".strip() if steering else ""
+    base_query = f"{keyword} {steer_suffix}".strip()
+    tasks = [
+        SubagentTaskSpec(
+            task_id="sub_web_init",
+            role="全网口碑与市场情报专员",
+            goal=f"检索并提炼【{keyword}】的全网主流定价、热销卖点与消费者高频差评痛点",
+            allowed_tools=tuple(t for t in WEB_TOOLS if t in scope.allowed_tools),
+            seed_queries=(base_query,),
+            channel_hint="web",
+        )
+    ]
+    if scope.needs_sourcing:
+        if "search_1688_wholesale" in scope.allowed_tools:
+            tasks.append(
+                SubagentTaskSpec(
+                    task_id="sub_1688_init",
+                    role="1688源头工厂采购专员",
+                    goal=f"核查【{keyword}】在1688源头工厂的一手出厂价梯度、MOQ起订量与核心产区",
+                    allowed_tools=("search_1688_wholesale",),
+                    seed_queries=(base_query, keyword),
+                    channel_hint="sourcing",
+                )
+            )
+        if "search_amazon" in scope.allowed_tools:
+            tasks.append(
+                SubagentTaskSpec(
+                    task_id="sub_amazon_init",
+                    role="海外亚马逊对标研究员",
+                    goal=f"采集【{keyword}】在海外亚马逊的零售美元定价带、主力规格与竞品特征",
+                    allowed_tools=("search_amazon",),
+                    seed_queries=(base_query, keyword),
+                    channel_hint="sourcing",
+                )
+            )
+    return tasks
+
+
+def _serialize_task(task: SubagentTaskSpec) -> Dict[str, Any]:
+    return {
+        "task_id": task.task_id,
+        "role": task.role,
+        "goal": task.goal,
+        "allowed_tools": list(task.allowed_tools),
+        "seed_queries": list(task.seed_queries),
+        "channel_hint": task.channel_hint,
+    }
+
+
+def _deserialize_task(raw: Dict[str, Any]) -> SubagentTaskSpec:
+    return SubagentTaskSpec(
+        task_id=str(raw.get("task_id") or f"sub_{uuid.uuid4().hex[:6]}"),
+        role=str(raw.get("role") or "市场调研专员"),
+        goal=str(raw.get("goal") or "收集客观市场事实"),
+        allowed_tools=tuple(str(x) for x in (raw.get("allowed_tools") or [])),
+        seed_queries=tuple(str(x) for x in (raw.get("seed_queries") or [])),
+        channel_hint=str(raw.get("channel_hint") or "general"),
+    )
+
+
+# ============================================================================
+# 5. 核心多智能体节点实现（Lead Orchestrator + Parallel ReAct Subagents）
+# ============================================================================
+
+def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
+    """主协调代理（Lead Research Agent）：自主审查黑板证据、响应实时干预并动态组队派单。"""
+    hooks = _get_hooks(state.get("hook_run_id", ""))
+    turn = int(state.get("turn_count", 0)) + 1
     query = state.get("user_query") or state.get("keyword") or ""
     keyword = state.get("keyword") or extract_search_keyword(query) or query
     outline = list(state.get("outline") or [])
 
-    hooks = _runtime_hooks.get()
-    cancelled = bool(state.get("cancelled", False))
-    if not cancelled and hooks.check_cancel_fn is not None:
-        try:
-            cancelled = bool(hooks.check_cancel_fn())
-        except Exception:
-            cancelled = False
-
-    steering_delta, all_inbox = _collect_new_steering(state)
+    cancelled = _is_cancelled(hooks, bool(state.get("cancelled", False)))
+    steering_delta, all_inbox = _collect_new_steering(state, hooks)
     processed_count = int(state.get("processed_steering_count", 0))
     newly_arrived = all_inbox[processed_count:]
 
-    web_f = state.get("web_findings")
-    whole_f = state.get("wholesale_findings")
-    verif_f = state.get("verification_findings")
-
-    reset_updates: Dict[str, Any] = {}
-    steering_redirected = False
     if newly_arrived:
-        steering_redirected = True
-        for instr in newly_arrived:
-            impact = classify_steering_impact(instr)
-            if impact.invalidate_web and web_f is not None:
-                web_f = None
-                reset_updates["web_findings"] = None
-            if impact.invalidate_wholesale and whole_f is not None:
-                whole_f = None
-                reset_updates["wholesale_findings"] = None
-            if impact.invalidate_verification and verif_f is not None:
-                verif_f = None
-                reset_updates["verification_findings"] = None
+        _emit_progress(hooks, f"[steering] 主脑接收运行期动态干预指令并重新评估黑板: {newly_arrived[-1]}")
 
     scope = classify_research_scope(query, all_inbox)
+    budget = ResearchBudget(
+        max_turns=int(state.get("max_turns", 5)),
+        max_parallel_subagents=int(state.get("max_parallel_subagents", 4)),
+        max_subagent_steps=int(state.get("max_subagent_steps", 3)),
+        timeout_seconds=float(state.get("timeout_seconds", 180.0)),
+    )
+
     started_at = float(state.get("started_at") or time.perf_counter())
     elapsed_seconds = max(0.0, time.perf_counter() - started_at)
+    active_ev = _active_evidence(state)
 
-    snapshot = ResearchSnapshot(
+    hard_stop = evaluate_hard_stop(
         turn=turn,
-        max_turns=int(state.get("max_turns", 6)),
         elapsed_seconds=elapsed_seconds,
-        timeout_seconds=float(state.get("timeout_seconds", 0.0)),
         cancelled=cancelled,
-        scope=scope,
-        has_web=web_f is not None,
-        web_count=int((web_f or {}).get("items_count", 0)) if web_f is not None else 0,
-        has_wholesale=whole_f is not None,
-        wholesale_count=(
-            int((whole_f or {}).get("items_count_1688", 0))
-            + int((whole_f or {}).get("items_count_amazon", 0))
-        )
-        if whole_f is not None
-        else 0,
-        has_verification=verif_f is not None,
         has_report=bool(state.get("report")),
-        web_retries=int(state.get("web_retries", 0)),
-        scanner_retries=int(state.get("scanner_retries", 0)),
-        max_empty_retries=int(state.get("max_empty_retries", 0)),
+        evidence_count=len(active_ev),
+        budget=budget,
     )
 
-    decision = evaluate_next_step(snapshot)
+    if hard_stop.should_stop:
+        next_act = "synthesizer" if hard_stop.force_synthesize else "final_node"
+        res: Dict[str, Any] = {
+            "turn_count": turn,
+            "outline": outline,
+            "next_action": next_act,
+            "pending_tasks": [],
+            "guard_notices": [],
+            "current_rationale": hard_stop.rationale,
+            "system_status": hard_stop.system_status,
+            "cancelled": cancelled,
+            "stop_reason": hard_stop.stop_reason.value,
+            "processed_steering_count": len(all_inbox),
+        }
+        if steering_delta:
+            res["steering_inbox"] = steering_delta
+        return res
 
-    # 仅在正常推进且尚未拟定大纲时生成探索大纲（取消/超限止损时不再额外调 LLM）
-    if not outline and decision.stop_reason != StopReason.CANCELLED:
-        llm = LLMClient()
-        sys_outline_prompt = (
-            "你是电商市场调研总监。请针对调研品类自主规划 3-4 个最核心调研维度（JSON 数组格式，严禁废话）。\n"
-            "必须涵盖：市场概况与竞品格局、1688源头工厂底价与出海售价比对、供应链真实毛利核验。"
+    # 构建主脑 Observation 交由模型自主决策：继续动态派工，还是信息已足交卷合成
+    ev_digest = [
+        {
+            "evidence_id": ev.get("evidence_id"),
+            "role": ev.get("role"),
+            "channel": ev.get("channel"),
+            "status": ev.get("status"),
+            "summary": ev.get("summary", "")[:500],
+            "key_metrics": ev.get("key_metrics", [])[:8],
+            "gaps_or_errors": ev.get("gaps_or_errors", [])[:5],
+        }
+        for ev in active_ev
+    ]
+    notices = list(state.get("guard_notices") or [])
+    remaining_turns = max(0, budget.max_turns - turn)
+    remaining_sec = max(0.0, budget.timeout_seconds - elapsed_seconds)
+
+    steer_note = f"最新动态干预指令（必须优先响应）：{newly_arrived}\n" if newly_arrived else ""
+    all_steer_note = f"累计干预指令：{all_inbox}\n" if all_inbox else ""
+    notice_note = f"上轮领域守卫拦截提示：{notices}\n" if notices else ""
+
+    prompt = (
+        f"你是一名电商市场调研多智能体系统的主协调代理（Lead Research Agent）。\n"
+        f"目标品类：【{keyword}】\n"
+        f"用户完整诉求：{query}\n"
+        f"{steer_note}{all_steer_note}{notice_note}"
+        f"当前合法允许授权的工具白名单（严禁越界使用未列出工具）：{list(scope.allowed_tools)}\n"
+        f"剩余调度轮次：{remaining_turns}；剩余时间预算：{remaining_sec:.1f}s；单轮最多并发子智能体：{budget.max_parallel_subagents}。\n"
+        f"当前黑板已有有效证据包（{len(ev_digest)} 份）：\n{json.dumps(ev_digest, ensure_ascii=False)}\n\n"
+        "请自主判断当前决策：\n"
+        "1. 若关键维度尚缺、存在口径矛盾或刚收到 Steering 纠偏需要重抓：输出 action='spawn_subagents'，"
+        "合理拆解 1 到多个互不重叠的子任务并发执行（比如区分全网痛点、1688源头底价、Amazon海外竞品、交叉核验等），"
+        "每个子任务明确 role、goal、allowed_tools（仅从白名单选）与 seed_queries；如旧证据被纠偏推翻，可在 invalidate_evidence_ids 中作废。\n"
+        "2. 若已有证据已充分覆盖用户核心问题（且无高价值可补查缺口）：输出 action='finish' 并完善 3-4 条 outline 研报章节大纲。"
+    )
+
+    llm = LLMClient()
+    parsed: Optional[_OrchestratorDecisionSchema] = None
+    try:
+        raw_decision = llm.chat_json(
+            prompt=prompt,
+            schema=_OrchestratorDecisionSchema,
+            tier=ModelTier.FAST,
+            system="你是客观严谨、擅长并行任务分解与质量核查的电商调研主协调智能体。严禁编造数据。",
+            retries=2,
         )
-        try:
-            raw_outline = llm.chat(f"品类词：{keyword}", tier=ModelTier.FAST, system=sys_outline_prompt, max_tokens=200)
-            clean = raw_outline.strip().strip("```json").strip("```").strip()
-            data = json.loads(clean)
-            if isinstance(data, list):
-                outline = [str(x) for x in data[:4]]
-        except Exception:
-            outline = [
-                "全网市场概况与热销卖点分析",
-                "1688 源头工厂出厂价与海外零售对标比价",
-                "零售溢价与供应链工艺交叉验真",
-                "品类差异化突围与选品决策建议",
-            ]
+        if isinstance(raw_decision, _OrchestratorDecisionSchema):
+            parsed = raw_decision
+        elif isinstance(raw_decision, dict) and raw_decision.get("action"):
+            parsed = _OrchestratorDecisionSchema.model_validate(raw_decision)
+    except Exception:
+        parsed = None
 
-    system_status = "STEERING_REDIRECTED" if (steering_redirected and decision.stop_reason == StopReason.CONTINUE) else decision.system_status
+    # 降级容错：若模型返回格式异常，首轮按允许范围安全派发起步探查，次轮且已有证据则直接收敛
+    if parsed is None:
+        if not active_ev:
+            parsed = _OrchestratorDecisionSchema(
+                action="spawn_subagents",
+                thought="主脑结构化输出降级，按当前合法工具边界并发启动基础调研子智能体",
+                outline=outline or ["市场需求与消费者痛点分析", "产品价格带与竞争格局", "供应链成本与选品建议"],
+                subtasks=[
+                    _ProposedSubtaskSchema(
+                        role=t.role,
+                        goal=t.goal,
+                        allowed_tools=list(t.allowed_tools),
+                        seed_queries=list(t.seed_queries),
+                        channel_hint="sourcing" if t.channel_hint == "sourcing" else "web",
+                    )
+                    for t in _default_fallback_tasks(keyword, scope, all_inbox)
+                ],
+            )
+        else:
+            parsed = _OrchestratorDecisionSchema(
+                action="finish",
+                thought="主脑结构化输出降级，基于黑板既有有效证据收敛生成研报",
+                outline=outline or ["市场需求与竞品格局", "多渠道数据汇总", "选品与操盘建议"],
+            )
 
-    result: Dict[str, Any] = {
+    if parsed.outline:
+        outline = [str(x) for x in parsed.outline[:4]]
+    elif not outline:
+        outline = ["市场概况与消费者痛点", "竞品价格带与卖点格局", "选品优化与落地建议"]
+
+    # 处理主脑声明作废的证据 + Steering 启发式辅助识别
+    invalid_delta = [str(eid) for eid in parsed.invalidate_evidence_ids if eid]
+    if newly_arrived and not invalid_delta and active_ev:
+        for instr in newly_arrived:
+            impact = classify_steering_impact(instr)
+            for ev in active_ev:
+                ch = ev.get("channel")
+                if (impact.invalidate_web and ch == "web") or (impact.invalidate_wholesale and ch == "sourcing"):
+                    if ev["evidence_id"] not in invalid_delta:
+                        invalid_delta.append(ev["evidence_id"])
+
+    # 若主脑判断 finish（且未因刚作废导致无剩余有效证据）
+    remaining_valid_count = len([ev for ev in active_ev if ev.get("evidence_id") not in set(invalid_delta)])
+    if parsed.action == "finish" and remaining_valid_count > 0:
+        _emit_progress(hooks, f"[agent_handoff] role=main_agent 确认黑板 {remaining_valid_count} 份证据充分，交接研报合成专家", 80)
+        res = {
+            "turn_count": turn,
+            "outline": outline,
+            "next_action": "synthesizer",
+            "pending_tasks": [],
+            "guard_notices": [],
+            "current_rationale": parsed.thought or "主脑确认各维度证据充实，开始合成终审研报",
+            "system_status": "REPORTING",
+            "cancelled": False,
+            "stop_reason": StopReason.CONTINUE.value,
+            "processed_steering_count": len(all_inbox),
+        }
+        if invalid_delta:
+            res["invalidated_evidence_ids"] = invalid_delta
+        if steering_delta:
+            res["steering_inbox"] = steering_delta
+        return res
+
+    # 将主脑规划的子任务送入 Domain 硬守卫裁剪越权工具与并发数
+    proposed_specs = [
+        SubagentTaskSpec(
+            task_id=f"t{turn}_sub{idx + 1}_{uuid.uuid4().hex[:4]}",
+            role=st.role,
+            goal=st.goal,
+            allowed_tools=tuple(st.allowed_tools),
+            seed_queries=tuple(st.seed_queries or [keyword]),
+            channel_hint=st.channel_hint,
+        )
+        for idx, st in enumerate(parsed.subtasks)
+    ]
+
+    if not proposed_specs and not remaining_valid_count:
+        proposed_specs = _default_fallback_tasks(keyword, scope, all_inbox)
+
+    auth_plan = authorize_subagent_tasks(proposed_specs, scope=scope, budget=budget)
+    authorized_tasks = list(auth_plan.tasks)
+    new_notices = list(auth_plan.rejected_reasons)
+
+    # 若主脑所有提案均因越权被驳回且黑板尚未有有效证据，注入合法兜底调研任务避免空转
+    if not authorized_tasks and remaining_valid_count == 0:
+        fallback_plan = authorize_subagent_tasks(_default_fallback_tasks(keyword, scope, all_inbox), scope=scope, budget=budget)
+        authorized_tasks = list(fallback_plan.tasks)
+        new_notices.append("主脑原提案均超出当前调研边界，已按允许白名单重置起步任务")
+
+    if not authorized_tasks:
+        _emit_progress(hooks, "[agent_handoff] main_agent 暂无更多合法增量派工，收敛现有证据撰写研报", 80)
+        next_act = "synthesizer"
+        sys_status = "REPORTING"
+    else:
+        roles_str = " / ".join(t.role for t in authorized_tasks)
+        _bump_progress(hooks, 10, 25, f"[agent_start] main_agent 第 {turn} 轮并行派发 {len(authorized_tasks)} 位子智能体 ({roles_str})")
+        next_act = "dispatch_subagents"
+        sys_status = "STEERING_REDIRECTED" if newly_arrived else "COLLECTING"
+
+    res = {
         "turn_count": turn,
         "outline": outline,
-        "active_agent": "main_agent",
-        "next_action": decision.next_action,
-        "current_rationale": decision.rationale,
-        "system_status": system_status,
-        "cancelled": cancelled,
-        "stop_reason": decision.stop_reason.value,
+        "next_action": next_act,
+        "pending_tasks": [_serialize_task(t) for t in authorized_tasks],
+        "guard_notices": new_notices,
+        "current_rationale": parsed.thought or "主脑派发并行子智能体探索市场事实",
+        "system_status": sys_status,
+        "cancelled": False,
+        "stop_reason": StopReason.CONTINUE.value,
         "processed_steering_count": len(all_inbox),
-        **reset_updates,
     }
+    if invalid_delta:
+        res["invalidated_evidence_ids"] = invalid_delta
     if steering_delta:
-        result["steering_inbox"] = steering_delta
-    return result
+        res["steering_inbox"] = steering_delta
+    return res
 
 
-def web_agent_node(state: AutonomousAgentState) -> Dict[str, Any]:
-    """全网情报分析专员（web_agent）：专注全网网页检索（仅绑定 search_web）。"""
+def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """受派子智能体执行节点：运行独立有界 ReAct 工具探索循环（Think -> Tool Gate -> Observe）。"""
     t0 = time.perf_counter()
-    raw_query = state.get("user_query") or state.get("keyword") or ""
-    keyword = state.get("keyword") or raw_query
-    inbox = state.get("steering_inbox") or []
-    scope = classify_research_scope(raw_query, inbox)
-    enforce_tool_allowed("search_web", scope)
+    hooks = _get_hooks(str(state.get("hook_run_id") or ""))
+    task = _deserialize_task(state.get("current_task") or {})
+    user_query = str(state.get("user_query") or state.get("keyword") or "")
+    keyword = str(state.get("keyword") or user_query)
+    steering = list(state.get("steering_inbox") or [])
+    started_at = float(state.get("started_at") or time.perf_counter())
+    timeout_seconds = float(state.get("timeout_seconds", 180.0))
+    max_steps = max(1, int(state.get("max_subagent_steps", 3)))
+    rationale = str(state.get("current_rationale") or task.goal)
 
-    steer_addon = f" {' '.join(inbox)}" if inbox else ""
-    query = f"{keyword}{steer_addon}".strip()
-
-    ctx = SubagentContext(conversation_id=f"web_{state.get('job_id', 'task')}_{int(time.time())}", role="全网市场情报分析专员")
-    tools_records: List[AuditableToolRecord] = []
-
-    t_start = time.perf_counter()
-    raw_results = search_web(query, limit=15)
-    t_tool = round(time.perf_counter() - t_start, 2)
-    tools_records.append({
-        "tool_name": "search_web",
-        "parameters": {"query": query, "limit": 15},
-        "result_summary": f"成功检索到 {len(raw_results)} 条全网网页结果，提取了主流热销款式特征及核心消费者痛点评价。",
-        "data_count": len(raw_results),
-        "elapsed": t_tool,
-    })
-
-    # 工具级空结果扩词兜底：当附加干预词过窄导致 0 条时，用核心品类词重抓一次
-    if not raw_results and query != keyword and keyword:
-        t_retry = time.perf_counter()
-        raw_results = search_web(keyword, limit=15)
-        tools_records.append({
-            "tool_name": "search_web",
-            "parameters": {"query": keyword, "limit": 15},
-            "result_summary": f"扩词重试检索到 {len(raw_results)} 条全网网页结果。",
-            "data_count": len(raw_results),
-            "elapsed": round(time.perf_counter() - t_retry, 2),
-        })
-
-    llm = LLMClient()
-    prompt = (
-        f"你是一名资深电商市场研究员。根据检索到的全网网页信息，针对【{keyword}】提炼 3-4 条核心事实要点：\n"
-        "1. 主流款式与全网零售定价带；\n"
-        "2. 消费者真实痛点与高频差评点；\n"
-        "3. 当前全网热销卖点。\n"
-        "【严格要求】：基于真实事实，严禁虚构造假。\n\n"
-        "抓取数据预览：\n" + json.dumps(raw_results[:10], ensure_ascii=False)
+    scope = classify_research_scope(user_query, steering)
+    ctx = SubagentContext(
+        conversation_id=f"{task.task_id}_{int(time.time())}",
+        role=task.role,
     )
-    try:
-        analysis_summary = llm.chat(prompt, tier=ModelTier.FAST, system="你是客观严谨的市场分析专员。")
-    except Exception:
-        analysis_summary = f"已完成全网网页情报抓取（共 {len(raw_results)} 条）。"
 
-    scratch_file = ctx.write_scratch("raw_search_web.json", json.dumps(raw_results, ensure_ascii=False, indent=2))
-    elapsed = round(time.perf_counter() - t0, 2)
+    _emit_progress(hooks, f"[agent_handoff] 角色交接: lead_agent ➔ {task.role} · 目标: '{task.goal}'")
 
-    transition: AuditableAgentTransition = {
-        "agent_id": ctx.conversation_id,
-        "role": "全网市场情报分析专员",
-        "type_name": "web_agent",
-        "state_from": "DISPATCHED",
-        "state_to": "COMPLETED",
-        "decision_rationale": state.get("current_rationale", ""),
-        "tools": tools_records,
-        "elapsed": elapsed,
-        "scratch_files": [str(scratch_file)],
-    }
-
-    return {
-        "web_findings": {
-            "summary": analysis_summary,
-            "items_count": len(raw_results),
-            "items": raw_results[:15],
-            "elapsed": elapsed,
-        },
-        "web_retries": int(state.get("web_retries", 0)) + 1,
-        "audit_trail": [transition],
-        "active_agent": "web_agent",
-    }
-
-
-def scanner_agent_node(state: AutonomousAgentState) -> Dict[str, Any]:
-    """货源比价专员（scanner_agent）：装备 1688 与 Amazon 双工具执行出厂底价与零售对标比价。"""
-    t0 = time.perf_counter()
-    raw_query = state.get("user_query") or state.get("keyword") or ""
-    keyword = state.get("keyword") or raw_query
-    inbox = state.get("steering_inbox") or []
-    scope = classify_research_scope(raw_query, inbox)
-    enforce_tool_allowed("search_1688_wholesale", scope)
-    enforce_tool_allowed("search_amazon", scope)
-
-    steer_addon = f" {' '.join(inbox)}" if inbox else ""
-    query = f"{keyword}{steer_addon}".strip()
-
-    ctx = SubagentContext(conversation_id=f"scan_{state.get('job_id', 'task')}_{int(time.time())}", role="货源比价专员")
     tools_records: List[AuditableToolRecord] = []
     scratch_files: List[str] = []
-
-    t1_start = time.perf_counter()
-    p1688_items = search_1688_wholesale(query, limit=15)
-    t1_dur = round(time.perf_counter() - t1_start, 2)
-    tools_records.append({
-        "tool_name": "search_1688_wholesale",
-        "parameters": {"query": query, "limit": 15},
-        "result_summary": f"抓取到 {len(p1688_items)} 家 1688 源头工厂，覆盖一手出厂价与起订批量梯度。",
-        "data_count": len(p1688_items),
-        "elapsed": t1_dur,
-    })
-    if not p1688_items and query != keyword and keyword:
-        t1_retry = time.perf_counter()
-        p1688_items = search_1688_wholesale(keyword, limit=15)
-        tools_records.append({
-            "tool_name": "search_1688_wholesale",
-            "parameters": {"query": keyword, "limit": 15},
-            "result_summary": f"扩词重试抓取到 {len(p1688_items)} 家 1688 源头工厂。",
-            "data_count": len(p1688_items),
-            "elapsed": round(time.perf_counter() - t1_retry, 2),
-        })
-    s1 = ctx.write_scratch("raw_1688.json", json.dumps(p1688_items, ensure_ascii=False, indent=2))
-    scratch_files.append(str(s1))
-
-    t2_start = time.perf_counter()
-    amz_items = search_amazon(query, limit=10)
-    t2_dur = round(time.perf_counter() - t2_start, 2)
-    s2 = ctx.write_scratch("raw_amazon.json", json.dumps(amz_items, ensure_ascii=False, indent=2))
-    scratch_files.append(str(s2))
-    tools_records.append({
-        "tool_name": "search_amazon",
-        "parameters": {"query": query, "limit": 10},
-        "result_summary": f"抓取到 {len(amz_items)} 款海外亚马逊竞品，获得美元零售价格带与主力 ASIN 标的。",
-        "data_count": len(amz_items),
-        "elapsed": t2_dur,
-    })
+    platform_items: Dict[str, List[Dict[str, Any]]] = {"web": [], "p1688": [], "amazon": []}
+    tool_counts: Dict[str, int] = {}
+    react_observations: List[Dict[str, Any]] = []
+    final_summary = ""
+    key_metrics: List[str] = []
+    gaps_or_errors: List[str] = []
 
     llm = LLMClient()
-    prompt = (
-        f"你是资深电商供应链采购专家。根据以下 1688 工厂货源与海外亚马逊比价数据，针对【{keyword}】归纳 3-4 条关键事实：\n"
-        "1. 1688 一手工厂出厂底价区间、起订量阶梯及主流供货产地（如深圳/东莞/义乌）；\n"
-        "2. 海外亚马逊竞品零售定价区间与热销规格；\n"
-        "3. 国内出厂到海外零售的粗算毛利空间。\n"
-        "【严格要求】：基于真实抓取数据，严禁无中生有编造价格。\n\n"
-        f"1688数据：{json.dumps(p1688_items[:8], ensure_ascii=False)}\n"
-        f"亚马逊数据：{json.dumps(amz_items[:5], ensure_ascii=False)}"
-    )
-    try:
-        analysis_summary = llm.chat(prompt, tier=ModelTier.FAST, system="你是精通供应链出厂底价核算的资深采购。")
-    except Exception:
-        analysis_summary = f"已完成 1688 一手货源（{len(p1688_items)} 家工厂）与亚马逊（{len(amz_items)} 款竞品）双渠道比价数据提取。"
+
+    def _run_guarded_tool(tool_name: str, query_or_url: str, step_idx: int) -> ToolOutcome:
+        # 1. Domain 双重硬守卫（业务边界 + 当前任务授权）
+        try:
+            enforce_tool_allowed(tool_name, scope, task.allowed_tools)
+        except Denied as exc:
+            return ToolOutcome(
+                tool_name=tool_name,
+                status="error",
+                error_reason=exc.message,
+            )
+
+        fn = _resolve_tool_callable(tool_name)
+        if fn is None:
+            return ToolOutcome(
+                tool_name=tool_name,
+                status="error",
+                error_reason=f"工具 {tool_name} 未注册可执行函数",
+            )
+
+        if _is_cancelled(hooks):
+            return ToolOutcome(
+                tool_name=tool_name,
+                status="cancelled",
+                error_reason="收到任务取消信号，中止工具调用",
+            )
+
+        remaining = timeout_seconds - (time.perf_counter() - started_at) if timeout_seconds > 0 else None
+        kwargs = _build_tool_kwargs(tool_name, query_or_url)
+
+        _emit_progress(
+            hooks,
+            f"[tool_execution_start] [{task.role}] 调度工具: {tool_name} · 入参: {json.dumps(kwargs, ensure_ascii=False)}",
+        )
+
+        outcome = execute_tool_with_outcome(
+            tool_name=tool_name,
+            fn=fn,
+            kwargs=kwargs,
+            remaining_seconds=remaining,
+            cancel_event=hooks.cancel_event,
+        )
+
+        # 原始抓取写入隔离 Scratch 沙箱，不污染状态黑板
+        if outcome.items:
+            scratch_name = f"step{step_idx}_{tool_name}.json"
+            s_path = ctx.write_scratch(scratch_name, json.dumps(outcome.items, ensure_ascii=False, indent=2))
+            scratch_files.append(str(s_path))
+
+        if tool_name == "search_web":
+            platform_items["web"].extend(outcome.items)
+        elif tool_name == "search_1688_wholesale":
+            platform_items["p1688"].extend(outcome.items)
+        elif tool_name == "search_amazon":
+            platform_items["amazon"].extend(outcome.items)
+
+        tool_counts[tool_name] = tool_counts.get(tool_name, 0) + outcome.data_count
+
+        summary_txt = (
+            f"状态 {outcome.status} · 返回 {outcome.data_count} 条结果"
+            if outcome.status in ("ok", "empty")
+            else f"状态 {outcome.status} · {outcome.error_reason}"
+        )
+        tools_records.append(
+            {
+                "tool_name": tool_name,
+                "parameters": kwargs,
+                "status": outcome.status,
+                "result_summary": summary_txt,
+                "data_count": outcome.data_count,
+                "elapsed": outcome.elapsed,
+            }
+        )
+
+        _bump_progress(
+            hooks,
+            8,
+            75,
+            f"[tool_execution_end] [{task.role}] 工具 {tool_name} 完毕 · {summary_txt}",
+        )
+        return outcome
+
+    # ── 子智能体有界 ReAct 探索循环 ──
+    for step_idx in range(1, max_steps + 1):
+        if _is_cancelled(hooks):
+            gaps_or_errors.append("任务中途取消")
+            break
+        if timeout_seconds > 0 and (time.perf_counter() - started_at) >= timeout_seconds:
+            gaps_or_errors.append("达到全局时间预算上限")
+            break
+
+        step_prompt = (
+            f"你是电商调研子智能体：【{task.role}】。\n"
+            f"核心目标：{task.goal}\n"
+            f"品类词：【{keyword}】；用户原诉求：{user_query}\n"
+            f"授权可用工具列表（严禁越界）：{list(task.allowed_tools)}\n"
+            f"建议起步词：{list(task.seed_queries)}\n"
+            f"当前进度：第 {step_idx}/{max_steps} 步。\n"
+            f"历史观测记录：\n{json.dumps(react_observations, ensure_ascii=False)}\n\n"
+            "请自主决策下一步：\n"
+            "- 若尚需收集信息，或上一步 status='empty'（应换同义词/更宽泛核心词再查），或想用 fetch_web_page 深抓上一步返回的某个 url 详情：输出 action='call_tool'，填写合法 tool_name 和 query_or_url。\n"
+            "- 若已获取足够实证，或所有渠道均 status='error'/'timeout' 无法继续抓取：输出 action='finish'，并严谨填写 findings_summary、key_metrics 与 gaps_or_errors。\n"
+            "【铁律】：严禁编造工具未返回的任何数字或链接。"
+        )
+
+        step_dec: Optional[_SubagentStepSchema] = None
+        try:
+            raw_step = llm.chat_json(
+                prompt=step_prompt,
+                schema=_SubagentStepSchema,
+                tier=ModelTier.FAST,
+                system=f"你是专注【{task.role}】的客观市场调查专员，基于工具实测观测执行 ReAct 循环。",
+                retries=2,
+            )
+            if isinstance(raw_step, _SubagentStepSchema):
+                step_dec = raw_step
+            elif isinstance(raw_step, dict) and raw_step.get("action"):
+                step_dec = _SubagentStepSchema.model_validate(raw_step)
+        except Exception:
+            step_dec = None
+
+        # 解析失败降级兜底：首步用默认工具与起步词实际跑一次，已有观测则直接收敛
+        if step_dec is None:
+            if not tools_records and task.allowed_tools:
+                default_tool = task.allowed_tools[0]
+                default_query = task.seed_queries[0] if task.seed_queries else keyword
+                step_dec = _SubagentStepSchema(
+                    action="call_tool",
+                    thought="执行起步检索收集原始情报",
+                    tool_name=default_tool,
+                    query_or_url=default_query,
+                )
+            else:
+                step_dec = _SubagentStepSchema(
+                    action="finish",
+                    thought="已有工具实测观测，收敛当前结果",
+                    findings_summary="",
+                )
+
+        if step_dec.action == "finish":
+            final_summary = (step_dec.findings_summary or "").strip()
+            key_metrics = [str(m) for m in step_dec.key_metrics if m]
+            gaps_or_errors.extend(str(g) for g in step_dec.gaps_or_errors if g)
+            break
+
+        tool_name = (step_dec.tool_name or (task.allowed_tools[0] if task.allowed_tools else "")).strip()
+        q_arg = (step_dec.query_or_url or (task.seed_queries[0] if task.seed_queries else keyword)).strip()
+        outcome = _run_guarded_tool(tool_name, q_arg, step_idx)
+
+        react_observations.append(
+            {
+                "step": step_idx,
+                "tool": tool_name,
+                "arg": q_arg,
+                "status": outcome.status,
+                "data_count": outcome.data_count,
+                "error_reason": outcome.error_reason,
+                "preview": outcome.text_preview[:1500],
+            }
+        )
+        if outcome.status in ("error", "timeout", "cancelled") and outcome.error_reason:
+            gaps_or_errors.append(f"{tool_name}({outcome.status}): {outcome.error_reason}")
+
+    # 若步数耗尽仍未调用 finish，基于真实观测做一次客观提炼
+    if not final_summary:
+        if react_observations:
+            try:
+                synth_prompt = (
+                    f"你是【{task.role}】，请仅依据以下工具真实返回观测（严禁虚构），针对目标『{task.goal}』归纳客观事实要点：\n"
+                    f"{json.dumps(react_observations, ensure_ascii=False)}"
+                )
+                final_summary = llm.chat(
+                    synth_prompt,
+                    tier=ModelTier.FAST,
+                    system="你是严禁幻觉与造假的市场分析专员。",
+                    max_tokens=800,
+                ).strip()
+            except Exception:
+                final_summary = ""
+        if not final_summary:
+            total_items = sum(t["data_count"] for t in tools_records)
+            final_summary = (
+                f"[{task.role}] 完成 {len(tools_records)} 次工具调用，累计获取 {total_items} 条原始数据"
+                + (f"；存在异常/缺口：{'；'.join(gaps_or_errors)}" if gaps_or_errors else "。")
+            )
 
     elapsed = round(time.perf_counter() - t0, 2)
+    channel = "sourcing" if any(t["tool_name"] in SOURCING_TOOLS for t in tools_records) or task.channel_hint == "sourcing" else "web"
+    has_ok = any(t["status"] == "ok" and t["data_count"] > 0 for t in tools_records)
+    has_err = any(t["status"] in ("error", "timeout") for t in tools_records)
+    ev_status = "ok" if has_ok else ("error" if has_err else "empty")
+
+    _emit_progress(hooks, f"[agent_end] 【{task.role}】完成探索 · 状态: {ev_status} (耗时 {elapsed}s)")
+
     transition: AuditableAgentTransition = {
         "agent_id": ctx.conversation_id,
-        "role": "货源比价专员",
-        "type_name": "scanner_agent",
-        "state_from": "DISPATCHED",
-        "state_to": "COMPLETED",
-        "decision_rationale": state.get("current_rationale", ""),
+        "role": task.role,
+        "type_name": task.task_id,
+        "state_from": "SPAWNED",
+        "state_to": "COMPLETED" if ev_status != "error" else "PARTIAL_OR_FAILED",
+        "decision_rationale": rationale,
         "tools": tools_records,
         "elapsed": elapsed,
         "scratch_files": scratch_files,
     }
 
-    return {
-        "wholesale_findings": {
-            "summary": analysis_summary,
-            "items_count_1688": len(p1688_items),
-            "items_count_amazon": len(amz_items),
-            "items": p1688_items[:15],
-            "elapsed": elapsed,
-        },
-        "scanner_retries": int(state.get("scanner_retries", 0)) + 1,
-        "audit_trail": [transition],
-        "active_agent": "scanner_agent",
-    }
-
-
-def verifier_agent_node(state: AutonomousAgentState) -> Dict[str, Any]:
-    """商品真实性验真专员（verifier_agent）：交叉比对供应链出厂与零售端，测算毛利并识别夸大宣传。"""
-    t0 = time.perf_counter()
-    keyword = state.get("keyword") or state.get("user_query") or ""
-    web_f = state.get("web_findings") or {}
-    whole_f = state.get("wholesale_findings") or {}
-
-    ctx = SubagentContext(conversation_id=f"verif_{state.get('job_id', 'task')}_{int(time.time())}", role="商品真实性验真专员")
-    llm = LLMClient()
-
-    prompt = (
-        f"你是电商产品合规与真实性验真专家。请交叉核对以下两端事实：\n"
-        f"【全网零售端情报】：\n{web_f.get('summary', '暂无')}\n\n"
-        f"【1688与亚马逊货源端比价】：\n{whole_f.get('summary', '暂无')}\n\n"
-        "请严谨核验并输出：\n"
-        "1. 零售端宣称的产品卖点与工厂实际出厂工艺是否存在夸大或虚假宣传；\n"
-        "2. 出厂批发底价到终端零售价的真实毛利空间测算；\n"
-        "3. 提炼出 3 条供应链与真实性风险警示。"
-    )
-    try:
-        verif_summary = llm.chat(prompt, tier=ModelTier.FAST, system="你是严谨的产品质检与合规审计专家。")
-    except Exception:
-        verif_summary = "已完成两端数据交叉比对：出厂底价与零售售价存在合理毛利空间，未发现严重虚假宣传。"
-
-    elapsed = round(time.perf_counter() - t0, 2)
-    transition: AuditableAgentTransition = {
-        "agent_id": ctx.conversation_id,
-        "role": "商品真实性验真专员",
-        "type_name": "verifier_agent",
-        "state_from": "DISPATCHED",
-        "state_to": "COMPLETED",
-        "decision_rationale": state.get("current_rationale", ""),
-        "tools": [
-            {
-                "tool_name": "cross_verify_margins",
-                "parameters": {"subject": keyword},
-                "result_summary": "完成供应链出厂价与零售宣称交叉验真，测算出毛利空间与风险提示。",
-                "data_count": 1,
-                "elapsed": elapsed,
-            }
-        ],
+    evidence: EvidenceRecord = {
+        "evidence_id": task.task_id,
+        "subagent_id": ctx.conversation_id,
+        "role": task.role,
+        "channel": channel,
+        "goal": task.goal,
+        "summary": final_summary,
+        "key_metrics": key_metrics,
+        "gaps_or_errors": gaps_or_errors,
+        "platform_items": platform_items,
+        "tool_counts": tool_counts,
+        "status": ev_status,
         "elapsed": elapsed,
-        "scratch_files": [],
     }
 
     return {
-        "verification_findings": {
-            "summary": verif_summary,
-            "elapsed": elapsed,
-        },
+        "evidence_pool": [evidence],
         "audit_trail": [transition],
-        "active_agent": "verifier_agent",
     }
 
 
-def reporter_agent_node(state: AutonomousAgentState) -> Dict[str, Any]:
-    """电商调研研报专家（reporter_agent）：由 ModelTier.STRONG 驱动，编排终审 Markdown 研报。"""
+def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
+    """终审研报合成专家（ModelTier.STRONG）：仅引用黑板实证生成带缺口声明的 Markdown 研报。"""
     t0 = time.perf_counter()
+    hooks = _get_hooks(state.get("hook_run_id", ""))
     keyword = state.get("keyword") or state.get("user_query") or ""
-    outline = state.get("outline") or []
-    web_f = state.get("web_findings") or {}
-    whole_f = state.get("wholesale_findings") or {}
-    verif_f = state.get("verification_findings") or {}
+    user_query = state.get("user_query") or keyword
+    outline = state.get("outline") or ["市场概况与用户痛点", "竞品价格带格局", "落地决策建议"]
     inbox = state.get("steering_inbox") or []
+    active_ev = _active_evidence(state)
 
-    ctx = SubagentContext(conversation_id=f"rep_{state.get('job_id', 'task')}_{int(time.time())}", role="电商市场调研研报专家")
-    llm = LLMClient()
+    _emit_progress(hooks, "[agent_handoff] 角色交接: lead_agent ➔ 终审研报合成专家 · 整合黑板有效证据", 85)
 
-    steer_section = f"\n【用户动态干预要求】：{'；'.join(inbox)}\n" if inbox else ""
-    prompt = (
-        f"调研关键词：【{keyword}】\n"
-        f"大纲章节：{'；'.join(outline)}\n"
-        f"{steer_section}\n"
-        f"【全网市场情报】：\n{web_f.get('summary', '')}\n\n"
-        f"【1688与亚马逊货源比价】：\n{whole_f.get('summary', '')}\n\n"
-        f"【真实性核验与毛利测算】：\n{verif_f.get('summary', '')}\n\n"
-        "请综合以上多智能体调查事实，撰写一份结构化、数据详实且条理清晰的电商市场全景调研报告。\n"
-        "报告必须涵盖：\n"
-        "1. 市场概况与竞品竞争格局；\n"
-        "2. 供应链出厂成本与零售/出海价格带剖析；\n"
-        "3. 用户高频痛点与热销卖点拆解；\n"
-        "4. 产品差异化突围策略与选品操盘建议。\n"
-        "【严格要求】：所有数据必须严格来源于上述智能体发现，禁止凭空造假。"
+    ctx = SubagentContext(
+        conversation_id=f"rep_{state.get('job_id', 'task')}_{int(time.time())}",
+        role="终审研报合成专家",
     )
 
+    evidence_payload = [
+        {
+            "evidence_id": ev.get("evidence_id"),
+            "role": ev.get("role"),
+            "channel": ev.get("channel"),
+            "status": ev.get("status"),
+            "goal": ev.get("goal"),
+            "summary": ev.get("summary"),
+            "key_metrics": ev.get("key_metrics"),
+            "gaps_or_errors": ev.get("gaps_or_errors"),
+            "tool_counts": ev.get("tool_counts"),
+        }
+        for ev in active_ev
+    ]
+
+    steer_block = f"\n【运行期动态干预要求（必须显式回应落地）】：{'；'.join(inbox)}\n" if inbox else ""
+    prompt = (
+        f"目标品类：【{keyword}】\n"
+        f"用户完整诉求：{user_query}\n"
+        f"规划大纲章节：{'；'.join(outline)}\n"
+        f"{steer_block}\n"
+        f"【黑板已回收有效证据包（共 {len(evidence_payload)} 份）】：\n"
+        f"{json.dumps(evidence_payload, ensure_ascii=False)}\n\n"
+        "请综合上述多智能体真实采回的证据撰写结构化 Markdown 市场调研报告。\n"
+        "【严格准则】：\n"
+        "1. 一切价格、起订量、销量、差评与工厂/商品线索必须严格来自上述黑板证据，绝不允许编造未出现的数字；\n"
+        "2. 若某渠道 status 为 empty/error 或 gaps_or_errors 非空，必须在报告对应章节客观说明数据缺失原因与可替代方案，严禁粉饰或凭空补齐；\n"
+        "3. 结合用户诉求给出可落地的差异化与风险提示。"
+    )
+
+    llm = LLMClient()
+    _emit_progress(hooks, "[tool_execution_start] [终审研报合成专家] 调度工具: generate_markdown_report", 90)
     try:
-        final_report = llm.chat(prompt, tier=ModelTier.STRONG, system="你是资深电商操盘负责人，输出高质量 Markdown 研报。")
-    except Exception:
-        steer_lines = [f"【动态干预诉求落地】：针对指令要求重点对标『{s}』，已在选品策略中优先落实并强化供应链核验。" for s in inbox]
-        steer_block = "\n\n## 4. 动态干预与重点策略\n" + "\n".join(steer_lines) if steer_lines else ""
+        final_report = llm.chat(
+            prompt,
+            tier=ModelTier.STRONG,
+            system="你是资深电商操盘负责人。输出客观、可核验的高质量 Markdown 研报，绝对禁止虚构数据。",
+        )
+    except Exception as exc:
+        sections = [
+            f"### {ev.get('role')}（{ev.get('status')}）\n{ev.get('summary', '')}"
+            for ev in active_ev
+        ]
+        body = "\n\n".join(sections) if sections else "本次暂无可用实测证据。"
         final_report = (
-            f"# 【{keyword}】电商市场全景调研报告\n\n"
-            f"## 1. 市场与全网用户口碑概览\n{web_f.get('summary', '已完成全网市场情报与核心热销卖点、高频买家痛点梳理。')}\n\n"
-            f"## 2. 供应链出厂价与跨境零售对标比价\n{whole_f.get('summary', '已完成 1688 一手源头工厂出厂底价与零售对标比价分析。')}\n\n"
-            f"## 3. 供应链真实毛利核验与操盘决策建议\n基于上述多维度数据交叉核验，建议避开负面痛点，紧扣核心卖点，优化出厂采购与起订量阶梯，实现稳健毛利。{steer_block}"
+            f"# 【{keyword}】电商市场调研报告（降级结构化汇总）\n\n"
+            f"> 注：终审大模型生成阶段发生异常（{type(exc).__name__}），以下内容严格由各子智能体实测证据直接汇总，未作二次推演。\n\n"
+            f"{body}"
         )
 
-    art_meta = ArtifactMetadata(summary=f"【{keyword}】电商全景调研报告", user_facing=True)
+    art_meta = ArtifactMetadata(summary=f"【{keyword}】电商多智能体调研报告", user_facing=True)
     art_file = ctx.write_artifact("market_research_report.md", final_report, metadata=art_meta)
     elapsed = round(time.perf_counter() - t0, 2)
 
+    _emit_progress(
+        hooks,
+        f"[tool_execution_end] [终审研报合成专家] 研报生成完毕 · {len(final_report)} 字符 (耗时 {elapsed}s)",
+        95,
+    )
+
     transition: AuditableAgentTransition = {
         "agent_id": ctx.conversation_id,
-        "role": "电商市场调研研报专家",
-        "type_name": "reporter_agent",
-        "state_from": "DISPATCHED",
+        "role": "终审研报合成专家",
+        "type_name": "synthesizer_agent",
+        "state_from": "SYNTHESIZING",
         "state_to": "COMPLETED",
         "decision_rationale": state.get("current_rationale", ""),
         "tools": [
             {
                 "tool_name": "generate_markdown_report",
-                "parameters": {"outline_count": len(outline)},
-                "result_summary": f"生成高质量终审 Markdown 研报，共计 {len(final_report)} 字符。",
-                "data_count": 1,
+                "parameters": {"evidence_count": len(active_ev), "outline_count": len(outline)},
+                "status": "ok",
+                "result_summary": f"基于 {len(active_ev)} 份黑板实证生成终审 Markdown 研报（{len(final_report)} 字符）。",
+                "data_count": len(active_ev),
                 "elapsed": elapsed,
             }
         ],
@@ -549,18 +935,15 @@ def reporter_agent_node(state: AutonomousAgentState) -> Dict[str, Any]:
         "report": final_report,
         "artifacts": [str(art_file)],
         "audit_trail": [transition],
-        "active_agent": "reporter_agent",
+        "system_status": "COMPLETED" if state.get("stop_reason") == StopReason.CONTINUE.value else state.get("system_status", "COMPLETED"),
     }
 
 
 def final_persistence_node(state: AutonomousAgentState) -> Dict[str, Any]:
-    """终态沉淀节点：仅在非取消状态下将实体事实持久化至租户长效知识库。"""
+    """终态沉淀节点：仅在非取消状态下将大纲与实测摘要写入租户长效知识库。"""
     cancelled = bool(state.get("cancelled", False))
     if cancelled:
-        return {
-            "system_status": "CANCELLED",
-            "active_agent": "system",
-        }
+        return {"system_status": "CANCELLED"}
 
     keyword = state.get("keyword") or ""
     tenant_id = state.get("tenant_id") or "default"
@@ -577,70 +960,67 @@ def final_persistence_node(state: AutonomousAgentState) -> Dict[str, Any]:
         pass
 
     final_status = "TIMEOUT" if state.get("stop_reason") == StopReason.TIMEOUT.value and not report else "COMPLETED"
-    return {
-        "system_status": final_status,
-        "active_agent": "system",
-    }
+    return {"system_status": final_status}
 
 
 # ============================================================================
-# 4. 动态条件路由与图编排（LangGraph Supervisor Loop）
+# 6. LangGraph 动态并行路由与状态图构建
 # ============================================================================
 
-def supervisor_router(state: AutonomousAgentState) -> str:
-    """根据主脑决策选择下一步节点（纯动态闭环）。"""
-    next_action = state.get("next_action", "FINISH")
-    if next_action in ("web_agent", "scanner_agent", "verifier_agent", "reporter_agent"):
-        return next_action
+def orchestrator_router(state: AutonomousAgentState) -> Any:
+    """动态扇出路由器：返回并行的 Send(subagent_worker) 列表，或跳转到终审/终止节点。"""
+    next_act = state.get("next_action", "final_node")
+    if next_act == "dispatch_subagents":
+        tasks = state.get("pending_tasks") or []
+        if tasks:
+            return [
+                Send(
+                    "subagent_worker",
+                    {
+                        "current_task": task,
+                        "hook_run_id": state.get("hook_run_id", ""),
+                        "user_query": state.get("user_query", ""),
+                        "keyword": state.get("keyword", ""),
+                        "steering_inbox": list(state.get("steering_inbox") or []),
+                        "started_at": state.get("started_at", 0.0),
+                        "timeout_seconds": state.get("timeout_seconds", 180.0),
+                        "max_subagent_steps": state.get("max_subagent_steps", 3),
+                        "current_rationale": state.get("current_rationale", ""),
+                    },
+                )
+                for task in tasks
+            ]
+        return "synthesizer"
+    if next_act == "synthesizer":
+        return "synthesizer"
     return "final_node"
 
 
 def build_autonomous_agent_graph(checkpointer: Optional[Any] = None) -> Any:
-    """构建自治多智能体 LangGraph 状态图。"""
+    """构建动态并行 Orchestrator–Workers 多智能体 LangGraph 状态图。"""
     builder = StateGraph(AutonomousAgentState)
 
-    builder.add_node("supervisor", main_supervisor_node)
-    builder.add_node("web_agent", web_agent_node)
-    builder.add_node("scanner_agent", scanner_agent_node)
-    builder.add_node("verifier_agent", verifier_agent_node)
-    builder.add_node("reporter_agent", reporter_agent_node)
+    builder.add_node("orchestrator", lead_orchestrator_node)
+    builder.add_node("subagent_worker", subagent_worker_node)
+    builder.add_node("synthesizer", synthesizer_node)
     builder.add_node("final_node", final_persistence_node)
 
-    builder.add_edge(START, "supervisor")
-
+    builder.add_edge(START, "orchestrator")
     builder.add_conditional_edges(
-        "supervisor",
-        supervisor_router,
-        {
-            "web_agent": "web_agent",
-            "scanner_agent": "scanner_agent",
-            "verifier_agent": "verifier_agent",
-            "reporter_agent": "reporter_agent",
-            "final_node": "final_node",
-        },
+        "orchestrator",
+        orchestrator_router,
+        ["subagent_worker", "synthesizer", "final_node"],
     )
-
-    builder.add_edge("web_agent", "supervisor")
-    builder.add_edge("scanner_agent", "supervisor")
-    builder.add_edge("verifier_agent", "supervisor")
-    builder.add_edge("reporter_agent", "final_node")
+    builder.add_edge("subagent_worker", "orchestrator")
+    builder.add_edge("synthesizer", "final_node")
     builder.add_edge("final_node", END)
 
     return builder.compile(checkpointer=checkpointer)
 
 
 # ============================================================================
-# 5. 统一流式执行入口（供 Worker 进程与评测沙箱调用）
+# 7. 统一流式执行入口（供 Worker 进程与评测沙箱调用）
 # ============================================================================
-
-def _emit_transition_events(tr: AuditableAgentTransition, emit: Callable[[str, int], None]) -> None:
-    """按严格可审计格式实时广播单个子智能体状态跃迁与工具事件。"""
-    emit(f"[agent_handoff] 角色交接: main_agent ➔ {tr['role']} · 决策理由: '{tr['decision_rationale']}'", 0)
-    for t in tr.get("tools", []):
-        emit(f"[tool_execution_start] 调度工具: {t['tool_name']} · 入参: {json.dumps(t['parameters'], ensure_ascii=False)}", 0)
-        emit(f"[tool_execution_end] 工具 {t['tool_name']} 执行完毕 · 返回 {t['data_count']} 条数据 · 摘要: {t['result_summary']}", 0)
-    emit(f"[agent_end] 【{tr['role']}】完成任务 · 状态变更为: {tr['state_to']} (耗时 {tr['elapsed']}s)", 0)
-
 
 def execute_autonomous_agents(
     keyword: str,
@@ -653,41 +1033,50 @@ def execute_autonomous_agents(
     emit_event_fn: Optional[Callable[[str, int], None]] = None,
     initial_steering: Optional[List[str]] = None,
     timeout_seconds: float = 180.0,
-    max_turns: int = 6,
-    max_empty_retries: int = 0,
+    max_turns: int = 5,
+    max_parallel_subagents: int = 4,
+    max_subagent_steps: int = 3,
     check_cancel_fn: Optional[Callable[[], bool]] = None,
     fetch_steering_fn: Optional[Callable[[], List[str]]] = None,
 ) -> Dict[str, Any]:
-    """执行自治多智能体协同系统，使用 graph.stream 逐节点实时广播可审计事件。"""
+    """执行动态并行多智能体调研系统并实时推送各层可审计事件。"""
     started_at = time.perf_counter()
-    emit = emit_event_fn or (lambda stage, pct: None)
+    hook_run_id = f"run_{uuid.uuid4().hex}"
+    hooks = _RuntimeHooks(
+        check_cancel_fn=check_cancel_fn,
+        fetch_steering_fn=fetch_steering_fn,
+        emit_fn=emit_event_fn,
+    )
+
+    with _HOOKS_LOCK:
+        _HOOKS_BY_RUN_ID[hook_run_id] = hooks
 
     init_state: AutonomousAgentState = {
         "job_id": job_id or f"job_{int(time.time())}",
         "tenant_id": tenant_id,
         "run_version": run_version,
         "conversation_id": conversation_id or f"conv_{int(time.time())}",
+        "hook_run_id": hook_run_id,
         "user_query": user_query or keyword,
         "keyword": keyword,
         "steering_inbox": list(initial_steering or []),
         "processed_steering_count": 0,
         "system_status": "INIT",
-        "active_agent": "main_agent",
-        "next_action": "supervisor",
-        "current_rationale": "启动电商多智能体自治协同系统",
+        "next_action": "orchestrator",
+        "current_rationale": "激活 Orchestrator-Workers 自治多智能体调研系统",
         "turn_count": 0,
         "max_turns": max_turns,
+        "max_parallel_subagents": max_parallel_subagents,
+        "max_subagent_steps": max_subagent_steps,
         "started_at": started_at,
         "timeout_seconds": timeout_seconds,
         "cancelled": False,
         "stop_reason": StopReason.CONTINUE.value,
-        "web_retries": 0,
-        "scanner_retries": 0,
-        "max_empty_retries": max_empty_retries,
         "outline": [],
-        "web_findings": None,
-        "wholesale_findings": None,
-        "verification_findings": None,
+        "pending_tasks": [],
+        "guard_notices": [],
+        "evidence_pool": [],
+        "invalidated_evidence_ids": [],
         "audit_trail": [],
         "artifacts": [],
         "report": "",
@@ -697,106 +1086,124 @@ def execute_autonomous_agents(
     thread_id = f"research_{job_id}_{run_version}" if job_id else f"research_{int(time.time())}"
     config = {"configurable": {"thread_id": thread_id}}
 
-    emit(f"[agent_start] 激活自治多智能体中枢 (Supervisor: main_agent) · 目标品类: 【{keyword}】", 0)
+    _emit_progress(hooks, f"[agent_start] 激活自治多智能体主协调代理 (main_agent) · 目标品类: 【{keyword}】", 5)
 
-    # 聚合流式运行后的完整状态，并在每个节点结束时实时推送事件
     merged_state: Dict[str, Any] = dict(init_state)
-    merged_state["audit_trail"] = []
-    merged_state["artifacts"] = []
-    merged_state["steering_inbox"] = list(init_state["steering_inbox"])
+    for list_key in ("steering_inbox", "evidence_pool", "invalidated_evidence_ids", "audit_trail", "artifacts"):
+        merged_state[list_key] = list(init_state[list_key])
 
-    token = _runtime_hooks.set(
-        _RuntimeHooks(
-            check_cancel_fn=check_cancel_fn,
-            fetch_steering_fn=fetch_steering_fn,
-        )
-    )
     try:
         for chunk in graph.stream(init_state, config=config, stream_mode="updates"):
-            for node_name, delta in chunk.items():
+            for _, delta in chunk.items():
                 if not isinstance(delta, dict):
                     continue
                 for k, v in delta.items():
-                    if k in ("audit_trail", "artifacts", "steering_inbox") and isinstance(v, list):
+                    if k in (
+                        "steering_inbox",
+                        "evidence_pool",
+                        "invalidated_evidence_ids",
+                        "audit_trail",
+                        "artifacts",
+                    ) and isinstance(v, list):
                         merged_state[k].extend(v)
                     else:
                         merged_state[k] = v
-
-                if node_name == "supervisor" and delta.get("system_status") == "STEERING_REDIRECTED":
-                    latest = merged_state["steering_inbox"][-1] if merged_state["steering_inbox"] else ""
-                    emit(f"[steering] 收到动态干预指令并重规划: {latest}", 0)
-
-                for tr in delta.get("audit_trail") or []:
-                    _emit_transition_events(tr, emit)
     finally:
-        _runtime_hooks.reset(token)
+        with _HOOKS_LOCK:
+            _HOOKS_BY_RUN_ID.pop(hook_run_id, None)
 
     total_elapsed = round(time.perf_counter() - started_at, 1)
 
     subagents_trace: List[Dict[str, Any]] = []
     for tr in merged_state.get("audit_trail", []):
         tool_records = tr.get("tools", [])
-        subagents_trace.append({
-            "id": tr["agent_id"],
-            "role": tr["role"],
-            "type": tr["type_name"],
-            "type_name": tr["type_name"],
-            "state": tr["state_to"].lower(),
-            "status": tr["state_to"].lower(),
-            "decision_rationale": tr["decision_rationale"],
-            "elapsed": tr["elapsed"],
-            "tools": [
-                {
-                    "name": t["tool_name"],
-                    "description": t["result_summary"],
-                    "data_count": t["data_count"],
-                    "parameters": t["parameters"],
-                }
-                for t in tool_records
-            ],
-            "scratch_files": tr["scratch_files"],
-            "brief": tool_records[0]["result_summary"] if tool_records else tr["decision_rationale"],
-        })
+        subagents_trace.append(
+            {
+                "id": tr["agent_id"],
+                "role": tr["role"],
+                "type": tr["type_name"],
+                "type_name": tr["type_name"],
+                "state": tr["state_to"].lower(),
+                "status": tr["state_to"].lower(),
+                "decision_rationale": tr["decision_rationale"],
+                "elapsed": tr["elapsed"],
+                "tools": [
+                    {
+                        "name": t["tool_name"],
+                        "description": t["result_summary"],
+                        "status": t.get("status", "ok"),
+                        "data_count": t["data_count"],
+                        "parameters": t["parameters"],
+                    }
+                    for t in tool_records
+                ],
+                "scratch_files": tr["scratch_files"],
+                "brief": tool_records[0]["result_summary"] if tool_records else tr["decision_rationale"],
+            }
+        )
+
+    # 聚合有效黑板证据中的真实平台抓包条目（绝不虚构）
+    invalidated = set(merged_state.get("invalidated_evidence_ids") or [])
+    active_ev = [ev for ev in (merged_state.get("evidence_pool") or []) if ev.get("evidence_id") not in invalidated]
+    web_items: List[Dict[str, Any]] = []
+    p1688_items: List[Dict[str, Any]] = []
+    amz_items: List[Dict[str, Any]] = []
+    web_briefs: List[str] = []
+    sourcing_briefs: List[str] = []
+
+    for ev in active_ev:
+        p_items = ev.get("platform_items") or {}
+        web_items.extend(p_items.get("web") or [])
+        p1688_items.extend(p_items.get("p1688") or [])
+        amz_items.extend(p_items.get("amazon") or [])
+        if ev.get("channel") == "web" and ev.get("summary"):
+            web_briefs.append(str(ev["summary"]))
+        elif ev.get("channel") == "sourcing" and ev.get("summary"):
+            sourcing_briefs.append(str(ev["summary"]))
 
     platforms_summary = []
-    if merged_state.get("web_findings"):
-        wf = merged_state["web_findings"]
-        platforms_summary.append({
-            "name": "web",
-            "label": "全网网页实时搜索",
-            "state": "ok",
-            "state_label": "已完成",
-            "items_count": wf.get("items_count", 0),
-            "items": wf.get("items", []),
-            "brief": wf.get("summary", "")[:180],
-        })
-    if merged_state.get("wholesale_findings"):
-        scf = merged_state["wholesale_findings"]
-        platforms_summary.append({
-            "name": "p1688",
-            "label": "1688与亚马逊货源比价",
-            "state": "ok",
-            "state_label": "已完成",
-            "items_count": scf.get("items_count_1688", 0) + scf.get("items_count_amazon", 0),
-            "items": scf.get("items", []),
-            "brief": scf.get("summary", "")[:180],
-        })
+    if web_items or web_briefs:
+        platforms_summary.append(
+            {
+                "name": "web",
+                "label": "全网网页实时搜索",
+                "state": "ok" if web_items else "empty",
+                "state_label": "已完成" if web_items else "无匹配条目",
+                "items_count": len(web_items),
+                "items": web_items[:20],
+                "brief": ("；".join(web_briefs))[:180],
+            }
+        )
+    if p1688_items or amz_items or sourcing_briefs:
+        sourcing_count = len(p1688_items) + len(amz_items)
+        platforms_summary.append(
+            {
+                "name": "p1688",
+                "label": "1688与亚马逊货源比价",
+                "state": "ok" if sourcing_count > 0 else "empty",
+                "state_label": "已完成" if sourcing_count > 0 else "无匹配条目",
+                "items_count": sourcing_count,
+                "items": (p1688_items + amz_items)[:20],
+                "brief": ("；".join(sourcing_briefs))[:180],
+            }
+        )
 
     if merged_state.get("cancelled"):
-        emit(f"[system] 任务已按用户取消请求提前终止 (耗时 {total_elapsed}s)", 100)
+        _emit_progress(hooks, f"[system] 任务已按用户取消请求提前终止 (耗时 {total_elapsed}s)", 100)
     else:
-        emit(f"[agent_end] 自治多智能体协同达成目标 · 终审研报交付就绪 (总耗时 {total_elapsed}s)", 100)
+        _emit_progress(hooks, f"[agent_end] 多智能体自主协同达成目标 · 终审研报交付就绪 (总耗时 {total_elapsed}s)", 100)
 
     return {
         "report": merged_state.get("report", ""),
         "reply": merged_state.get("report", ""),
         "outline": merged_state.get("outline", []),
         "platforms": platforms_summary,
-        "model_calls": len(merged_state.get("audit_trail", [])) + 1,
+        "model_calls": len(merged_state.get("audit_trail", [])) + int(merged_state.get("turn_count", 0)),
         "elapsed": total_elapsed,
         "artifacts": merged_state.get("artifacts", []),
         "subagents": subagents_trace,
         "audit_trail": merged_state.get("audit_trail", []),
+        "evidence_pool": active_ev,
         "conversation_id": conversation_id,
         "keyword": keyword,
         "system_status": merged_state.get("system_status", "COMPLETED"),

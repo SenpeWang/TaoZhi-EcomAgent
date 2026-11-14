@@ -173,18 +173,62 @@ def test_subagent_runner_invoke():
 
 
 def test_full_multi_agent_research_flow():
-    """测试端到端的多智能体调研流水线（边界隔离：非供应链诉求直接收敛到研报）。
+    """测试端到端的真·多智能体调研系统（边界隔离 + Orchestrator-Workers 闭环）。
 
-    关键词「磁吸手机壳」不含工厂/出厂/1688/跨境等供应链信号，主脑依据边界隔离
-    正确跳过 scanner_agent（1688/Amazon 越权探查）与 verifier_agent，仅委派
-    web_agent 采集全网口碑后直接收敛到 reporter_agent 编制研报，避免越权。
+    关键词「磁吸手机壳」不含工厂/出厂/1688/跨境等供应链信号，领域硬守卫
+    仅放行全网工具并裁掉越权货源子任务，最终收敛生成研报。
     """
+    from taozhi.orchestration.agent_system import (
+        _OrchestratorDecisionSchema,
+        _ProposedSubtaskSchema,
+        _SubagentStepSchema,
+    )
+
     mock_llm = MagicMock()
-    mock_llm.chat.side_effect = [
-        '["市场概览", "竞品痛点", "选品建议"]',
-        "全网搜索发现：主流款式为超薄磁吸，热销价 39.9 元。",
-        "# 磁吸支架手机壳电商市场调研报告\n\n## 1. 市场概览\n全网需求旺盛。\n\n## 2. 选品建议\n紧扣核心卖点。",
-    ]
+    orch_calls = {"n": 0}
+
+    def fake_chat_json(*, prompt: str, schema=None, **kwargs):
+        if schema is _OrchestratorDecisionSchema:
+            orch_calls["n"] += 1
+            if orch_calls["n"] == 1:
+                return _OrchestratorDecisionSchema(
+                    action="spawn_subagents",
+                    thought="检索全网磁吸手机壳主流款式与用户评价",
+                    outline=["市场概览", "竞品痛点", "选品建议"],
+                    subtasks=[
+                        _ProposedSubtaskSchema(
+                            role="全网市场情报专员",
+                            goal="采集磁吸手机壳全网口碑与价位",
+                            allowed_tools=["search_web", "search_1688_wholesale"],  # 测试领域守卫裁掉越权 1688
+                            seed_queries=["磁吸手机壳"],
+                            channel_hint="web",
+                        )
+                    ],
+                )
+            return _OrchestratorDecisionSchema(
+                action="finish",
+                thought="已获得充分全网实证",
+                outline=["市场概览", "竞品痛点", "选品建议"],
+            )
+
+        if "历史观测记录：\n[]" in prompt:
+            return _SubagentStepSchema(
+                action="call_tool",
+                thought="使用授权的 search_web 检索全网口碑",
+                tool_name="search_web",
+                query_or_url="磁吸手机壳",
+            )
+        return _SubagentStepSchema(
+            action="finish",
+            thought="收集完毕",
+            findings_summary="全网搜索发现：主流款式为超薄磁吸，热销价 39.9 元。",
+            key_metrics=["热销价39.9元"],
+        )
+
+    mock_llm.chat_json.side_effect = fake_chat_json
+    mock_llm.chat.return_value = (
+        "# 磁吸支架手机壳电商市场调研报告\n\n## 1. 市场概览\n全网需求旺盛。\n\n## 2. 选品建议\n紧扣核心卖点。"
+    )
 
     progress_stages = []
 
@@ -192,13 +236,15 @@ def test_full_multi_agent_research_flow():
         progress_stages.append((stage, pct))
 
     with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm):
-        result = execute_autonomous_agents(keyword="磁吸手机壳", emit_event_fn=on_progress)
+        with patch("taozhi.orchestration.agent_system.search_web", return_value=[{"title": "磁吸壳测评", "snippet": "热销39.9元"}]):
+            result = execute_autonomous_agents(keyword="磁吸手机壳", emit_event_fn=on_progress)
 
     assert "report" in result
     assert "磁吸支架手机壳电商市场调研报告" in result["report"]
     assert len(result["outline"]) == 3
-    # 边界隔离：未触发供应链探查，只保留 web 单渠道，子智能体收敛为 2 个（web + reporter）
+    # 边界隔离：越权 1688 工具被领域守卫剥离，只保留 web 单渠道与 2 条审计跃迁（子智能体 + 合成专家）
     assert len(result["platforms"]) == 1
+    assert result["platforms"][0]["name"] == "web"
     assert len(result["subagents"]) == 2
     assert len(progress_stages) > 0
     assert any(pct == 100 for _, pct in progress_stages)
