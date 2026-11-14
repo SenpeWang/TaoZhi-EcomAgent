@@ -77,6 +77,7 @@ class Grant(Input):
     revoke:bool=False
 class SteerInput(Input):
     input:str=Field(min_length=1,max_length=2000)
+    request_id:str=Field(default="",max_length=64,pattern=r"^[A-Za-z0-9_-]*$")
 class Question(Input):
     question:str=Field(min_length=1,max_length=4000)
     kind:Literal["ask","research"]="ask"
@@ -530,37 +531,45 @@ def cancel(task_id:str,p=Depends(identity)):
     return {"message":"已请求取消"}
 @app.post("/api/tasks/{task_id}/steer")
 def steer(task_id:str,payload:SteerInput,p=Depends(identity)):
+    steer_id = (payload.request_id or "").strip() or f"steer_{secrets.token_hex(8)}"
     with database_connection() as c:
         r=fetch_one(c,"SELECT * FROM jobs WHERE tenant_id=%s AND id=%s FOR UPDATE",(p.tenant_id,task_id))
         if not r:raise Denied("任务不存在或没有访问权限","NOT_FOUND",404)
         if r["state"] not in ("queued","running"):raise Denied("只能对进行中的任务追加干预指令","CONFLICT",409)
         if not (r["owner_id"]==p.id or p.boss or p.system_admin):raise Denied("无权干预该任务","FORBIDDEN",403)
+        existing_items = ((r.get("payload") or {}).get("steering_inputs")) or []
+        if any(isinstance(item, dict) and str(item.get("id") or "") == steer_id for item in existing_items):
+            return {"message":"中途干预指令已受理（幂等命中）","task_id":task_id,"input":payload.input,"request_id":steer_id}
         stage_desc=f"【用户中途追加干预指令】：{payload.input}"
         run_ver=r.get("run_version") or 1
         c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,%s,'running')",(p.tenant_id,task_id,run_ver,stage_desc,r.get("progress") or 50))
-        # 1. 事务级写入 jobs.payload->'steering_inputs' 数组持久化队列，杜绝跨进程丢失
+        # 1. 事务级写入带唯一 id 的结构化干预记录，杜绝跨进程丢失或重复重试入队
         c.execute(
             """UPDATE jobs SET payload = jsonb_set(
                 COALESCE(payload, '{}'::jsonb),
                 '{steering_inputs}',
                 COALESCE(payload->'steering_inputs', '[]'::jsonb) || jsonb_build_array(%s)
             ) WHERE id=%s""",
-            (payload.input, task_id)
+            (as_jsonb({"id": steer_id, "text": payload.input}), task_id)
         )
-        audit(c,p,"中途动态干预",task_id,r["node_id"],r["input_level"])
-    # 2. 尝试向正在运行的 LangGraph 检查点追加 steering_inbox 状态（主通道已持久化至 jobs.payload，此处为即时加速旁路）
+        audit(c,p,"中途动态干预",task_id,r["node_id"],r["input_level"],detail={"request_id":steer_id})
+    # 2. 尝试向正在运行的 LangGraph 检查点追加（带幂等键去重，避免与 DB 轮询通道重复累加）
     try:
         from langgraph.checkpoint.postgres import PostgresSaver
         from ..orchestration.agent_system import build_autonomous_agent_graph
         with PostgresSaver.from_conn_string(load_config().dsn) as saver:
             saver.setup()
-            graph = build_autonomous_agent_graph(checkpointer=saver)
+            graph = build_autonomous_agent_graph(checkpointer=saver, require_checkpointer=True)
             thread_id = f"research_{task_id}_{run_ver}"
-            graph.update_state({"configurable": {"thread_id": thread_id}}, {"steering_inbox": [payload.input]})
+            cfg = {"configurable": {"thread_id": thread_id}}
+            snap = graph.get_state(cfg)
+            seen_ids = set((snap.values or {}).get("steering_event_ids") or []) if snap else set()
+            if steer_id not in seen_ids:
+                graph.update_state(cfg, {"steering_inbox": [payload.input], "steering_event_ids": [steer_id]})
     except Exception as exc:
         import logging
         logging.getLogger("taozhi.server.api").warning("LangGraph 检查点即时注入失败（已由 DB 队列兜底）: %s", exc)
-    return {"message":"中途干预指令已发送并生效","task_id":task_id,"input":payload.input}
+    return {"message":"中途干预指令已发送并生效","task_id":task_id,"input":payload.input,"request_id":steer_id}
 @app.post("/api/tasks/{task_id}/retry")
 def retry_task(task_id:str,p=Depends(identity)):
     """断点重试或重新发起任务（递增执行版本并重新推入工作流队列）。"""
@@ -644,7 +653,7 @@ def dashboard(p=Depends(identity)):
           model_ready=bool(settings.api_key),business_ready=bool(settings.business_api_url and settings.business_api_token),mode=load_config().mode)
 
 @app.get("/api/bi/dashboard")
-def bi_dashboard(p=Depends(identity)):
+def bi_dashboard(days:int=Query(30,ge=7,le=365),p=Depends(identity)):
     """数据中台经营看板：全部数据来自指标语义层受控执行（权限与 ChatBI 同源）。
 
     无权限/执行失败的板块返回 null，前端按需渲染——不泄露指标存在性之外的信息。
@@ -674,15 +683,20 @@ def bi_dashboard(p=Depends(identity)):
         except (TypeError, ValueError):
             return None
 
-    days30 = {"time_range": {"days": 30}}
-    gsv, orders = run("biz.gsv", days30), run("biz.order_count", days30)
-    rate, profit = run("biz.refund_rate", days30), run("biz.gross_profit", days30)
-    low, aftersales = run("biz.low_stock_count"), run("biz.aftersales_count", days30)
-    trend = run("biz.gsv_daily", days30)
+    window = {"time_range": {"days": days}}
+    gsv, orders = run("biz.gsv", window), run("biz.order_count", window)
+    rate, profit = run("biz.refund_rate", window), run("biz.gross_profit", window)
+    low, aftersales = run("biz.low_stock_count"), run("biz.aftersales_count", window)
+    trend = run("biz.gsv_daily", window)
+
+    with database_connection() as c:
+        latest_row = fetch_one(c, "SELECT max(created_at) AS latest_at FROM orders WHERE tenant_id=%s", (p.tenant_id,))
+    latest_order_at = latest_row["latest_at"].isoformat() if latest_row and latest_row["latest_at"] else None
 
     cards = dict(
         gsv_30d=total(gsv), orders_30d=total(orders),
-        gross_profit_30d=total(profit), low_stock=total(low))
+        gross_profit_30d=total(profit), low_stock=total(low),
+        aftersales_count=total(aftersales))
     if rate and rate["rows"]:
         worst = max(rate["rows"], key=lambda r: float(r[-1]) if isinstance(r[-1], (int, float)) else 0)
         cards["worst_refund_channel"] = {"channel": worst[0], "rate": worst[-1]}
@@ -696,10 +710,32 @@ def bi_dashboard(p=Depends(identity)):
             agg[r[0]] = round(agg.get(r[0], 0) + float(r[-1]), 2)
         channel_gsv = dict(sorted(agg.items(), key=lambda x: -x[1]))
 
+    # 品类经营透视（销售额 + 授权时附带毛利，严格源于受控指标结果）
+    category_summary = None
+    if gsv and gsv["rows"]:
+        cat_gsv: dict[str, float] = {}
+        for r in gsv["rows"]:
+            cat_gsv[r[1]] = round(cat_gsv.get(r[1], 0) + float(r[-1]), 2)
+        cat_profit: dict[str, float] = {}
+        if profit and profit["rows"]:
+            for r in profit["rows"]:
+                cat_profit[r[1]] = round(cat_profit.get(r[1], 0) + float(r[-1]), 2)
+        category_summary = [
+            dict(
+                category=cat,
+                gsv=val,
+                gross_profit=cat_profit.get(cat) if profit and profit["rows"] else None,
+            )
+            for cat, val in sorted(cat_gsv.items(), key=lambda x: -x[1])
+        ]
+
     return dict(
+        days=days,
+        latest_order_at=latest_order_at,
         cards=cards,
         trend=trend,
         channel_gsv=channel_gsv,
+        category_summary=category_summary,
         refund_rate=rate,
         aftersales=aftersales,
         low_stock=low,

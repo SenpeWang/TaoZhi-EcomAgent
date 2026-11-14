@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import operator
 import threading
@@ -27,6 +28,7 @@ from langgraph.types import Send
 from pydantic import BaseModel, Field
 
 from ..ai.client import LLMClient, ModelTier
+from ..ai.router import route_audit_scope
 from ..core.agent.context import ArtifactMetadata, SubagentContext
 from ..core.memory.service import get_memory_store
 from ..core.tools.outcome import ToolOutcome
@@ -190,6 +192,11 @@ class EvidenceRecord(TypedDict):
     elapsed: float
 
 
+def _keep_last_str(left: str, right: str) -> str:
+    """并发子分支合流时保留最新非空字符串（兼容 LangGraph 并发 Send Superstep）。"""
+    return right or left
+
+
 class AutonomousAgentState(TypedDict):
     """多智能体系统在状态图之间流转的全局黑板状态（支持并发增量合并）。"""
 
@@ -201,8 +208,9 @@ class AutonomousAgentState(TypedDict):
     user_query: str
     keyword: str
 
-    # 动态中途干预（Steering）信箱
+    # 动态中途干预（Steering）信箱（含幂等 event_id 去重）
     steering_inbox: Annotated[List[str], operator.add]
+    steering_event_ids: Annotated[List[str], operator.add]
     processed_steering_count: int
 
     # 硬预算与运行期控制信标（仅主协调节点/终态节点可写）
@@ -227,6 +235,8 @@ class AutonomousAgentState(TypedDict):
 
     # 可审计轨迹与最终交付物
     audit_trail: Annotated[List[AuditableAgentTransition], operator.add]
+    active_llm_endpoint: Annotated[str, _keep_last_str]
+    llm_route_history: Annotated[List[Dict[str, Any]], operator.add]
     artifacts: Annotated[List[str], operator.add]
     report: str
 
@@ -235,21 +245,85 @@ class AutonomousAgentState(TypedDict):
 # 4. 辅助函数：干预收集、工具派发与 Fallback 构建
 # ============================================================================
 
-def _collect_new_steering(state: AutonomousAgentState, hooks: _RuntimeHooks) -> tuple[List[str], List[str]]:
-    """拉取并去重外部动态干预指令，返回 (delta, 完整 inbox)。"""
+def _normalize_steering_item(item: Any) -> Optional[tuple[str, str]]:
+    """统一将干预项归一化为 (event_id, text)；支持结构化 dict 与兼容纯字符串。"""
+    if isinstance(item, dict):
+        text = str(item.get("text") or item.get("input") or "").strip()
+        if not text:
+            return None
+        eid = str(item.get("id") or "").strip() or f"str:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]}"
+        return eid, text
+    text = str(item or "").strip()
+    if not text:
+        return None
+    return f"str:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]}", text
+
+
+def _collect_new_steering(
+    state: AutonomousAgentState, hooks: _RuntimeHooks
+) -> tuple[List[str], List[str], List[str]]:
+    """拉取并按 event_id 幂等去重外部动态干预指令，返回 (delta_texts, delta_ids, 完整 inbox)。"""
     existing = list(state.get("steering_inbox") or [])
-    delta: List[str] = []
+    seen_ids = set(state.get("steering_event_ids") or [])
+    seen_texts = set(existing)
+    delta_texts: List[str] = []
+    delta_ids: List[str] = []
     if hooks.fetch_steering_fn is not None:
         try:
             remote_items = list(hooks.fetch_steering_fn() or [])
-            seen = set(existing)
-            for item in remote_items:
-                if item not in seen:
-                    delta.append(item)
-                    seen.add(item)
+            for raw_item in remote_items:
+                norm = _normalize_steering_item(raw_item)
+                if norm is None:
+                    continue
+                eid, text = norm
+                if eid in seen_ids:
+                    continue
+                if not isinstance(raw_item, dict) and text in seen_texts:
+                    continue
+                seen_ids.add(eid)
+                seen_texts.add(text)
+                delta_texts.append(text)
+                delta_ids.append(eid)
         except Exception:
-            delta = []
-    return delta, existing + delta
+            delta_texts = []
+            delta_ids = []
+    return delta_texts, delta_ids, existing + delta_texts
+
+
+def _attach_steering_delta(
+    res: Dict[str, Any], delta_texts: List[str], delta_ids: List[str]
+) -> Dict[str, Any]:
+    """仅当本轮产生新增干预时写入累加通道，避免空增污染状态。"""
+    if delta_texts:
+        res["steering_inbox"] = delta_texts
+    if delta_ids:
+        res["steering_event_ids"] = delta_ids
+    return res
+
+
+def _make_failover_emitter(hooks: _RuntimeHooks) -> Callable[[Dict[str, Any]], None]:
+    """构建脱敏故障转移事件实时推送回调（接入 SSE 事件流）。"""
+    def _on_failover(ev: Dict[str, Any]) -> None:
+        if ev.get("outcome") == "ok":
+            _emit_progress(
+                hooks,
+                f"[system] [模型容灾] 通道自适应切换至 {ev.get('label')} ({ev.get('region')} · {ev.get('model')})",
+            )
+        else:
+            _emit_progress(
+                hooks,
+                f"[system] [模型容灾] {ev.get('label')} 异常({ev.get('reason')})，正在切换下一可用商汤通道",
+            )
+    return _on_failover
+
+
+def _attach_route_delta(res: Dict[str, Any], events: List[Dict[str, Any]], last_ep: str) -> Dict[str, Any]:
+    """将脱敏路由决策轨迹与最新健康端点写入 LangGraph Checkpoint 状态增量。"""
+    if events:
+        res["llm_route_history"] = events
+    if last_ep:
+        res["active_llm_endpoint"] = last_ep
+    return res
 
 
 def _active_evidence(state: AutonomousAgentState) -> List[EvidenceRecord]:
@@ -350,7 +424,7 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
     outline = list(state.get("outline") or [])
 
     cancelled = _is_cancelled(hooks, bool(state.get("cancelled", False)))
-    steering_delta, all_inbox = _collect_new_steering(state, hooks)
+    steering_delta, steering_id_delta, all_inbox = _collect_new_steering(state, hooks)
     processed_count = int(state.get("processed_steering_count", 0))
     newly_arrived = all_inbox[processed_count:]
 
@@ -365,8 +439,8 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
         timeout_seconds=float(state.get("timeout_seconds", 180.0)),
     )
 
-    started_at = float(state.get("started_at") or time.perf_counter())
-    elapsed_seconds = max(0.0, time.perf_counter() - started_at)
+    started_at = float(state.get("started_at") or time.time())
+    elapsed_seconds = max(0.0, time.time() - started_at)
     active_ev = _active_evidence(state)
 
     hard_stop = evaluate_hard_stop(
@@ -392,9 +466,7 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
             "stop_reason": hard_stop.stop_reason.value,
             "processed_steering_count": len(all_inbox),
         }
-        if steering_delta:
-            res["steering_inbox"] = steering_delta
-        return res
+        return _attach_steering_delta(res, steering_delta, steering_id_delta)
 
     # 构建主脑 Observation 交由模型自主决策：继续动态派工，还是信息已足交卷合成
     ev_digest = [
@@ -435,20 +507,28 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
 
     llm = LLMClient()
     parsed: Optional[_OrchestratorDecisionSchema] = None
-    try:
-        raw_decision = llm.chat_json(
-            prompt=prompt,
-            schema=_OrchestratorDecisionSchema,
-            tier=ModelTier.FAST,
-            system="你是客观严谨、擅长并行任务分解与质量核查的电商调研主协调智能体。严禁编造数据。",
-            retries=2,
-        )
-        if isinstance(raw_decision, _OrchestratorDecisionSchema):
-            parsed = raw_decision
-        elif isinstance(raw_decision, dict) and raw_decision.get("action"):
-            parsed = _OrchestratorDecisionSchema.model_validate(raw_decision)
-    except Exception:
-        parsed = None
+    route_events: List[Dict[str, Any]] = []
+    last_ep = ""
+    with route_audit_scope(
+        preferred_endpoint_id=str(state.get("active_llm_endpoint") or "") or None,
+        on_failover=_make_failover_emitter(hooks),
+    ) as route_rec:
+        try:
+            raw_decision = llm.chat_json(
+                prompt=prompt,
+                schema=_OrchestratorDecisionSchema,
+                tier=ModelTier.FAST,
+                system="你是客观严谨、擅长并行任务分解与质量核查的电商调研主协调智能体。严禁编造数据。",
+                retries=2,
+            )
+            if isinstance(raw_decision, _OrchestratorDecisionSchema):
+                parsed = raw_decision
+            elif isinstance(raw_decision, dict) and raw_decision.get("action"):
+                parsed = _OrchestratorDecisionSchema.model_validate(raw_decision)
+        except Exception:
+            parsed = None
+        route_events = route_rec.snapshot()
+        last_ep = route_rec.last_active_endpoint
 
     # 降级容错：若模型返回格式异常，首轮按允许范围安全派发起步探查，次轮且已有证据则直接收敛
     if parsed is None:
@@ -509,9 +589,7 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
         }
         if invalid_delta:
             res["invalidated_evidence_ids"] = invalid_delta
-        if steering_delta:
-            res["steering_inbox"] = steering_delta
-        return res
+        return _attach_route_delta(_attach_steering_delta(res, steering_delta, steering_id_delta), route_events, last_ep)
 
     # 将主脑规划的子任务送入 Domain 硬守卫裁剪越权工具与并发数
     proposed_specs = [
@@ -563,9 +641,7 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
     }
     if invalid_delta:
         res["invalidated_evidence_ids"] = invalid_delta
-    if steering_delta:
-        res["steering_inbox"] = steering_delta
-    return res
+    return _attach_route_delta(_attach_steering_delta(res, steering_delta, steering_id_delta), route_events, last_ep)
 
 
 def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -576,7 +652,7 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
     user_query = str(state.get("user_query") or state.get("keyword") or "")
     keyword = str(state.get("keyword") or user_query)
     steering = list(state.get("steering_inbox") or [])
-    started_at = float(state.get("started_at") or time.perf_counter())
+    started_at = float(state.get("started_at") or time.time())
     timeout_seconds = float(state.get("timeout_seconds", 180.0))
     max_steps = max(1, int(state.get("max_subagent_steps", 3)))
     rationale = str(state.get("current_rationale") or task.goal)
@@ -599,6 +675,8 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
     gaps_or_errors: List[str] = []
 
     llm = LLMClient()
+    sub_route_events: List[Dict[str, Any]] = []
+    sub_last_ep = str(state.get("active_llm_endpoint") or "")
     mcp_client = _get_mcp_client()
     mcp_specs = mcp_client.list_tool_specs(task.allowed_tools)
 
@@ -620,7 +698,7 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 error_reason="收到任务取消信号，中止工具调用",
             )
 
-        remaining = timeout_seconds - (time.perf_counter() - started_at) if timeout_seconds > 0 else None
+        remaining = max(0.0, timeout_seconds - (time.time() - started_at)) if timeout_seconds > 0 else None
         kwargs = _build_tool_kwargs(tool_name, query_or_url)
 
         _emit_progress(
@@ -679,7 +757,7 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
         if _is_cancelled(hooks):
             gaps_or_errors.append("任务中途取消")
             break
-        if timeout_seconds > 0 and (time.perf_counter() - started_at) >= timeout_seconds:
+        if timeout_seconds > 0 and (time.time() - started_at) >= timeout_seconds:
             gaps_or_errors.append("达到全局时间预算上限")
             break
 
@@ -698,20 +776,27 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         step_dec: Optional[_SubagentStepSchema] = None
-        try:
-            raw_step = llm.chat_json(
-                prompt=step_prompt,
-                schema=_SubagentStepSchema,
-                tier=ModelTier.FAST,
-                system=f"你是专注【{task.role}】的客观市场调查专员，基于工具实测观测执行 ReAct 循环。",
-                retries=2,
-            )
-            if isinstance(raw_step, _SubagentStepSchema):
-                step_dec = raw_step
-            elif isinstance(raw_step, dict) and raw_step.get("action"):
-                step_dec = _SubagentStepSchema.model_validate(raw_step)
-        except Exception:
-            step_dec = None
+        with route_audit_scope(
+            preferred_endpoint_id=sub_last_ep or None,
+            on_failover=_make_failover_emitter(hooks),
+        ) as step_rec:
+            try:
+                raw_step = llm.chat_json(
+                    prompt=step_prompt,
+                    schema=_SubagentStepSchema,
+                    tier=ModelTier.FAST,
+                    system=f"你是专注【{task.role}】的客观市场调查专员，基于工具实测观测执行 ReAct 循环。",
+                    retries=2,
+                )
+                if isinstance(raw_step, _SubagentStepSchema):
+                    step_dec = raw_step
+                elif isinstance(raw_step, dict) and raw_step.get("action"):
+                    step_dec = _SubagentStepSchema.model_validate(raw_step)
+            except Exception:
+                step_dec = None
+            sub_route_events.extend(step_rec.snapshot())
+            if step_rec.last_active_endpoint:
+                sub_last_ep = step_rec.last_active_endpoint
 
         # 解析失败降级兜底：首步用默认工具与起步词实际跑一次，已有观测则直接收敛
         if step_dec is None:
@@ -758,19 +843,26 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # 若步数耗尽仍未调用 finish，基于真实观测做一次客观提炼
     if not final_summary:
         if react_observations:
-            try:
-                synth_prompt = (
-                    f"你是【{task.role}】，请仅依据以下工具真实返回观测（严禁虚构），针对目标『{task.goal}』归纳客观事实要点：\n"
-                    f"{json.dumps(react_observations, ensure_ascii=False)}"
-                )
-                final_summary = llm.chat(
-                    synth_prompt,
-                    tier=ModelTier.FAST,
-                    system="你是严禁幻觉与造假的市场分析专员。",
-                    max_tokens=800,
-                ).strip()
-            except Exception:
-                final_summary = ""
+            with route_audit_scope(
+                preferred_endpoint_id=sub_last_ep or None,
+                on_failover=_make_failover_emitter(hooks),
+            ) as synth_rec:
+                try:
+                    synth_prompt = (
+                        f"你是【{task.role}】，请仅依据以下工具真实返回观测（严禁虚构），针对目标『{task.goal}』归纳客观事实要点：\n"
+                        f"{json.dumps(react_observations, ensure_ascii=False)}"
+                    )
+                    final_summary = llm.chat(
+                        synth_prompt,
+                        tier=ModelTier.FAST,
+                        system="你是严禁幻觉与造假的市场分析专员。",
+                        max_tokens=800,
+                    ).strip()
+                except Exception:
+                    final_summary = ""
+                sub_route_events.extend(synth_rec.snapshot())
+                if synth_rec.last_active_endpoint:
+                    sub_last_ep = synth_rec.last_active_endpoint
         if not final_summary:
             total_items = sum(t["data_count"] for t in tools_records)
             final_summary = (
@@ -813,10 +905,14 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "elapsed": elapsed,
     }
 
-    return {
-        "evidence_pool": [evidence],
-        "audit_trail": [transition],
-    }
+    return _attach_route_delta(
+        {
+            "evidence_pool": [evidence],
+            "audit_trail": [transition],
+        },
+        sub_route_events,
+        sub_last_ep,
+    )
 
 
 def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
@@ -868,23 +964,31 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
 
     llm = LLMClient()
     _emit_progress(hooks, "[tool_execution_start] [终审研报合成专家] 调度工具: generate_markdown_report", 90)
-    try:
-        final_report = llm.chat(
-            prompt,
-            tier=ModelTier.STRONG,
-            system="你是资深电商操盘负责人。输出客观、可核验的高质量 Markdown 研报，绝对禁止虚构数据。",
-        )
-    except Exception as exc:
-        sections = [
-            f"### {ev.get('role')}（{ev.get('status')}）\n{ev.get('summary', '')}"
-            for ev in active_ev
-        ]
-        body = "\n\n".join(sections) if sections else "本次暂无可用实测证据。"
-        final_report = (
-            f"# 【{keyword}】电商市场调研报告（降级结构化汇总）\n\n"
-            f"> 注：终审大模型生成阶段发生异常（{type(exc).__name__}），以下内容严格由各子智能体实测证据直接汇总，未作二次推演。\n\n"
-            f"{body}"
-        )
+    synth_route_events: List[Dict[str, Any]] = []
+    synth_last_ep = ""
+    with route_audit_scope(
+        preferred_endpoint_id=str(state.get("active_llm_endpoint") or "") or None,
+        on_failover=_make_failover_emitter(hooks),
+    ) as synth_rec:
+        try:
+            final_report = llm.chat(
+                prompt,
+                tier=ModelTier.STRONG,
+                system="你是资深电商操盘负责人。输出客观、可核验的高质量 Markdown 研报，绝对禁止虚构数据。",
+            )
+        except Exception as exc:
+            sections = [
+                f"### {ev.get('role')}（{ev.get('status')}）\n{ev.get('summary', '')}"
+                for ev in active_ev
+            ]
+            body = "\n\n".join(sections) if sections else "本次暂无可用实测证据。"
+            final_report = (
+                f"# 【{keyword}】电商市场调研报告（降级结构化汇总）\n\n"
+                f"> 注：终审大模型生成阶段发生异常（{type(exc).__name__}），以下内容严格由各子智能体实测证据直接汇总，未作二次推演。\n\n"
+                f"{body}"
+            )
+        synth_route_events = synth_rec.snapshot()
+        synth_last_ep = synth_rec.last_active_endpoint
 
     art_meta = ArtifactMetadata(summary=f"【{keyword}】电商多智能体调研报告", user_facing=True)
     art_file = ctx.write_artifact("market_research_report.md", final_report, metadata=art_meta)
@@ -917,12 +1021,16 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
         "scratch_files": [],
     }
 
-    return {
-        "report": final_report,
-        "artifacts": [str(art_file)],
-        "audit_trail": [transition],
-        "system_status": "COMPLETED" if state.get("stop_reason") == StopReason.CONTINUE.value else state.get("system_status", "COMPLETED"),
-    }
+    return _attach_route_delta(
+        {
+            "report": final_report,
+            "artifacts": [str(art_file)],
+            "audit_trail": [transition],
+            "system_status": "COMPLETED" if state.get("stop_reason") == StopReason.CONTINUE.value else state.get("system_status", "COMPLETED"),
+        },
+        synth_route_events,
+        synth_last_ep,
+    )
 
 
 def final_persistence_node(state: AutonomousAgentState) -> Dict[str, Any]:
@@ -982,8 +1090,14 @@ def orchestrator_router(state: AutonomousAgentState) -> Any:
     return "final_node"
 
 
-def build_autonomous_agent_graph(checkpointer: Optional[Any] = None) -> Any:
+def build_autonomous_agent_graph(
+    checkpointer: Optional[Any] = None,
+    *,
+    require_checkpointer: bool = False,
+) -> Any:
     """构建动态并行 Orchestrator–Workers 多智能体 LangGraph 状态图。"""
+    if require_checkpointer and checkpointer is None:
+        raise ValueError("启用持久化或中断恢复时必须传入非空 checkpointer（如 PostgresSaver）")
     builder = StateGraph(AutonomousAgentState)
 
     builder.add_node("orchestrator", lead_orchestrator_node)
@@ -1017,22 +1131,40 @@ def execute_autonomous_agents(
     conversation_id: str = "",
     checkpointer: Optional[Any] = None,
     emit_event_fn: Optional[Callable[[str, int], None]] = None,
-    initial_steering: Optional[List[str]] = None,
+    initial_steering: Optional[List[Any]] = None,
     timeout_seconds: float = 180.0,
     max_turns: int = 5,
     max_parallel_subagents: int = 4,
     max_subagent_steps: int = 3,
     check_cancel_fn: Optional[Callable[[], bool]] = None,
-    fetch_steering_fn: Optional[Callable[[], List[str]]] = None,
+    fetch_steering_fn: Optional[Callable[[], List[Any]]] = None,
+    require_checkpointer: bool = False,
 ) -> Dict[str, Any]:
     """执行动态并行多智能体调研系统并实时推送各层可审计事件。"""
-    started_at = time.perf_counter()
+    if require_checkpointer and checkpointer is None:
+        raise ValueError("启用持久化或中断恢复时必须传入非空 checkpointer（如 PostgresSaver）")
+
+    started_at = time.time()
     hook_run_id = f"run_{uuid.uuid4().hex}"
     hooks = _RuntimeHooks(
         check_cancel_fn=check_cancel_fn,
         fetch_steering_fn=fetch_steering_fn,
         emit_fn=emit_event_fn,
     )
+
+    init_steering_texts: List[str] = []
+    init_steering_ids: List[str] = []
+    seen_init_ids = set()
+    for raw_item in initial_steering or []:
+        norm = _normalize_steering_item(raw_item)
+        if norm is None:
+            continue
+        eid, text = norm
+        if eid in seen_init_ids:
+            continue
+        seen_init_ids.add(eid)
+        init_steering_ids.append(eid)
+        init_steering_texts.append(text)
 
     with _HOOKS_LOCK:
         _HOOKS_BY_RUN_ID[hook_run_id] = hooks
@@ -1045,7 +1177,8 @@ def execute_autonomous_agents(
         "hook_run_id": hook_run_id,
         "user_query": user_query or keyword,
         "keyword": keyword,
-        "steering_inbox": list(initial_steering or []),
+        "steering_inbox": init_steering_texts,
+        "steering_event_ids": init_steering_ids,
         "processed_steering_count": 0,
         "system_status": "INIT",
         "next_action": "orchestrator",
@@ -1064,18 +1197,72 @@ def execute_autonomous_agents(
         "evidence_pool": [],
         "invalidated_evidence_ids": [],
         "audit_trail": [],
+        "active_llm_endpoint": "",
+        "llm_route_history": [],
         "artifacts": [],
         "report": "",
     }
 
-    graph = build_autonomous_agent_graph(checkpointer=checkpointer)
+    graph = build_autonomous_agent_graph(
+        checkpointer=checkpointer,
+        require_checkpointer=require_checkpointer,
+    )
+
+    # Checkpoint 跨执行版本断点续跑：若重试任务存在上一版本未终态的检查点，继承已采集证据与路由记录
+    if checkpointer is not None and job_id and run_version > 1:
+        for prev_ver in range(run_version - 1, 0, -1):
+            try:
+                snap = graph.get_state({"configurable": {"thread_id": f"research_{job_id}_{prev_ver}"}})
+                vals = (snap.values or {}) if snap else {}
+            except Exception:
+                vals = {}
+            if vals and (vals.get("evidence_pool") or vals.get("outline") or vals.get("llm_route_history")):
+                if vals.get("evidence_pool"):
+                    init_state["evidence_pool"] = list(vals.get("evidence_pool") or [])
+                if vals.get("invalidated_evidence_ids"):
+                    init_state["invalidated_evidence_ids"] = list(vals.get("invalidated_evidence_ids") or [])
+                if vals.get("outline"):
+                    init_state["outline"] = list(vals.get("outline") or [])
+                if vals.get("audit_trail"):
+                    init_state["audit_trail"] = list(vals.get("audit_trail") or [])
+                if vals.get("artifacts"):
+                    init_state["artifacts"] = list(vals.get("artifacts") or [])
+                if vals.get("active_llm_endpoint"):
+                    init_state["active_llm_endpoint"] = str(vals.get("active_llm_endpoint") or "")
+                if vals.get("llm_route_history"):
+                    init_state["llm_route_history"] = list(vals.get("llm_route_history") or [])
+                for txt, eid in zip(vals.get("steering_inbox") or [], vals.get("steering_event_ids") or []):
+                    if eid not in seen_init_ids:
+                        seen_init_ids.add(eid)
+                        init_state["steering_inbox"].append(txt)
+                        init_state["steering_event_ids"].append(eid)
+                init_state["processed_steering_count"] = int(vals.get("processed_steering_count") or 0)
+                prior_turn = int(vals.get("turn_count") or 0)
+                if prior_turn > 0:
+                    init_state["turn_count"] = min(prior_turn, max(0, max_turns - 1))
+                _emit_progress(
+                    hooks,
+                    f"[system] [检查点续跑] 已从上一版本检查点恢复 {len(init_state['evidence_pool'])} 份黑板证据与路由状态，继续推进",
+                    5,
+                )
+                break
+
     thread_id = f"research_{job_id}_{run_version}" if job_id else f"research_{int(time.time())}"
     config = {"configurable": {"thread_id": thread_id}}
 
     _emit_progress(hooks, f"[agent_start] 激活自治多智能体主协调代理 (main_agent) · 目标品类: 【{keyword}】", 5)
 
+    list_fields = (
+        "steering_inbox",
+        "steering_event_ids",
+        "evidence_pool",
+        "invalidated_evidence_ids",
+        "audit_trail",
+        "llm_route_history",
+        "artifacts",
+    )
     merged_state: Dict[str, Any] = dict(init_state)
-    for list_key in ("steering_inbox", "evidence_pool", "invalidated_evidence_ids", "audit_trail", "artifacts"):
+    for list_key in list_fields:
         merged_state[list_key] = list(init_state[list_key])
 
     try:
@@ -1084,13 +1271,7 @@ def execute_autonomous_agents(
                 if not isinstance(delta, dict):
                     continue
                 for k, v in delta.items():
-                    if k in (
-                        "steering_inbox",
-                        "evidence_pool",
-                        "invalidated_evidence_ids",
-                        "audit_trail",
-                        "artifacts",
-                    ) and isinstance(v, list):
+                    if k in list_fields and isinstance(v, list):
                         merged_state[k].extend(v)
                     else:
                         merged_state[k] = v
@@ -1098,7 +1279,7 @@ def execute_autonomous_agents(
         with _HOOKS_LOCK:
             _HOOKS_BY_RUN_ID.pop(hook_run_id, None)
 
-    total_elapsed = round(time.perf_counter() - started_at, 1)
+    total_elapsed = round(max(0.0, time.time() - started_at), 1)
 
     subagents_trace: List[Dict[str, Any]] = []
     for tr in merged_state.get("audit_trail", []):
@@ -1189,6 +1370,8 @@ def execute_autonomous_agents(
         "artifacts": merged_state.get("artifacts", []),
         "subagents": subagents_trace,
         "audit_trail": merged_state.get("audit_trail", []),
+        "active_llm_endpoint": merged_state.get("active_llm_endpoint", ""),
+        "llm_route_history": merged_state.get("llm_route_history", []),
         "evidence_pool": active_ev,
         "conversation_id": conversation_id,
         "keyword": keyword,

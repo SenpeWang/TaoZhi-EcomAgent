@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os,time,secrets,threading,signal,hashlib
 from datetime import datetime,timezone
-from ..config import load_config
+from ..config import get_settings, load_config
 from ..knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import (can_write, get_document, load_principal, sources_valid)
@@ -10,8 +10,34 @@ from ..knowledge.storage import get_blob_store
 from ..knowledge.index_cache import encode_index
 STOP=threading.Event()
 WORKER="worker_"+secrets.token_hex(8)
+def expire_stale_reviews(conn=None):
+    """清理超期未审核任务，避免 review / interrupt 挂起状态无限期滞留。"""
+    ttl = int(load_config().review_timeout)
+    if ttl <= 0:
+        return 0
+    def _expire(c):
+        stale = fetch_all(
+            c,
+            "UPDATE jobs SET state='cancelled',error='审核等待超时，任务已自动关闭',stage='审核已超时关闭',finished_at=now(),lease_until=NULL "
+            "WHERE state='review' AND finished_at IS NOT NULL AND finished_at<now()-(%s*interval '1 second') "
+            "RETURNING id,tenant_id,run_version",
+            (ttl,),
+        )
+        for row in stale:
+            c.execute(
+                "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,'审核等待超时，任务已自动关闭',100,'cancelled')",
+                (row["tenant_id"], row["id"], row["run_version"]),
+            )
+        return len(stale)
+    if conn is not None:
+        return _expire(conn)
+    with database_connection() as c:
+        return _expire(c)
+
+
 def claim_next_job():
     with database_connection() as c:
+        expire_stale_reviews(c)
         # Expired executions have fencing numbers; stale workers cannot publish.
         c.execute("UPDATE jobs SET state='failed',error='任务重试次数已达上限',finished_at=now() WHERE state IN ('queued','running') AND attempts>=%s AND (lease_until IS NULL OR lease_until<now())",(load_config().max_attempts,))
         row=fetch_one(c,"SELECT * FROM jobs WHERE NOT cancel_requested AND attempts<%s AND (state='queued' OR (state='running' AND lease_until<now())) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",(load_config().max_attempts,))
@@ -158,13 +184,14 @@ def process_research_job(job):
             r = fetch_one(c, "SELECT state, run_version, cancel_requested FROM jobs WHERE id=%s", (job["id"],))
             return not r or r["state"] != "running" or r["run_version"] != job["run_version"] or bool(r["cancel_requested"])
 
-    def fetch_steering() -> list[str]:
+    def fetch_steering() -> list:
         with database_connection() as c:
             r = fetch_one(c, "SELECT payload FROM jobs WHERE id=%s", (job["id"],))
             items = ((r or {}).get("payload") or {}).get("steering_inputs") or []
-            return [str(x) for x in items]
+            return list(items)
 
     cfg = load_config()
+    settings = get_settings()
     conv_id = job.get("conversation_id") or (job.get("payload") or {}).get("conversation_id") or ""
     keyword = (job.get("payload") or {}).get("keyword") or job["question"]
     initial_steering = (job.get("payload") or {}).get("steering_inputs") or []
@@ -179,12 +206,13 @@ def process_research_job(job):
             run_version=job.get("run_version") or 1,
             conversation_id=conv_id,
             checkpointer=saver,
+            require_checkpointer=True,
             emit_event_fn=emit,
             initial_steering=initial_steering,
-            timeout_seconds=float(cfg.llm_timeout or 180.0),
-            max_turns=int(cfg.research_max_turns),
-            max_parallel_subagents=int(cfg.research_max_parallel_subagents),
-            max_subagent_steps=int(cfg.research_max_subagent_steps),
+            timeout_seconds=float(settings.llm_timeout or 180.0),
+            max_turns=int(settings.research_max_turns),
+            max_parallel_subagents=int(settings.research_max_parallel_subagents),
+            max_subagent_steps=int(settings.research_max_subagent_steps),
             check_cancel_fn=check_cancel,
             fetch_steering_fn=fetch_steering,
         )
@@ -250,5 +278,6 @@ def main():
             print("任务进程正在重连",type(exc).__name__,flush=True);STOP.wait(3)
 def sweep():
     heartbeat()
+    expire_stale_reviews()
     process_next_job()
 if __name__=="__main__":main()

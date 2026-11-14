@@ -1,14 +1,17 @@
 """业务合成数据生成器（确定性、可复现、来源可审计）。
 
 用法：ECOM_ENV_FILE=.env.production .venv/bin/python scripts/seed_business_data.py
+可选参数：--anchor-date YYYY-MM-DD（默认使用当前 UTC 日期作为窗口终点）
 
 设计原则（生产级学习项目）：
-- 固定随机种子 SEED，同一环境重跑结果完全一致；
-- 数据形态贴近真实手机配件电商：渠道权重、周末效应、618/国庆大促脉冲、
-  售后原因分布，并埋入一个可归因的异常钩子（拼多多渠道钢化膜 9/20 后退货率异常，
+- 固定随机种子 SEED，同一锚定日期重跑结果完全一致；
+- 默认以运行当日为终点向前生成 183 天订单流水，保证近 7/30/90 日看板持续有真实数据；
+- 数据形态贴近真实手机配件电商：渠道权重、周末效应、618/国庆/双十一大促脉冲、
+  售后原因分布，并埋入一个可归因的异常钩子（拼多多渠道钢化膜近 25 天退货率异常，
   供 ChatBI 归因分析演示）；
 - 金额一律 minor units（分）；只清空本组合成表（按租户），不触碰工作台自身数据。
 """
+import argparse
 import hashlib
 import random
 import sys
@@ -21,7 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from taozhi.knowledge.db import database_connection, fetch_one  # noqa: E402
 
 SEED = 20261015
-DAYS_BACK = 183          # 2026-04-15 起
+DAYS_BACK = 183          # 滚动近 183 天
 BASE_DAILY = 52          # 工作日基础单量
 
 CHANNELS = [  # (code, name, 权重)
@@ -43,7 +46,7 @@ PRODUCTS = [  # (spu_code, name, category, cost分, spec→[(规格, 售价分)]
 STATUS_W = [("pending", .02), ("paid", .04), ("shipped", .05), ("delivered", .07),
             ("completed", .78), ("cancelled", .04)]
 REFUND_BASE = 0.055                       # 全局退款改写率
-ANOMALY = dict(channel="pdd", spu="SPU-MEM-IP15", since="2026-09-20", rate=0.30)
+ANOMALY = dict(channel="pdd", spu="SPU-MEM-IP15", days=25, rate=0.30)
 AS_REASONS = ["质量问题", "尺寸不符", "物流破损", "七天无理由", "描述不符"]
 AS_REASONS_ANOMALY = ["质量问题", "质量问题", "质量问题", "物流破损", "七天无理由"]  # 异常期偏置
 AS_TYPE_BY = {"质量问题": ("return", "refund"), "尺寸不符": ("exchange", "refund"),
@@ -72,12 +75,28 @@ def _promo_factor(day: datetime) -> float:
         return 2.6          # 618
     if (10, 1) <= md <= (10, 6):
         return 1.7          # 国庆
+    if (11, 1) <= md <= (11, 11):
+        return 2.2          # 双十一
     if (8, 25) <= md <= (9, 5):
         return 1.35         # 开学季
     return 1.25 if day.weekday() >= 5 else 1.0
 
 
-def main() -> int:
+def _parse_anchor_date(argv: list[str] | None = None) -> datetime:
+    """解析滚动窗口终点日期（UTC 零点），默认取运行当日。"""
+    parser = argparse.ArgumentParser(description="生成确定性电商经营合成数据")
+    parser.add_argument("--anchor-date", help="窗口终点日期 YYYY-MM-DD（默认今日 UTC）")
+    args = parser.parse_args(argv)
+    if args.anchor_date:
+        return datetime.strptime(args.anchor_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def main(argv: list[str] | None = None) -> int:
+    end_day = _parse_anchor_date(argv)
+    now_utc = datetime.now(timezone.utc)
+    anomaly_since = end_day - timedelta(days=int(ANOMALY["days"]))
     rng = random.Random(SEED)
     with database_connection() as c:
         tenant = fetch_one(c, "SELECT id FROM tenants ORDER BY created_at LIMIT 1")
@@ -86,7 +105,8 @@ def main() -> int:
             return 1
         tid = tenant["id"]
         owner_ids = [r["id"] for r in c.execute(
-            "SELECT id FROM users WHERE tenant_id=%s AND username IN ('leader','staff')", (tid,)).fetchall()]
+            "SELECT id FROM users WHERE tenant_id=%s AND username IN ('leader','staff','syn_leader1','syn_staff1')",
+            (tid,)).fetchall()]
         node_ids = [r["id"] for r in c.execute(
             "SELECT id FROM org_nodes WHERE tenant_id=%s AND name IN ('店铺运营组','售前客服组')", (tid,)).fetchall()]
         if not owner_ids or not node_ids:
@@ -120,8 +140,8 @@ def main() -> int:
         bulk(c, "INSERT INTO skus(id,tenant_id,spu_id,sku_code,spec,price_minor,cost_minor) "
                 "VALUES(%s,%s,%s,%s,%s,%s,%s)", sku_rows)
 
-        # 订单流水
-        start = datetime(2026, 4, 15, tzinfo=timezone.utc)
+        # 订单流水（以 end_day 为终点向前 DAYS_BACK 天，保证今日订单不超越当前时间）
+        start = end_day - timedelta(days=DAYS_BACK - 1)
         codes, weights = [x[0] for x in CHANNELS], [x[2] for x in CHANNELS]
         o_rows, as_rows, seq, order_no_n = [], [], 0, 0
         for d in range(DAYS_BACK):
@@ -135,9 +155,11 @@ def main() -> int:
                 st = rng.choices([s for s, _ in STATUS_W], weights=[w for _, w in STATUS_W])[0]
                 ts = day.replace(hour=rng.randint(8, 23), minute=rng.randint(0, 59),
                                  second=rng.randint(0, 59), microsecond=0)
-                # 异常钩子：9/20 起拼多多钢化膜退款率飙升（批次质量）
+                if ts > now_utc and d == DAYS_BACK - 1:
+                    ts = now_utc - timedelta(minutes=rng.randint(1, 180))
+                # 异常钩子：近 25 天拼多多钢化膜退款率飙升（批次质量）
                 is_anom = (ch == ANOMALY["channel"] and sku["spu"] == ANOMALY["spu"]
-                           and ts >= datetime(2026, 9, 20, tzinfo=timezone.utc))
+                           and ts >= anomaly_since)
                 if st in ("shipped", "delivered", "completed") and (
                         rng.random() < (ANOMALY["rate"] if is_anom else REFUND_BASE)):
                     st = "refunded"
@@ -153,7 +175,7 @@ def main() -> int:
                     at = rng.choices(AS_TYPE_BY[reason], weights=[.6, .4])[0]
                     ast = rng.choices(["resolved", "pending", "approved", "rejected"],
                                       weights=[.82, .10, .05, .03])[0]
-                    res = ts + timedelta(days=rng.randint(1, 7)) if ast == "resolved" else None
+                    res = min(ts + timedelta(days=rng.randint(1, 7)), now_utc) if ast == "resolved" else None
                     as_rows.append((_id("as", len(as_rows) + 1), tid, oid, at, reason, amount, ast, ts, res))
 
         bulk(c, """INSERT INTO orders(id,tenant_id,order_no,channel_id,sku_id,qty,amount_minor,
@@ -182,9 +204,9 @@ def main() -> int:
         anom = c.execute("""SELECT count(*) FILTER (WHERE o.status='refunded') AS refunded, count(*) AS total
               FROM orders o JOIN skus s ON s.id=o.sku_id JOIN channels c2 ON c2.id=o.channel_id
               WHERE o.tenant_id=%s AND c2.code='pdd' AND s.sku_code LIKE 'SPU-MEM-IP15/%%'
-              AND o.created_at >= '2026-09-20'""", (tid,)).fetchone()
-        print(f"合成数据完成：SKU {len(sku_rows)} / 订单 {n_orders}（GMV ¥{gmv/100:,.0f}）/ 售后 {n_as}")
-        print(f"异常钩子：pdd 钢化膜 9/20 后退款单 {anom['refunded']}/{anom['total']} = "
+              AND o.created_at >= %s""", (tid, anomaly_since)).fetchone()
+        print(f"合成数据完成（{start:%Y-%m-%d} ~ {end_day:%Y-%m-%d}）：SKU {len(sku_rows)} / 订单 {n_orders}（GMV ¥{gmv/100:,.0f}）/ 售后 {n_as}")
+        print(f"异常钩子（近 {ANOMALY['days']} 天）：pdd 钢化膜退款单 {anom['refunded']}/{anom['total']} = "
               f"{100*anom['refunded']/max(1,anom['total']):.1f}%")
     return 0
 

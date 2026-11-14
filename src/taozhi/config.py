@@ -60,12 +60,12 @@ class Settings(BaseSettings):
     reports_dir: Path = PROJECT_ROOT / "data" / "reports"
     checkpoint_db: Path = PROJECT_ROOT / "data" / "archive" / "langgraph.sqlite"
 
-    # ───────────────────── LLM 服务层（模型分级路由） ─────────────────────
+    # ───────────────────── LLM 服务层（商汤 sensenova-6.8-flash 国内/海外容灾池） ─────────────────────
     base_url: str = Field(default="https://token.sensenova.cn/v1", alias="BASE_URL")
     api_key: str = Field(default="", alias="API_KEY")
     model: str = Field(default="sensenova-6.8-flash", alias="MODEL")
 
-    # 分级路由：日常解析用轻量模型，复杂研判用强模型，多模态用视觉模型
+    # 统一模型路由（默认全量采用 sensenova-6.8-flash）
     llm_fast_model: str = ""
     llm_strong_model: str = ""
     llm_vision_model: str = ""
@@ -74,12 +74,25 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 8192
     llm_timeout: int = 180
     llm_max_retries: int = 1
-    llm_empty_retries: int = Field(default=1,ge=0,le=2)
-    llm_output_cap: int = Field(default=8192,ge=2048,le=32000)
+    llm_empty_retries: int = Field(default=1, ge=0, le=2)
+    llm_output_cap: int = Field(default=8192, ge=2048, le=32000)
     llm_max_concurrency: int = 6
+
+    # 国内第二 Key + 商汤海外容灾端点 + 兼容自定义备线（全线仅限 sensenova-6.8-flash 体系，不含第三方云）
+    sensenova_cn_secondary_api_key: str = Field(default="", alias="SENSENOVA_CN_SECONDARY_API_KEY")
+    sensenova_overseas_base_url: str = Field(default="https://token.sensenova.ai/v1", alias="SENSENOVA_OVERSEAS_BASE_URL")
+    sensenova_overseas_api_key: str = Field(default="", alias="SENSENOVA_OVERSEAS_API_KEY")
+    sensenova_overseas_model: str = Field(default="sensenova-6.8-flash", alias="SENSENOVA_OVERSEAS_MODEL")
+    sensenova_overseas_direct_connection: bool = Field(default=False, alias="SENSENOVA_OVERSEAS_DIRECT_CONNECTION")
+
     llm_fallback_base_url: str = Field(default="", alias="LLM_FALLBACK_BASE_URL")
     llm_fallback_api_key: str = Field(default="", alias="LLM_FALLBACK_API_KEY")
     llm_fallback_model: str = Field(default="", alias="LLM_FALLBACK_MODEL")
+
+    # 容灾熔断中间件冷却参数（秒）
+    llm_circuit_cooldown_rate_limit: int = Field(default=45, ge=5, le=600, alias="LLM_CIRCUIT_COOLDOWN_RATE_LIMIT")
+    llm_circuit_cooldown_transient: int = Field(default=25, ge=5, le=600, alias="LLM_CIRCUIT_COOLDOWN_TRANSIENT")
+    llm_circuit_cooldown_auth: int = Field(default=600, ge=30, le=3600, alias="LLM_CIRCUIT_COOLDOWN_AUTH")
 
     # ───────────────────── Embedding ─────────────────────
     embedding_base_url: str = ""
@@ -205,6 +218,7 @@ class Settings(BaseSettings):
         self.llm_fast_model = self.llm_fast_model or self.model
         self.llm_strong_model = self.llm_strong_model or self.model
         self.llm_vision_model = self.llm_vision_model or self.model
+        self.sensenova_overseas_model = self.sensenova_overseas_model or self.model
         # Remote embedding requires separately configured credentials.
 
 
@@ -215,7 +229,12 @@ class Settings(BaseSettings):
 
     @property
     def has_llm(self) -> bool:
-        return bool(self.api_key)
+        return bool(
+            self.api_key
+            or self.sensenova_cn_secondary_api_key
+            or self.sensenova_overseas_api_key
+            or self.llm_fallback_api_key
+        )
 
 
 @lru_cache(maxsize=1)
@@ -243,6 +262,7 @@ class Config:
     tenant_code: str
     cookie_secure: bool
     task_timeout: int = 600
+    review_timeout: int = 86400
     lease_seconds: int = 45
     max_attempts: int = 3
     max_model_calls: int = 6
@@ -298,6 +318,7 @@ def load_config() -> Config:
     private = Path(values.get("ECOM_PRIVATE_DIR", ROOT / "data/private" / mode / "private"))
     private.mkdir(parents=True,exist_ok=True,mode=0o700)
     return Config(dsn, mode, private, values.get("ECOM_TENANT_CODE","mofa"), values.get("ECOM_COOKIE_SECURE","false")=="true",
+      review_timeout=int(values.get("ECOM_REVIEW_TIMEOUT","86400")),
       embed_service_url=values.get("ECOM_EMBED_SERVICE_URL","http://127.0.0.1:18555"),
       hyde_enabled=values.get("ECOM_HYDE_ENABLED","true")=="true",
       minio_enabled=values.get("ECOM_MINIO_ENABLED","false")=="true",

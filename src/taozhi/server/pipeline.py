@@ -227,7 +227,7 @@ def _hyde_vector(c,p,job,state):
         from ..ai.client import LLMClient,ModelTier
         from taozhi.domain.privacy import redact
         started=time.time()
-        text=LLMClient().chat(redact(state["question"]),tier=ModelTier.FAST,system=_HYDE_SYSTEM,max_tokens=220)
+        text=LLMClient(allow_overseas=False).chat(redact(state["question"]),tier=ModelTier.FAST,system=_HYDE_SYSTEM,max_tokens=220)
         c.execute("INSERT INTO model_calls(tenant_id,job_id,role,elapsed_ms,outcome) VALUES(%s,%s,'hyde',%s,'ok')",
           (p.tenant_id,job["id"],int((time.time()-started)*1000)))
         if not text or len(text.strip())<20:return None
@@ -374,7 +374,7 @@ def domain_node(state):
 
         started = time.monotonic()
         outcome = "ok"
-        client = LLMClient(settings.model_copy(update={"llm_timeout": 45, "llm_max_retries": 0, "llm_empty_retries": 0, "llm_max_concurrency": 2, "llm_max_tokens": 4096, "llm_output_cap": 4096}))
+        client = LLMClient(settings.model_copy(update={"llm_timeout": 45, "llm_max_retries": 0, "llm_empty_retries": 0, "llm_max_concurrency": 2, "llm_max_tokens": 4096, "llm_output_cap": 4096}), allow_overseas=False)
         try:
             # 结构化输出必须走 chat_json + Pydantic schema（judge 同款可靠通道）。
             # 禁用 expect="object"：该路径无 schema，网关 json_object 模式实测
