@@ -103,7 +103,7 @@ def test_pipeline_a_events_emitted_during_research():
     mock_llm.chat.return_value = "# 测试保温杯市场调研报告\n\n## 1. 市场概览\n需求旺盛。"
 
     with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm):
-        with patch("taozhi.orchestration.agent_system.search_web", return_value=[{"title": "保温杯测评", "snippet": "主流69元"}]):
+        with patch("taozhi.infrastructure.mcp.server.search_web", return_value=[{"title": "保温杯测评", "snippet": "主流69元"}]):
             execute_autonomous_agents(
                 keyword="测试保温杯",
                 emit_event_fn=mock_emit,

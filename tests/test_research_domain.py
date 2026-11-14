@@ -212,8 +212,8 @@ def test_parallel_orchestrator_and_react_query_refinement():
     mock_llm.chat.return_value = "# 便携充气泵市场调研报告\n\n## 1. 市场需求与痛点\n散热噪音突出，零售 129 元；1688 出厂 38 元。"
 
     with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm):
-        with patch("taozhi.orchestration.agent_system.search_web", side_effect=fake_search_web):
-            with patch("taozhi.orchestration.agent_system.search_1688_wholesale", return_value=[{"title": "东莞充气泵源头厂", "price": 38}]):
+        with patch("taozhi.infrastructure.mcp.server.search_web", side_effect=fake_search_web):
+            with patch("taozhi.infrastructure.mcp.server.search_1688_wholesale", return_value=[{"title": "东莞充气泵源头厂", "price": 38}]):
                 res = execute_autonomous_agents(
                     keyword="便携充气泵",
                     user_query="调研便携充气泵全网差评与1688出厂价",
@@ -244,7 +244,7 @@ def test_live_cancel_and_mid_flight_steering():
     ]
     cancel_checks = iter([False, True])
     with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm_cancel):
-        with patch("taozhi.orchestration.agent_system.search_web", return_value=[{"title": "耳机", "snippet": "热销"}]):
+        with patch("taozhi.infrastructure.mcp.server.search_web", return_value=[{"title": "耳机", "snippet": "热销"}]):
             res_cancel = execute_autonomous_agents(
                 keyword="无线耳机",
                 check_cancel_fn=lambda: next(cancel_checks, True),

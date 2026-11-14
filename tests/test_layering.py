@@ -30,20 +30,11 @@ LAYER_ORDER = {
 
 LAYER_MAP = {
     "interface": [
-        "api/",
         "server/",
-        "agents/",
     ],
     "application": [
         "orchestration/",
-        "rag/",
-        "agent/",
-        "schemas/",
         "core/agent/",
-        "core/compaction/",
-        "core/session/",
-        "core/skills/",
-        "core/commands/",
     ],
     "infrastructure": [
         "infrastructure/",
@@ -63,7 +54,6 @@ LAYER_MAP = {
 PACKAGE_MARKERS = {
     "__init__.py",
     "core/__init__.py",
-    "agent/__init__.py",
 }
 
 # 领域层严禁引入的第三方框架与外部技术依赖

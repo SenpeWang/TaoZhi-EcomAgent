@@ -15,31 +15,18 @@
 | `scripts/` | 部署、数据管理、构建与运维；不含评估逻辑 |
 | `src/` | Python 源码根目录 |
 | `src/taozhi/` | 淘智 (TaoZhi) 智能体工程核心根包 |
-| `src/taozhi/domain/` | 领域层：核心实体、业务规则、权限判定与隐私策略（不依赖任何框架） |
+| `src/taozhi/domain/` | 领域层：核心实体、业务规则、权限判定、隐私策略与多智能体硬守卫（不依赖任何框架） |
 | `src/taozhi/infrastructure/persistence/` | 持久化实现：数据模型实现、仓储接口具体化 |
-| `src/taozhi/schemas/` | 请求响应契约 DTO、Agent 状态与全链路 Trace 规范 |
-| `src/taozhi/api/` | 接入层接口：同步问答、流式传输、会话管理与健康检查 |
-| `src/taozhi/orchestration/` | 编排层：显式 5 节点迭代闭环状态机、意图路由与防死锁控制 |
-| `src/taozhi/agent/` | 智能体核心层 (Harness 执行引擎) |
-| `src/taozhi/agent/tools/` | 受控工具层：面向非人类消费者的有界工具与检索/搜索适配 |
-| `src/taozhi/rag/` | RAG 能力层：离线数据管道、在线多路检索与独立评估 |
-| `src/taozhi/rag/retrieval/` | 在线多路混合检索器 (BM25+ANN+RRF) 与带锚点上下文构建器 |
-| `src/taozhi/rag/evaluation/` | 独立评估模块：HitRate/MRR 检索指标与生成忠实度校验器 |
-| `src/taozhi/infrastructure/` | 基础设施层：数据库仓储、向量库、缓存、队列与 SDK 适配 |
-| `src/taozhi/infrastructure/cache/` | 基础设施缓存：独立语义向量缓存与会话状态隔离 |
-| `src/taozhi/infrastructure/mcp/` | 电商与情报类 MCP 标准服务端与智能体适配器 |
-| `src/taozhi/observability/` | 可观测性横切能力：全链路树状 Trace 收集器与指标埋点 |
-| `src/taozhi/ai/` | 大模型客户端、Embedding 向量化、用量统计与结构化解析 |
+| `src/taozhi/orchestration/` | 编排层：多智能体调研主副系统（Lead + Parallel ReAct Subagents）、知识问答控制器与离散决策 |
+| `src/taozhi/infrastructure/` | 基础设施层：数据库仓储、向量库、MCP 服务与任务队列适配 |
+| `src/taozhi/infrastructure/mcp/` | 电商与情报类标准 MCP 协议服务端（tools/list & tools/call）与智能体客户端适配器 |
+| `src/taozhi/observability/` | 可观测性横切能力：Phoenix Trace 与 OpenTelemetry Span 埋点 |
+| `src/taozhi/ai/` | 大模型客户端、用量统计与结构化输出解析 |
 | `src/taozhi/core/` | 核心引擎与底层基础设施 |
-| `src/taozhi/core/agent/` | 智能体核心循环、生命周期状态机、上下文与事件总线 |
-| `src/taozhi/core/compaction/` | 阶梯式上下文治理管线、切分点检测与事实硬兜底 |
-| `src/taozhi/core/tools/` | 工业级工具管理、行边界保持截断与流式转存累加器 |
+| `src/taozhi/core/agent/` | 智能体上下文隔离（Scratch / Artifacts）与工作区通信协议定义 |
+| `src/taozhi/core/tools/` | 原子工具集与统一结构化 ToolOutcome / 行边界截断工具 |
 | `src/taozhi/core/memory/` | 租户物理隔离长效记忆库与双轨会话日志 |
-| `src/taozhi/core/session/` | 会话持久化管理器与动态上下文投影 |
-| `src/taozhi/core/skills/` | 渐进式技能发现与指令解析 |
-| `src/taozhi/core/commands/` | 业务快捷斜杠指令系统 |
-| `src/taozhi/agents/` | 专职电商子智能体模板定义与统一注册中心 |
-| `src/taozhi/server/` | FastAPI 接口服务与异步 Worker 守护进程（仅做适配，权限判定在 domain） |
+| `src/taozhi/server/` | FastAPI 接口服务、企业知识问答 Workflow 与异步 Worker 守护进程 |
 | `src/taozhi/knowledge/` | 知识库切片入库、混合检索器与数据库连接池 |
 | `evals/` | 评估模块（独立单元）：口径说明、数据集、指标、运行器、基线与报告 |
 | `evals/rag_eval/` | 企业知识库 RAG 三层评测运行器与质量门禁 |

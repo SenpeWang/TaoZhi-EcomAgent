@@ -1,4 +1,9 @@
-"编排层：显式 5 节点迭代闭环状态机、查询意图路由、离散决策与确定性控制。"
+"""编排层：多智能体调研主副系统、离散决策引擎与确定性控制器。"""
+from .agent_system import (
+    AutonomousAgentState,
+    build_autonomous_agent_graph,
+    execute_autonomous_agents,
+)
 from .controller import DeterministicController
 from .decision import (
     ChoiceResult,
@@ -8,29 +13,16 @@ from .decision import (
     VerificationResult,
     get_decision_engine,
 )
-from .loop import AgenticRAGOrchestrator
-from .router import QueryRoute, QueryRouter
-from .state import EvaluationResult, OrchestrationState
-from .agent_system import (
-    AutonomousAgentState,
-    build_autonomous_agent_graph,
-    execute_autonomous_agents,
-)
 
 __all__ = [
-    AutonomousAgentState,
-    build_autonomous_agent_graph,
-    execute_autonomous_agents,
-    AgenticRAGOrchestrator,
-    ChoiceResult,
-    DecisionEngine,
-    DecisionPath,
-    DeterministicController,
-    EvaluationResult,
-    OrchestrationState,
-    QueryRoute,
-    QueryRouter,
-    ScoreResult,
-    VerificationResult,
-    get_decision_engine,
+    "AutonomousAgentState",
+    "ChoiceResult",
+    "DecisionEngine",
+    "DecisionPath",
+    "DeterministicController",
+    "ScoreResult",
+    "VerificationResult",
+    "build_autonomous_agent_graph",
+    "execute_autonomous_agents",
+    "get_decision_engine",
 ]

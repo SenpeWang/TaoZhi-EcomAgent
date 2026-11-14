@@ -3,7 +3,6 @@
 基于 Anthropic MCP 协议规范，将 1688、亚马逊、全网搜索与网页去噪统一暴露为标准 MCP 工具集。
 严格遵循 Google Python Style 规范。
 """
-
 from __future__ import annotations
 
 import json
@@ -16,12 +15,19 @@ from ...core.tools.web_scraper import fetch_web_page
 from .protocol import McpCallToolResult, McpContentItem, McpToolDefinition
 
 
+def _call_global(name: str, **kwargs: Any) -> Any:
+    """按名称解析模块级工具函数，支持测试注入或运行时替换。"""
+    fn = globals()[name]
+    return fn(**kwargs)
+
+
 class EcommerceMcpServer:
-    """电商与市场情报类 MCP 服务端。"""
+    """电商与市场情报类 MCP 服务端（支持 tools/list 与 tools/call）。"""
 
     def __init__(self) -> None:
         self._tools: Dict[str, McpToolDefinition] = {}
         self._handlers: Dict[str, Callable[[Dict[str, Any]], Any]] = {}
+        self._aliases: Dict[str, str] = {"search_1688": "search_1688_wholesale"}
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -30,39 +36,53 @@ class EcommerceMcpServer:
         self.register_tool(
             McpToolDefinition(
                 name="search_amazon",
-                description="在亚马逊全球站 (https://www.amazon.com/) 检索跨境商品、出厂零售价($)、ASIN、评分与买家评论。",
+                description="在亚马逊全球站 (https://www.amazon.com/) 检索跨境商品、零售价($)、ASIN、评分与买家评论。",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "英文或中文检索关键词（例如 iphone 16 case）"},
                         "limit": {"type": "integer", "description": "返回商品条数上限", "default": 10},
+                        "timeout": {"type": "number", "description": "可选单次超时时间（秒）", "default": 12.0},
                     },
                     "required": ["query"],
                 },
             ),
-            handler=lambda args: search_amazon(
+            handler=lambda args: _call_global(
+                "search_amazon",
                 query=str(args.get("query", "")),
                 limit=int(args.get("limit", 10)),
+                **(
+                    {"timeout": float(args["timeout"])}
+                    if args.get("timeout") is not None
+                    else {}
+                ),
             ),
         )
 
         # 2. 1688 源头工厂出厂货源比价
         self.register_tool(
             McpToolDefinition(
-                name="search_1688",
+                name="search_1688_wholesale",
                 description="深入 1688 批发渠道抓取源头工厂批发底价、出厂阶梯价格、起订量(MOQ)与供应商分布。",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "keyword": {"type": "string", "description": "1688 检索关键词"},
                         "limit": {"type": "integer", "description": "返回条目上限", "default": 20},
+                        "timeout": {"type": "number", "description": "可选单次超时时间（秒）", "default": 90.0},
                     },
                     "required": ["keyword"],
                 },
             ),
-            handler=lambda args: search_1688_wholesale(
-                keyword=str(args.get("keyword", "")),
+            handler=lambda args: _call_global(
+                "search_1688_wholesale",
+                keyword=str(args.get("keyword") or args.get("query") or ""),
                 limit=int(args.get("limit", 20)),
+                **(
+                    {"timeout": float(args["timeout"])}
+                    if args.get("timeout") is not None
+                    else {}
+                ),
             ),
         )
 
@@ -76,13 +96,20 @@ class EcommerceMcpServer:
                     "properties": {
                         "query": {"type": "string", "description": "搜索关键词或调研主题"},
                         "limit": {"type": "integer", "description": "返回条数上限", "default": 10},
+                        "timeout": {"type": "number", "description": "可选单次超时时间（秒）", "default": 12.0},
                     },
                     "required": ["query"],
                 },
             ),
-            handler=lambda args: search_web(
+            handler=lambda args: _call_global(
+                "search_web",
                 query=str(args.get("query", "")),
                 limit=int(args.get("limit", 10)),
+                **(
+                    {"timeout": float(args["timeout"])}
+                    if args.get("timeout") is not None
+                    else {}
+                ),
             ),
         )
 
@@ -96,13 +123,20 @@ class EcommerceMcpServer:
                     "properties": {
                         "url": {"type": "string", "description": "目标网页 URL"},
                         "max_chars": {"type": "integer", "description": "最多截取的纯文字数", "default": 4000},
+                        "timeout": {"type": "number", "description": "可选单次超时时间（秒）", "default": 10.0},
                     },
                     "required": ["url"],
                 },
             ),
-            handler=lambda args: fetch_web_page(
+            handler=lambda args: _call_global(
+                "fetch_web_page",
                 url=str(args.get("url", "")),
                 max_chars=int(args.get("max_chars", 4000)),
+                **(
+                    {"timeout": float(args["timeout"])}
+                    if args.get("timeout") is not None
+                    else {}
+                ),
             ),
         )
 
@@ -117,16 +151,17 @@ class EcommerceMcpServer:
         """符合 MCP tools/list 协议接口规范。"""
         return list(self._tools.values())
 
-    def call_tool(self, name: str, arguments: Dict[str, Any]) -> McpCallToolResult:
+    def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> McpCallToolResult:
         """符合 MCP tools/call 协议接口规范。"""
-        if name not in self._handlers:
+        canonical = self._aliases.get(name, name)
+        if canonical not in self._handlers:
             return McpCallToolResult(
                 content=[McpContentItem(type="text", text=f"Error: Tool '{name}' not found on MCP server.")],
                 isError=True,
             )
 
         try:
-            handler = self._handlers[name]
+            handler = self._handlers[canonical]
             raw_output = handler(arguments or {})
             if isinstance(raw_output, (dict, list)):
                 text_payload = json.dumps(raw_output, ensure_ascii=False, indent=2)
@@ -144,5 +179,4 @@ class EcommerceMcpServer:
             )
 
 
-# 默认全局单例
 default_mcp_server = EcommerceMcpServer()

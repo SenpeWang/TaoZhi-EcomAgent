@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import difflib
 import time
-from typing import List, Tuple
-
-from .state import OrchestrationState
+from typing import Any, List, Tuple
 
 
 class DeterministicController:
@@ -15,9 +13,10 @@ class DeterministicController:
         self.max_iterations = max_iterations
         self.timeout_seconds = timeout_seconds
 
-    def check_iteration_budget(self, state: OrchestrationState) -> Tuple[bool, str]:
+    def check_iteration_budget(self, state_or_count: Any) -> Tuple[bool, str]:
         """检查迭代预算。返回 (是否允许继续, 状态原因)。"""
-        if state.iteration_count >= self.max_iterations:
+        iteration_count = state_or_count if isinstance(state_or_count, int) else getattr(state_or_count, "iteration_count", 0)
+        if iteration_count >= self.max_iterations:
             return False, "MAX_ITERATIONS_EXCEEDED"
         return True, "BUDGET_OK"
 

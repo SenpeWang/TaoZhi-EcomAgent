@@ -29,14 +29,10 @@ from pydantic import BaseModel, Field
 from ..ai.client import LLMClient, ModelTier
 from ..core.agent.context import ArtifactMetadata, SubagentContext
 from ..core.memory.service import get_memory_store
-from ..core.tools.outcome import ToolOutcome, execute_tool_with_outcome
-from ..core.tools.search_1688 import search_1688_wholesale
-from ..core.tools.search_amazon import search_amazon
-from ..core.tools.search_web import extract_search_keyword, search_web
-from ..core.tools.web_scraper import fetch_web_page
+from ..core.tools.outcome import ToolOutcome
+from ..core.tools.search_web import extract_search_keyword
 from ..domain.errors import Denied
 from ..domain.research import (
-    ALL_RESEARCH_TOOLS,
     ResearchBudget,
     ResearchScope,
     SOURCING_TOOLS,
@@ -49,6 +45,8 @@ from ..domain.research import (
     enforce_tool_allowed,
     evaluate_hard_stop,
 )
+from ..infrastructure.mcp.adapter import McpClientAdapter
+from ..infrastructure.mcp.server import default_mcp_server
 
 
 # ============================================================================
@@ -259,15 +257,9 @@ def _active_evidence(state: AutonomousAgentState) -> List[EvidenceRecord]:
     return [ev for ev in (state.get("evidence_pool") or []) if ev.get("evidence_id") not in invalidated]
 
 
-def _resolve_tool_callable(tool_name: str) -> Optional[Callable[..., Any]]:
-    """按名字解析模块级工具函数（支持单测 patch 模块变量）。"""
-    mapping: Dict[str, Optional[Callable[..., Any]]] = {
-        "search_web": globals().get("search_web"),
-        "fetch_web_page": globals().get("fetch_web_page"),
-        "search_1688_wholesale": globals().get("search_1688_wholesale"),
-        "search_amazon": globals().get("search_amazon"),
-    }
-    return mapping.get(tool_name)
+def _get_mcp_client() -> McpClientAdapter:
+    """获取绑定 EcommerceMcpServer 的标准 MCP 协议工具客户端。"""
+    return McpClientAdapter(server=default_mcp_server)
 
 
 def _build_tool_kwargs(tool_name: str, query_or_url: str) -> Dict[str, Any]:
@@ -424,13 +416,14 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
     steer_note = f"最新动态干预指令（必须优先响应）：{newly_arrived}\n" if newly_arrived else ""
     all_steer_note = f"累计干预指令：{all_inbox}\n" if all_inbox else ""
     notice_note = f"上轮领域守卫拦截提示：{notices}\n" if notices else ""
+    mcp_specs = _get_mcp_client().list_tool_specs(scope.allowed_tools)
 
     prompt = (
         f"你是一名电商市场调研多智能体系统的主协调代理（Lead Research Agent）。\n"
         f"目标品类：【{keyword}】\n"
         f"用户完整诉求：{query}\n"
         f"{steer_note}{all_steer_note}{notice_note}"
-        f"当前合法允许授权的工具白名单（严禁越界使用未列出工具）：{list(scope.allowed_tools)}\n"
+        f"当前合法允许授权的 MCP 工具列表（tools/list 契约，严禁越界使用未列出工具）：\n{json.dumps(mcp_specs, ensure_ascii=False)}\n"
         f"剩余调度轮次：{remaining_turns}；剩余时间预算：{remaining_sec:.1f}s；单轮最多并发子智能体：{budget.max_parallel_subagents}。\n"
         f"当前黑板已有有效证据包（{len(ev_digest)} 份）：\n{json.dumps(ev_digest, ensure_ascii=False)}\n\n"
         "请自主判断当前决策：\n"
@@ -606,6 +599,8 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
     gaps_or_errors: List[str] = []
 
     llm = LLMClient()
+    mcp_client = _get_mcp_client()
+    mcp_specs = mcp_client.list_tool_specs(task.allowed_tools)
 
     def _run_guarded_tool(tool_name: str, query_or_url: str, step_idx: int) -> ToolOutcome:
         # 1. Domain 双重硬守卫（业务边界 + 当前任务授权）
@@ -616,14 +611,6 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 tool_name=tool_name,
                 status="error",
                 error_reason=exc.message,
-            )
-
-        fn = _resolve_tool_callable(tool_name)
-        if fn is None:
-            return ToolOutcome(
-                tool_name=tool_name,
-                status="error",
-                error_reason=f"工具 {tool_name} 未注册可执行函数",
             )
 
         if _is_cancelled(hooks):
@@ -638,13 +625,12 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
         _emit_progress(
             hooks,
-            f"[tool_execution_start] [{task.role}] 调度工具: {tool_name} · 入参: {json.dumps(kwargs, ensure_ascii=False)}",
+            f"[tool_execution_start] [{task.role}] MCP tools/call: {tool_name} · 入参: {json.dumps(kwargs, ensure_ascii=False)}",
         )
 
-        outcome = execute_tool_with_outcome(
+        outcome = mcp_client.call_tool(
             tool_name=tool_name,
-            fn=fn,
-            kwargs=kwargs,
+            arguments=kwargs,
             remaining_seconds=remaining,
             cancel_event=hooks.cancel_event,
         )
@@ -701,7 +687,7 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
             f"你是电商调研子智能体：【{task.role}】。\n"
             f"核心目标：{task.goal}\n"
             f"品类词：【{keyword}】；用户原诉求：{user_query}\n"
-            f"授权可用工具列表（严禁越界）：{list(task.allowed_tools)}\n"
+            f"授权可用 MCP 工具（tools/list 契约，严禁越界）：\n{json.dumps(mcp_specs, ensure_ascii=False)}\n"
             f"建议起步词：{list(task.seed_queries)}\n"
             f"当前进度：第 {step_idx}/{max_steps} 步。\n"
             f"历史观测记录：\n{json.dumps(react_observations, ensure_ascii=False)}\n\n"

@@ -1,16 +1,15 @@
-"""MCP 协议规范与 search_amazon 跨境情报工具验收测试。"""
+"""MCP 协议规范、EcommerceMcpServer / McpClientAdapter 与领域工具边界测试。"""
 from __future__ import annotations
 
 import json
-import pytest
+import threading
+from unittest.mock import patch
 
-from taozhi.agent.tools.base import ToolContext
-from taozhi.agents.registry import default_registry
 from taozhi.core.tools.search_amazon import AMAZON_BASE_URL, search_amazon
-from taozhi.infrastructure.mcp.adapter import McpToolAdapter
-from taozhi.infrastructure.mcp.protocol import McpCallToolResult, McpToolDefinition
-from taozhi.infrastructure.mcp.server import EcommerceMcpServer, default_mcp_server
-from taozhi.observability.tracer import active_trace
+from taozhi.domain.research import classify_research_scope
+from taozhi.infrastructure.mcp.adapter import McpClientAdapter
+from taozhi.infrastructure.mcp.protocol import McpCallToolResult
+from taozhi.infrastructure.mcp.server import EcommerceMcpServer
 
 
 def test_mcp_protocol_and_server_registration():
@@ -20,11 +19,10 @@ def test_mcp_protocol_and_server_registration():
     tool_names = [t.name for t in tools]
 
     assert "search_amazon" in tool_names
-    assert "search_1688" in tool_names
+    assert "search_1688_wholesale" in tool_names
     assert "search_web" in tool_names
     assert "fetch_web_page" in tool_names
 
-    # 验证 search_amazon 的 inputSchema 符合 JSON Schema 规范
     amz_tool = next(t for t in tools if t.name == "search_amazon")
     assert amz_tool.inputSchema["type"] == "object"
     assert "query" in amz_tool.inputSchema["properties"]
@@ -32,7 +30,7 @@ def test_mcp_protocol_and_server_registration():
 
 
 def test_search_amazon_execution_and_data_structure():
-    """测试 search_amazon 工具的真实或容灾抓取输出结构。"""
+    """测试 search_amazon 工具的输出结构契约。"""
     results = search_amazon("iphone 16 case", limit=3)
     assert isinstance(results, list)
     assert len(results) >= 1
@@ -46,11 +44,10 @@ def test_search_amazon_execution_and_data_structure():
     assert item["url"].startswith(AMAZON_BASE_URL) or "amazon.com" in item["url"]
 
 
-def test_mcp_server_call_tool():
-    """测试 MCP 服务端的工具分发与执行（tools/call）契约。"""
+def test_mcp_server_call_tool_and_alias():
+    """测试 MCP 服务端 tools/call 执行、别名兼容及未知工具报错。"""
     server = EcommerceMcpServer()
 
-    # 1. 正常调用 search_amazon
     res = server.call_tool("search_amazon", {"query": "thermal mug", "limit": 2})
     assert isinstance(res, McpCallToolResult)
     assert not res.isError
@@ -62,55 +59,64 @@ def test_mcp_server_call_tool():
     assert len(parsed) >= 1
     assert parsed[0]["source"] == "amazon"
 
-    # 2. 调用不存在的未知工具
+    # 测试 search_1688 别名可映射到 canonical 工具 search_1688_wholesale
+    with patch(
+        "taozhi.infrastructure.mcp.server.search_1688_wholesale",
+        return_value=[{"title": "东莞源头厂保温杯", "price": 18.5}],
+    ):
+        alias_res = server.call_tool("search_1688", {"keyword": "保温杯", "limit": 2})
+    assert not alias_res.isError
+    alias_parsed = json.loads(alias_res.content[0].text)
+    assert alias_parsed[0]["title"] == "东莞源头厂保温杯"
+
     err_res = server.call_tool("unknown_tool", {})
     assert err_res.isError
     assert "not found" in err_res.content[0].text
 
 
-def test_mcp_tool_adapter_integration():
-    """测试 McpToolAdapter 将 MCP 工具转接为 BaseTool 原生契约。"""
+def test_mcp_client_adapter_integration():
+    """测试 McpClientAdapter 的受限 Schema 发现、ToolOutcome 封装与取消中断。"""
     server = EcommerceMcpServer()
-    amz_def = next(t for t in server.list_tools() if t.name == "search_amazon")
-    adapter = McpToolAdapter(tool_definition=amz_def, server=server)
+    adapter = McpClientAdapter(server=server)
 
-    assert adapter.name == "search_amazon"
+    # 1. 受限 tools/list 过滤
+    specs = adapter.list_tool_specs(["search_web", "fetch_web_page"])
+    spec_names = [s["name"] for s in specs]
+    assert spec_names == ["search_web", "fetch_web_page"]
+    assert "inputSchema" in specs[0]
 
-    # 1. 测试 dry-run 演练模式
-    dry_res = adapter({"query": "test"}, context=ToolContext(dry_run=True))
-    assert dry_res.success
-    assert dry_res.output["status"] == "dry_run_validated"
+    # 2. 通过 MCP tools/call 执行并返回结构化 ToolOutcome
+    with patch(
+        "taozhi.infrastructure.mcp.server.search_amazon",
+        return_value=[{"title": "AMZ Mug", "price": "$19.99", "asin": "B001", "source": "amazon"}],
+    ):
+        outcome = adapter.call_tool("search_amazon", {"query": "screen protector", "limit": 2})
+    assert outcome.status == "ok"
+    assert outcome.data_count == 1
+    assert outcome.items[0]["asin"] == "B001"
 
-    # 2. 测试正常调用与 Trace 树集成
-    with active_trace() as trace:
-        normal_res = adapter({"query": "screen protector", "limit": 2})
+    # 3. 任务取消事件拦截
+    cancel_evt = threading.Event()
+    cancel_evt.set()
+    cancelled = adapter.call_tool("search_amazon", {"query": "test"}, cancel_event=cancel_evt)
+    assert cancelled.status == "cancelled"
 
-    assert normal_res.success
-    assert isinstance(normal_res.output, list)
-    record = trace.finish()
-
-    # 验证 Trace 树中包含 mcp.tool.search_amazon Span
-    span_names = [c.name for c in record.root_span.children]
-    assert "mcp.tool.search_amazon" in span_names
+    # 4. 未注册工具映射为错误态 ToolOutcome
+    unknown = adapter.call_tool("non_existent_tool", {})
+    assert unknown.status == "error"
 
 
-def test_agent_registry_equipped_with_amazon():
-    """测试专职智能体角色工具边界（scanner 装备 1688 与 Amazon，web 仅搜索网页）。"""
-    researcher = default_registry.get("web_agent")
-    scanner = default_registry.get("scanner_agent")
+def test_research_scope_filters_mcp_tool_specs():
+    """测试领域范围守卫与 MCP tools/list 的白名单联动隔离。"""
+    adapter = McpClientAdapter(server=EcommerceMcpServer())
 
-    assert researcher is not None
-    assert scanner is not None
+    web_scope = classify_research_scope("调研无线耳机全网口碑与痛点")
+    web_specs = adapter.list_tool_specs(web_scope.allowed_tools)
+    web_names = {s["name"] for s in web_specs}
+    assert web_names == {"search_web", "fetch_web_page"}
 
-    researcher_tool_names = [t.__name__ for t in researcher.tools]
-    scanner_tool_names = [t.__name__ for t in scanner.tools]
-
-    # 全网市场情报分析专员仅搜索网页，不包含 search_amazon
-    assert "search_web" in researcher_tool_names
-    assert "search_amazon" not in researcher_tool_names
-    assert len(researcher.tools) == 1
-
-    # 货源比价专员装备 1688 与 search_amazon 进行供应链比价对标（共 2 个工具）
-    assert "search_1688_wholesale" in scanner_tool_names
-    assert "search_amazon" in scanner_tool_names
-    assert len(scanner.tools) == 2
+    sourcing_scope = classify_research_scope("调研保温杯1688出厂价与Amazon零售对标")
+    sourcing_specs = adapter.list_tool_specs(sourcing_scope.allowed_tools)
+    sourcing_names = {s["name"] for s in sourcing_specs}
+    assert "search_1688_wholesale" in sourcing_names
+    assert "search_amazon" in sourcing_names
