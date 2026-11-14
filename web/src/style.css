@@ -332,7 +332,6 @@ p {
   text-align: center;
 }
 
-.sandbox-avatar,
 .member-avatar,
 .account-avatar-xl,
 .topbar-avatar {
@@ -341,12 +340,6 @@ p {
   border-radius: 9px;
   font-weight: 700;
   flex-shrink: 0;
-}
-
-.sandbox-avatar {
-  width: 30px;
-  height: 30px;
-  font-size: 12px;
 }
 
 .tone-exec {
@@ -369,40 +362,12 @@ p {
   color: #334155;
 }
 
-.sandbox-account-meta {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.sandbox-name-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.sandbox-name-row strong {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--tz-ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .sandbox-role-pill {
   font-size: 9.5px;
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 4px;
   white-space: nowrap;
-}
-
-.sandbox-account-meta small {
-  font-size: 10.5px;
-  color: var(--tz-ink-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* ==========================================================================
@@ -506,14 +471,6 @@ p {
   color: #34d399;
   font-weight: 600;
   flex-shrink: 0;
-}
-
-.online-pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #10b981;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.22);
 }
 
 .sidebar-nav {
@@ -1108,14 +1065,6 @@ p {
   text-align: right;
 }
 
-.panel-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 16px;
-}
-
 /* ==========================================================================
    5. 账号与安全中心（AccountCenter）
    ========================================================================== */
@@ -1317,15 +1266,6 @@ p {
   font-size: 11px;
   line-height: 1.4;
   color: var(--tz-ink-muted);
-}
-
-.security-shield-pill {
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
-  background: var(--tz-success-soft);
-  color: var(--tz-success);
 }
 
 .security-alert-banner {
@@ -1731,18 +1671,6 @@ p {
   margin: 6px 0 0;
 }
 
-.upload-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 16px;
-  font-size: 12.5px;
-  color: var(--tz-ink-muted);
-}
-
-.preset-label,
-.platform-label,
-.slash-label,
 .outline-label,
 .artifact-label {
   font-size: 12px;
@@ -1834,14 +1762,16 @@ p {
   font-size: 11.5px;
 }
 
-.research-markdown-view {
+.research-markdown-view,
+.answer-markdown-view {
   background: #ffffff;
   border: 1px solid var(--tz-border);
   border-radius: 10px;
   padding: 18px 22px;
   font-size: 13.5px;
-  line-height: 1.8;
+  line-height: 1.78;
   color: var(--tz-ink);
+  white-space: normal;
 }
 
 .workflow-events-box {
@@ -1981,8 +1911,7 @@ p {
   .document-cards,
   .capability-matrix,
   .form-two-col,
-  .form-columns,
-  .sandbox-account-grid {
+  .form-columns {
     grid-template-columns: 1fr;
   }
   .overview-banner {

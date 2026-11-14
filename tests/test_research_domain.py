@@ -430,8 +430,10 @@ def test_sensenova_router_failover_circuit_and_compliance():
     """测试商汤 sensenova-6.8-flash 国内多 Key 与海外版自动故障转移、熔断屏蔽及内密合规隔离。"""
     from types import SimpleNamespace
     from langchain_core.messages import AIMessage
+    from taozhi.ai import observability as obs
     from taozhi.ai.client import LLMClient
     from taozhi.ai.router import CircuitBreakerRegistry, build_sensenova_endpoints, route_audit_scope
+    obs.reset()
 
     fake_settings = SimpleNamespace(
         base_url="https://token.sensenova.cn/v1",
@@ -453,9 +455,6 @@ def test_sensenova_router_failover_circuit_and_compliance():
         sensenova_overseas_api_key="test-overseas-credential",
         sensenova_overseas_model="sensenova-6.8-flash",
         sensenova_overseas_direct_connection=False,
-        llm_fallback_base_url="",
-        llm_fallback_api_key="",
-        llm_fallback_model="",
         llm_circuit_cooldown_rate_limit=45,
         llm_circuit_cooldown_transient=25,
         llm_circuit_cooldown_auth=600,
@@ -483,7 +482,10 @@ def test_sensenova_router_failover_circuit_and_compliance():
                 raise RuntimeError("Error code: 429 - {'error': {'type': 'rate_limit_error'}}")
             if ep.endpoint_id == "sensenova_cn_secondary":
                 raise TimeoutError("ConnectTimeout: The handshake operation timed out")
-            return AIMessage(content="OVERSEAS_FLASH_OK")
+            return AIMessage(
+                content="OVERSEAS_FLASH_OK",
+                response_metadata={"token_usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}},
+            )
 
         bound.invoke.side_effect = _invoke
         raw = MagicMock()
@@ -528,6 +530,8 @@ def test_sensenova_router_failover_circuit_and_compliance():
         with pytest.raises(RuntimeError, match="429"):
             strict_client.chat("涉密内部文档推理")
     assert "sensenova_overseas" not in strict_calls
+    assert obs.token_usage()["total_tokens"] == 300.0
+    assert obs.snapshot()["llm.errors.total"] == 1.0
 
 
 def test_checkpoint_cross_version_resume_hydrates_evidence_and_route_history():

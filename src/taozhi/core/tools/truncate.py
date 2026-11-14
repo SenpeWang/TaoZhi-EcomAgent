@@ -98,7 +98,3 @@ def truncate_text(
         max_lines=max_lines,
         max_bytes=max_bytes,
     )
-
-
-# 向后兼容别名
-preserve_line_boundary_truncate = truncate_text

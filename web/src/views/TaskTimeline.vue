@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { Task } from '../types'
+import MarkdownReport from './MarkdownReport.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -202,7 +203,13 @@ function onSteer() {
             </el-tag>
           </div>
 
-          <pre class="answer-body research-markdown-view">{{ task.result.report }}</pre>
+          <div class="answer-body research-markdown-view">
+            <MarkdownReport
+              :content="task.result.report || ''"
+              :id-prefix="'task-' + task.id"
+              compact
+            />
+          </div>
         </template>
 
         <template v-else>
@@ -214,7 +221,14 @@ function onSteer() {
             </el-tag>
             <el-tag type="success" effect="dark">终审通过</el-tag>
           </div>
-          <pre class="answer-body">{{ task.result.answer }}</pre>
+          <div class="answer-body answer-markdown-view">
+            <MarkdownReport
+              :content="task.result.answer || ''"
+              :id-prefix="'ans-' + task.id"
+              :show-outline="false"
+              compact
+            />
+          </div>
           <div v-if="task.result.missing?.length" class="missing-box">
             <strong>待补充确认</strong>
             <p v-for="m in task.result.missing" :key="m">{{ m }}</p>

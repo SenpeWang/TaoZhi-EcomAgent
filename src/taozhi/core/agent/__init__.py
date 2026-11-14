@@ -7,14 +7,12 @@ from .protocol import (
     SubagentDefinition,
     SubagentResult,
     SubagentState,
-    SubagentState as AgentState,
     WorkspaceMode,
 )
 from ..memory.store import LongTermMemoryStore
 from ..memory.transcript import TranscriptLogger, TranscriptStep
 
 __all__ = [
-    "AgentState",
     "ArtifactMetadata",
     "LongTermMemoryStore",
     "Message",

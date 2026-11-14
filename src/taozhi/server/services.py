@@ -1,11 +1,12 @@
 from __future__ import annotations
 import hashlib,secrets,re
-from datetime import datetime,timezone
+from datetime import datetime
 from ..config import load_config
 from ..knowledge.db import fetch_one,fetch_all,as_jsonb
+from taozhi.domain.access import can_review, can_task
 from taozhi.domain.errors import Denied
-from taozhi.infrastructure.persistence.access_repo import (audit, can_review, can_task, can_write, get_document, require_system, sources_valid)
-from .passwords import hash_password,verify_password
+from taozhi.infrastructure.persistence.access_repo import (audit, can_write, get_document, require_system, sources_valid)
+from .passwords import hash_password
 from taozhi.domain.privacy import redact
 
 def generate_id(prefix):return prefix+"_"+secrets.token_hex(12)

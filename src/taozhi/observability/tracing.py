@@ -75,18 +75,6 @@ def node_span(name: str, attrs: dict | None = None, context=None):
         return nullcontext()
 
 
-def current_context():
-    """取当前链路上下文（供线程池子任务挂父子关系）；未启用返回 None。"""
-    if not _enabled():
-        return None
-    try:
-        from opentelemetry import context as otel_context
-
-        return otel_context.get_current()
-    except Exception:
-        return None
-
-
 def current_trace_id() -> str:
     """当前 span 的 32 位十六进制 trace_id；不可用返回空串。"""
     try:

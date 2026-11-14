@@ -59,15 +59,16 @@ def test_mcp_server_call_tool_and_alias():
     assert len(parsed) >= 1
     assert parsed[0]["source"] == "amazon"
 
-    # 测试 search_1688 别名可映射到 canonical 工具 search_1688_wholesale
+    # 直接通过规范工具名 search_1688_wholesale 调用，并确认废弃别名 search_1688 不再放行
     with patch(
         "taozhi.infrastructure.mcp.server.search_1688_wholesale",
         return_value=[{"title": "东莞源头厂保温杯", "price": 18.5}],
     ):
-        alias_res = server.call_tool("search_1688", {"keyword": "保温杯", "limit": 2})
-    assert not alias_res.isError
-    alias_parsed = json.loads(alias_res.content[0].text)
-    assert alias_parsed[0]["title"] == "东莞源头厂保温杯"
+        ws_res = server.call_tool("search_1688_wholesale", {"keyword": "保温杯", "limit": 2})
+    assert not ws_res.isError
+    ws_parsed = json.loads(ws_res.content[0].text)
+    assert ws_parsed[0]["title"] == "东莞源头厂保温杯"
+    assert server.call_tool("search_1688", {"keyword": "保温杯", "limit": 2}).isError
 
     err_res = server.call_tool("unknown_tool", {})
     assert err_res.isError

@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import uuid
 from pathlib import Path
@@ -109,11 +108,6 @@ class SubagentContext:
             self.workspace_dir = self.base_dir / "workspace"
 
         self._ensure_dirs()
-
-    @property
-    def artifact_dir(self) -> Path:
-        """工件目录属性别名。"""
-        return self.artifacts_dir
 
     def _ensure_dirs(self) -> None:
         """确保子智能体所需的隔离工作区目录存在。"""

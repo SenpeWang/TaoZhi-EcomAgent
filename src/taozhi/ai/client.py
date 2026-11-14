@@ -18,6 +18,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from ..config import Settings, get_settings
+from .observability import record_llm_call, record_llm_error
 from .parsers import _JSON_RULES, clean_model_output, get_pydantic_parser
 from .router import (
     _PREFERRED_ENDPOINT,
@@ -70,10 +71,6 @@ class LLMClient:
             False: httpx.AsyncClient(trust_env=False),
             True: httpx.AsyncClient(trust_env=True),
         }
-        # 兼容外部直接引用属性
-        default_trust = not self.settings.llm_direct_connection
-        self._http = self._http_by_trust_env[default_trust]
-        self._async_http = self._async_http_by_trust_env[default_trust]
         self.last_route_events: List[Dict[str, Any]] = []
 
     def _model_for_tier(self, tier: ModelTier, override_model: str = "") -> str:
@@ -108,27 +105,6 @@ class LLMClient:
                     http_async_client=self._async_http_by_trust_env[trust_env],
                 )
             return self._clients[key]
-
-    def _client(self, tier: ModelTier) -> ChatOpenAI:
-        """兼容旧调用入口：返回首选商汤端点客户端。"""
-        cfg = self.settings
-        model = self._model_for_tier(tier)
-        direct = cfg.llm_direct_connection
-        trust_env = not bool(direct)
-        with self._client_lock:
-            if model not in self._clients:
-                self._clients[model] = ChatOpenAI(
-                    base_url=cfg.base_url,
-                    api_key=cfg.api_key,
-                    model=model,
-                    temperature=cfg.llm_temperature,
-                    max_tokens=cfg.llm_max_tokens,
-                    timeout=cfg.llm_timeout,
-                    max_retries=cfg.llm_max_retries,
-                    http_client=self._http_by_trust_env[trust_env],
-                    http_async_client=self._async_http_by_trust_env[trust_env],
-                )
-            return self._clients[model]
 
     @staticmethod
     def _to_messages(payload: Union[str, List[Message]]) -> List[BaseMessage]:
@@ -219,15 +195,14 @@ class LLMClient:
 
             for idx, ep in enumerate(candidates):
                 try:
-                    raw_client = (
-                        self._client(tier)
-                        if ep.endpoint_id == "sensenova_default"
-                        else self._client_for_endpoint(ep)
-                    )
+                    raw_client = self._client_for_endpoint(ep)
                     bound_client = raw_client.bind(temperature=eff_temp, max_tokens=budget)
                     t0 = time.perf_counter()
                     result = bound_client.invoke(messages)
-                    latency_ms = int((time.perf_counter() - t0) * 1000)
+                    elapsed_s = time.perf_counter() - t0
+                    latency_ms = int(elapsed_s * 1000)
+                    usage = extract_usage(result)
+                    record_llm_call(tier.value, elapsed_s, usage["prompt_tokens"], usage["completion_tokens"])
                     self._registry.record_success(ep, latency_ms)
                     self._record_route(
                         {
@@ -269,7 +244,12 @@ class LLMClient:
                         try:
                             t0 = time.perf_counter()
                             result = raw_client.bind(temperature=eff_temp, max_tokens=budget).invoke(messages)
-                            latency_ms = int((time.perf_counter() - t0) * 1000)
+                            elapsed_s = time.perf_counter() - t0
+                            latency_ms = int(elapsed_s * 1000)
+                            usage = extract_usage(result)
+                            record_llm_call(
+                                tier.value, elapsed_s, usage["prompt_tokens"], usage["completion_tokens"]
+                            )
                             self._registry.record_success(ep, latency_ms)
                             self._record_route(
                                 {
@@ -286,6 +266,7 @@ class LLMClient:
                             break
                         except Exception as exc2:
                             last_exc = exc2
+                    record_llm_error(tier.value)
                     raise last_exc
 
         if result is None:
@@ -364,6 +345,11 @@ class LLMClient:
                 pass
 
         return default if default is not None else ({} if expect == "object" else [])
+
+    def close(self) -> None:
+        """关闭底层同步 HTTP 连接池。"""
+        for http_client in self._http_by_trust_env.values():
+            http_client.close()
 
 
 _DEFAULT_CLIENT: Optional[LLMClient] = None

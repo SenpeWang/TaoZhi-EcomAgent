@@ -1,5 +1,5 @@
 from __future__ import annotations
-import asyncio,hashlib,json,secrets
+import asyncio,json,secrets
 from datetime import datetime,timezone
 from pathlib import Path
 from typing import Literal
@@ -11,8 +11,9 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel,ConfigDict,Field,ValidationError
 from ..config import load_config, ROOT
 from ..knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
+from taozhi.domain.access import can_review, can_task
 from taozhi.domain.errors import Denied
-from taozhi.infrastructure.persistence.access_repo import (audit, can_download, can_read, can_review, can_task, can_write, get_document, load_principal, require_document_read, require_system, sources_valid)
+from taozhi.infrastructure.persistence.access_repo import (audit, can_download, can_read, can_write, get_document, load_principal, require_document_read, require_system, sources_valid)
 from .services import (approval, create_job, create_user, decide, edit_document, generate_id, invalidate_authorization, membership_request, new_document, present_job, public_user, user_request)
 from .auth import identity,login,hash_token,SESSION_COOKIE,CSRF_COOKIE
 from .passwords import hash_password,verify_password
@@ -90,10 +91,6 @@ class Question(Input):
     sku_id:str=Field(default="",max_length=64,pattern=r"^[A-Za-z0-9_-]*$")
     order_id:str=Field(default="",max_length=64,pattern=r"^[A-Za-z0-9_-]*$")
     keyword:str=Field(default="",max_length=100)
-class LearnMemory(Input):
-    keyword:str=Field(min_length=1,max_length=100)
-    rule_or_fact:str=Field(min_length=1,max_length=500)
-    is_rule:bool=True
 
 class Tool(Input):
     name:Literal["search_knowledge","query_product_spec","query_compatibility","query_stock","query_order"]
@@ -118,7 +115,6 @@ async def invalid(request,exc):
 @app.exception_handler(Exception)
 async def unexpected(request,exc):
     return JSONResponse({"code":"INTERNAL_ERROR","message":"服务暂时无法处理请求，请稍后重试","request_id":getattr(request.state,"request_id","")},status_code=500)
-@app.get("/api/health")
 @app.get("/api/health")
 def health():
     with database_connection() as c:
@@ -163,16 +159,13 @@ def info():
         if cfg.quick_login:data["quick_accounts"]=_quick_accounts(c,cfg)
     return data
 @app.post("/api/auth/login")
-@app.post("/api/auth/login")
 def signin(payload:Login,request:Request,response:Response):
     p,sid,csrf,expires=login(payload.username,payload.password,request.client.host if request.client else "local",payload.tenant_code or load_config().tenant_code)
     response.set_cookie(SESSION_COOKIE,sid,httponly=True,secure=load_config().cookie_secure,samesite="strict",max_age=7200,path="/")
     response.set_cookie(CSRF_COOKIE,csrf,httponly=False,secure=load_config().cookie_secure,samesite="strict",max_age=7200,path="/")
     return dict(user=p.public(),csrf_token=csrf,expires_at=expires,message="登录成功")
 @app.get("/api/auth/me")
-@app.get("/api/auth/me")
 def me(p=Depends(identity)):return p.public()
-@app.post("/api/auth/logout")
 @app.post("/api/auth/logout")
 def logout(request:Request,response:Response,p=Depends(identity)):
     with database_connection() as c:
@@ -370,7 +363,6 @@ def decision(aid: str, payload: Decision, p=Depends(identity)):
         return decide(c, p, aid, payload.approve, payload.comment)
 
 
-@app.post("/api/research/task", status_code=202)
 @app.post("/api/tasks", status_code=202)
 def ask(
     payload: Question,
@@ -408,7 +400,6 @@ def ask(
             conversation_id=payload.conversation_id,
         )
         return {"id": job["id"], "task_id": job["id"], "state": job["state"], "message": "任务已提交"}
-@app.get("/api/research/tasks")
 @app.get("/api/tasks")
 def tasks(p=Depends(identity)):
     with database_connection() as c:
@@ -496,24 +487,7 @@ def delete_research_conversation(conversation_id: str, p=Depends(identity)):
         audit(c, p, "删除调研对话", conversation_id, p.root, 1)
     return {"message": "对话已成功删除"}
 
-@app.post("/api/research/memory/learn")
-def research_learn(payload: LearnMemory, p=Depends(identity)):
-    from ..core.memory.service import get_memory_store
-    store = get_memory_store(tenant_id=p.tenant_id)
-    if payload.is_rule:
-        if not getattr(p, "boss", False) and not getattr(p, "root", False):
-            raise Denied("权限不足：只有企业管理员可发布企业级推理规则", "FORBIDDEN", 403)
-        store.learn_rule(payload.rule_or_fact, category="research", source=f"tenant_admin_{p.tenant_id}")
-    else:
-        store.remember_fact(
-            subject=payload.keyword,
-            predicate="用户设定事实",
-            object_val=payload.rule_or_fact,
-            source=f"tenant_{p.tenant_id}_user_{p.id}",
-        )
-    return {"message": "已成功记录至长效记忆库", "facts": store.query_facts(subject=payload.keyword)}
 
-@app.get("/api/research/task/{task_id}")
 @app.get("/api/tasks/{task_id}")
 def task(task_id:str,p=Depends(identity)):
     with database_connection() as c:

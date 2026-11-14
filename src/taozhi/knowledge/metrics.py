@@ -12,10 +12,8 @@ from __future__ import annotations
 import re
 import time
 
-import numpy as np
-
 from ..config import load_config
-from ..knowledge.db import database_connection, fetch_all, fetch_one
+from ..knowledge.db import fetch_all, fetch_one
 from taozhi.domain.errors import Denied
 from ..knowledge.retriever import words
 
@@ -54,22 +52,6 @@ def can_read_metric(conn, p, m) -> bool:
 def list_metrics(conn, p):
     rows = fetch_all(conn, "SELECT * FROM metrics WHERE tenant_id=%s AND state='published' ORDER BY metric_key", (p.tenant_id,))
     return [m for m in rows if can_read_metric(conn, p, m)]
-
-
-def search_metrics(conn, p, query, limit=5):
-    """按 key/名称/别名/说明匹配指标（jieba 词重叠 + 精确命中加权），权限前置过滤。"""
-    terms = set(words(query))
-    q = (query or "").strip().lower()
-    scored = []
-    for m in list_metrics(conn, p):
-        toks = set(words(m["metric_key"] + " " + m["name"] + " " + " ".join(m["aliases"]) + " " + m["description"]))
-        score = len(terms & toks) / max(1, len(terms))
-        if q and (q == m["metric_key"].lower() or q in [a.lower() for a in m["aliases"]]):
-            score += 1.0
-        if score > 0:
-            scored.append((score, m))
-    scored.sort(key=lambda x: -x[0])
-    return [m for _, m in scored[:limit]]
 
 
 def _validate_template(m) -> None:

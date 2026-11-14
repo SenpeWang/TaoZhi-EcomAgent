@@ -336,23 +336,6 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
         overseas_direct,
     )
 
-    # 4. 兼容传统 LLM_FALLBACK_* 环境变量备线（若仍指向商汤）
-    fb_base = (getattr(settings, "llm_fallback_base_url", "") or "").strip()
-    fb_key = (getattr(settings, "llm_fallback_api_key", "") or "").strip()
-    fb_model = (getattr(settings, "llm_fallback_model", "") or target_model).strip()
-    if fb_base or fb_key:
-        eff_url = fb_base or settings.base_url
-        eff_region = _infer_region(eff_url)
-        _add(
-            "sensenova_custom_fallback",
-            "商汤自定义备线",
-            eff_region,
-            eff_url,
-            fb_key or settings.api_key,
-            fb_model,
-            overseas_direct if eff_region == "overseas" else settings.llm_direct_connection,
-        )
-
     return endpoints
 
 

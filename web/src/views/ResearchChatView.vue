@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { User } from '../types'
 import robotUrl from '../assets/robot.svg'
+import MarkdownReport from './MarkdownReport.vue'
 
 interface ToolCallTrace {
   name: string
@@ -129,6 +130,9 @@ function parseStep(log: string): FormattedThinkingStep {
   if (log.startsWith('[agent_start]')) {
     return { type: 'agent', label: '开始处理', icon: '启动', content: log.slice(13).trim() }
   }
+  if (log.startsWith('[agent_handoff]')) {
+    return { type: 'agent', label: '角色交接', icon: '交接', content: log.slice(15).trim() }
+  }
   if (log.startsWith('[turn_start]')) {
     return { type: 'turn', label: '分析步骤', icon: '步骤', content: log.slice(12).trim() }
   }
@@ -140,6 +144,26 @@ function parseStep(log: string): FormattedThinkingStep {
   }
   if (log.startsWith('[tool_result]')) {
     return { type: 'security', label: '结果核验', icon: '核验', content: log.slice(13).trim() }
+  }
+  if (log.startsWith('[system]')) {
+    const body = log.slice(8).trim()
+    if (body.includes('模型容灾')) {
+      return {
+        type: 'security',
+        label: '模型容灾',
+        icon: '容灾',
+        content: body.replace(/^\[模型容灾\]\s*/, '').trim(),
+      }
+    }
+    if (body.includes('检查点')) {
+      return {
+        type: 'turn',
+        label: '断点续跑',
+        icon: '续跑',
+        content: body.replace(/^\[检查点恢复\]\s*/, '').trim(),
+      }
+    }
+    return { type: 'plain', label: '系统调度', icon: '系统', content: body }
   }
   if (log.includes('用户中途追加干预指令') || log.startsWith('[steering]')) {
     return {
@@ -581,6 +605,23 @@ async function copyText(text?: string): Promise<void> {
   }
 }
 
+/**
+ * 将调研报告原文导出为本地 Markdown 文件下载。
+ * @param text - 报告 Markdown 原文
+ * @param title - 用于生成文件名的主题词
+ */
+function downloadReport(text?: string, title?: string): void {
+  if (!text) return
+  const safeName = (title || 'market_research_report').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40)
+  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `${safeName}.md`
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 onMounted(() => {
   void loadConversations()
 })
@@ -732,21 +773,35 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <!-- 3. 回答正文 (Markdown 渲染) -->
+                <!-- 3. 回答正文 (Markdown 结构化富文本渲染) -->
                 <div
                   v-if="turn.result?.report || turn.result?.reply"
                   class="response-markdown-body"
                 >
-                  {{ turn.result?.report || turn.result?.reply }}
+                  <MarkdownReport
+                    :content="turn.result?.report || turn.result?.reply || ''"
+                    :id-prefix="'rep-' + turn.id"
+                  />
                 </div>
 
-                <!-- 4. 底部简单操作栏 -->
+                <!-- 4. 底部操作栏 -->
                 <div v-if="turn.result?.report || turn.result?.reply" class="response-actions-row">
                   <button
                     class="action-btn"
                     @click="copyText(turn.result?.report || turn.result?.reply)"
                   >
                     复制全文
+                  </button>
+                  <button
+                    class="action-btn"
+                    @click="
+                      downloadReport(
+                        turn.result?.report || turn.result?.reply,
+                        turn.result?.keyword || turn.question,
+                      )
+                    "
+                  >
+                    导出 .md 报告
                   </button>
                 </div>
 
@@ -1215,14 +1270,13 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-/* Markdown 回答正文 */
+/* Markdown 回答正文容器 */
 .response-markdown-body {
-  font-size: 14.5px;
-  line-height: 1.8;
-  color: #1e293b;
-  white-space: pre-wrap;
-  word-break: break-word;
   margin-top: 8px;
+  padding: 16px 18px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
 }
 
 /* 操作行 */

@@ -27,7 +27,6 @@ class EcommerceMcpServer:
     def __init__(self) -> None:
         self._tools: Dict[str, McpToolDefinition] = {}
         self._handlers: Dict[str, Callable[[Dict[str, Any]], Any]] = {}
-        self._aliases: Dict[str, str] = {"search_1688": "search_1688_wholesale"}
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -153,15 +152,14 @@ class EcommerceMcpServer:
 
     def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> McpCallToolResult:
         """符合 MCP tools/call 协议接口规范。"""
-        canonical = self._aliases.get(name, name)
-        if canonical not in self._handlers:
+        if name not in self._handlers:
             return McpCallToolResult(
                 content=[McpContentItem(type="text", text=f"Error: Tool '{name}' not found on MCP server.")],
                 isError=True,
             )
 
         try:
-            handler = self._handlers[canonical]
+            handler = self._handlers[name]
             raw_output = handler(arguments or {})
             if isinstance(raw_output, (dict, list)):
                 text_payload = json.dumps(raw_output, ensure_ascii=False, indent=2)

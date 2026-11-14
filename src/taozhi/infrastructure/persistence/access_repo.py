@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
-from taozhi.domain.access import can_task, can_review, evaluate_read_permission, evaluate_write_permission, evaluate_download_permission
+from taozhi.domain.access import evaluate_read_permission, evaluate_write_permission, evaluate_download_permission
 from taozhi.knowledge.db import fetch_one, fetch_all, as_jsonb
 
 def load_principal(conn, user_id: str) -> Principal:

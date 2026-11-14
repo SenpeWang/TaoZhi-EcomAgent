@@ -4,7 +4,7 @@ import json,time,re,functools
 from typing import TypedDict,List
 from pydantic import BaseModel,Field
 from concurrent.futures import ThreadPoolExecutor
-from ..knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
+from ..knowledge.db import database_connection,fetch_one,fetch_all
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import (load_principal, sources_valid)
 from ..config import load_config
@@ -405,7 +405,7 @@ def domain_node(state):
             agent_missing.append(agent_name + "模型暂时不可用，保留原文供核验。")
             outcome = "failed"
         finally:
-            client._http.close()
+            client.close()
 
         elapsed = int((time.monotonic() - started) * 1000)
         if call_id:

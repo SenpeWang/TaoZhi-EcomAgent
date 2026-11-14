@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from typing import Any, Optional, Type
-from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel
 
 _JSON_RULES = """【输出格式要求】
