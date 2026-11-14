@@ -1,110 +1,130 @@
-<script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { Capabilities, DocumentListItem } from '../types'
-
-const props = defineProps<{
-  docs: DocumentListItem[]
-  caps: Partial<Capabilities>
-}>()
-
-const emit = defineEmits<{
-  (e: 'openDoc', docId: string): void
-  (e: 'openPermissionId'): void
-  (e: 'openAccess'): void
-}>()
-
-const searchTerm = ref('')
-
-const levelMap: Record<number, string> = {
-  1: 'L1 公开',
-  2: 'L2 内部',
-  3: 'L3 机密',
-}
-
-const stateMap: Record<string, string> = {
-  published: '已发布',
-  review: '等待审核',
-  draft: '草稿',
-  failed: '处理失败',
-}
-
-/**
- * 格式化密级标签。
- * @param l - 密级数值。
- * @returns 密级中文描述。
- */
-function level(l: number) {
-  return levelMap[l] || 'L' + l
-}
-
-/**
- * 格式化状态标签。
- * @param s - 状态码。
- * @returns 状态中文描述。
- */
-function state(s: string) {
-  return stateMap[s] || s
-}
-
-const filteredDocs = computed(() => {
-  if (!searchTerm.value.trim()) return props.docs
-  const term = searchTerm.value.trim().toLowerCase()
-  return props.docs.filter((d) => (d.title || '').toLowerCase().includes(term))
-})
-</script>
-
 <template>
   <section class="panel">
-    <div class="section-heading">
-      <el-input v-model="searchTerm" class="search-box" placeholder="搜索可访问资料" clearable />
+    <div class="section-head">
       <div>
-        <el-button v-if="caps.system" @click="emit('openPermissionId')">按编号配置权限</el-button>
-        <el-button @click="emit('openAccess')">申请资料访问</el-button>
+        <h3>知识文档</h3>
+        <p class="section-sub">
+          展示当前权限范围内的企业文档，支持按标题检索、查看密级及提交访问申请。
+        </p>
+      </div>
+      <div class="toolbar">
+        <el-input
+          v-model="localSearch"
+          placeholder="搜索文档标题..."
+          clearable
+          class="doc-search-input"
+          @input="onSearchInput"
+        />
+        <el-button v-if="canManagePermissions" plain @click="emit('openPermissionId')">
+          按编号查权限
+        </el-button>
+        <el-button plain @click="emit('openRequestAccess')">申请阅读权限</el-button>
+        <el-button v-if="canWrite" type="primary" @click="emit('newDoc')"> 上传文档 </el-button>
       </div>
     </div>
 
-    <el-table :data="filteredDocs">
-      <el-table-column label="资料名称" min-width="300">
+    <el-table :data="documents" empty-text="当前权限范围内暂无文档">
+      <el-table-column prop="title" label="文档标题" min-width="240">
         <template #default="{ row }">
-          <el-button text type="primary" class="table-question" @click="emit('openDoc', row.id)">
-            {{ row.title }}
-          </el-button>
+          <div class="doc-title-cell">
+            <strong>{{ row.title }}</strong>
+            <small class="muted-line">文档 ID：{{ row.id }}</small>
+          </div>
         </template>
       </el-table-column>
 
-      <el-table-column label="组织范围" prop="node_name" min-width="150" />
+      <el-table-column label="可见范围" min-width="150">
+        <template #default="{ row }">
+          <span class="org-chip">
+            {{ row.scope === 'company' ? '全企业' : row.node_name || row.node_id }}
+          </span>
+        </template>
+      </el-table-column>
 
       <el-table-column label="密级" width="110">
         <template #default="{ row }">
-          <el-tag :type="row.level === 3 ? 'danger' : row.level === 2 ? 'warning' : 'info'">
-            {{ level(row.level) }}
-          </el-tag>
+          <span class="level-pill" :class="`level-${row.level}`">
+            {{ levelText(row.level) }}
+          </span>
         </template>
       </el-table-column>
 
-      <el-table-column label="版本" width="80">
-        <template #default="{ row }">第 {{ row.current_version }} 版</template>
-      </el-table-column>
-
-      <el-table-column label="状态" width="120">
-        <template #default="{ row }">{{ state(row.state) }}</template>
-      </el-table-column>
-
-      <el-table-column label="操作" width="160">
+      <el-table-column label="状态" width="110">
         <template #default="{ row }">
-          <el-button text @click="emit('openDoc', row.id)">查看</el-button>
-          <el-button
-            v-if="row.can_download"
-            text
-            tag="a"
-            :href="'/api/documents/' + row.id + '/download'"
-          >
-            下载
+          <span class="status-pill" :class="stateClass(row.state)">
+            <span class="status-dot" />
+            {{ stateText(row.state) }}
+          </span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="操作" width="110" align="right">
+        <template #default="{ row }">
+          <el-button size="small" type="primary" plain @click="emit('openDoc', row.id)">
+            查看
           </el-button>
         </template>
       </el-table-column>
     </el-table>
-
-    <el-empty v-if="!filteredDocs.length" description="暂无匹配资料" />
   </section>
 </template>
+
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import type { DocumentListItem } from '../types'
+
+const props = defineProps<{
+  documents: DocumentListItem[]
+  search: string
+  canWrite: boolean
+  canManagePermissions: boolean
+  levelText: (level: number) => string
+  stateText: (state: string) => string
+}>()
+
+const emit = defineEmits<{
+  'update:search': [value: string]
+  reload: []
+  openPermissionId: []
+  openRequestAccess: []
+  newDoc: []
+  openDoc: [id: string]
+}>()
+
+const localSearch = ref(props.search)
+
+watch(
+  /**
+   * 监听外部检索词变化并同步至本地输入框。
+   * @returns 当前搜索关键词。
+   */
+  () => props.search,
+  /**
+   * 更新本地检索词状态。
+   * @param value - 外部传入的搜索字符串。
+   */
+  (value) => {
+    localSearch.value = value
+  },
+)
+
+/**
+ * 同步检索关键词并触发服务端列表刷新。
+ * @param value - 输入框最新内容。
+ */
+function onSearchInput(value: string): void {
+  emit('update:search', value)
+  emit('reload')
+}
+
+/**
+ * 根据文档状态映射语义视觉样式类。
+ * @param state - 文档状态编码。
+ * @returns 样式类名。
+ */
+function stateClass(state: string): string {
+  if (state === 'published' || state === 'approved') return 'status-active'
+  if (state === 'review' || state === 'pending') return 'status-pending'
+  return 'status-disabled'
+}
+</script>

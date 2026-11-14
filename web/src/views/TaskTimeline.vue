@@ -92,7 +92,7 @@ function onSteer() {
 
       <div v-if="task.events?.length" class="workflow-events-box">
         <div class="events-box-header">
-          <strong>🧭 工作流节点执行流转记录 (共 {{ task.events.length }} 步)</strong>
+          <strong>执行记录（共 {{ task.events.length }} 步）</strong>
           <small>LangGraph 状态图驱动 · 真实 Checkpoint 审计流水</small>
         </div>
         <div class="events-timeline-list">
@@ -125,9 +125,9 @@ function onSteer() {
       <template v-if="task.result">
         <template v-if="task.kind === 'research'">
           <div class="research-header-row">
-            <h3>📈 淘智多智能体协同调研研报</h3>
+            <h3>选品与市场调研报告</h3>
             <el-button size="small" type="primary" plain @click="copyReport">
-              📋 复制研报 Markdown
+              复制报告全文
             </el-button>
           </div>
           <div class="detail-meta">
@@ -140,18 +140,17 @@ function onSteer() {
               {{ pl.label }} · {{ pl.state_label }}
             </el-tag>
             <el-tag v-if="task.result.elapsed" type="warning" effect="plain">
-              ⏱️ 协同耗时 {{ task.result.elapsed }}s
+              用时 {{ task.result.elapsed }}s
             </el-tag>
             <el-tag v-if="task.result.model_calls" type="info" effect="plain">
-              🧠 模型调度 {{ task.result.model_calls }} 次
+              模型调用 {{ task.result.model_calls }} 次
             </el-tag>
           </div>
 
-          <!-- 多智能体协作阵容墙 (Subagents Roster) -->
           <div v-if="task.result.subagents?.length" class="subagents-roster-box">
             <div class="roster-header">
-              <strong>🤖 参战子智能体协同梯队 ({{ task.result.subagents.length }} 位)</strong>
-              <small>事件总线反应式协同 · 双轨记忆与 Scratch 隔离</small>
+              <strong>参与分析模块（{{ task.result.subagents.length }} 项）</strong>
+              <small>分模块并行检索与交叉验证</small>
             </div>
             <div class="subagents-card-grid">
               <div
@@ -166,7 +165,7 @@ function onSteer() {
                     :type="sa.status === 'completed' ? 'success' : 'info'"
                     effect="light"
                   >
-                    {{ sa.status }}
+                    {{ sa.status === 'completed' ? '已完成' : sa.status }}
                   </el-tag>
                 </div>
                 <div class="subagent-card-bottom">
@@ -177,9 +176,8 @@ function onSteer() {
             </div>
           </div>
 
-          <!-- 调研大纲章节标签 -->
           <div v-if="task.result.outline?.length" class="research-outline-bar">
-            <span class="outline-label">📑 研报大纲章节：</span>
+            <span class="outline-label">报告大纲：</span>
             <el-tag
               v-for="(ch, idx) in task.result.outline"
               :key="idx"
@@ -191,9 +189,8 @@ function onSteer() {
             </el-tag>
           </div>
 
-          <!-- 交付工件链接 -->
           <div v-if="task.result.artifacts?.length" class="artifacts-bar">
-            <span class="artifact-label">📦 交付工件 (Artifacts)：</span>
+            <span class="artifact-label">附件输出：</span>
             <el-tag
               v-for="(art, idx) in task.result.artifacts"
               :key="idx"
@@ -209,57 +206,54 @@ function onSteer() {
         </template>
 
         <template v-else>
-          <h3>核验结果</h3>
+          <h3>检索结果</h3>
           <div class="detail-meta">
-            <el-tag type="primary" effect="dark">🎯 Main 调度</el-tag>
+            <el-tag type="primary" effect="dark">主流程校验</el-tag>
             <el-tag v-for="s in task.result.specialists || []" :key="s.name" effect="plain">
-              {{ s.name }} · {{ s.count ? '已核验 ' + s.count + ' 条原文' : '暂无支持结论' }}
+              {{ s.name }} · {{ s.count ? '命中 ' + s.count + ' 条原文' : '暂无匹配依据' }}
             </el-tag>
-            <el-tag type="success" effect="dark">🔍 Verifier 终审</el-tag>
+            <el-tag type="success" effect="dark">终审通过</el-tag>
           </div>
           <pre class="answer-body">{{ task.result.answer }}</pre>
           <div v-if="task.result.missing?.length" class="missing-box">
-            <strong>尚需确认</strong>
+            <strong>待补充确认</strong>
             <p v-for="m in task.result.missing" :key="m">{{ m }}</p>
           </div>
-          <h3 v-if="task.result.citations?.length">引用来源</h3>
+          <h3 v-if="task.result.citations?.length">参考依据来源</h3>
           <el-collapse>
             <el-collapse-item
               v-for="(c, i) in task.result.citations"
               :key="c.chunk_id"
-              :title="'[' + (Number(i) + 1) + '] ' + c.title + ' · 第 ' + c.version + ' 版'"
+              :title="'[' + (Number(i) + 1) + '] ' + c.title + ' · V' + c.version"
             >
               <pre class="quote-body">{{ c.quote }}</pre>
               <el-button text type="primary" @click="emit('openDoc', c.document_id)">
-                查看授权原文
+                查看原文文档
               </el-button>
             </el-collapse-item>
           </el-collapse>
         </template>
       </template>
 
-      <el-empty v-else-if="task.state === 'review'" description="等待业务负责人审核" />
+      <el-empty v-else-if="task.state === 'review'" description="待负责人审核后发布结果" />
 
-      <!-- 中途动态干预栏 (仅运行中展示) -->
       <div v-if="task.state === 'running'" class="mid-flight-steering-box" style="margin-top: 18px">
         <el-input
           v-model="steerInput"
-          placeholder="运行时动态干预：追加调研偏好/指引（如：优先比对浙江义乌供应商）"
+          placeholder="发送补充要求（例如：优先筛选浙江产地供应商）"
           clearable
           @keyup.enter="onSteer"
         >
           <template #append>
-            <el-button type="warning" @click="onSteer">⚡ 注入干预指引</el-button>
+            <el-button type="warning" @click="onSteer">发送补充要求</el-button>
           </template>
         </el-input>
       </div>
 
       <div class="dialog-actions" style="margin-top: 18px">
         <template v-if="task.state === 'review' && task.can_review">
-          <el-button type="primary" @click="emit('review', task.id, true)">批准发布</el-button>
-          <el-button type="danger" plain @click="emit('review', task.id, false)"
-            >拒绝发布</el-button
-          >
+          <el-button type="primary" @click="emit('review', task.id, true)">通过发布</el-button>
+          <el-button type="danger" plain @click="emit('review', task.id, false)">驳回</el-button>
         </template>
         <el-button
           v-if="['failed', 'cancelled'].includes(task.state)"
@@ -267,7 +261,7 @@ function onSteer() {
           plain
           @click="emit('retry', task.id)"
         >
-          🔄 重新执行该任务
+          重新运行
         </el-button>
         <el-button
           v-if="['queued', 'running', 'review'].includes(task.state) && task.can_cancel"

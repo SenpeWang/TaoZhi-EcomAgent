@@ -127,43 +127,43 @@ const currentTurnCount = computed(() => turns.value.length)
  */
 function parseStep(log: string): FormattedThinkingStep {
   if (log.startsWith('[agent_start]')) {
-    return { type: 'agent', label: '智能体启动', icon: '🤖', content: log.slice(13).trim() }
+    return { type: 'agent', label: '开始处理', icon: '启动', content: log.slice(13).trim() }
   }
   if (log.startsWith('[turn_start]')) {
-    return { type: 'turn', label: '轮次迭代', icon: '🔄', content: log.slice(12).trim() }
+    return { type: 'turn', label: '分析步骤', icon: '步骤', content: log.slice(12).trim() }
   }
   if (log.startsWith('[tool_execution_start]')) {
-    return { type: 'tool', label: '调度工具', icon: '🛠️', content: log.slice(22).trim() }
+    return { type: 'tool', label: '检索查询', icon: '查询', content: log.slice(22).trim() }
   }
   if (log.startsWith('[tool_execution_end]')) {
-    return { type: 'data', label: '数据返回', icon: '📊', content: log.slice(20).trim() }
+    return { type: 'data', label: '获取数据', icon: '数据', content: log.slice(20).trim() }
   }
   if (log.startsWith('[tool_result]')) {
-    return { type: 'security', label: '结果清洗', icon: '🛡️', content: log.slice(13).trim() }
+    return { type: 'security', label: '结果核验', icon: '核验', content: log.slice(13).trim() }
   }
   if (log.includes('用户中途追加干预指令') || log.startsWith('[steering]')) {
     return {
       type: 'steering',
-      label: '动态纠偏',
-      icon: '⚡',
+      label: '补充要求',
+      icon: '调整',
       content: log.replace(/^\[steering\]\s*/, '').trim(),
     }
   }
   if (log.startsWith('[agent_end]')) {
-    return { type: 'done', label: '阶段交付', icon: '📦', content: log.slice(11).trim() }
+    return { type: 'done', label: '整理输出', icon: '输出', content: log.slice(11).trim() }
   }
   if (log.startsWith('思考\n') || log.startsWith('💭 ')) {
     return {
       type: 'thought',
-      label: '模型思考',
-      icon: '💭',
+      label: '分析思路',
+      icon: '思路',
       content: log
         .replace(/^思考\n/, '')
         .replace(/^💭\s*/, '')
         .trim(),
     }
   }
-  return { type: 'plain', label: '过程状态', icon: '🔹', content: log }
+  return { type: 'plain', label: '运行状态', icon: '状态', content: log }
 }
 
 /**
@@ -649,9 +649,10 @@ onUnmounted(() => {
             <div class="welcome-robot-wrapper">
               <img :src="robotUrl" alt="淘智机器人" class="welcome-robot-large" />
             </div>
-            <div class="welcome-title">有什么电商爆品想调研？</div>
+            <div class="welcome-title">电商选品与市场调研</div>
             <div class="welcome-subtitle">
-              输入品类名称，专职智能体将实时检索 1688 源头工厂出厂价、全网零售价带并交叉验真。
+              输入商品类目或选品问题，自动对比 1688
+              源头供货行情与主流电商零售价带并生成选品分析报告。
             </div>
             <div class="preset-suggestions">
               <button
@@ -832,7 +833,14 @@ onUnmounted(() => {
   margin-bottom: 3px;
 }
 .trace-step-icon {
-  font-size: 13px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #475569;
+  letter-spacing: 0.4px;
 }
 .trace-step-entry.agent .trace-step-type {
   color: #2563eb;

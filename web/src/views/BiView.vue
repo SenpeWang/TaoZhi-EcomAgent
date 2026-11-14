@@ -1,69 +1,238 @@
 <template>
   <div class="bi-shell">
-    <div class="bi-tabs">
-      <button :class="{ active: tab === 'board' }" @click="switchTab('board')">
-        <span class="tab-glyph">板</span>经营看板
-      </button>
-      <button :class="{ active: tab === 'chat' }" @click="switchTab('chat')">
-        <span class="tab-glyph">数</span>智能问数
-      </button>
-      <span class="bi-tab-note">受控只读查询</span>
-    </div>
+    <!-- ── 顶部工作台导航栏 ────────────────────────────────────── -->
+    <header class="bi-toolbar">
+      <div class="bi-tabs" role="tablist" aria-label="经营分析视图切换">
+        <button
+          :class="{ active: tab === 'board' }"
+          type="button"
+          role="tab"
+          :aria-selected="tab === 'board'"
+          @click="switchTab('board')"
+        >
+          <svg class="bi-tab-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M4 20h16v2H4v-2zm2-7h3v5H6v-5zm5-5h3v10h-3V8zm5-4h3v14h-3V4z"
+            />
+          </svg>
+          经营总览看板
+        </button>
+        <button
+          :class="{ active: tab === 'chat' }"
+          type="button"
+          role="tab"
+          :aria-selected="tab === 'chat'"
+          @click="switchTab('chat')"
+        >
+          <svg class="bi-tab-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M4 4h16v11H7l-3 3V4zm3 4v2h10V8H7zm0 4v2h7v-2H7z" />
+          </svg>
+          指标智能问数
+        </button>
+      </div>
 
-    <!-- ── 经营看板 ─────────────────────────────────────────────── -->
-    <div v-show="tab === 'board'" v-loading="boardLoading" class="board">
+      <div class="bi-toolbar-meta">
+        <div v-if="tab === 'board'" class="bi-period-group" role="group" aria-label="统计周期">
+          <button
+            v-for="opt in periodOptions"
+            :key="opt.days"
+            type="button"
+            class="period-btn"
+            :class="{ active: periodDays === opt.days }"
+            @click="changePeriod(opt.days)"
+          >
+            {{ opt.label }}
+          </button>
+        </div>
+        <span v-if="tab === 'board' && latestOrderLabel" class="bi-meta-pill">
+          数据截至 {{ latestOrderLabel }}
+        </span>
+        <span class="bi-meta-pill tone-gov">数据权限分级受控</span>
+        <el-button v-if="tab === 'board'" size="small" :loading="boardLoading" @click="loadBoard">
+          刷新数据
+        </el-button>
+      </div>
+    </header>
+
+    <!-- ── 经营总览看板 ─────────────────────────────────────────── -->
+    <div v-show="tab === 'board'" v-loading="boardLoading" class="bi-board">
       <template v-if="board">
-        <div class="kpi-grid">
-          <div v-for="k in kpiCards" :key="k.label" class="kpi-card" :class="k.tone">
-            <span class="kpi-label">{{ k.label }}</span>
-            <strong class="kpi-value"
-              >{{ k.value }}<small>{{ k.unit }}</small></strong
-            >
-            <span class="kpi-sub">{{ k.sub }}</span>
+        <section class="kpi-grid" aria-label="核心经营指标">
+          <div v-for="c in kpiCards" :key="c.label" class="kpi-card" :class="c.tone">
+            <div class="kpi-head">
+              <span class="kpi-label">{{ c.label }}</span>
+              <span class="kpi-badge">{{ c.badge }}</span>
+            </div>
+            <div class="kpi-value">
+              {{ c.value }}<small v-if="c.unit">{{ c.unit }}</small>
+            </div>
+            <div class="kpi-sub">{{ c.sub }}</div>
           </div>
+        </section>
+
+        <div v-if="!hasOrderData" class="panel empty-period-card">
+          <strong>当前统计周期（近 {{ board.days || periodDays }} 日）暂无经营订单流水</strong>
+          <p v-if="latestOrderLabel">
+            系统内最近一笔订单时间为 {{ latestOrderLabel }}，可切换更长统计周期或同步最新交易数据。
+          </p>
+          <p v-else>当前企业账套尚未录入销售订单流水。</p>
         </div>
-        <el-alert
-          v-if="!board.cards.gross_profit_30d"
-          type="info"
-          :closable="false"
-          show-icon
-          class="bi-note"
-          title="毛利、采购成本、库存预警为二级及以上机密指标，当前身份不可见。"
-        />
-        <div class="chart-grid">
-          <section class="panel chart-panel wide">
-            <h3>日销售趋势<small>近 30 天 · 单位：元</small></h3>
+
+        <section v-if="board.low_stock === null && board.gross_profit === null" class="gov-banner">
+          <span class="gov-dot" />
+          <span>
+            销售毛利与分仓安全库存预警属于企业二级机密（L2）经营指标，当前账号仅展示已授权范围内的业务数据。
+          </span>
+        </section>
+
+        <section class="chart-grid" aria-label="经营趋势与渠道分析">
+          <article class="panel chart-panel wide">
+            <div class="panel-head">
+              <div>
+                <h3>成交额日趋势分析</h3>
+                <p class="panel-sub">统计周期：近 {{ board.days || periodDays }} 日 · 单位：元</p>
+              </div>
+            </div>
             <div ref="trendRef" class="chart-box tall" />
-            <el-empty v-if="!board.trend" description="暂无趋势数据" :image-size="60" />
-          </section>
-          <section class="panel chart-panel">
-            <h3>渠道销售额分布<small>近 30 天 · 单位：元</small></h3>
+            <el-empty
+              v-if="!hasRows(board.trend)"
+              description="当前周期暂无日趋势数据"
+              :image-size="60"
+            />
+          </article>
+
+          <article class="panel chart-panel">
+            <div class="panel-head">
+              <div>
+                <h3>全渠道成交贡献分布</h3>
+                <p class="panel-sub">近 {{ board.days || periodDays }} 日有效成交额 · 单位：元</p>
+              </div>
+            </div>
             <div ref="channelRef" class="chart-box" />
-            <el-empty v-if="!board.channel_gsv" description="暂无数据" :image-size="60" />
-          </section>
-          <section class="panel chart-panel">
-            <h3>渠道退货率对比<small>近 30 天 · 虚线为均值</small></h3>
+            <el-empty
+              v-if="!hasChannelData"
+              description="当前周期暂无渠道成交数据"
+              :image-size="60"
+            />
+          </article>
+
+          <article class="panel chart-panel">
+            <div class="panel-head">
+              <div>
+                <h3>各渠道售后退货率监控</h3>
+                <p class="panel-sub">虚线为全渠道均值 · 单位：%</p>
+              </div>
+            </div>
             <div ref="refundRef" class="chart-box" />
-            <el-empty v-if="!board.refund_rate" description="暂无数据" :image-size="60" />
-          </section>
-          <section class="panel chart-panel wide">
-            <h3>售后原因分布<small>近 30 天 · 按工单类型着色</small></h3>
+            <el-empty
+              v-if="!hasRows(board.refund_rate)"
+              description="当前周期暂无退货率数据"
+              :image-size="60"
+            />
+          </article>
+
+          <article class="panel chart-panel wide">
+            <div class="panel-head">
+              <div>
+                <h3>售后工单类型与原因归因</h3>
+                <p class="panel-sub">
+                  近 {{ board.days || periodDays }} 日按售后原因与处理方式分布 · 单位：单
+                </p>
+              </div>
+            </div>
             <div ref="afterRef" class="chart-box" />
-            <el-empty v-if="!board.aftersales" description="暂无数据" :image-size="60" />
-          </section>
-        </div>
+            <el-empty
+              v-if="!hasRows(board.aftersales)"
+              description="当前周期暂无售后工单记录"
+              :image-size="60"
+            />
+          </article>
+        </section>
+
+        <section
+          v-if="categoryRows.length || lowStockRows.length"
+          class="detail-grid"
+          aria-label="经营结构明细"
+        >
+          <article v-if="categoryRows.length" class="panel chart-panel">
+            <div class="panel-head">
+              <div>
+                <h3>品类经营贡献明细</h3>
+                <p class="panel-sub">近 {{ board.days || periodDays }} 日全渠道各商品品类表现</p>
+              </div>
+            </div>
+            <el-table :data="categoryRows" size="small" class="enterprise-table">
+              <el-table-column prop="category" label="商品品类" min-width="100" />
+              <el-table-column label="成交金额" min-width="120" align="right">
+                <template #default="{ row }">
+                  <span class="num-strong">¥{{ fmtExactMoney(row.gsv) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="营收占比" min-width="110" align="right">
+                <template #default="{ row }">
+                  <span class="share-pill">{{ row.sharePct }}%</span>
+                </template>
+              </el-table-column>
+              <el-table-column
+                v-if="hasProfitSummary"
+                label="销售毛利额"
+                min-width="120"
+                align="right"
+              >
+                <template #default="{ row }">
+                  <span class="num-strong">
+                    {{ row.grossProfit !== null ? '¥' + fmtExactMoney(row.grossProfit) : '—' }}
+                  </span>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="hasProfitSummary" label="毛利率" min-width="90" align="right">
+                <template #default="{ row }">
+                  <span>{{ row.marginPct !== null ? row.marginPct + '%' : '—' }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </article>
+
+          <article v-if="lowStockRows.length" class="panel chart-panel">
+            <div class="panel-head">
+              <div>
+                <h3>分仓安全库存预警</h3>
+                <p class="panel-sub">低于安全库存阈值 SKU 汇总 · 二级机密 (L2)</p>
+              </div>
+            </div>
+            <el-table :data="lowStockRows" size="small" class="enterprise-table">
+              <el-table-column prop="warehouse" label="仓储中心" min-width="120" />
+              <el-table-column label="预警 SKU 数" min-width="110" align="right">
+                <template #default="{ row }">
+                  <span class="num-strong">{{ row.count }} 个</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="补货优先级" min-width="110" align="right">
+                <template #default="{ row }">
+                  <el-tag :type="row.count >= 2 ? 'danger' : 'warning'" size="small" effect="light">
+                    {{ row.count >= 2 ? '高优先级补货' : '建议及时补货' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+          </article>
+        </section>
       </template>
-      <el-empty v-else-if="!boardLoading" description="看板数据暂不可用" />
+      <el-empty v-else-if="!boardLoading" description="经营看板数据暂不可用" />
     </div>
 
-    <!-- ── 智能问数 ─────────────────────────────────────────────── -->
+    <!-- ── 指标智能问数 ─────────────────────────────────────────── -->
     <div v-show="tab === 'chat'" class="chat">
       <div ref="chatList" class="chat-list">
         <div v-if="!messages.length" class="chat-welcome">
-          <h2>问点数据</h2>
-          <p>用自然语言查询授权范围内的经营指标。</p>
+          <span class="welcome-eyebrow">企业数据语义层 · 指标智能问数</span>
+          <h2>经营指标自然语言检索</h2>
+          <p>按账号所属组织范围与数据密级实时查询企业经营报表，自动生成明细表与可视化图表。</p>
           <div class="quick-chips">
-            <button v-for="q in quickQuestions" :key="q" @click="ask(q)">{{ q }}</button>
+            <button v-for="q in quickQuestions" :key="q" type="button" @click="ask(q)">
+              {{ q }}
+            </button>
           </div>
         </div>
         <template v-for="(m, i) in messages" :key="i">
@@ -75,7 +244,7 @@
               <template v-if="m.pending">
                 <div class="pending">
                   <el-icon class="is-loading"><Loading /></el-icon>
-                  <span>{{ m.stage || '指标匹配中' }}</span>
+                  <span>{{ m.stage || '正在匹配企业经营指标' }}</span>
                   <el-progress
                     v-if="typeof m.progress === 'number'"
                     :percentage="m.progress"
@@ -86,21 +255,20 @@
               </template>
               <template v-else-if="m.denied">
                 <div class="denied-card">
-                  <span class="denied-glyph">密</span>
+                  <span class="denied-glyph">限</span>
                   <div>
-                    <strong>该指标需要更高权限</strong>
+                    <strong>当前账号暂未获得该指标访问权限</strong>
                     <p>{{ m.text }}</p>
                   </div>
                 </div>
               </template>
               <template v-else-if="m.data">
                 <div class="answer-head">
-                  <span class="answer-tag">指标 · {{ m.data.metric_name }}</span>
-                  <span class="answer-meta"
-                    >{{ m.data.meta.row_count }} 行 · {{ m.data.meta.elapsed_ms }}ms · 密级 L{{
-                      m.data.meta.level
-                    }}</span
-                  >
+                  <span class="answer-tag">指标口径 · {{ m.data.metric_name }}</span>
+                  <span class="answer-meta">
+                    返回 {{ m.data.meta.row_count }} 条记录 · 耗时 {{ m.data.meta.elapsed_ms }}ms ·
+                    数据密级 L{{ m.data.meta.level }}
+                  </span>
                 </div>
                 <el-table
                   :data="tableRows(m.data)"
@@ -112,12 +280,12 @@
                     v-for="(c, ci) in m.data.columns"
                     :key="c"
                     :prop="String(ci)"
-                    :label="c"
+                    :label="columnLabel(c, m.data.unit)"
                     :formatter="cellFormatter"
                   />
                 </el-table>
                 <AnswerChart v-if="m.data.rows.length >= 2" :data="m.data" />
-                <p class="answer-foot">{{ m.data.description }}</p>
+                <p class="answer-foot">口径说明：{{ m.data.description }}</p>
               </template>
               <template v-else>
                 <p class="plain-answer">{{ m.text }}</p>
@@ -129,14 +297,14 @@
       <div class="chat-input">
         <el-input
           v-model="draft"
-          placeholder="例如：近30天退货率最高的渠道是哪个？"
+          placeholder="输入经营分析问题，例如：近30天退货率最高的渠道是哪个？"
           size="large"
           clearable
           @keyup.enter="ask(draft)"
         />
-        <el-button type="primary" size="large" :loading="asking" @click="ask(draft)"
-          >查询</el-button
-        >
+        <el-button type="primary" size="large" :loading="asking" @click="ask(draft)">
+          发起查询
+        </el-button>
       </div>
     </div>
   </div>
@@ -177,17 +345,27 @@ type MetricBlock = {
   description: string
   meta: { row_count: number; elapsed_ms: number; level: number; metric_key: string }
 }
+type CategorySummaryItem = {
+  category: string
+  gsv: number
+  gross_profit: number | null
+}
 type BoardData = {
+  days?: number
+  latest_order_at?: string | null
+  generated_at?: string
   cards: {
     gsv_30d: number | null
     orders_30d: number | null
     gross_profit_30d: number | null
     low_stock: number | null
+    aftersales_count?: number | null
     worst_refund_channel?: { channel: string; rate: number }
     avg_refund_rate?: number
   }
   trend: MetricBlock | null
   channel_gsv: Record<string, number> | null
+  category_summary?: CategorySummaryItem[] | null
   refund_rate: MetricBlock | null
   aftersales: MetricBlock | null
   low_stock: MetricBlock | null
@@ -210,7 +388,40 @@ type ApiFn = <T = Record<string, unknown>>(
 
 const props = defineProps<{ user: { id: string; display_name: string }; api: ApiFn }>()
 
+const COLUMN_LABEL_MAP: Record<string, string> = {
+  channel_name: '销售渠道',
+  category: '商品品类',
+  status: '订单状态',
+  type: '售后类型',
+  reason: '售后原因',
+  warehouse: '仓储中心',
+  day: '统计日期',
+}
+
+const VALUE_LABEL_MAP: Record<string, string> = {
+  refund: '仅退款',
+  return: '退货退款',
+  exchange: '换新',
+  pending: '待付款',
+  paid: '已付款',
+  shipped: '已发货',
+  delivered: '已签收',
+  completed: '已完成',
+  cancelled: '已取消',
+  refunded: '已退款',
+  resolved: '已结案',
+  approved: '已审核',
+  rejected: '已驳回',
+}
+
+const periodOptions = [
+  { days: 7, label: '近 7 日' },
+  { days: 30, label: '近 30 日' },
+  { days: 90, label: '近 90 日' },
+]
+
 const tab = ref<'board' | 'chat'>('board')
+const periodDays = ref(30)
 const board = ref<BoardData | null>(null)
 const boardLoading = ref(false)
 const messages = ref<Message[]>([])
@@ -223,59 +434,149 @@ const refundRef = ref<HTMLElement | null>(null)
 const afterRef = ref<HTMLElement | null>(null)
 const quickQuestions = [
   '近30天退货率最高的渠道是哪个？',
-  '天猫近30天卖了多少？',
-  '近14天日销售趋势',
+  '天猫近30天成交金额是多少？',
+  '近14天每日成交趋势',
   '近30天毛利情况',
-  '库存预警情况',
+  '各仓库存预警情况',
 ]
 let charts: echarts.ECharts[] = []
 let stream: EventSource | null = null
 
-/** 当前登录者是否老板级（毛利与库存预警卡由后端按权限返回，缺失即不渲染）。 */
+const activeDays = computed(() => board.value?.days || periodDays.value)
+
+const latestOrderLabel = computed(() => {
+  const raw = board.value?.latest_order_at
+  if (!raw) return ''
+  const dt = new Date(raw)
+  if (Number.isNaN(dt.getTime())) return ''
+  return dt.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+})
+
+const hasOrderData = computed(() => {
+  const c = board.value?.cards
+  return Boolean(
+    c && ((c.gsv_30d !== null && c.gsv_30d > 0) || (c.orders_30d !== null && c.orders_30d > 0)),
+  )
+})
+
+const hasChannelData = computed(() =>
+  Boolean(board.value?.channel_gsv && Object.keys(board.value.channel_gsv).length > 0),
+)
+
+const hasProfitSummary = computed(() =>
+  Boolean(board.value?.category_summary?.some((item) => item.gross_profit !== null)),
+)
+
+const categoryRows = computed(() => {
+  const list = board.value?.category_summary || []
+  if (!list.length) return []
+  const totalGsv = list.reduce((sum, item) => sum + item.gsv, 0)
+  return list.map((item) => ({
+    category: item.category,
+    gsv: item.gsv,
+    sharePct: totalGsv > 0 ? ((item.gsv / totalGsv) * 100).toFixed(1) : '0.0',
+    grossProfit: item.gross_profit,
+    marginPct:
+      item.gross_profit !== null && item.gsv > 0
+        ? ((item.gross_profit / item.gsv) * 100).toFixed(1)
+        : null,
+  }))
+})
+
+const lowStockRows = computed(() => {
+  const rows = board.value?.low_stock?.rows || []
+  return rows.map((row) => ({
+    warehouse: String(row[0] ?? '未命名仓库'),
+    count: Number(row[1] ?? 0),
+  }))
+})
+
 const kpiCards = computed(() => {
   const c = board.value?.cards
   if (!c) return []
-  const cards: { label: string; value: string; unit: string; sub: string; tone?: string }[] = []
+  const spanLabel = `近 ${activeDays.value} 日`
+  const cards: {
+    label: string
+    badge: string
+    value: string
+    unit: string
+    sub: string
+    tone?: string
+  }[] = []
   cards.push({
-    label: '销售额（近30天）',
+    label: '成交总额 (GMV)',
+    badge: spanLabel,
     value: fmtMoney(c.gsv_30d),
     unit: '元',
-    sub: '不含取消订单',
+    sub: '有效订单累计（已剔除取消单）',
     tone: 'blue',
   })
   cards.push({
-    label: '订单量（近30天）',
+    label: '订单总量',
+    badge: spanLabel,
     value: fmtNum(c.orders_30d),
     unit: '单',
-    sub: '含全部订单状态',
+    sub: '全渠道订单笔数统计',
     tone: 'cyan',
   })
   if (c.worst_refund_channel)
     cards.push({
-      label: '最高退货率渠道',
+      label: '渠道退货率峰值',
+      badge: spanLabel,
       value: `${c.worst_refund_channel.rate}%`,
       unit: '',
-      sub: `${c.worst_refund_channel.channel} · 均值 ${c.avg_refund_rate}%`,
+      sub: `${c.worst_refund_channel.channel} · 全渠道均值 ${c.avg_refund_rate}%`,
       tone: 'red',
     })
-  if (c.gross_profit_30d !== null && c.gross_profit_30d !== undefined)
+  if (c.gross_profit_30d !== null && c.gross_profit_30d !== undefined) {
+    const marginText =
+      c.gsv_30d && c.gsv_30d > 0
+        ? `综合毛利率 ${((c.gross_profit_30d / c.gsv_30d) * 100).toFixed(1)}% · L2`
+        : '成交额 − 商品成本 · L2'
     cards.push({
-      label: '毛利（近30天）',
+      label: '销售毛利额',
+      badge: spanLabel,
       value: fmtMoney(c.gross_profit_30d),
       unit: '元',
-      sub: '销售额 − 成本 · L2',
+      sub: marginText,
       tone: 'green',
+    })
+  }
+  if (c.aftersales_count !== null && c.aftersales_count !== undefined)
+    cards.push({
+      label: '售后工单总量',
+      badge: spanLabel,
+      value: fmtNum(c.aftersales_count),
+      unit: '单',
+      sub: '仅退款 · 退货退款 · 换新',
+      tone: 'slate',
     })
   if (c.low_stock !== null && c.low_stock !== undefined)
     cards.push({
-      label: '低库存 SKU',
+      label: '库存预警 SKU',
+      badge: '实时库存',
       value: fmtNum(c.low_stock),
       unit: '个',
-      sub: '低于安全线 · L2',
+      sub: '低于安全库存阈值 · L2',
       tone: 'amber',
     })
   return cards
 })
+
+/**
+ * 判断指标数据块是否包含有效数据行。
+ * @param block 指标数据块，允许为空
+ * @returns 至少存在一行数据时返回 true
+ */
+function hasRows(block: MetricBlock | null | undefined): boolean {
+  return Boolean(block && block.rows && block.rows.length > 0)
+}
+
 /**
  * 金额格式化：万级换算为"万"单位，缺失显示占位符。
  * @param v 金额数值（元），允许为空
@@ -283,8 +584,20 @@ const kpiCards = computed(() => {
  */
 function fmtMoney(v: number | null | undefined): string {
   if (v === null || v === undefined) return '—'
-  return v >= 10000 ? (v / 10000).toFixed(2) + ' 万' : v.toLocaleString('zh-CN')
+  return v >= 10000
+    ? (v / 10000).toFixed(2) + ' 万'
+    : v.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
+
+/**
+ * 表格明细金额格式化：保留两位小数且带千分位。
+ * @param v 金额数值（元）
+ * @returns 带千分位的精确金额字符串
+ */
+function fmtExactMoney(v: number): string {
+  return v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 /**
  * 整数格式化：千分位显示，缺失显示占位符。
  * @param v 数值，允许为空
@@ -293,6 +606,29 @@ function fmtMoney(v: number | null | undefined): string {
 function fmtNum(v: number | null | undefined): string {
   return v === null || v === undefined ? '—' : Math.round(v).toLocaleString('zh-CN')
 }
+
+/**
+ * 映射指标原始字段名为企业中文列标题。
+ * @param col 后端返回的列名
+ * @param unit 指标计量单位
+ * @returns 企业级中文列标题
+ */
+function columnLabel(col: string, unit: string): string {
+  if (col === 'value') return unit ? `指标数值（${unit}）` : '指标数值'
+  return COLUMN_LABEL_MAP[col] || col
+}
+
+/**
+ * 切换统计周期并重新加载看板指标。
+ * @param days 统计周期天数（7 / 30 / 90）
+ * @returns 异步加载完成后无返回值
+ */
+async function changePeriod(days: number): Promise<void> {
+  if (periodDays.value === days && board.value) return
+  periodDays.value = days
+  await loadBoard()
+}
+
 /**
  * 切换看板/问数页签；回到看板时重渲染图表。
  * @param t 目标页签：board 看板或 chat 问数
@@ -301,11 +637,15 @@ function switchTab(t: 'board' | 'chat') {
   tab.value = t
   if (t === 'board') nextTick(() => renderCharts())
 }
-/** 拉取看板数据；失败给中文提示但不打断页面。 */
-async function loadBoard() {
+
+/**
+ * 拉取经营看板数据；失败时提示中文错误信息但不阻断页面。
+ * @returns 异步完成后无返回值
+ */
+async function loadBoard(): Promise<void> {
   boardLoading.value = true
   try {
-    board.value = await props.api<BoardData>('/bi/dashboard')
+    board.value = await props.api<BoardData>(`/bi/dashboard?days=${periodDays.value}`)
     await nextTick()
     renderCharts()
   } catch (e: unknown) {
@@ -313,48 +653,57 @@ async function loadBoard() {
     const msg =
       e instanceof Error && /[\u4e00-\u9fff]/.test(e.message)
         ? e.message
-        : '看板加载失败，请稍后重试'
+        : '经营看板加载失败，请稍后重试'
     ElMessage.error(msg)
   } finally {
     boardLoading.value = false
   }
 }
+
 /**
- * 表格行转对象（列名做 prop）。
+ * 表格行转对象（列下标字符串作 prop）。
  * @param d 指标数据块，rows 为二维数组
  * @returns 以列下标字符串为键的行对象数组
  */
 function tableRows(d: MetricBlock): Record<string, unknown>[] {
   return d.rows.map((r) => Object.fromEntries(r.map((v, i) => [String(i), v])))
 }
+
 /**
- * 表格单元格格式化：万级数值换算为"万"单位，缺失显示占位符。
- * @param row 当前行数据（未使用，保留 el-table 签名）
- * @param _col 当前列定义（未使用，保留 el-table 签名）
+ * 表格单元格格式化：翻译状态与类型枚举，万级数值换算为"万"单位。
+ * @param _row 当前行数据（保留 el-table 签名）
+ * @param _col 当前列定义（保留 el-table 签名）
  * @param cellValue 单元格原始值
- * @returns 人类可读的单元格字符串
+ * @returns 面向企业用户的展示字符串
  */
-function cellFormatter(row: Record<string, unknown>, _col: unknown, cellValue: unknown): string {
-  if (typeof cellValue === 'number' && Math.abs(cellValue) >= 10000)
-    return (cellValue / 10000).toFixed(2) + ' 万'
-  return cellValue === null || cellValue === undefined ? '—' : String(cellValue)
+function cellFormatter(_row: Record<string, unknown>, _col: unknown, cellValue: unknown): string {
+  if (typeof cellValue === 'number') {
+    if (Math.abs(cellValue) >= 10000) return (cellValue / 10000).toFixed(2) + ' 万'
+    return cellValue.toLocaleString('zh-CN')
+  }
+  if (cellValue === null || cellValue === undefined) return '—'
+  const text = String(cellValue)
+  return VALUE_LABEL_MAP[text] || text
 }
+
 /**
- * 趋势图悬浮提示：千分位展示数值。
- * @param v 数值，允许为空
- * @returns 千分位字符串
+ * 趋势图悬浮提示：千分位展示成交额。
+ * @param v 成交额数值（元）
+ * @returns 千分位字符串（含"元"）
  */
 function trendTooltipValue(v: number): string {
-  return v?.toLocaleString('zh-CN')
+  return v?.toLocaleString('zh-CN') + ' 元'
 }
+
 /**
  * 渠道销售额悬浮提示：千分位并附加单位。
- * @param v 数值（元），允许为空
+ * @param v 数值（元）
  * @returns 千分位字符串（含"元"）
  */
 function channelTooltipValue(v: number): string {
   return v?.toLocaleString('zh-CN') + ' 元'
 }
+
 /**
  * 渠道条形图数值标签：千分位展示。
  * @param p 数据项包装对象
@@ -364,43 +713,49 @@ function channelTooltipValue(v: number): string {
 function channelBarLabel(p: { value: number }): string {
   return p.value.toLocaleString('zh-CN')
 }
+
 /**
  * 退货率悬浮提示：附加百分号。
  * @param v 百分比数值
  * @returns 含"%"的字符串
  */
 function refundTooltipValue(v: number): string {
-  return v + ' %'
+  return v + '%'
 }
-/** 渲染看板四图；数据缺失时跳过。 */
+
+/**
+ * 渲染经营看板四组图表；对应数据集为空时跳过初始化。
+ */
 function renderCharts() {
   charts.forEach((c) => c.dispose())
   charts = []
   const b = board.value
   if (!b) return
   const axis = {
-    axisLabel: { color: '#64748b' },
+    axisLabel: { color: '#64748b', fontSize: 12 },
     axisLine: { lineStyle: { color: '#e2e8f0' } },
     splitLine: { lineStyle: { color: '#f1f5f9' } },
   }
-  if (b.trend && trendRef.value) {
+  if (hasRows(b.trend) && b.trend && trendRef.value) {
     const ch = echarts.init(trendRef.value)
     ch.setOption({
       tooltip: {
         trigger: 'axis',
         valueFormatter: trendTooltipValue,
       },
-      grid: { left: 60, right: 20, top: 24, bottom: 32 },
+      grid: { left: 64, right: 20, top: 20, bottom: 30 },
       xAxis: { type: 'category', data: b.trend.rows.map((r) => String(r[0]).slice(5)), ...axis },
       yAxis: { type: 'value', ...axis },
       series: [
         {
+          name: '日成交额',
           type: 'line',
           data: b.trend.rows.map((r) => r[1]),
           smooth: true,
           symbol: 'circle',
           symbolSize: 5,
           lineStyle: { width: 2.5, color: '#2563eb' },
+          itemStyle: { color: '#2563eb' },
           areaStyle: {
             color: {
               type: 'linear',
@@ -409,8 +764,8 @@ function renderCharts() {
               x2: 0,
               y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(37,99,235,.22)' },
-                { offset: 1, color: 'rgba(37,99,235,.02)' },
+                { offset: 0, color: 'rgba(37, 99, 235, 0.20)' },
+                { offset: 1, color: 'rgba(37, 99, 235, 0.01)' },
               ],
             },
           },
@@ -419,7 +774,7 @@ function renderCharts() {
     })
     charts.push(ch)
   }
-  if (b.channel_gsv && channelRef.value) {
+  if (b.channel_gsv && Object.keys(b.channel_gsv).length && channelRef.value) {
     const entries = Object.entries(b.channel_gsv).reverse()
     const ch = echarts.init(channelRef.value)
     ch.setOption({
@@ -427,7 +782,7 @@ function renderCharts() {
         trigger: 'axis',
         valueFormatter: channelTooltipValue,
       },
-      grid: { left: 76, right: 30, top: 16, bottom: 28 },
+      grid: { left: 84, right: 64, top: 14, bottom: 26 },
       xAxis: { type: 'value', ...axis },
       yAxis: {
         type: 'category',
@@ -437,6 +792,7 @@ function renderCharts() {
       },
       series: [
         {
+          name: '成交额',
           type: 'bar',
           data: entries.map((e) => e[1]),
           barWidth: 16,
@@ -445,6 +801,7 @@ function renderCharts() {
             show: true,
             position: 'right',
             color: '#475569',
+            fontSize: 12,
             formatter: channelBarLabel,
           },
         },
@@ -452,7 +809,7 @@ function renderCharts() {
     })
     charts.push(ch)
   }
-  if (b.refund_rate && refundRef.value) {
+  if (hasRows(b.refund_rate) && b.refund_rate && refundRef.value) {
     const rows = b.refund_rate.rows
     const avg = rows.reduce((s, r) => s + Number(r[1]), 0) / Math.max(1, rows.length)
     const ch = echarts.init(refundRef.value)
@@ -461,29 +818,30 @@ function renderCharts() {
         trigger: 'axis',
         valueFormatter: refundTooltipValue,
       },
-      grid: { left: 44, right: 16, top: 20, bottom: 32 },
+      grid: { left: 48, right: 20, top: 20, bottom: 36 },
       xAxis: {
         type: 'category',
         data: rows.map((r) => String(r[0])),
         ...axis,
-        axisLabel: { ...axis.axisLabel, rotate: 24 },
+        axisLabel: { ...axis.axisLabel, rotate: 20 },
       },
       yAxis: { type: 'value', ...axis },
       series: [
         {
+          name: '退货率',
           type: 'bar',
           data: rows.map((r) => Number(r[1])),
           barWidth: 22,
           itemStyle: {
             borderRadius: [6, 6, 0, 0],
             /**
-             * 按均值分档着色：高于均值红色，接近均值黄色，其余绿色。
+             * 按全渠道均值分档着色：高于均值红色预警，接近均值琥珀色，其余绿色稳态。
              * @param p 数据项包装对象
-             * @param p.value 退货率数值
-             * @returns 对应档位的颜色值
+             * @param p.value 退货率百分比数值
+             * @returns 对应预警档位色值
              */
             color: (p: { value: number }) =>
-              p.value >= avg ? '#dc2626' : p.value >= avg * 0.7 ? '#f59e0b' : '#10b981',
+              p.value >= avg ? '#dc2626' : p.value >= avg * 0.7 ? '#d97706' : '#059669',
           },
           markLine: {
             symbol: 'none',
@@ -496,7 +854,7 @@ function renderCharts() {
     })
     charts.push(ch)
   }
-  if (b.aftersales && afterRef.value) {
+  if (hasRows(b.aftersales) && b.aftersales && afterRef.value) {
     const typeColor: Record<string, string> = {
       refund: '#dc2626',
       return: '#d97706',
@@ -507,16 +865,22 @@ function renderCharts() {
       return: '退货退款',
       exchange: '换新',
     }
-    const rows = [...b.aftersales.rows].sort((a, b2) => Number(b2[2]) - Number(a[2])).slice(0, 10)
+    const rows = b.aftersales.rows
+    const reasons = [...new Set(rows.map((r) => String(r[1])))].slice(0, 10)
+    const countMap = new Map<string, number>()
+    for (const r of rows) {
+      const key = `${String(r[0])}::${String(r[1])}`
+      countMap.set(key, (countMap.get(key) || 0) + Number(r[2]))
+    }
     const ch = echarts.init(afterRef.value)
     ch.setOption({
       tooltip: { trigger: 'axis' },
       legend: { top: 0, textStyle: { color: '#64748b' } },
-      grid: { left: 90, right: 30, top: 34, bottom: 28 },
+      grid: { left: 90, right: 24, top: 34, bottom: 26 },
       xAxis: { type: 'value', ...axis, splitLine: { lineStyle: { color: '#f1f5f9' } } },
       yAxis: {
         type: 'category',
-        data: rows.map((r) => String(r[1])),
+        data: reasons,
         ...axis,
         splitLine: { show: false },
       },
@@ -526,25 +890,26 @@ function renderCharts() {
         stack: 'total',
         barWidth: 16,
         itemStyle: { color: typeColor[t] },
-        data: rows.map((r) => (String(r[0]) === t ? Number(r[2]) : 0)),
+        data: reasons.map((reason) => countMap.get(`${t}::${reason}`) || 0),
       })),
     })
     charts.push(ch)
   }
 }
+
 /**
- * 问数：提交任务并订阅事件流；终态后拉取结果渲染表格与图表。
+ * 问数查询：提交任务并订阅事件流；终态后拉取结果渲染明细表与图表。
  * @param q 用户输入的问题，为空时回退输入框草稿
  * @returns 异步完成后无返回值
  */
-async function ask(q: string) {
+async function ask(q: string): Promise<void> {
   const question = (q || draft.value || '').trim()
-  if (!question) return void ElMessage.warning('请输入你想查询的问题')
+  if (!question) return void ElMessage.warning('请输入您想分析的经营问题')
   if (asking.value) return
   draft.value = ''
   asking.value = true
   messages.value.push({ role: 'user', text: question })
-  const pending: Message = { role: 'system', pending: true, stage: '指标匹配中' }
+  const pending: Message = { role: 'system', pending: true, stage: '正在匹配企业经营指标' }
   messages.value.push(pending)
   await scrollBottom()
   try {
@@ -587,13 +952,14 @@ async function ask(q: string) {
   }
   await scrollBottom()
 }
+
 /**
- * 拉取任务终态结果并转为消息；SSE 提前断开时以轮询兜底（最多 60s）。
+ * 拉取任务终态结果并转为回答消息；SSE 提前断开时以轮询兜底（最多 60s）。
  * @param taskId 任务 ID
  * @param pending 聊天区待处理消息，完成后原地替换为结果
  * @returns 异步完成后无返回值
  */
-async function finish(taskId: string, pending: Message) {
+async function finish(taskId: string, pending: Message): Promise<void> {
   try {
     let job: {
       state: string
@@ -623,7 +989,7 @@ async function finish(taskId: string, pending: Message) {
     } else {
       messages.value.splice(messages.value.indexOf(pending), 1, {
         role: 'system',
-        text: res?.answer || '这个问题暂时没有可用的指标数据，请换个问法，或到知识库检索相关资料。',
+        text: res?.answer || '暂未匹配到相关指标数据，请换个问法，或前往知识文档检索资料。',
       })
     }
   } catch (e: unknown) {
@@ -641,23 +1007,28 @@ async function finish(taskId: string, pending: Message) {
     await scrollBottom()
   }
 }
+
 /**
  * 聊天列表滚动到底部（在下一渲染帧执行）。
+ * @returns 异步滚动完成后无返回值
  */
-async function scrollBottom() {
+async function scrollBottom(): Promise<void> {
   await nextTick()
   if (chatList.value) chatList.value.scrollTop = chatList.value.scrollHeight
 }
+
 /**
  * 窗口尺寸变化时重算全部图表尺寸。
  */
 function onResize() {
   charts.forEach((c) => c.resize())
 }
+
 onMounted(async () => {
   await loadBoard()
   window.addEventListener('resize', onResize)
 })
+
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   stream?.close()
@@ -670,272 +1041,497 @@ onUnmounted(() => {
 .bi-shell {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   height: 100%;
 }
-.bi-tabs {
+
+.bi-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--tz-surface, #ffffff);
+  border: 1px solid var(--tz-border, #e2e8f0);
+  border-radius: 12px;
+  box-shadow: var(--tz-shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.04));
 }
+
+.bi-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  background: var(--tz-surface-muted, #f8fafc);
+  border: 1px solid var(--tz-border, #e2e8f0);
+  border-radius: 9px;
+}
+
 .bi-tabs button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 9px 18px;
-  border: 1px solid var(--line, #e2e8f0);
-  border-radius: 10px;
-  background: #fff;
-  color: #334155;
-  font-size: 14px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--tz-ink-secondary, #475569);
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
 }
+
 .bi-tabs button:hover {
-  border-color: #2563eb;
-  color: #2563eb;
+  color: var(--tz-ink, #0f172a);
 }
+
 .bi-tabs button.active {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);
+  background: var(--tz-primary, #2563eb);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.22);
 }
-.tab-glyph {
+
+.bi-tab-svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.bi-toolbar-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bi-period-group {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  background: var(--tz-surface-muted, #f8fafc);
+  border: 1px solid var(--tz-border, #e2e8f0);
+  border-radius: 8px;
+}
+
+.period-btn {
+  padding: 5px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tz-ink-muted, #64748b);
   font-size: 12px;
-  opacity: 0.75;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
 }
-.bi-tab-note {
-  margin-left: auto;
-  color: #94a3b8;
+
+.period-btn:hover {
+  color: var(--tz-ink, #0f172a);
+}
+
+.period-btn.active {
+  background: #ffffff;
+  color: var(--tz-primary, #2563eb);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.bi-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--tz-surface-muted, #f8fafc);
+  border: 1px solid var(--tz-border-soft, #eef2f6);
+  color: var(--tz-ink-muted, #64748b);
   font-size: 12px;
 }
-/* 看板 */
+
+.bi-meta-pill.tone-gov {
+  background: var(--tz-primary-soft, #eff6ff);
+  border-color: #dbeafe;
+  color: var(--tz-primary, #2563eb);
+  font-weight: 500;
+}
+
+.bi-board {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* KPI Strip */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
 }
+
 .kpi-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 18px 20px;
-  background: #fff;
-  border: 1px solid #e8edf4;
-  border-radius: 14px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  gap: 8px;
+  padding: 16px 18px;
+  background: var(--tz-surface, #ffffff);
+  border: 1px solid var(--tz-border, #e2e8f0);
+  border-radius: 12px;
+  box-shadow: var(--tz-shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.04));
   overflow: hidden;
 }
+
 .kpi-card::before {
   content: '';
   position: absolute;
   inset: 0 auto 0 0;
-  width: 4px;
+  width: 3px;
   background: var(--tone, #2563eb);
 }
+
 .kpi-card.blue {
   --tone: #2563eb;
 }
+
 .kpi-card.cyan {
   --tone: #0891b2;
 }
+
 .kpi-card.green {
   --tone: #059669;
 }
+
 .kpi-card.red {
   --tone: #dc2626;
 }
+
 .kpi-card.amber {
   --tone: #d97706;
 }
+
+.kpi-card.slate {
+  --tone: #475569;
+}
+
+.kpi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .kpi-label {
-  color: #64748b;
+  color: var(--tz-ink-secondary, #475569);
   font-size: 13px;
+  font-weight: 600;
 }
+
+.kpi-badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--tz-surface-muted, #f8fafc);
+  color: var(--tz-ink-subtle, #94a3b8);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .kpi-value {
-  font-size: 27px;
+  font-size: 26px;
   font-weight: 700;
-  color: #0f172a;
-  letter-spacing: -0.5px;
+  color: var(--tz-ink, #0f172a);
+  letter-spacing: -0.4px;
+  font-variant-numeric: tabular-nums;
 }
+
 .kpi-value small {
   margin-left: 4px;
   font-size: 13px;
-  font-weight: 400;
-  color: #94a3b8;
+  font-weight: 500;
+  color: var(--tz-ink-muted, #64748b);
 }
+
 .kpi-sub {
-  color: #94a3b8;
+  color: var(--tz-ink-muted, #64748b);
   font-size: 12px;
 }
-.chart-grid {
+
+.empty-period-card {
+  padding: 14px 18px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  border-radius: 10px;
+}
+
+.empty-period-card strong {
+  display: block;
+  color: #92400e;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.empty-period-card p {
+  margin: 0;
+  color: #b45309;
+  font-size: 13px;
+}
+
+.gov-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--tz-surface, #ffffff);
+  border: 1px solid var(--tz-border, #e2e8f0);
+  border-radius: 10px;
+  color: var(--tz-ink-muted, #64748b);
+  font-size: 12.5px;
+}
+
+.gov-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--tz-primary, #2563eb);
+  flex-shrink: 0;
+}
+
+/* Charts & Breakdowns */
+.chart-grid,
+.detail-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
+
 .chart-panel {
-  background: #fff;
-  border: 1px solid #e8edf4;
-  border-radius: 14px;
+  background: var(--tz-surface, #ffffff);
+  border: 1px solid var(--tz-border, #e2e8f0);
+  border-radius: 12px;
   padding: 16px 18px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  box-shadow: var(--tz-shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.04));
 }
+
 .chart-panel.wide {
   grid-column: 1 / -1;
 }
-.chart-panel h3 {
-  margin: 0 0 6px;
+
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.panel-head h3 {
+  margin: 0 0 3px;
   font-size: 15px;
-  color: #0f172a;
+  font-weight: 600;
+  color: var(--tz-ink, #0f172a);
 }
-.chart-panel h3 small {
-  margin-left: 8px;
-  font-weight: 400;
+
+.panel-sub {
+  margin: 0;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--tz-ink-subtle, #94a3b8);
 }
+
 .chart-box {
   height: 240px;
 }
+
 .chart-box.tall {
   height: 280px;
 }
-.bi-note {
-  border-radius: 10px;
+
+.enterprise-table {
+  width: 100%;
 }
+
+.num-strong {
+  font-weight: 600;
+  color: var(--tz-ink, #0f172a);
+  font-variant-numeric: tabular-nums;
+}
+
+.share-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--tz-surface-muted, #f1f5f9);
+  color: var(--tz-ink-secondary, #475569);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* 问数 */
 .chat {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: calc(100vh - 210px);
-  min-height: 420px;
+  height: calc(100vh - 220px);
+  min-height: 440px;
 }
+
 .chat-list {
   flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 6px 4px;
+  padding: 8px 4px;
 }
+
 .chat-welcome {
   margin: auto;
   text-align: center;
-  max-width: 460px;
+  max-width: 520px;
+  padding: 24px;
 }
+
+.welcome-eyebrow {
+  display: inline-block;
+  margin-bottom: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--tz-primary-soft, #eff6ff);
+  color: var(--tz-primary, #2563eb);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .chat-welcome h2 {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   font-size: 22px;
-  color: #0f172a;
+  color: var(--tz-ink, #0f172a);
 }
+
 .chat-welcome p {
-  color: #64748b;
+  color: var(--tz-ink-muted, #64748b);
   font-size: 13px;
   line-height: 1.7;
 }
+
 .quick-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   justify-content: center;
-  margin-top: 16px;
+  margin-top: 18px;
 }
+
 .quick-chips button {
   padding: 7px 14px;
-  border: 1px solid #dbe4ef;
+  border: 1px solid var(--tz-border, #dbe4ef);
   border-radius: 999px;
-  background: #fff;
-  color: #334155;
+  background: #ffffff;
+  color: var(--tz-ink-secondary, #334155);
   font-size: 13px;
   cursor: pointer;
   transition: all 0.15s;
 }
+
 .quick-chips button:hover {
-  border-color: #2563eb;
-  color: #2563eb;
-  background: #eff6ff;
+  border-color: var(--tz-primary, #2563eb);
+  color: var(--tz-primary, #2563eb);
+  background: var(--tz-primary-soft, #eff6ff);
 }
+
 .msg {
   display: flex;
 }
+
 .msg-user {
   justify-content: flex-end;
 }
+
 .msg-user .bubble {
-  background: #2563eb;
-  color: #fff;
+  background: var(--tz-primary, #2563eb);
+  color: #ffffff;
   border-radius: 14px 14px 4px 14px;
   padding: 10px 16px;
   max-width: 70%;
   font-size: 14px;
   line-height: 1.6;
 }
+
 .msg-system {
   justify-content: flex-start;
 }
+
 .msg-system .bubble {
-  background: #fff;
-  border: 1px solid #e8edf4;
+  background: #ffffff;
+  border: 1px solid var(--tz-border, #e2e8f0);
   border-radius: 4px 14px 14px 14px;
-  padding: 14px 16px;
-  max-width: 86%;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  padding: 16px 18px;
+  max-width: 88%;
+  box-shadow: var(--tz-shadow-sm, 0 1px 3px rgba(15, 23, 42, 0.05));
 }
+
 .pending {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #2563eb;
+  color: var(--tz-primary, #2563eb);
   font-size: 13px;
 }
+
 .answer-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
+
 .answer-tag {
-  background: #eff6ff;
-  color: #2563eb;
+  background: var(--tz-primary-soft, #eff6ff);
+  color: var(--tz-primary, #2563eb);
   border-radius: 6px;
   padding: 3px 10px;
   font-size: 12px;
   font-weight: 600;
 }
+
 .answer-meta {
-  color: #94a3b8;
+  color: var(--tz-ink-subtle, #94a3b8);
   font-size: 12px;
 }
+
 .answer-table {
   width: 100%;
 }
+
 .answer-chart {
   height: 230px;
   margin-top: 12px;
 }
+
 .answer-foot {
-  margin: 10px 0 0;
-  color: #94a3b8;
+  margin: 12px 0 0;
+  color: var(--tz-ink-muted, #64748b);
   font-size: 12px;
   line-height: 1.6;
-  border-top: 1px dashed #e2e8f0;
+  border-top: 1px dashed var(--tz-border, #e2e8f0);
   padding-top: 8px;
 }
+
 .plain-answer {
   margin: 0;
-  color: #334155;
+  color: var(--tz-ink-secondary, #334155);
   font-size: 14px;
   line-height: 1.7;
   white-space: pre-wrap;
 }
+
 .denied-card {
   display: flex;
   gap: 12px;
   align-items: flex-start;
 }
+
 .denied-glyph {
   display: inline-flex;
   align-items: center;
@@ -943,27 +1539,32 @@ onUnmounted(() => {
   width: 34px;
   height: 34px;
   border-radius: 9px;
-  background: #fef2f2;
-  color: #dc2626;
+  background: var(--tz-danger-soft, #fef2f2);
+  color: var(--tz-danger, #dc2626);
   font-weight: 700;
   flex: none;
 }
+
 .denied-card strong {
-  color: #0f172a;
+  color: var(--tz-ink, #0f172a);
   font-size: 14px;
 }
+
 .denied-card p {
   margin: 4px 0 0;
-  color: #64748b;
+  color: var(--tz-ink-muted, #64748b);
   font-size: 13px;
   line-height: 1.6;
 }
+
 .chat-input {
   display: flex;
   gap: 10px;
 }
+
 @media (max-width: 1080px) {
-  .chart-grid {
+  .chart-grid,
+  .detail-grid {
     grid-template-columns: 1fr;
   }
 }

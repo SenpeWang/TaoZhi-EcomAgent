@@ -1,66 +1,976 @@
+<template>
+  <LoginPortal
+    v-if="!user"
+    v-model:username="loginForm.username"
+    v-model:password="loginForm.password"
+    :info="info"
+    :busy="busy"
+    @sign-in="signIn"
+    @pick-account="pickAccount"
+  />
+
+  <div v-else class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-logo-wrap">
+          <img :src="robotUrl" alt="平台标识" class="brand-logo-img" />
+        </div>
+        <div class="brand-meta">
+          <strong class="brand-title">淘智工作台</strong>
+          <span class="brand-edition">ENTERPRISE EDITION</span>
+        </div>
+      </div>
+
+      <div class="tenant-badge-box">
+        <span class="tenant-name-text" :title="info.name">
+          {{ info.name || '企业工作空间' }}
+        </span>
+        <span class="tenant-online-dot">
+          {{ info.tenant_code || 'default' }}
+        </span>
+      </div>
+
+      <nav class="sidebar-nav" aria-label="主导航">
+        <template v-for="group in navGroups" :key="group.title">
+          <div class="nav-group-label">{{ group.title }}</div>
+          <button
+            v-for="item in group.items"
+            :key="item.key"
+            type="button"
+            class="nav-item-btn"
+            :class="{ active: page === item.key }"
+            @click="navigate(item.key)"
+          >
+            <svg
+              class="nav-svg-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path v-for="(d, idx) in item.paths" :key="idx" :d="d" />
+            </svg>
+            <span class="nav-label">{{ item.label }}</span>
+            <span v-if="item.badge" class="nav-badge-count">{{ item.badge }}</span>
+          </button>
+        </template>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-security-chip">
+          <svg
+            class="nav-svg-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+          >
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+          <span>数据权限：{{ clearanceShortText }}</span>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main-shell">
+      <header class="topbar">
+        <div class="topbar-breadcrumb">
+          <span class="bc-platform">{{ info.name || '企业工作台' }}</span>
+          <span class="bc-slash">/</span>
+          <span class="bc-current">{{ page }}</span>
+          <span class="bc-desc">{{ currentSubtitle }}</span>
+        </div>
+
+        <div class="topbar-right">
+          <button
+            v-if="caps.permissions && approvals.filter(isPendingApproval).length > 0"
+            type="button"
+            class="topbar-alert-btn"
+            @click="navigate('权限审批')"
+          >
+            <span>待审批 {{ approvals.filter(isPendingApproval).length }}</span>
+          </button>
+
+          <el-dropdown trigger="click" @command="handleUserCommand">
+            <button type="button" class="user-dropdown-trigger">
+              <span class="topbar-avatar" :class="userToneClass">
+                {{ userInitial }}
+              </span>
+              <span class="user-name-col">
+                <strong class="user-realname">{{ user.display_name }}</strong>
+                <small class="user-roles-text">{{ displayRoles(user) }}</small>
+              </span>
+              <svg
+                class="chevron-svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <div class="dropdown-user-header">
+                  <strong>{{ user.display_name }}</strong>
+                  <small>账号：{{ user.username }} · {{ primaryOrgName }}</small>
+                  <span class="dropdown-clearance-tag">数据权限：{{ clearanceText }}</span>
+                </div>
+                <el-dropdown-item command="account">个人中心</el-dropdown-item>
+                <el-dropdown-item command="tasks">我的任务</el-dropdown-item>
+                <el-dropdown-item divided command="signout">退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </header>
+
+      <main class="content">
+        <div class="page-heading">
+          <div>
+            <h1>{{ page }}</h1>
+            <p>{{ currentSubtitle }}</p>
+          </div>
+        </div>
+
+        <el-alert
+          v-if="user.must_change"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="安全提醒：当前账号使用初始密码或重置后的临时密码登录，请先在个人中心修改登录密码。"
+        />
+
+        <!-- ── 1. 工作概览 ───────────────────────────────────────── -->
+        <template v-if="page === '工作概览'">
+          <section class="overview-banner">
+            <div class="overview-banner-meta">
+              <h2>你好，{{ user.display_name }}</h2>
+              <p>
+                角色：{{ displayRoles(user) }} · 所属部门：{{ primaryOrgName }} · 数据权限：{{
+                  clearanceText
+                }}
+              </p>
+            </div>
+            <div class="overview-banner-actions">
+              <el-button @click="navigate('知识问答')">发起知识问答</el-button>
+              <el-button type="primary" @click="navigate('选品调研')">开始选品调研</el-button>
+            </div>
+          </section>
+
+          <section class="stat-grid">
+            <div class="stat-card">
+              <div class="stat-card-top">
+                <span>可访问文档</span>
+              </div>
+              <strong>{{ dashboard.documents }}<small>份</small></strong>
+              <span class="stat-foot">当前权限范围内文档</span>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-top">
+                <span>分析任务</span>
+              </div>
+              <strong>{{ dashboard.tasks }}<small>项</small></strong>
+              <span class="stat-foot">知识检索与选品调研</span>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-top">
+                <span>待审核</span>
+              </div>
+              <strong>{{ dashboard.review }}<small>项</small></strong>
+              <span class="stat-foot">需主管或负责人复核</span>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-top">
+                <span>已完成</span>
+              </div>
+              <strong>{{ dashboard.completed }}<small>项</small></strong>
+              <span class="stat-foot">支持溯源查看与导出</span>
+            </div>
+          </section>
+
+          <section class="dashboard-grid">
+            <div class="panel">
+              <div class="section-heading">
+                <div>
+                  <h3>最近可访问文档</h3>
+                  <p class="section-sub">点击即可阅读授权正文或查看权限策略</p>
+                </div>
+                <el-button text type="primary" @click="navigate('知识文档')"> 全部文档 </el-button>
+              </div>
+              <div v-if="documents.length" class="document-cards">
+                <button
+                  v-for="d in documents.slice(0, 6)"
+                  :key="d.id"
+                  type="button"
+                  class="document-card"
+                  @click="openDoc(d.id)"
+                >
+                  <span class="level-pill" :class="`level-${d.level}`">{{
+                    levelText(d.level)
+                  }}</span>
+                  <strong>{{ d.title }}</strong>
+                  <small>{{ d.scope === 'company' ? '全企业' : d.node_name || d.node_id }}</small>
+                </button>
+              </div>
+              <el-empty v-else description="当前权限范围内暂无文档" />
+            </div>
+
+            <div class="panel">
+              <div class="section-heading">
+                <h3>账号与服务状态</h3>
+                <el-button text type="primary" @click="navigate('个人中心')"> 账号设置 </el-button>
+              </div>
+              <div class="scope-card">
+                <span>姓名 / 账号</span>
+                <strong>{{ user.display_name }}（{{ user.username }}）</strong>
+              </div>
+              <div class="scope-card">
+                <span>岗位角色</span>
+                <strong>{{ displayRoles(user) }}</strong>
+              </div>
+              <div class="scope-card">
+                <span>所属部门</span>
+                <strong>{{ primaryOrgName }}</strong>
+              </div>
+              <div class="scope-card">
+                <span>数据权限</span>
+                <strong>{{ clearanceText }}</strong>
+              </div>
+              <div class="scope-card">
+                <span>AI 分析服务</span>
+                <span
+                  class="status-pill"
+                  :class="dashboard.model_ready ? 'status-active' : 'status-disabled'"
+                >
+                  <span class="status-dot" />
+                  {{ dashboard.model_ready ? '已就绪' : '未连接' }}
+                </span>
+              </div>
+              <div class="scope-card">
+                <span>经营数据集</span>
+                <span
+                  class="status-pill"
+                  :class="dashboard.business_ready ? 'status-active' : 'status-disabled'"
+                >
+                  <span class="status-dot" />
+                  {{ dashboard.business_ready ? '已连接' : '未连接' }}
+                </span>
+              </div>
+            </div>
+          </section>
+        </template>
+
+        <!-- ── 2. 选品调研 ───────────────────────────────────────── -->
+        <ResearchChatView v-else-if="page === '选品调研'" :user="user" :api="api" />
+
+        <!-- ── 3. 经营看板 ───────────────────────────────────────── -->
+        <BiView v-else-if="page === '经营看板'" :user="user" :api="api" />
+
+        <!-- ── 4. 知识问答 ───────────────────────────────────────── -->
+        <template v-else-if="page === '知识问答'">
+          <section class="question-grid">
+            <div class="panel">
+              <div class="section-head">
+                <div>
+                  <h3>企业知识库检索</h3>
+                  <p class="section-sub">
+                    基于当前账号权限检索企业内部文档，输出结论附带可核验的原文出处。
+                  </p>
+                </div>
+              </div>
+              <el-form label-position="top">
+                <el-form-item label="咨询问题">
+                  <el-input
+                    v-model="askForm.question"
+                    type="textarea"
+                    :rows="5"
+                    placeholder="请输入制度流程、合同条款、供应商政策等相关问题..."
+                  />
+                </el-form-item>
+                <div class="form-columns">
+                  <el-form-item label="检索部门范围">
+                    <el-select v-model="askForm.node_id">
+                      <el-option v-for="o in orgs" :key="o.id" :label="o.name" :value="o.id" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="数据密级">
+                    <div class="account-level-badge">
+                      <span class="level-pill" :class="`level-${currentUserLevel}`">
+                        {{ levelText(currentUserLevel) }}
+                      </span>
+                      <span class="level-hint">按当前账号职级匹配</span>
+                    </div>
+                  </el-form-item>
+                </div>
+                <el-checkbox v-model="askForm.allow_external">
+                  允许非机密文档经外部 AI 模型辅助分析（机密文档默认仅内网处理）
+                </el-checkbox>
+                <el-alert
+                  v-if="currentUserLevel === 3"
+                  type="info"
+                  :closable="false"
+                  show-icon
+                  title="机密（L3）文档默认禁止向外部 AI 服务传输，如需使用须经负责人单独授权。"
+                />
+                <el-button
+                  class="submit-question"
+                  type="primary"
+                  size="large"
+                  :loading="busy"
+                  @click="submitQuestion"
+                >
+                  提交查询
+                </el-button>
+              </el-form>
+            </div>
+
+            <div class="panel">
+              <h3>检索与审核流程</h3>
+              <div class="pipeline-step">
+                <span>01</span>
+                <div>
+                  <strong>权限范围校验</strong>
+                  <small>系统自动过滤当前账号所属部门及密级允许访问的文档内容。</small>
+                </div>
+              </div>
+              <div class="pipeline-step">
+                <span>02</span>
+                <div>
+                  <strong>文档提取与核验</strong>
+                  <small>提取关键业务条文并比对原文依据，确保答复内容真实可追溯。</small>
+                </div>
+              </div>
+              <div class="pipeline-step">
+                <span>03</span>
+                <div>
+                  <strong>审核与版本留痕</strong>
+                  <small>引用结果绑定文档版本号；源文档失效或权限变更时自动停止展示。</small>
+                </div>
+              </div>
+            </div>
+          </section>
+        </template>
+
+        <!-- ── 5. 我的任务 / 团队审核 ──────────────────────────────── -->
+        <template v-else-if="page === '我的任务' || page === '团队审核'">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <h3>{{ page === '团队审核' ? '团队待审核任务' : '我的分析任务' }}</h3>
+                <p class="section-sub">
+                  查看任务进度、执行记录与最终结论，支持运行中补充要求或待审核结果复核。
+                </p>
+              </div>
+              <el-button type="primary" @click="navigate('知识问答')"> 新建问答任务 </el-button>
+            </div>
+
+            <el-table :data="visibleTasks" empty-text="暂无任务记录">
+              <el-table-column label="任务内容" min-width="280">
+                <template #default="{ row }">
+                  <el-button text type="primary" class="table-question" @click="openTask(row.id)">
+                    {{ row.question }}
+                  </el-button>
+                  <small class="cell-small">
+                    任务 ID：{{ row.id }} · 类型：{{
+                      row.kind === 'research' ? '选品调研' : '知识问答'
+                    }}
+                  </small>
+                </template>
+              </el-table-column>
+              <el-table-column label="当前阶段" width="170">
+                <template #default="{ row }">
+                  <span>{{ row.stage || '等待处理' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="115">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="stateTag(row.state)" effect="light">
+                    {{ stateText(row.state) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="进度" width="145">
+                <template #default="{ row }">
+                  <el-progress :percentage="row.progress" :stroke-width="6" />
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="105" align="right">
+                <template #default="{ row }">
+                  <el-button size="small" plain @click="openTask(row.id)">详情</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </section>
+        </template>
+
+        <!-- ── 6. 知识文档 ──────────────────────────────────────── -->
+        <DocumentManager
+          v-else-if="page === '知识文档'"
+          v-model:search="search"
+          :documents="documents"
+          :can-write="caps.write"
+          :can-manage-permissions="caps.permissions"
+          :level-text="levelText"
+          :state-text="stateText"
+          @reload="load"
+          @open-permission-id="permissionIdOpen = true"
+          @open-request-access="accessOpen = true"
+          @new-doc="newDoc"
+          @open-doc="openDoc"
+        />
+
+        <!-- ── 7. 权限审批 ──────────────────────────────────────── -->
+        <PolicyMatrix
+          v-else-if="page === '权限审批'"
+          mode="approvals"
+          :approvals="approvals"
+          :tree="tree"
+          :users="users"
+          @decide="decideRequest"
+        />
+
+        <!-- ── 8. 组织与成员 ────────────────────────────────────── -->
+        <PolicyMatrix
+          v-else-if="page === '组织与成员'"
+          mode="org"
+          :approvals="approvals"
+          :tree="tree"
+          :users="users"
+          @new-org="newOrg"
+          @edit-org="editOrg"
+          @new-account="newAccount"
+          @membership="membership"
+          @reset-password="openResetDialog"
+          @disable-user="disableUser"
+        />
+
+        <!-- ── 9. 操作日志 ──────────────────────────────────────── -->
+        <template v-else-if="page === '操作日志'">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <h3>操作审计日志</h3>
+                <p class="section-sub">记录系统登录、文档访问、权限调整及审批决策历史。</p>
+              </div>
+            </div>
+            <el-table :data="audits" empty-text="暂无操作日志">
+              <el-table-column prop="created_at" label="时间" width="195" />
+              <el-table-column prop="action" label="操作行为" min-width="200" />
+              <el-table-column prop="actor_id" label="操作账号" min-width="150" />
+              <el-table-column prop="node_id" label="关联部门" min-width="140" />
+              <el-table-column label="密级" width="110">
+                <template #default="{ row }">
+                  <span class="level-pill" :class="`level-${row.level}`">
+                    {{ levelText(row.level) }}
+                  </span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </section>
+        </template>
+
+        <!-- ── 10. 系统状态 ─────────────────────────────────────── -->
+        <template v-else-if="page === '系统状态'">
+          <section class="runtime-grid">
+            <div class="panel">
+              <h3>服务连接状态</h3>
+              <div class="scope-card">
+                <span>主数据库与向量检索</span>
+                <span
+                  class="status-pill"
+                  :class="runtimeStatus?.database ? 'status-active' : 'status-disabled'"
+                >
+                  <span class="status-dot" />
+                  {{ runtimeStatus?.database ? '正常' : '异常' }}
+                </span>
+              </div>
+              <div class="scope-card">
+                <span>后台任务执行服务</span>
+                <span
+                  class="status-pill"
+                  :class="runtimeStatus?.worker_available ? 'status-active' : 'status-disabled'"
+                >
+                  <span class="status-dot" />
+                  {{ runtimeStatus?.worker_available ? '在线' : '离线' }}
+                </span>
+              </div>
+              <div class="scope-card">
+                <span>AI 分析模型配置</span>
+                <span
+                  class="status-pill"
+                  :class="runtimeStatus?.model_configured ? 'status-active' : 'status-disabled'"
+                >
+                  <span class="status-dot" />
+                  {{ runtimeStatus?.model_configured ? '已配置' : '未配置' }}
+                </span>
+              </div>
+              <div class="scope-card">
+                <span>经营分析数据源</span>
+                <span
+                  class="status-pill"
+                  :class="runtimeStatus?.business_configured ? 'status-active' : 'status-disabled'"
+                >
+                  <span class="status-dot" />
+                  {{ runtimeStatus?.business_configured ? '已连接' : '未配置' }}
+                </span>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>任务状态统计</h3>
+              <div v-for="c in runtimeStatus?.counts || []" :key="c.state" class="scope-card">
+                <span>{{ stateText(c.state) }}</span>
+                <strong>{{ c.count }} 项</strong>
+              </div>
+            </div>
+          </section>
+        </template>
+
+        <!-- ── 11. 个人中心 ─────────────────────────────────────── -->
+        <AccountCenter
+          v-else-if="page === '个人中心'"
+          :user="user"
+          :tenant-name="info.name || '企业工作空间'"
+          :busy="busy"
+          :format-role-name="roleLabel"
+          @change-password="changePassword"
+          @sign-out="signOut"
+        />
+      </main>
+    </div>
+  </div>
+
+  <!-- ── 任务详情与进度弹窗 ───────────────────────────────────────── -->
+  <TaskTimeline
+    v-model="taskOpen"
+    :task="activeTask"
+    @open-doc="openDoc"
+    @review="reviewTask"
+    @cancel="cancelTask"
+    @retry="retryTask"
+    @steer="steerTask"
+  />
+
+  <!-- ── 文档详情弹窗 ────────────────────────────────────────────── -->
+  <el-dialog v-model="docOpen" :title="detail?.title || '文档详情'" width="760px">
+    <template v-if="detail">
+      <div class="detail-meta">
+        <span class="org-chip">
+          {{ detail.scope === 'company' ? '全企业' : detail.node_name || detail.node_id }}
+        </span>
+        <span class="level-pill" :class="`level-${detail.level}`">
+          {{ levelText(detail.level) }}
+        </span>
+        <el-tag size="small" :type="stateTag(detail.state)">{{ stateText(detail.state) }}</el-tag>
+        <span>版本 V{{ detail.current_version }}</span>
+        <span>权限版本 #{{ detail.acl_version }}</span>
+      </div>
+      <el-alert v-if="detail.error" type="error" :title="detail.error" :closable="false" />
+      <pre v-if="detail.body" class="document-body">{{ detail.body }}</pre>
+      <el-empty v-else description="当前仅可查看文档基本信息，暂未获准阅读正文" />
+      <div class="dialog-actions">
+        <el-link
+          v-if="detail.can_download"
+          :href="'/api/documents/' + detail.id + '/download'"
+          target="_blank"
+          type="primary"
+        >
+          下载原文件
+        </el-link>
+        <el-button v-if="detail.can_write" @click="editDoc">编辑文档</el-button>
+        <el-button v-if="caps.permissions" @click="showPolicy">权限与密级</el-button>
+        <el-button v-if="caps.permissions" @click="showGrant">人员授权</el-button>
+        <el-button v-if="detail.body" @click="showVersions">历史版本</el-button>
+        <el-button v-if="detail.can_write" type="danger" plain @click="deleteDoc">
+          删除文档
+        </el-button>
+      </div>
+    </template>
+  </el-dialog>
+
+  <!-- ── 上传 / 编辑文档弹窗 ─────────────────────────────────────── -->
+  <el-dialog v-model="docEdit" :title="docForm.id ? '编辑文档' : '上传 / 新建文档'" width="680px">
+    <div class="dialog-lead">
+      新增或修改文档后将进入审核流程，审核通过后可供相应权限成员检索查阅。
+    </div>
+    <el-form label-position="top">
+      <el-form-item label="文档标题">
+        <el-input v-model="docForm.title" placeholder="请输入文档标题" />
+      </el-form-item>
+      <div v-if="!docForm.id" class="form-columns">
+        <el-form-item label="可见范围">
+          <el-select v-model="docForm.scope">
+            <el-option v-if="user?.is_boss || caps.system" label="全企业" value="company" />
+            <el-option label="指定部门" value="org" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="docForm.scope === 'org'" label="所属部门">
+          <el-select v-model="docForm.node_id">
+            <el-option v-for="o in orgs" :key="o.id" :label="o.name" :value="o.id" />
+          </el-select>
+        </el-form-item>
+      </div>
+      <div v-if="!docForm.id" class="form-columns">
+        <el-form-item label="文档密级">
+          <el-select v-model="docForm.level">
+            <el-option label="公开 (L1)" :value="1" />
+            <el-option label="内部 (L2)" :value="2" />
+            <el-option label="机密 (L3)" :value="3" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="上传本地文件（支持 Markdown / TXT / Word / PDF）">
+          <input type="file" @change="picked" />
+        </el-form-item>
+      </div>
+      <el-form-item v-if="!selectedFile" label="文档正文">
+        <el-input
+          v-model="docForm.body"
+          type="textarea"
+          :rows="8"
+          placeholder="请输入文档正文，或选择本地文件上传"
+        />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="docEdit = false">取消</el-button>
+      <el-button type="primary" :loading="busy" @click="saveDoc">保存提交</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- ── 文档权限与密级弹窗 ───────────────────────────────────────── -->
+  <el-dialog v-model="policyOpen" title="修改文档权限与密级" width="540px">
+    <div class="dialog-lead">
+      修改文档密级、可见部门范围或 AI 使用授权需提交企业负责人审批通过后生效。
+    </div>
+    <el-form label-position="top">
+      <div class="form-columns">
+        <el-form-item label="可见范围">
+          <el-select v-model="policyForm.scope">
+            <el-option label="全企业" value="company" />
+            <el-option label="指定部门" value="org" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="文档密级">
+          <el-select v-model="policyForm.level">
+            <el-option label="公开 (L1)" :value="1" />
+            <el-option label="内部 (L2)" :value="2" />
+            <el-option label="机密 (L3)" :value="3" />
+          </el-select>
+        </el-form-item>
+      </div>
+      <el-form-item v-if="policyForm.scope === 'org'" label="所属部门">
+        <el-select v-model="policyForm.node_id">
+          <el-option v-for="o in orgs" :key="o.id" :label="o.name" :value="o.id" />
+        </el-select>
+      </el-form-item>
+      <el-checkbox v-model="policyForm.ai_allowed">允许授权人员用于 AI 问答分析</el-checkbox>
+      <el-checkbox v-model="policyForm.download_allowed">允许具备权限的成员下载原文件</el-checkbox>
+    </el-form>
+    <template #footer>
+      <el-button @click="policyOpen = false">取消</el-button>
+      <el-button type="primary" :loading="busy" @click="savePolicy">提交审批</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- ── 单文档人员授权弹窗 ───────────────────────────────────────── -->
+  <el-dialog v-model="grantOpen" title="文档人员授权管理" width="600px">
+    <div v-if="currentGrants.length" class="subagents-roster-box" style="margin-top: 0">
+      <div class="roster-header">
+        <strong>当前有效授权</strong>
+      </div>
+      <div v-for="g in currentGrants" :key="g.user_id" class="scope-card">
+        <span>{{ g.display_name }}</span>
+        <strong>
+          {{ g.effect === 'deny' ? '禁止访问' : '允许阅读' }}
+          {{ g.can_download ? ' · 可下载' : '' }}
+          {{ g.expires_at ? ' · 有效期至 ' + g.expires_at : '' }}
+        </strong>
+      </div>
+    </div>
+    <el-form label-position="top">
+      <el-form-item label="选择成员">
+        <el-select v-model="grantForm.user_id" filterable placeholder="请选择企业成员">
+          <el-option
+            v-for="u in users"
+            :key="u.id"
+            :label="`${u.display_name} (${u.username})`"
+            :value="u.id"
+          />
+        </el-select>
+      </el-form-item>
+      <div class="form-columns">
+        <el-form-item label="授权类型">
+          <el-select v-model="grantForm.effect">
+            <el-option label="允许阅读" value="allow" />
+            <el-option label="禁止访问" value="deny" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="有效期至（可选）">
+          <el-date-picker
+            v-model="grantForm.expires_at"
+            type="datetime"
+            style="width: 100%"
+            placeholder="留空表示长期有效"
+          />
+        </el-form-item>
+      </div>
+      <el-checkbox v-model="grantForm.can_download">允许下载原文件</el-checkbox>
+      <el-checkbox v-model="grantForm.revoke">收回该成员的文档授权</el-checkbox>
+    </el-form>
+    <template #footer>
+      <el-button @click="grantOpen = false">取消</el-button>
+      <el-button type="primary" :loading="busy" @click="saveGrant">提交审批</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- ── 文档历史版本弹窗 ─────────────────────────────────────────── -->
+  <el-dialog v-model="historyOpen" title="历史版本记录" width="660px">
+    <el-collapse>
+      <el-collapse-item
+        v-for="v in history"
+        :key="v.version"
+        :title="`V${v.version} · ${v.title} (${v.created_at})`"
+      >
+        <pre class="quote-body">{{ v.body }}</pre>
+      </el-collapse-item>
+    </el-collapse>
+  </el-dialog>
+
+  <!-- ── 按编号申请访问 ───────────────────────────────────────────── -->
+  <el-dialog v-model="accessOpen" title="申请文档阅读权限" width="440px">
+    <div class="dialog-lead">
+      输入管理员或同事提供的文档 ID 后可直接发起阅读授权申请，申请将流转至对应负责人审批。
+    </div>
+    <el-form label-position="top">
+      <el-form-item label="文档 ID">
+        <el-input v-model="accessId" placeholder="请输入文档 ID" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="accessOpen = false">取消</el-button>
+      <el-button type="primary" :loading="busy" @click="requestAccess">提交申请</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- ── 按编号管理文档权限 ───────────────────────────────────────── -->
+  <el-dialog v-model="permissionIdOpen" title="按文档 ID 管理权限" width="440px">
+    <el-form label-position="top">
+      <el-form-item label="文档 ID">
+        <el-input v-model="permissionId" placeholder="请输入文档 ID" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="permissionIdOpen = false">取消</el-button>
+      <el-button type="primary" :loading="busy" @click="manageById">查询配置</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- ── 新建成员账号弹窗 ─────────────────────────────────────────── -->
+  <el-dialog v-model="accountOpen" title="新建成员账号" width="540px">
+    <div class="dialog-lead">创建成员账号后，系统将同步提交初始部门分配或管理员角色审批申请。</div>
+    <el-form label-position="top">
+      <div class="form-columns">
+        <el-form-item label="姓名">
+          <el-input v-model="accountForm.display_name" placeholder="请输入成员姓名" />
+        </el-form-item>
+        <el-form-item label="登录账号">
+          <el-input v-model="accountForm.username" placeholder="建议使用英文名或工号" />
+        </el-form-item>
+      </div>
+      <el-form-item label="初始密码（建议不少于 12 位）">
+        <el-input
+          v-model="accountForm.password"
+          type="password"
+          show-password
+          placeholder="请输入初始密码"
+        />
+      </el-form-item>
+      <div class="form-columns">
+        <el-form-item label="岗位角色">
+          <el-select v-model="accountForm.role">
+            <el-option label="普通员工 (L1)" value="employee" />
+            <el-option label="部门主管 (L2)" value="leader" />
+            <el-option label="企业负责人 (L3)" value="boss" />
+            <el-option label="系统管理员" value="admin" />
+          </el-select>
+        </el-form-item>
+        <el-form-item
+          v-if="accountForm.role !== 'boss' && accountForm.role !== 'admin'"
+          label="所属部门"
+        >
+          <el-select v-model="accountForm.node_id">
+            <el-option v-for="o in orgs" :key="o.id" :label="o.name" :value="o.id" />
+          </el-select>
+        </el-form-item>
+      </div>
+    </el-form>
+    <template #footer>
+      <el-button @click="accountOpen = false">取消</el-button>
+      <el-button type="primary" :loading="busy" @click="saveAccount">确定新建</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- ── 调整部门与岗位弹窗 ───────────────────────────────────────── -->
+  <el-dialog v-model="memberOpen" title="调整成员所属部门" width="480px">
+    <div class="dialog-lead">
+      成员所属部门及岗位角色变更后，其数据访问范围将随之调整（提交后需审批生效）。
+    </div>
+    <el-form label-position="top">
+      <el-form-item label="岗位角色">
+        <el-select v-model="memberForm.role">
+          <el-option label="普通员工 (L1)" value="employee" />
+          <el-option label="部门主管 (L2)" value="leader" />
+          <el-option label="企业负责人 (L3)" value="boss" />
+        </el-select>
+      </el-form-item>
+      <el-form-item v-if="memberForm.role !== 'boss'" label="所属部门">
+        <el-select v-model="memberForm.node_id">
+          <el-option v-for="o in orgs" :key="o.id" :label="o.name" :value="o.id" />
+        </el-select>
+      </el-form-item>
+      <el-checkbox v-model="memberForm.remove">从所选部门中移除该成员</el-checkbox>
+    </el-form>
+    <template #footer>
+      <el-button @click="memberOpen = false">取消</el-button>
+      <el-button type="primary" :loading="busy" @click="saveMembership">提交申请</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- ── 重置登录密码弹窗 ─────────────────────────────────────────── -->
+  <el-dialog v-model="resetOpen" title="重置成员登录密码" width="460px">
+    <div class="dialog-lead">
+      正在为 <strong>{{ resetForm.display_name }}</strong
+      >（{{ resetForm.username }}）申请重置密码。审批生效后该账号现有登录会话将立即失效。
+    </div>
+    <el-form label-position="top" @submit.prevent="submitResetPassword">
+      <el-form-item label="新临时密码（建议不少于 12 位）">
+        <el-input
+          v-model="resetForm.new_password"
+          type="password"
+          show-password
+          placeholder="请输入新的临时登录密码"
+        />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="resetOpen = false">取消</el-button>
+      <el-button type="primary" :loading="busy" @click="submitResetPassword">提交申请</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- ── 新建 / 编辑部门弹窗 ──────────────────────────────────────── -->
+  <el-dialog v-model="orgOpen" :title="orgForm.id ? '编辑部门' : '新建部门'" width="460px">
+    <el-form label-position="top">
+      <el-form-item label="部门名称">
+        <el-input v-model="orgForm.name" placeholder="例如：华东电商运营部" />
+      </el-form-item>
+      <el-form-item v-if="!orgForm.id" label="组织类型">
+        <el-select v-model="orgForm.kind">
+          <el-option label="部门" value="department" />
+          <el-option label="业务小组" value="team" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="上级部门">
+        <el-select v-model="orgForm.parent_id">
+          <el-option
+            v-for="o in orgs.filter((item) => item.id !== orgForm.id)"
+            :key="o.id"
+            :label="o.name"
+            :value="o.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-checkbox v-if="orgForm.id" v-model="orgForm.active">启用该部门</el-checkbox>
+    </el-form>
+    <template #footer>
+      <el-button @click="orgOpen = false">取消</el-button>
+      <el-button type="primary" :loading="busy" @click="saveOrg">保存</el-button>
+    </template>
+  </el-dialog>
+</template>
+
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { requestApi } from './api'
+import robotUrl from './assets/robot.svg'
+import AccountCenter from './views/AccountCenter.vue'
 import BiView from './views/BiView.vue'
-import ResearchChatView from './views/ResearchChatView.vue'
 import DocumentManager from './views/DocumentManager.vue'
+import LoginPortal from './views/LoginPortal.vue'
 import PolicyMatrix from './views/PolicyMatrix.vue'
+import ResearchChatView from './views/ResearchChatView.vue'
 import TaskTimeline from './views/TaskTimeline.vue'
-import logoUrl from './assets/logo.svg'
 import type {
-  User,
-  WorkspaceInfo,
-  Organization,
-  OrganizationTree,
-  DocumentRecord,
-  DocumentListItem,
-  DocumentVersion,
-  Task,
   Approval,
   AuditEvent,
-  Grant,
-  Dashboard,
-  RuntimeStatus,
-  Items,
-  CreatedResource,
-  LoginResponse,
   Capabilities,
+  CreatedResource,
+  Dashboard,
+  DocumentListItem,
+  DocumentRecord,
+  DocumentVersion,
+  Grant,
+  Items,
+  LoginResponse,
+  Organization,
+  OrganizationTree,
+  QuickAccount,
+  RuntimeStatus,
+  Task,
+  User,
+  WorkspaceInfo,
 } from './types'
-const user = ref<User | null>(null),
-  info = ref<Partial<WorkspaceInfo>>({}),
-  page = ref('工作台'),
-  loading = ref(false),
-  busy = ref(false)
-const orgs = ref<Organization[]>([]),
-  docs = ref<DocumentListItem[]>([]),
-  jobs = ref<Task[]>([]),
-  people = ref<User[]>([]),
-  requests = ref<Approval[]>([]),
-  audits = ref<AuditEvent[]>([]),
-  stats = ref<Partial<Dashboard>>({})
-const detail = ref<DocumentRecord | null>(null),
-  activeTask = ref<Task | null>(null),
-  history = ref<DocumentVersion[]>([])
-const docOpen = ref(false),
-  taskOpen = ref(false),
-  historyOpen = ref(false),
-  docEdit = ref(false),
-  policyOpen = ref(false),
-  grantOpen = ref(false),
-  accountOpen = ref(false),
-  memberOpen = ref(false),
-  orgOpen = ref(false),
-  accessOpen = ref(false)
-const loginForm = reactive({ username: '', password: '' }),
-  passwordForm = reactive({ current_password: '', new_password: '' })
-const askForm = reactive({
-  question: '',
-  input_level: 1,
-  allow_external: true,
-  sku_id: '',
-  order_id: '',
+
+interface NavItem {
+  key: string
+  label: string
+  paths: string[]
+  badge?: number
+}
+
+interface NavGroup {
+  title: string
+  items: NavItem[]
+}
+
+const info = ref<WorkspaceInfo>({
+  name: '',
+  mode: '',
+  tenant_code: '',
+  quick_accounts: [],
 })
+const user = ref<User | null>(null)
+const page = ref('工作概览')
+const busy = ref(false)
+const search = ref('')
+const orgs = ref<Organization[]>([])
+const documents = ref<DocumentListItem[]>([])
+const tasks = ref<Task[]>([])
+const approvals = ref<Approval[]>([])
+const users = ref<User[]>([])
+const audits = ref<AuditEvent[]>([])
+const runtimeStatus = ref<RuntimeStatus | null>(null)
+const dashboard = ref<Dashboard>({
+  documents: 0,
+  tasks: 0,
+  review: 0,
+  completed: 0,
+  teams: [],
+  model_ready: false,
+  business_ready: false,
+})
+
+const loginForm = reactive({ username: '', password: '' })
+const askForm = reactive({ question: '', node_id: '', input_level: 1, allow_external: false })
+
+const docOpen = ref(false)
+const detail = ref<DocumentRecord | null>(null)
+const docEdit = ref(false)
 const docForm = reactive({
   id: '',
   title: '',
@@ -70,6 +980,9 @@ const docForm = reactive({
   level: 2,
   version: 1,
 })
+const selectedFile = ref<File | null>(null)
+
+const policyOpen = ref(false)
 const policyForm = reactive({
   scope: 'org',
   node_id: '',
@@ -77,6 +990,9 @@ const policyForm = reactive({
   ai_allowed: false,
   download_allowed: false,
 })
+
+const grantOpen = ref(false)
+const currentGrants = ref<Grant[]>([])
 const grantForm = reactive({
   user_id: '',
   effect: 'allow',
@@ -84,6 +1000,18 @@ const grantForm = reactive({
   expires_at: '',
   revoke: false,
 })
+
+const historyOpen = ref(false)
+const history = ref<DocumentVersion[]>([])
+const accessOpen = ref(false)
+const accessId = ref('')
+const permissionIdOpen = ref(false)
+const permissionId = ref('')
+
+const taskOpen = ref(false)
+const activeTask = ref<Task | null>(null)
+
+const accountOpen = ref(false)
 const accountForm = reactive({
   username: '',
   password: '',
@@ -91,332 +1019,538 @@ const accountForm = reactive({
   role: 'employee',
   node_id: '',
 })
+
+const memberOpen = ref(false)
 const memberForm = reactive({ user_id: '', node_id: '', role: 'employee', remove: false })
-const orgForm = reactive({
-  id: '',
-  name: '',
-  kind: 'department',
-  parent_id: '' as string | null,
-  active: true,
-})
-const runtimeStatus = ref<Partial<RuntimeStatus>>({}),
-  currentGrants = ref<Grant[]>([]),
-  permissionIdOpen = ref(false),
-  permissionId = ref('')
-const accessId = ref(''),
-  selectedFile = ref<File | null>(null),
-  fileInput = ref<HTMLInputElement | null>(null)
+
+const resetOpen = ref(false)
+const resetForm = reactive({ user_id: '', username: '', display_name: '', new_password: '' })
+
+const orgOpen = ref(false)
+const orgForm = reactive({ id: '', name: '', kind: 'department', parent_id: '', active: true })
 
 /**
- * 清除会话关联的资料、答案、弹窗及密码；401、退出和改密均调用，避免换人后残留。
+ * 判断审批记录是否处于待处理状态。
+ * @param row - 审批记录。
+ * @returns 是否为待审批状态。
  */
-function wipe() {
+function isPendingApproval(row: Approval): boolean {
+  return row.state === 'pending'
+}
+
+/**
+ * 读取当前登录身份的功能能力集合。
+ * @returns 权限能力对象。
+ */
+function resolveCaps(): Capabilities {
+  return (
+    user.value?.capabilities || {
+      system: false,
+      write: false,
+      review: false,
+      permissions: false,
+    }
+  )
+}
+const caps = computed(resolveCaps)
+
+/**
+ * 计算组织根节点编号。
+ * @returns 公司根节点 ID。
+ */
+function resolveRootId(): string {
+  for (const o of orgs.value) {
+    if (o.kind === 'company') return o.id
+  }
+  return orgs.value[0]?.id || ''
+}
+const root = computed(resolveRootId)
+
+/**
+ * 将组织平铺列表构造成前端树形控件结构。
+ * @param parentId - 父级组织 ID。
+ * @returns 递归嵌套组织树节点数组。
+ */
+function buildTree(parentId: string | null): OrganizationTree[] {
+  const result: OrganizationTree[] = []
+  for (const o of orgs.value) {
+    if (o.parent_id !== parentId) continue
+    result.push({ ...o, label: o.name, children: buildTree(o.id) })
+  }
+  return result
+}
+const tree = computed(
+  /**
+   * 生成根节点起点的企业组织架构树。
+   * @returns 组织树。
+   */
+  () => buildTree(null),
+)
+
+/**
+ * 计算企业导航栏分组与权限可见菜单。
+ * @returns 分组导航清单。
+ */
+function computeNavGroups(): NavGroup[] {
+  if (!user.value) return []
+  if (user.value.must_change) {
+    return [
+      {
+        title: '账号安全',
+        items: [
+          {
+            key: '个人中心',
+            label: '个人中心',
+            paths: ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'],
+          },
+        ],
+      },
+    ]
+  }
+  const pendingCount = approvals.value.filter(isPendingApproval).length
+  const groups: NavGroup[] = [
+    {
+      title: '业务工作台',
+      items: [
+        {
+          key: '工作概览',
+          label: '工作概览',
+          paths: ['M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z'],
+        },
+        {
+          key: '选品调研',
+          label: '选品调研',
+          paths: ['M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z', 'M5 20a7 7 0 0 1 14 0'],
+        },
+        {
+          key: '经营看板',
+          label: '经营看板',
+          paths: ['M3 3v18h18', 'M18 17V9', 'M13 17V5', 'M8 17v-3'],
+        },
+        {
+          key: '知识问答',
+          label: '知识问答',
+          paths: ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'],
+        },
+      ],
+    },
+    {
+      title: '文档与任务',
+      items: [
+        {
+          key: '知识文档',
+          label: '知识文档',
+          paths: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6'],
+        },
+        {
+          key: '我的任务',
+          label: '我的任务',
+          paths: ['M9 11l3 3L22 4', 'M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'],
+        },
+        ...(caps.value.review
+          ? [
+              {
+                key: '团队审核',
+                label: '团队审核',
+                paths: [
+                  'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2',
+                  'M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+                ],
+                badge: dashboard.value.review || undefined,
+              },
+            ]
+          : []),
+      ],
+    },
+  ]
+
+  const governanceItems: NavItem[] = []
+  if (caps.value.permissions) {
+    governanceItems.push({
+      key: '权限审批',
+      label: '权限审批',
+      paths: ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'],
+      badge: pendingCount || undefined,
+    })
+  }
+  if (caps.value.system) {
+    governanceItems.push({
+      key: '组织与成员',
+      label: '组织与成员',
+      paths: [
+        'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2',
+        'M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+        'M22 21v-2a4 4 0 0 0-3-3.87',
+      ],
+    })
+  }
+  if (caps.value.system || caps.value.permissions) {
+    governanceItems.push({
+      key: '操作日志',
+      label: '操作日志',
+      paths: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M9 13h6', 'M9 17h6'],
+    })
+  }
+  if (caps.value.system) {
+    governanceItems.push({
+      key: '系统状态',
+      label: '系统状态',
+      paths: ['M22 12h-4l-3 9L9 3l-3 9H2'],
+    })
+  }
+  if (governanceItems.length) {
+    groups.push({ title: '组织与权限', items: governanceItems })
+  }
+
+  groups.push({
+    title: '账号设置',
+    items: [
+      {
+        key: '个人中心',
+        label: '个人中心',
+        paths: ['M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2', 'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z'],
+      },
+    ],
+  })
+  return groups
+}
+const navGroups = computed(computeNavGroups)
+
+const SUBTITLES: Record<string, string> = {
+  工作概览: '查看当前授权文档、待办任务及账号服务状态。',
+  选品调研: '自动对比货源行情与主流渠道价带，生成选品分析报告。',
+  经营看板: '权限受控的企业经营数据看板与自然语言指标查询。',
+  知识问答: '按组织架构与文档密级检索企业制度及业务资料。',
+  知识文档: '按部门与密级管理的企业文档知识库。',
+  我的任务: '追踪我发起的分析任务进度与历史结论。',
+  团队审核: '复核负责范围内提交的知识检索答案并决定是否发布。',
+  权限审批: '处理文档密级调整、阅读授权、部门架构及成员账号审批。',
+  组织与成员: '维护企业部门架构、成员账号及岗位角色。',
+  操作日志: '查看系统登录、文档读写与权限审批操作历史。',
+  系统状态: '查看数据库、后台任务服务与数据源连接情况。',
+  个人中心: '查看个人权限范围、所属部门及修改登录密码。',
+}
+
+const currentSubtitle = computed(
+  /**
+   * 获取当前页面对应的业务说明副标题。
+   * @returns 说明文本。
+   */
+  () => SUBTITLES[page.value] || '',
+)
+
+/**
+ * 过滤当前任务视图。
+ * @returns 当前页面可见任务列表。
+ */
+function computeVisibleTasks(): Task[] {
+  if (page.value === '团队审核') return tasks.value
+  const uid = user.value?.id
+  const out: Task[] = []
+  for (const t of tasks.value) {
+    if (!uid || t.owner_id === uid) out.push(t)
+  }
+  return out
+}
+const visibleTasks = computed(computeVisibleTasks)
+
+/**
+ * 获取当前登录用户的首字缩写。
+ * @returns 大写头像缩写。
+ */
+function computeUserInitial(): string {
+  const raw = (user.value?.display_name || user.value?.username || 'U').trim()
+  return raw ? raw.slice(0, 1).toUpperCase() : 'U'
+}
+const userInitial = computed(computeUserInitial)
+
+/**
+ * 计算当前用户的角色视觉配色类名。
+ * @returns 样式类名。
+ */
+function computeUserTone(): string {
+  if (user.value?.is_boss) return 'tone-exec'
+  if (user.value?.is_leader) return 'tone-lead'
+  if (user.value?.system_admin) return 'tone-admin'
+  return 'tone-member'
+}
+const userToneClass = computed(computeUserTone)
+
+/**
+ * 获取当前用户主归属部门名称。
+ * @returns 部门名称。
+ */
+function computePrimaryOrg(): string {
+  const m = user.value?.memberships?.[0]
+  return m?.name || m?.node_id || '暂未分配部门'
+}
+const primaryOrgName = computed(computePrimaryOrg)
+
+/**
+ * 推导当前账户的数据访问密级数值（L1/L2/L3）。
+ * @returns 密级数字。
+ */
+function computeUserLevel(): number {
+  if (user.value?.is_boss) return 3
+  if (user.value?.is_leader) return 2
+  return 1
+}
+const currentUserLevel = computed(computeUserLevel)
+
+const clearanceText = computed(
+  /**
+   * 输出完整的数据权限等级文本。
+   * @returns 密级名称。
+   */
+  () => levelText(currentUserLevel.value),
+)
+
+const clearanceShortText = computed(
+  /**
+   * 输出侧栏底部精简密级标识。
+   * @returns 精简密级标签。
+   */
+  () =>
+    `${currentUserLevel.value === 3 ? '机密 (L3)' : currentUserLevel.value === 2 ? '内部 (L2)' : '公开 (L1)'}`,
+)
+
+/**
+ * 将数字密级转为企业标准化中文标签。
+ * @param n - 密级编号。
+ * @returns 企业密级文案。
+ */
+function levelText(n: number): string {
+  if (n === 1) return '公开 (L1)'
+  if (n === 2) return '内部 (L2)'
+  if (n === 3) return '机密 (L3)'
+  return '待定'
+}
+
+/**
+ * 将英文状态编码转为企业规范中文状态名称。
+ * @param state - 服务端状态编码。
+ * @returns 中文状态。
+ */
+function stateText(state: string): string {
+  const labels: Record<string, string> = {
+    draft: '草稿',
+    parsing: '解析中',
+    review: '待审核',
+    published: '已发布',
+    queued: '排队中',
+    running: '进行中',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+    rejected: '已驳回',
+    approved: '已通过',
+    pending: '待审批',
+  }
+  return labels[state] || state
+}
+
+/**
+ * 映射任务或文档状态的 Element Plus 标签色彩。
+ * @param state - 服务端状态编码。
+ * @returns 标签样式类型。
+ */
+function stateTag(state: string): 'primary' | 'success' | 'warning' | 'danger' | 'info' {
+  if (['published', 'completed', 'approved'].includes(state)) return 'success'
+  if (['review', 'pending', 'running'].includes(state)) return 'warning'
+  if (['failed', 'rejected'].includes(state)) return 'danger'
+  return 'info'
+}
+
+/**
+ * 将组织角色编码映射为规范企业岗位称谓。
+ * @param role - 服务端角色编码。
+ * @returns 中文岗位名称。
+ */
+function roleLabel(role: string): string {
+  const map: Record<string, string> = {
+    employee: '普通员工',
+    leader: '部门主管',
+    boss: '企业负责人',
+    admin: '系统管理员',
+  }
+  return map[role] || role
+}
+
+/**
+ * 格式化用户信息条展示的岗位角色摘要。
+ * @param row - 账号对象。
+ * @returns 角色摘要文案。
+ */
+function displayRoles(row: User): string {
+  const items: string[] = []
+  if (row.is_boss) items.push('企业负责人')
+  else if (row.is_leader) items.push('部门主管')
+  else items.push('普通员工')
+  if (row.system_admin) items.push('系统管理员')
+  return items.join(' · ')
+}
+
+/**
+ * 清空客户端所有业务状态，确保退出或改密后不残留会话信息。
+ */
+function wipe(): void {
   user.value = null
+  orgs.value = []
+  documents.value = []
+  tasks.value = []
+  approvals.value = []
+  users.value = []
+  audits.value = []
+  runtimeStatus.value = null
   detail.value = null
   activeTask.value = null
-  docs.value = []
-  jobs.value = []
-  people.value = []
-  requests.value = []
-  audits.value = []
-  orgs.value = []
-  history.value = []
-  currentGrants.value = []
-  stats.value = {}
-  runtimeStatus.value = {}
   docOpen.value = false
   taskOpen.value = false
-  historyOpen.value = false
-  docEdit.value = false
-  policyOpen.value = false
-  grantOpen.value = false
-  accountOpen.value = false
-  memberOpen.value = false
-  orgOpen.value = false
-  accessOpen.value = false
-  permissionIdOpen.value = false
-  Object.assign(docForm, { id: '', title: '', body: '' })
-  askForm.question = ''
-  askForm.sku_id = ''
-  askForm.order_id = ''
-  accountForm.password = ''
-  passwordForm.current_password = ''
-  passwordForm.new_password = ''
-  accessId.value = ''
-  permissionId.value = ''
-  selectedFile.value = null
 }
+
 /**
- * 复用同源会话请求与 CSRF 校验；响应契约由调用方显式指定，后端拒绝仍生效。
- * @param path - 业务接口路径。
- * @param method - HTTP 方法；写入需要 CSRF。
- * @param payload - JSON 输入或附件表单。
- * @returns 通过基础校验的接口结果；网络或业务拒绝抛出中文错误。
+ * 调用同源企业服务端 API，统一注入运行环境 CSRF 与未认证会话清理回调。
+ * @param path - 同源请求路径。
+ * @param method - HTTP 方法，默认 GET。
+ * @param payload - JSON 对象或 FormData 表单载体。
+ * @returns 经过结构校验的服务端响应数据。
  */
-async function api<T = Record<string, unknown>>(
-  path: string,
-  method = 'GET',
-  payload?: unknown,
-): Promise<T> {
-  return requestApi<T>(path, info.value.mode || '', wipe, method, payload)
+async function api<T>(path: string, method = 'GET', payload?: unknown): Promise<T> {
+  return requestApi<T>(path, info.value.mode, wipe, method, payload)
 }
+
 /**
- * 执行页面操作并显示中文错误；无论成功或失败都释放忙碌状态。
- * @param work - 需要执行的异步操作。
- * @returns 操作完成结果；失败统一显示中文提示。
+ * 将未知异常安全提取为中文错误提示文本。
+ * @param e - 捕获到的异常对象。
+ * @returns 面向用户的中文错误提示。
  */
-async function action(work: () => Promise<void>) {
+function readError(e: unknown): string {
+  return e instanceof Error ? e.message : '操作未完成，请稍后重试'
+}
+
+/**
+ * 包装异步操作，统一维护加载锁与中文异常提示。
+ * @param fn - 需要执行的业务操作。
+ */
+async function action(fn: () => Promise<void>): Promise<void> {
   busy.value = true
   try {
-    await work()
+    await fn()
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : ''
-    ElMessage.error(
-      message && /[\u4e00-\u9fff]/.test(message) ? message : '操作未完成，请检查输入或稍后重试',
-    )
+    ElMessage.error(readError(e))
   } finally {
     busy.value = false
   }
 }
-const caps = computed<Partial<Capabilities>>(() => user.value?.capabilities || {})
-const root = computed(() => orgs.value.find((n) => n.kind === 'company')?.id || '')
-const menus = computed(() => [
-  '工作台',
-  '智能调研',
-  '企业知识问答',
-  '数据中台',
-  '任务中心',
-  '文档库',
-  ...(caps.value.review ? ['团队工作台'] : []),
-  ...(caps.value.permissions ? ['审核与授权'] : []),
-  ...(caps.value.system ? ['组织与人员', '运行状态'] : []),
-  ...(caps.value.review || caps.value.system ? ['审计记录'] : []),
-  '个人设置',
-])
-const subtitles = computed(
-  () =>
-    (
-      ({
-        工作台: '你获准访问的资料与任务。',
-        智能调研: '多智能体深度协同调研与多轮对话中台。',
-        企业知识问答: '仅使用你有权访问的资料回答。',
-        数据中台: '看板总览，自然语言问数。',
-        任务中心: '查看进度、核验结果与引用来源。',
-        文档库: '资料按组织范围与密级管理。',
-        团队工作台: '审核负责范围内的任务。',
-        审核与授权: '处理任职、授权与发布审核。',
-        组织与人员: '维护组织架构与人员任职。',
-        审计记录: '查看权限与业务操作记录。',
-        运行状态: '服务连通性与任务队列状态。',
-        个人设置: '密码修改后需重新登录。',
-      }) as Record<string, string>
-    )[page.value],
-)
-const NAV_ICONS: Record<string, string> = {
-  工作台: '📊',
-  智能调研: '🤖',
-  企业知识问答: '💬',
-  数据中台: '📈',
-  任务中心: '📋',
-  文档库: '📚',
-  团队工作台: '👥',
-  审核与授权: '🛡️',
-  组织与人员: '🏢',
-  运行状态: '⚡',
-  审计记录: '📜',
-  个人设置: '⚙️',
-}
-const tree = computed(() => {
-  const map = new Map(
-    orgs.value.map((n) => [n.id, { ...n, label: n.name, children: [] } as OrganizationTree]),
-  )
-  const roots: OrganizationTree[] = []
-  map.forEach((n) => {
-    if (n.parent_id && map.has(n.parent_id)) map.get(n.parent_id)!.children.push(n)
-    else roots.push(n)
-  })
-  return roots
-})
+
 /**
- * 将资料密级转为中文；未知等级显示待确认。
- * @param n - 资料密级。
- * @returns 中文显示文本。
+ * 并行刷新当前账号权限范围内的数据快照。
  */
-const level = (n: number) =>
-  (({ 1: '员工级', 2: '组长级', 3: '老板级' }) as Record<number, string>)[n] || '待确认'
-/**
- * 根据当前登录账号的身份权限自动确定问题密级（老板为3，组长为2，员工为1）。
- */
-const currentUserLevel = computed(() => {
-  if (!user.value) return 1
-  return user.value.is_boss ? 3 : user.value.is_leader ? 2 : 1
-})
-watch(
-  user,
-  (newUser) => {
-    if (newUser) {
-      askForm.input_level = newUser.is_boss ? 3 : newUser.is_leader ? 2 : 1
-      askForm.allow_external = !newUser.is_boss
-    } else {
-      askForm.input_level = 1
-      askForm.allow_external = true
-    }
-  },
-  { immediate: true },
-)
-/**
- * 将任务、资料与审批状态转为中文；未知状态不冒充成功。
- * @param s - 后端状态码。
- * @returns 中文显示文本。
- */
-const state = (s: string) =>
-  (
-    ({
-      queued: '等待处理',
-      running: '处理中',
-      review: '等待审核',
-      completed: '已完成',
-      cancelled: '已取消',
-      failed: '处理失败',
-      rejected: '审核未通过',
-      legacy: '待重新核验',
-      draft: '草稿',
-      ingesting: '正在解析',
-      published: '已发布',
-      deleted: '已删除',
-      pending: '待审批',
-      approved: '已批准',
-      stale: '已失效',
-    }) as Record<string, string>
-  )[s] || '待确认'
-/**
- * 将组织、任职和授权类型转为中文。
- * @param s - 后端类型值。
- * @returns 中文显示文本。
- */
-const kind = (s: string) =>
-  (
-    ({
-      company: '公司',
-      department: '部门',
-      team: '小组',
-      employee: '员工',
-      leader: '组长',
-      boss: '老板',
-      allow: '允许',
-      deny: '禁止',
-    }) as Record<string, string>
-  )[s] || s
-/**
- * 格式化中文时间；缺少时间显示占位符。
- * @param v - ISO 时间、日期对象或空值。
- * @returns 中文显示文本。
- */
-const date = (v: string | number | Date | null | undefined) =>
-  v ? new Date(v).toLocaleString('zh-CN', { hour12: false }) : '—'
-/**
- * 仅在当前可见组织中查找名称。
- * @param id - 组织编号。
- * @returns 中文显示文本。
- */
-const nodeName = (id: string) => orgs.value.find((n) => n.id === id)?.name || '待分配'
-/**
- * 仅在当前可见人员中查找姓名；未知人员不暴露身份。
- * @param id - 人员编号。
- * @returns 中文显示文本。
- */
-const personName = (id: string) =>
-  people.value.find((n) => n.id === id)?.display_name ||
-  (id === user.value?.id ? user.value?.display_name : '企业成员')
-/**
- * 并行刷新当前身份的获准资料与任务；首次改密账号仅进入个人设置。
- */
-async function load() {
+async function load(): Promise<void> {
   if (!user.value) return
   if (user.value.must_change) {
-    page.value = '个人设置'
+    page.value = '个人中心'
     return
   }
-  loading.value = true
-  try {
-    const [o, d, t, s, p, r] = await Promise.all([
-      api<Items<Organization>>('/organizations'),
-      api<Items<DocumentListItem>>('/documents'),
-      api<Items<Task>>('/tasks'),
-      api<Dashboard>('/dashboard'),
-      api<Items<User>>('/users'),
-      api<Items<Approval>>('/approvals'),
-    ])
-    orgs.value = o.items
-    docs.value = d.items
-    jobs.value = t.items
-    stats.value = s
-    people.value = p.items
-    requests.value = r.items
-  } finally {
-    loading.value = false
-  }
+  const query = search.value ? '?q=' + encodeURIComponent(search.value) : ''
+  const requests = await Promise.all([
+    api<Dashboard>('/dashboard'),
+    api<Items<Organization>>('/organizations'),
+    api<Items<DocumentListItem>>('/documents' + query),
+    api<Items<Task>>('/tasks'),
+    caps.value.permissions
+      ? api<Items<Approval>>('/approvals')
+      : Promise.resolve({ items: [] as Approval[] }),
+    caps.value.system || caps.value.permissions
+      ? api<Items<User>>('/users')
+      : Promise.resolve({ items: [] as User[] }),
+  ])
+  dashboard.value = requests[0]
+  orgs.value = requests[1].items
+  documents.value = requests[2].items
+  tasks.value = requests[3].items
+  approvals.value = requests[4].items
+  users.value = requests[5].items
+  if (!askForm.node_id && orgs.value.length) askForm.node_id = orgs.value[0].id
 }
+
 /**
- * 使用企业账号登录并设置问题默认密级；密码随即清空，老板默认禁用外部 AI。
+ * 使用企业账号登录并设置默认密级与外部分析开关；登录成功后立即清空密码输入。
  */
-async function signIn() {
+async function signIn(): Promise<void> {
   await action(async () => {
     const result = await api<LoginResponse>('/auth/login', 'POST', {
       ...loginForm,
       tenant_code: info.value.tenant_code,
     })
-    user.value = result.user
+    const signedUser = result.user
+    user.value = signedUser
     loginForm.password = ''
-    page.value = user.value!.must_change ? '个人设置' : '工作台'
-    askForm.input_level = user.value!.is_boss ? 3 : user.value!.is_leader ? 2 : 1
-    askForm.allow_external = !user.value!.is_boss
+    page.value = signedUser.must_change ? '个人中心' : '工作概览'
+    askForm.input_level = signedUser.is_boss ? 3 : signedUser.is_leader ? 2 : 1
+    askForm.allow_external = !signedUser.is_boss
     await load()
   })
 }
+
 /**
- * 撤销当前会话并清空业务内存；网络失败时保持当前界面以便重试。
+ * 退出当前账号并清空客户端状态。
  */
-async function signOut() {
+async function signOut(): Promise<void> {
   await action(async () => {
     await api('/auth/logout', 'POST')
     wipe()
     loginForm.username = ''
+    ElMessage.success('已退出登录')
   })
-}
-/**
- * 快速切换企业账号：填充真实账号；口令仅在运维显式开启时才随响应提供。
- * @param a - /api/info 返回的真实企业账号。
- * @param a.username - 企业账号用户名。
- * @param a.password - 企业账号口令（仅 ECOM_QUICK_LOGIN_PASSWORDS 开启时返回）。
- */
-function pickAccount(a: { username: string; password?: string }) {
-  loginForm.username = a.username
-  if (a.password) loginForm.password = a.password
-}
-/**
- * 切换中文菜单并按当前身份获取审计或运行状态；菜单可见不代替后端授权。
- * @param name - 中文菜单名称。
- */
-async function navigate(name: string) {
-  page.value = name
-  if (name === '运行状态')
-    await action(async () => {
-      runtimeStatus.value = await api<RuntimeStatus>('/system/status')
-    })
-  else if (name === '审计记录')
-    await action(async () => {
-      audits.value = (await api<Items<AuditEvent>>('/audit')).items
-    })
-  else await action(load)
 }
 
 /**
- * 提交问答任务并打开获准进度；空问题不提交，审核前不自行显示答案。
- * @returns 操作完成；空问题时返回中文提示，不创建任务。
+ * 快捷填充测试账号凭据。
+ * @param acc - 服务端返回的测试账号元数据。
  */
-async function submitQuestion() {
-  if (!askForm.question.trim()) return ElMessage.warning('请先填写你的问题')
+function pickAccount(acc: QuickAccount): void {
+  loginForm.username = acc.username
+  if (acc.password) loginForm.password = acc.password
+}
+
+/**
+ * 处理右上角用户菜单指令。
+ * @param cmd - 菜单命令标识。
+ */
+function handleUserCommand(cmd: string): void {
+  if (cmd === 'account') void navigate('个人中心')
+  else if (cmd === 'tasks') void navigate('我的任务')
+  else if (cmd === 'signout') void signOut()
+}
+
+/**
+ * 切换菜单并加载对应页面数据。
+ * @param name - 菜单名称。
+ */
+async function navigate(name: string): Promise<void> {
+  page.value = name
+  if (name === '系统状态') {
+    await action(async () => {
+      runtimeStatus.value = await api<RuntimeStatus>('/system/status')
+    })
+  } else if (name === '操作日志') {
+    await action(async () => {
+      audits.value = (await api<Items<AuditEvent>>('/audit')).items
+    })
+  } else {
+    await action(load)
+  }
+}
+
+/**
+ * 提交知识库问答任务并开启实时进度监听。
+ */
+async function submitQuestion(): Promise<void> {
+  if (!askForm.question.trim()) {
+    ElMessage.warning('请先填写咨询问题')
+    return
+  }
   askForm.input_level = currentUserLevel.value
   await action(async () => {
     const r = await api<CreatedResource>('/tasks', 'POST', askForm)
@@ -427,138 +1561,170 @@ async function submitQuestion() {
     await load()
   })
 }
+
 let taskStream: EventSource | null = null
+
 /**
- * 订阅任务事件流（SSE）：阶段与进度实时推送，终态一次性携带完整结果。
- * 核验完成前服务端只发阶段状态；连接失败时静默降级为既有轮询。
- * @param id - 任务编号；权限由服务端在事件流中持续核验。
+ * 订阅指定任务的服务端 SSE 进度流，连接异常时静默降级为轮询。
+ * @param id - 任务 ID。
  */
-function streamTask(id: string) {
+function streamTask(id: string): void {
   taskStream?.close()
   taskStream = new EventSource('/api/tasks/' + id + '/events')
-  /**
-   * 接收进度事件；只更新当前任务，忽略其他任务的事件。
-   * @param ev - 服务端推送的进度事件，载荷为阶段与进度字段。
-   */
-  taskStream.onmessage = (ev) => {
-    try {
-      const row = JSON.parse(ev.data) as {
-        id?: number
-        stage?: string
-        progress?: number
-        status?: string
-      }
-      if (!activeTask.value || activeTask.value.id !== id) return
-      if (row.stage) activeTask.value.stage = row.stage
-      if (typeof row.progress === 'number') activeTask.value.progress = row.progress
-      if (!activeTask.value.events) activeTask.value.events = []
-      if (row.stage && !activeTask.value.events.some((e) => e.stage === row.stage)) {
-        activeTask.value.events.push({
-          id: row.id || Date.now(),
-          stage: row.stage,
-          progress: row.progress || 0,
-          status: row.status || 'running',
-        })
-      }
-    } catch {}
-  }
-  taskStream.addEventListener('done', (ev) => {
-    taskStream?.close()
-    taskStream = null
-    try {
-      const done = JSON.parse((ev as MessageEvent).data) as { id: string }
-      if (activeTask.value?.id === done.id)
-        api<Task>('/tasks/' + done.id).then((t) => {
-          if (activeTask.value?.id === done.id) activeTask.value = t
-        })
-    } catch {}
-  })
-  /** 连接失败时静默关闭事件流，既有轮询继续兜底刷新进度。 */
-  taskStream.onerror = () => {
-    taskStream?.close()
-    taskStream = null
-  }
+  taskStream.onmessage =
+    /**
+     * 处理实时阶段推送。
+     * @param ev - SSE 消息事件。
+     */
+    (ev) => {
+      try {
+        const row = JSON.parse(ev.data) as {
+          id?: number
+          stage?: string
+          progress?: number
+          status?: string
+        }
+        if (!activeTask.value || activeTask.value.id !== id) return
+        if (row.stage) activeTask.value.stage = row.stage
+        if (typeof row.progress === 'number') activeTask.value.progress = row.progress
+        if (!activeTask.value.events) activeTask.value.events = []
+        let exists = false
+        for (const e of activeTask.value.events) {
+          if (e.stage === row.stage) {
+            exists = true
+            break
+          }
+        }
+        if (row.stage && !exists) {
+          activeTask.value.events.push({
+            id: row.id || Date.now(),
+            stage: row.stage,
+            progress: row.progress || 0,
+            status: row.status || 'running',
+          })
+        }
+      } catch {}
+    }
+  taskStream.addEventListener(
+    'done',
+    /**
+     * 监听终态事件并全量刷新任务结论。
+     * @param ev - 结束事件。
+     */
+    (ev) => {
+      taskStream?.close()
+      taskStream = null
+      try {
+        const done = JSON.parse((ev as MessageEvent).data) as { id: string }
+        if (activeTask.value?.id === done.id) {
+          api<Task>('/tasks/' + done.id).then(
+            /**
+             * 回写终态任务明细。
+             * @param t - 最新任务对象。
+             */
+            (t: Task) => {
+              if (activeTask.value?.id === done.id) activeTask.value = t
+            },
+          )
+        }
+      } catch {}
+    },
+  )
+  taskStream.onerror =
+    /** 连接异常时静默关闭流，保留轮询兜底刷新。 */
+    () => {
+      taskStream?.close()
+      taskStream = null
+    }
 }
+
 /**
- * 重新读取指定任务；权限或来源失效由服务端拒绝，不沿用历史答案。
- * @param id - 任务编号，读取时重新核验权限。
+ * 加载并展示指定任务详情。
+ * @param id - 任务 ID。
  */
-async function openTask(id: string) {
+async function openTask(id: string): Promise<void> {
   await action(async () => {
     activeTask.value = await api<Task>('/tasks/' + id)
     taskOpen.value = true
   })
 }
+
 /**
- * 提交审核决定并重新获取答案；批准不会把审核人的权限转给提问人。
- * @param approveOrTaskId - 批准决定或任务编号。
- * @param maybeApprove - 可选的批准布尔决定。
+ * 提交审核决定。
+ * @param approveOrTaskId - 审核决定或任务 ID。
+ * @param maybeApprove - 当首参为 ID 时的审核布尔决定。
  */
-async function reviewTask(approveOrTaskId: boolean | string, maybeApprove?: boolean) {
+async function reviewTask(
+  approveOrTaskId: boolean | string,
+  maybeApprove?: boolean,
+): Promise<void> {
   if (!activeTask.value) return
   const approve = typeof approveOrTaskId === 'boolean' ? approveOrTaskId : Boolean(maybeApprove)
   await action(async () => {
     await api('/tasks/' + activeTask.value!.id + '/review', 'POST', { approve, comment: '' })
-    ElMessage.success(approve ? '答案已发布' : '答案未通过审核')
+    ElMessage.success(approve ? '已通过并发布' : '已驳回')
     activeTask.value = await api<Task>('/tasks/' + activeTask.value!.id)
     await load()
   })
 }
+
 /**
- * 请求取消当前任务；执行与取消权限由服务端再次核验。
- * @param taskId - 可选的任务编号。
+ * 取消正在等待或执行的任务。
+ * @param taskId - 目标任务 ID。
  */
-async function cancelTask(taskId?: string) {
+async function cancelTask(taskId?: string): Promise<void> {
   const tid = taskId || activeTask.value?.id
   if (!tid) return
   await action(async () => {
     await api('/tasks/' + tid + '/cancel', 'POST')
-    ElMessage.success('已请求取消')
+    ElMessage.success('已申请取消任务')
     await load()
   })
 }
 
 /**
- * 重新发起任务排队与执行。
- * @param taskId - 可选的任务编号。
+ * 重新发起任务执行。
+ * @param taskId - 目标任务 ID。
  */
-async function retryTask(taskId?: string) {
+async function retryTask(taskId?: string): Promise<void> {
   const tid = taskId || activeTask.value?.id
   if (!tid) return
   await action(async () => {
     await api('/tasks/' + tid + '/retry', 'POST')
-    ElMessage.success('已重新发起任务排队')
+    ElMessage.success('已重新发起任务')
     await load()
   })
 }
 
 /**
- * 运行时向正在执行的任务注入中途动态干预指引。
- * @param taskId - 任务编号。
- * @param message - 干预指引正文。
+ * 向运行中任务发送补充要求。
+ * @param taskId - 目标任务 ID。
+ * @param message - 补充要求正文。
  */
-async function steerTask(taskId: string, message: string) {
+async function steerTask(taskId: string, message: string): Promise<void> {
   if (!taskId || !message.trim()) return
   await action(async () => {
     await api('/tasks/' + taskId + '/steer', 'POST', { message: message.trim() })
-    ElMessage.success('干预指令已注入执行管道')
+    ElMessage.success('补充要求已发送')
     await load()
   })
 }
+
 /**
- * 打开授权文档；不根据猜测编号展示未获准标题或正文。
- * @param id - 资料编号，读取时重新核验范围和密级。
+ * 查看授权文档详情。
+ * @param id - 文档 ID。
  */
-async function openDoc(id: string) {
+async function openDoc(id: string): Promise<void> {
   await action(async () => {
     detail.value = await api<DocumentRecord>('/documents/' + id)
     docOpen.value = true
   })
 }
+
 /**
- * 创建资料草稿表单；管理员默认公司员工级资料，发布仍需审核。
+ * 初始化新建文档表单。
  */
-function newDoc() {
+function newDoc(): void {
   Object.assign(docForm, {
     id: '',
     title: '',
@@ -574,10 +1740,11 @@ function newDoc() {
   selectedFile.value = null
   docEdit.value = true
 }
+
 /**
- * 读取当前资料版本到编辑表单；保存时携带版本，避免覆盖并发修改。
+ * 载入现有文档版本准备编辑。
  */
-function editDoc() {
+function editDoc(): void {
   if (!detail.value) return
   Object.assign(docForm, {
     id: detail.value.id,
@@ -591,24 +1758,26 @@ function editDoc() {
   selectedFile.value = null
   docEdit.value = true
 }
+
 /**
- * 保存草稿、附件或新版本；指定范围和密级，解析后仍等待发布审核。
+ * 保存新建文档或更新版本。
  */
-async function saveDoc() {
+async function saveDoc(): Promise<void> {
   await action(async () => {
-    if (docForm.id)
+    if (docForm.id) {
       await api('/documents/' + docForm.id, 'PUT', {
         title: docForm.title,
         body: docForm.body,
         version: docForm.version,
       })
-    else if (selectedFile.value) {
+    } else if (selectedFile.value) {
       const form = new FormData()
       form.append('file', selectedFile.value)
-      for (const k of ['title', 'scope', 'node_id', 'level'] as const)
+      for (const k of ['title', 'scope', 'node_id', 'level'] as const) {
         form.append(k, String(docForm[k]))
+      }
       await api('/documents/upload', 'POST', form)
-    } else
+    } else {
       await api('/documents', 'POST', {
         title: docForm.title,
         body: docForm.body,
@@ -616,40 +1785,44 @@ async function saveDoc() {
         scope: docForm.scope,
         level: docForm.level,
       })
+    }
     docEdit.value = false
     docOpen.value = false
-    ElMessage.success('资料已保存，等待发布审核')
+    ElMessage.success('文档已保存，等待审核发布')
     await load()
   })
 }
+
 /**
- * 读取浏览器选择的首个文件；格式、体积和权限仍由上传 API 校验。
- * @param e - 浏览器文件选择事件。
+ * 读取选择的文件对象。
+ * @param e - 文件选择器事件。
  */
-function picked(e: Event) {
+function picked(e: Event): void {
   selectedFile.value = (e.target as HTMLInputElement).files?.[0] || null
 }
+
 /**
- * 确认后删除获准资料；来源变化会使依赖该资料的历史答案不可读取。
+ * 确认后删除当前文档。
  */
-async function deleteDoc() {
+async function deleteDoc(): Promise<void> {
   if (!detail.value) return
   await action(async () => {
-    await ElMessageBox.confirm('删除后，引用这份资料的历史答案将不可读取。是否删除？', '删除资料', {
+    await ElMessageBox.confirm('删除后，引用该文档的历史答案将受限展示，确认删除？', '删除文档', {
       confirmButtonText: '删除',
       cancelButtonText: '取消',
       type: 'warning',
     })
     await api('/documents/' + detail.value!.id, 'DELETE')
     docOpen.value = false
-    ElMessage.success('资料已删除')
+    ElMessage.success('文档已删除')
     await load()
   })
 }
+
 /**
- * 填充当前授权配置；按编号查询返回的配置不能当作正文阅读许可。
+ * 打开文档权限与密级设置弹窗。
  */
-function showPolicy() {
+function showPolicy(): void {
   if (!detail.value) return
   Object.assign(policyForm, {
     scope: detail.value.scope,
@@ -660,24 +1833,26 @@ function showPolicy() {
   })
   policyOpen.value = true
 }
+
 /**
- * 提交资料密级、组织与 AI 许可申请；审批完成前不会自行扩大访问范围。
+ * 提交文档权限调整申请。
  */
-async function savePolicy() {
+async function savePolicy(): Promise<void> {
   await action(async () => {
     await api('/documents/' + detail.value!.id + '/policy', 'POST', {
       ...policyForm,
       node_id: policyForm.scope === 'company' ? root.value : policyForm.node_id,
     })
     policyOpen.value = false
-    ElMessage.success('权限调整已提交，等待老板审批')
+    ElMessage.success('权限变更已提交，等待企业负责人审批')
     await load()
   })
 }
+
 /**
- * 读取当前单文档授权并准备申请；不提升人员角色或默认编辑权限。
+ * 打开单文档人员授权窗口。
  */
-async function showGrant() {
+async function showGrant(): Promise<void> {
   currentGrants.value = []
   await action(async () => {
     currentGrants.value = (
@@ -693,24 +1868,26 @@ async function showGrant() {
   })
   grantOpen.value = true
 }
+
 /**
- * 提交指定人员的读取与下载授权申请；到期时间转换为明确的 UTC 时间。
+ * 提交单文档人员授权申请。
  */
-async function saveGrant() {
+async function saveGrant(): Promise<void> {
   await action(async () => {
     await api('/documents/' + detail.value!.id + '/grants', 'POST', {
       ...grantForm,
       expires_at: grantForm.expires_at ? new Date(grantForm.expires_at).toISOString() : null,
     })
     grantOpen.value = false
-    ElMessage.success('授权已提交，等待审批')
+    ElMessage.success('授权申请已提交审批')
     await load()
   })
 }
+
 /**
- * 读取当前身份获准的历史资料版本；不可读版本由后端过滤。
+ * 加载获准查阅的历史版本列表。
  */
-async function showVersions() {
+async function showVersions(): Promise<void> {
   await action(async () => {
     history.value = (
       await api<Items<DocumentVersion>>('/documents/' + detail.value!.id + '/versions')
@@ -718,22 +1895,24 @@ async function showVersions() {
     historyOpen.value = true
   })
 }
+
 /**
- * 审批获准申请；版本或人员变更导致旧申请失效时由服务端拒绝。
- * @param row - 可见申请。
- * @param approve - 批准或拒绝申请。
+ * 审批或驳回待处理申请。
+ * @param row - 审批记录。
+ * @param approve - 是否通过。
  */
-async function decideRequest(row: Approval, approve: boolean) {
+async function decideRequest(row: Approval, approve: boolean): Promise<void> {
   await action(async () => {
     await api('/approvals/' + row.id + '/decision', 'POST', { approve, comment: '' })
-    ElMessage.success(approve ? '申请已批准' : '申请已拒绝')
+    ElMessage.success(approve ? '已审批通过' : '已驳回申请')
     await load()
   })
 }
+
 /**
- * 准备新账号表单；企业环境口令须遵守服务端密码强度校验（生产 ≥12 位）。
+ * 初始化新建成员账号表单。
  */
-function newAccount() {
+function newAccount(): void {
   Object.assign(accountForm, {
     username: '',
     password: '',
@@ -743,34 +1922,38 @@ function newAccount() {
   })
   accountOpen.value = true
 }
+
 /**
- * 创建账号并另行申请任职或管理员身份；账号创建不自动取得业务机密。
+ * 新建企业成员账号并提交初始部门/角色审批。
  */
-async function saveAccount() {
+async function saveAccount(): Promise<void> {
   await action(async () => {
     const r = await api<CreatedResource>('/users', 'POST', {
       username: accountForm.username,
       password: accountForm.password,
       display_name: accountForm.display_name,
     })
-    if (accountForm.role === 'admin') await api('/users/' + r.id, 'PATCH', { system_admin: true })
-    else
+    if (accountForm.role === 'admin') {
+      await api('/users/' + r.id, 'PATCH', { system_admin: true })
+    } else {
       await api('/users/' + r.id + '/memberships', 'POST', {
         node_id: accountForm.role === 'boss' ? root.value : accountForm.node_id,
         role: accountForm.role,
         remove: false,
       })
+    }
     accountOpen.value = false
     accountForm.password = ''
-    ElMessage.success('账号已创建，任职待审批')
+    ElMessage.success('成员账号已创建，部门分配待审批')
     await load()
   })
 }
+
 /**
- * 读取人员现有任职到调整表单；多组任职按具体组织单独处理。
- * @param row - 当前可管理人员。
+ * 打开成员部门调整弹窗。
+ * @param row - 目标成员对象。
  */
-function membership(row: User) {
+function membership(row: User): void {
   Object.assign(memberForm, {
     user_id: row.id,
     node_id: row.memberships?.[0]?.node_id || root.value,
@@ -779,10 +1962,11 @@ function membership(row: User) {
   })
   memberOpen.value = true
 }
+
 /**
- * 提交组织任职的新增或移除申请；老板身份限定公司且受审批保护。
+ * 提交成员部门调整或移出申请。
  */
-async function saveMembership() {
+async function saveMembership(): Promise<void> {
   await action(async () => {
     await api('/users/' + memberForm.user_id + '/memberships', 'POST', {
       node_id: memberForm.role === 'boss' ? root.value : memberForm.node_id,
@@ -790,41 +1974,64 @@ async function saveMembership() {
       remove: memberForm.remove,
     })
     memberOpen.value = false
-    ElMessage.success('任职调整已提交，等待审批')
+    ElMessage.success('部门调整申请已提交')
     await load()
   })
 }
+
 /**
- * 申请切换账号状态；停用后的会话与任务授权由服务端撤销。
- * @param row - 拟调整状态的人员。
+ * 确认后申请停用或启用成员账号。
+ * @param row - 目标成员对象。
  */
-async function disableUser(row: User) {
+async function disableUser(row: User): Promise<void> {
   await action(async () => {
-    await api('/users/' + row.id, 'PATCH', { active: !row.active })
-    ElMessage.success('状态变更已提交，等待审批')
-    await load()
-  })
-}
-/**
- * 收集临时密码并申请重置；受保护身份必须经老板批准，密码不写日志。
- * @param row - 拟申请密码重置的人员。
- */
-async function resetPassword(row: User) {
-  await action(async () => {
-    const r = await ElMessageBox.prompt(
-      '输入新的临时密码（至少 12 位，批准后旧会话失效）。',
-      '申请重置密码',
-      { confirmButtonText: '提交申请', cancelButtonText: '取消', inputType: 'password' },
+    const targetAction = row.active ? '停用' : '启用'
+    await ElMessageBox.confirm(
+      `确定申请${targetAction}成员「${row.display_name}」(${row.username}) 吗？账号停用后将自动注销其当前登录会话。`,
+      `${targetAction}账号`,
+      { confirmButtonText: `确定${targetAction}`, cancelButtonText: '取消', type: 'warning' },
     )
-    await api('/users/' + row.id, 'PATCH', { new_password: r.value })
-    ElMessage.success('重置申请已提交，等待审批')
+    await api('/users/' + row.id, 'PATCH', { active: !row.active })
+    ElMessage.success(`账号${targetAction}申请已提交审批`)
     await load()
   })
 }
+
 /**
- * 准备部门或小组表单；上级组织按公司结构限定。
+ * 打开重置成员密码弹窗。
+ * @param row - 目标成员对象。
  */
-function newOrg() {
+function openResetDialog(row: User): void {
+  Object.assign(resetForm, {
+    user_id: row.id,
+    username: row.username,
+    display_name: row.display_name,
+    new_password: '',
+  })
+  resetOpen.value = true
+}
+
+/**
+ * 提交重置临时密码审批请求。
+ */
+async function submitResetPassword(): Promise<void> {
+  if (!resetForm.new_password) {
+    ElMessage.warning('请输入新的临时密码')
+    return
+  }
+  await action(async () => {
+    await api('/users/' + resetForm.user_id, 'PATCH', { new_password: resetForm.new_password })
+    resetForm.new_password = ''
+    resetOpen.value = false
+    ElMessage.success('密码重置申请已提交，等待审批')
+    await load()
+  })
+}
+
+/**
+ * 初始化新建部门表单。
+ */
+function newOrg(): void {
   Object.assign(orgForm, {
     id: '',
     name: '',
@@ -834,11 +2041,12 @@ function newOrg() {
   })
   orgOpen.value = true
 }
+
 /**
- * 读取现有组织以申请调整；公司根节点由界面和后端限制修改。
- * @param row - 已有组织。
+ * 载入现有部门信息准备编辑。
+ * @param row - 目标部门对象。
  */
-function editOrg(row: Organization) {
+function editOrg(row: Organization): void {
   Object.assign(orgForm, {
     id: row.id,
     name: row.name,
@@ -848,42 +2056,46 @@ function editOrg(row: Organization) {
   })
   orgOpen.value = true
 }
+
 /**
- * 创建组织或申请调整；组织变更后的业务访问范围需要负责人审批。
+ * 提交部门新建或调整申请。
  */
-async function saveOrg() {
+async function saveOrg(): Promise<void> {
   await action(async () => {
-    if (orgForm.id)
+    if (orgForm.id) {
       await api('/organizations/' + orgForm.id, 'PATCH', {
         name: orgForm.name,
         parent_id: orgForm.parent_id,
         active: orgForm.active,
       })
-    else
+    } else {
       await api('/organizations', 'POST', {
         name: orgForm.name,
         kind: orgForm.kind,
         parent_id: orgForm.parent_id,
       })
+    }
     orgOpen.value = false
-    ElMessage.success(orgForm.id ? '组织调整已提交，等待审批' : '组织已创建')
+    ElMessage.success(orgForm.id ? '部门调整申请已提交' : '部门已创建')
     await load()
   })
 }
+
 /**
- * 按负责人提供的编号申请阅读；响应不披露未授权资料是否存在。
+ * 按文档 ID 提交阅读权限申请。
  */
-async function requestAccess() {
+async function requestAccess(): Promise<void> {
   await action(async () => {
     await api('/documents/' + encodeURIComponent(accessId.value) + '/request-access', 'POST')
     accessOpen.value = false
     ElMessage.success('访问申请已提交')
   })
 }
+
 /**
- * 管理员按编号读取授权配置；结果不含机密标题和正文。
+ * 管理员按文档 ID 查询并配置权限策略。
  */
-async function manageById() {
+async function manageById(): Promise<void> {
   await action(async () => {
     detail.value = await api<DocumentRecord>(
       '/documents/' + encodeURIComponent(permissionId.value) + '/permission-status',
@@ -892,19 +2104,26 @@ async function manageById() {
     showPolicy()
   })
 }
+
 /**
- * 修改本人密码后清空状态并重新登录；旧会话立即撤销。
+ * 个人修改登录密码并强制重新登录。
+ * @param payload - 包含当前密码与新密码的变更载荷。
+ * @param payload.current_password - 当前登录密码。
+ * @param payload.new_password - 新登录密码。
  */
-async function changePassword() {
+async function changePassword(payload: {
+  current_password: string
+  new_password: string
+}): Promise<void> {
   await action(async () => {
-    await api('/auth/password', 'POST', passwordForm)
-    passwordForm.current_password = ''
-    passwordForm.new_password = ''
+    await api('/auth/password', 'POST', payload)
     wipe()
     ElMessage.success('密码已修改，请重新登录')
   })
 }
+
 let timer: ReturnType<typeof setInterval>
+
 onMounted(async () => {
   try {
     info.value = await api<WorkspaceInfo>('/info')
@@ -912,16 +2131,18 @@ onMounted(async () => {
     console.error('获取工作空间信息失败:', e)
   }
   try {
-    user.value = await api<User>('/auth/me')
-    askForm.input_level = user.value!.is_boss ? 3 : user.value!.is_leader ? 2 : 1
-    askForm.allow_external = !user.value!.is_boss
+    const me = await api<User>('/auth/me')
+    user.value = me
+    askForm.input_level = me.is_boss ? 3 : me.is_leader ? 2 : 1
+    askForm.allow_external = !me.is_boss
     await load()
   } catch {}
   timer = setInterval(async () => {
     if (!user.value || user.value.must_change) return
     try {
-      if (taskOpen.value && activeTask.value)
+      if (taskOpen.value && activeTask.value) {
         activeTask.value = await api<Task>('/tasks/' + activeTask.value.id)
+      }
       if (docOpen.value && detail.value) {
         try {
           detail.value = await api<DocumentRecord>('/documents/' + detail.value.id)
@@ -933,718 +2154,9 @@ onMounted(async () => {
     } catch {}
   }, 2500)
 })
+
 onUnmounted(() => {
   clearInterval(timer)
   taskStream?.close()
 })
 </script>
-
-<template>
-  <div v-if="!user" class="login-shell">
-    <aside class="login-story">
-      <div class="brand">
-        <img :src="logoUrl" alt="淘智 Logo" class="brand-logo-img" />
-        <span class="brand-title">淘智</span>
-      </div>
-      <div class="story-content">
-        <span class="eyebrow">知识 · 业务 · 协作</span>
-        <h1>每一份知识，<br />都有合适的边界。</h1>
-        <p>从商品资料到经营决策，让团队在清晰的权限范围内协作，让智能体用可靠依据回答。</p>
-        <div class="story-grid">
-          <div>分级资料<span>员工 · 组长 · 老板</span></div>
-          <div>组织协作<span>公司 · 部门 · 小组</span></div>
-          <div>可靠回答<span>来源可查 · 权限可控</span></div>
-          <div>操作留痕<span>授权申请 · 审核记录</span></div>
-        </div>
-      </div>
-      <span class="story-foot">数字化电商工作台</span>
-    </aside>
-    <main class="login-main">
-      <div class="login-card">
-        <h2>登录工作台</h2>
-        <p class="muted">使用企业账号登录</p>
-        <div
-          v-if="info.quick_accounts && info.quick_accounts.length"
-          style="margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center"
-        >
-          <small class="muted">快速切换企业账号：</small>
-          <el-button
-            v-for="a in info.quick_accounts"
-            :key="a.username"
-            size="small"
-            :type="loginForm.username === a.username ? 'primary' : 'default'"
-            @click="pickAccount(a)"
-            >{{ a.display_name }}（{{ a.role }}）</el-button
-          >
-        </div>
-        <el-form label-position="top" @submit.prevent="signIn">
-          <el-form-item label="账号">
-            <el-input
-              v-model="loginForm.username"
-              placeholder="企业账号"
-              autocomplete="username"
-              size="large"
-            />
-          </el-form-item>
-          <el-form-item label="密码">
-            <el-input
-              v-model="loginForm.password"
-              type="password"
-              show-password
-              placeholder="请输入密码"
-              autocomplete="current-password"
-              size="large"
-              @keyup.enter="signIn"
-            />
-          </el-form-item>
-          <el-button class="full" size="large" type="primary" :loading="busy" @click="signIn">
-            登录
-          </el-button>
-        </el-form>
-      </div>
-    </main>
-  </div>
-  <div v-else class="app-shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <img :src="logoUrl" alt="淘智 Logo" class="brand-logo-img" />
-        <div class="brand-meta">
-          <span class="brand-title">淘智</span>
-          <small class="brand-edition">数字化电商中台</small>
-        </div>
-      </div>
-      <div class="tenant-badge-box">
-        <span class="tenant-name-text">{{ info.name || '企业空间' }}</span>
-        <span class="tenant-online-dot"><span class="online-pulse"></span>已连接</span>
-      </div>
-      <nav class="sidebar-nav">
-        <button
-          v-for="name in menus"
-          :key="name"
-          :class="{ active: page === name }"
-          class="nav-item-btn"
-          @click="navigate(name)"
-        >
-          <span class="nav-icon">{{ NAV_ICONS[name] }}</span>
-          <span class="nav-label">{{ name }}</span>
-        </button>
-      </nav>
-    </aside>
-    <div class="main-shell">
-      <header class="topbar">
-        <div class="topbar-breadcrumb">
-          <span class="bc-platform">淘智</span>
-          <span class="bc-slash">/</span>
-          <span class="bc-current">{{ page }}</span>
-          <span class="bc-desc">{{ subtitles }}</span>
-        </div>
-        <div class="topbar-right">
-          <div class="topbar-user-badge">
-            <span class="user-avatar-round">{{ user.display_name?.slice(0, 1) }}</span>
-            <div class="user-name-col">
-              <span class="user-realname">{{ user.display_name }}</span>
-              <small class="user-roles-text">{{ user.roles.join(' · ') }}</small>
-            </div>
-          </div>
-          <el-button size="small" plain class="signout-btn" @click="signOut">退出登录</el-button>
-        </div>
-      </header>
-      <main v-loading="loading" class="content">
-        <div class="page-heading">
-          <div>
-            <h1>{{ page }}</h1>
-            <p>{{ subtitles }}</p>
-          </div>
-          <el-button v-if="page === '文档库' && caps.write" type="primary" @click="newDoc"
-            >新增资料</el-button
-          ><el-button v-else @click="action(load)">刷新</el-button>
-        </div>
-        <template v-if="page === '工作台'">
-          <div class="stat-grid">
-            <div
-              v-for="s in [
-                { l: '可读资料', v: stats.documents, u: '份' },
-                { l: '可见任务', v: stats.tasks, u: '个' },
-                { l: '待业务审核', v: stats.review, u: '个' },
-                { l: '已完成任务', v: stats.completed, u: '个' },
-              ]"
-              :key="s.l"
-              class="stat-card"
-            >
-              <span>{{ s.l }}</span
-              ><strong
-                >{{ s.v || 0 }}<small>{{ s.u }}</small></strong
-              >
-              <div class="stat-line"></div>
-            </div>
-          </div>
-          <div class="dashboard-grid">
-            <section class="panel user-profile-panel">
-              <h3>👤 个人信息</h3>
-              <div class="scope-cards-grid">
-                <div class="scope-card">
-                  <span>登录账号</span><strong>{{ user.username }}</strong>
-                </div>
-                <div class="scope-card">
-                  <span>用户名称</span><strong>{{ user.display_name }}</strong>
-                </div>
-                <div class="scope-card">
-                  <span>当前身份</span><strong>{{ user.roles.join(' / ') }}</strong>
-                </div>
-                <div class="scope-card">
-                  <span>所属团队</span
-                  ><strong>{{ stats.teams?.join('、') || '公司共享范围' }}</strong>
-                </div>
-                <div class="scope-card">
-                  <span>企业模型</span
-                  ><strong>{{ stats.model_ready ? '已就绪' : '待配置' }}</strong>
-                </div>
-                <div class="scope-card">
-                  <span>业务集成</span
-                  ><strong>{{ stats.business_ready ? '已连接' : '未接入' }}</strong>
-                </div>
-              </div>
-            </section>
-          </div>
-          <section class="panel">
-            <div class="section-heading">
-              <h3>近期资料</h3>
-              <el-button text type="primary" @click="page = '文档库'">查看文档库</el-button>
-            </div>
-            <div class="document-cards">
-              <button
-                v-for="d in docs.slice(0, 4)"
-                :key="d.id"
-                class="document-card"
-                @click="openDoc(d.id)"
-              >
-                <span class="doc-mark">文</span><strong>{{ d.title }}</strong
-                ><span>{{ level(d.level) }} · {{ d.node_name }}</span
-                ><small>{{ state(d.state) }}</small>
-              </button>
-            </div>
-            <el-empty v-if="!docs.length" description="暂无资料" />
-          </section>
-        </template>
-        <template v-else-if="page === '智能调研'">
-          <ResearchChatView :user="user" :api="api" />
-        </template>
-        <template v-else-if="page === '数据中台'">
-          <BiView :user="user" :api="api" />
-        </template>
-        <template v-else-if="page === '企业知识问答'"
-          ><div class="question-grid">
-            <section class="panel">
-              <el-form label-position="top">
-                <el-form-item label="问题">
-                  ><el-input
-                    v-model="askForm.question"
-                    type="textarea"
-                    :rows="7"
-                    maxlength="4000"
-                    show-word-limit
-                    placeholder="请说明商品型号、适配机型或需要核对的业务事项"
-                /></el-form-item>
-                <div class="form-columns">
-                  <el-form-item label="问题内容密级">
-                    <div class="account-level-badge">
-                      <el-tag
-                        :type="
-                          askForm.input_level === 3
-                            ? 'danger'
-                            : askForm.input_level === 2
-                              ? 'warning'
-                              : 'info'
-                        "
-                        effect="plain"
-                      >
-                        {{ level(askForm.input_level) }}
-                      </el-tag>
-                      <span class="level-hint">（根据登录账号权限自动确定）</span>
-                    </div>
-                  </el-form-item>
-                </div>
-                <div class="form-columns">
-                  <el-form-item label="商品编号（选填）"
-                    ><el-input
-                      v-model="askForm.sku_id"
-                      placeholder="接入库存系统后可查询" /></el-form-item
-                  ><el-form-item label="订单编号（选填）"
-                    ><el-input v-model="askForm.order_id" placeholder="接入订单系统后可查询"
-                  /></el-form-item>
-                </div>
-                <el-checkbox v-model="askForm.allow_external"
-                  >允许问题使用外部 AI（资料仍需获准）</el-checkbox
-                ><el-alert
-                  v-if="askForm.input_level === 3"
-                  title="老板级资料默认禁止发送外部 AI，需负责人另行批准。"
-                  type="info"
-                  :closable="false"
-                  show-icon
-                /><el-button
-                  class="submit-question"
-                  type="primary"
-                  size="large"
-                  :loading="busy"
-                  @click="submitQuestion"
-                  >提交问题</el-button
-                ></el-form
-              >
-            </section>
-            <section class="panel pipeline-panel">
-              <h3>处理流程</h3>
-              <div
-                v-for="(step, i) in [
-                  '校验身份与组织范围',
-                  '制定问题核验计划',
-                  '检索授权资料和业务数据',
-                  '调度专业智能体',
-                  '检查事实、数字与引用',
-                  '审核并发布可读答案',
-                ]"
-                :key="step"
-                class="pipeline-step"
-              >
-                <span>{{ i + 1 }}</span>
-                <div>{{ step }}</div>
-              </div>
-            </section>
-          </div></template
-        >
-        <template v-else-if="page === '任务中心' || page === '团队工作台'"
-          ><section class="panel">
-            <div class="section-heading">
-              <h3>{{ page === '团队工作台' ? '团队任务与审核' : '我的可见任务' }}</h3>
-              <el-button type="primary" @click="page = '企业知识问答'">提出新问题</el-button>
-            </div>
-            <el-table :data="jobs"
-              ><el-table-column label="问题" min-width="290"
-                ><template #default="{ row }"
-                  ><el-button
-                    text
-                    type="primary"
-                    class="table-question"
-                    @click="openTask(row.id)"
-                    >{{ row.question }}</el-button
-                  ></template
-                ></el-table-column
-              ><el-table-column label="状态" width="130"
-                ><template #default="{ row }"
-                  ><el-tag
-                    :type="
-                      row.state === 'completed'
-                        ? 'success'
-                        : row.state === 'failed'
-                          ? 'danger'
-                          : 'info'
-                    "
-                    >{{ state(row.state) }}</el-tag
-                  ></template
-                ></el-table-column
-              ><el-table-column label="当前阶段" prop="stage" min-width="150" /><el-table-column
-                label="范围"
-                width="140"
-                ><template #default="{ row }">{{
-                  nodeName(row.node_id)
-                }}</template></el-table-column
-              ><el-table-column label="密级" width="100"
-                ><template #default="{ row }">{{
-                  level(row.input_level)
-                }}</template></el-table-column
-              ><el-table-column label="提交时间" width="190"
-                ><template #default="{ row }">{{ date(row.created_at) }}</template></el-table-column
-              ></el-table
-            ><el-empty v-if="!jobs.length" description="暂无任务" /></section
-        ></template>
-        <template v-else-if="page === '文档库'">
-          <DocumentManager
-            :docs="docs"
-            :caps="caps"
-            @open-doc="openDoc"
-            @open-permission-id="permissionIdOpen = true"
-            @open-access="accessOpen = true"
-          />
-        </template>
-        <template v-else-if="page === '审核与授权'">
-          <PolicyMatrix
-            mode="approvals"
-            :requests="requests"
-            :tree="tree"
-            :people="people"
-            :caps="caps"
-            :person-name="personName"
-            :node-name="nodeName"
-            @decide-request="decideRequest"
-            @new-org="newOrg"
-            @edit-org="editOrg"
-            @new-account="newAccount"
-            @membership="membership"
-            @reset-password="resetPassword"
-            @disable-user="disableUser"
-          />
-        </template>
-        <template v-else-if="page === '组织与人员'">
-          <PolicyMatrix
-            mode="org"
-            :requests="requests"
-            :tree="tree"
-            :people="people"
-            :caps="caps"
-            :person-name="personName"
-            :node-name="nodeName"
-            @decide-request="decideRequest"
-            @new-org="newOrg"
-            @edit-org="editOrg"
-            @new-account="newAccount"
-            @membership="membership"
-            @reset-password="resetPassword"
-            @disable-user="disableUser"
-          />
-        </template>
-        <template v-else-if="page === '审计记录'"
-          ><section class="panel">
-            <el-table :data="audits"
-              ><el-table-column label="时间" width="190"
-                ><template #default="{ row }">{{ date(row.created_at) }}</template></el-table-column
-              ><el-table-column label="操作" prop="action" min-width="220" /><el-table-column
-                label="操作者"
-                min-width="140"
-                ><template #default="{ row }">{{
-                  personName(row.actor_id)
-                }}</template></el-table-column
-              ><el-table-column label="审计范围" width="130"
-                ><template #default="{ row }">{{
-                  row.system ? '系统运行' : '业务操作'
-                }}</template></el-table-column
-              ><el-table-column label="密级" width="110"
-                ><template #default="{ row }">{{ level(row.level) }}</template></el-table-column
-              ><el-table-column label="组织" min-width="160"
-                ><template #default="{ row }">{{
-                  nodeName(row.node_id)
-                }}</template></el-table-column
-              ></el-table
-            ><el-empty v-if="!audits.length" description="暂无记录" /></section
-        ></template>
-        <template v-else-if="page === '运行状态'"
-          ><section class="panel">
-            <h3>服务状态</h3>
-            <div class="stat-grid">
-              <div
-                v-for="s in [
-                  { l: '企业数据库', v: runtimeStatus.database ? '已连接' : '待连接' },
-                  { l: '任务进程', v: runtimeStatus.worker_available ? '运行中' : '待恢复' },
-                  { l: '企业模型', v: runtimeStatus.model_configured ? '已配置' : '待配置' },
-                  { l: '真实业务系统', v: runtimeStatus.business_configured ? '已配置' : '未接入' },
-                ]"
-                :key="s.l"
-                class="stat-card"
-              >
-                <span>{{ s.l }}</span
-                ><strong style="font-size: 22px">{{ s.v }}</strong>
-              </div>
-            </div>
-            <el-table :data="runtimeStatus.counts || []"
-              ><el-table-column label="任务状态"
-                ><template #default="{ row }">{{ state(row.state) }}</template></el-table-column
-              ><el-table-column label="本企业数量" prop="count"
-            /></el-table></section
-        ></template>
-        <template v-else-if="page === '个人设置'"
-          ><section class="panel profile-panel">
-            <h3>{{ user.must_change ? '首次登录，请修改初始密码' : '个人账号' }}</h3>
-            <div class="profile-details">
-              <span>姓名</span><strong>{{ user.display_name }}</strong
-              ><span>账号</span><strong>{{ user.username }}</strong
-              ><span>身份</span><strong>{{ user.roles.join(' / ') }}</strong>
-            </div>
-            <el-divider /><el-form label-position="top"
-              ><el-form-item label="原密码"
-                ><el-input
-                  v-model="passwordForm.current_password"
-                  type="password"
-                  show-password /></el-form-item
-              ><el-form-item label="新密码"
-                ><el-input
-                  v-model="passwordForm.new_password"
-                  type="password"
-                  show-password
-                  placeholder="至少 12 位，避免常见密码" /></el-form-item
-              ><el-button type="primary" :loading="busy" @click="changePassword"
-                >修改密码并重新登录</el-button
-              ></el-form
-            >
-          </section></template
-        >
-      </main>
-    </div>
-    <el-dialog v-model="docOpen" :title="detail?.title || '资料详情'" width="760px"
-      ><template v-if="detail"
-        ><div class="detail-meta">
-          <el-tag>{{ level(detail.level) }}</el-tag
-          ><span>{{ nodeName(detail.node_id) }}</span
-          ><span>第 {{ detail.current_version }} 版</span><span>{{ state(detail.state) }}</span>
-        </div>
-        <el-alert v-if="detail.error" :title="detail.error" type="error" :closable="false" />
-        <p class="muted" style="font-size: 11px">资料编号：{{ detail.id }}</p>
-        <pre class="document-body">{{ detail.body }}</pre>
-        <div class="dialog-actions">
-          <el-button v-if="detail.can_write" @click="editDoc">编辑资料</el-button
-          ><el-button @click="showVersions">版本记录</el-button
-          ><el-button v-if="caps.permissions" @click="showPolicy">权限设置</el-button
-          ><el-button v-if="caps.permissions" @click="showGrant">单文档授权</el-button
-          ><el-button
-            v-if="detail.can_download"
-            tag="a"
-            :href="'/api/documents/' + detail.id + '/download'"
-            >下载</el-button
-          ><el-button v-if="detail.can_write" type="danger" plain @click="deleteDoc"
-            >删除</el-button
-          >
-        </div></template
-      ></el-dialog
-    >
-    <TaskTimeline
-      v-model="taskOpen"
-      :task="activeTask"
-      @steer="steerTask"
-      @retry="retryTask"
-      @cancel="cancelTask"
-      @review="reviewTask"
-      @open-doc="openDoc"
-    />
-    <el-dialog
-      v-model="docEdit"
-      :title="docForm.id ? '编辑资料新版本' : '新增资料草稿'"
-      width="700px"
-      ><el-form label-position="top"
-        ><el-form-item label="资料名称"
-          ><el-input v-model="docForm.title" maxlength="160"
-        /></el-form-item>
-        <div v-if="!docForm.id" class="form-columns">
-          <el-form-item label="密级"
-            ><el-select v-model="docForm.level"
-              ><el-option
-                v-for="l in [1, 2, 3]"
-                :key="l"
-                :label="level(l)"
-                :value="l" /></el-select></el-form-item
-          ><el-form-item label="可见范围"
-            ><el-select
-              v-model="docForm.scope"
-              @change="docForm.scope === 'company' && (docForm.node_id = root)"
-              ><el-option label="所属组织" value="org" /><el-option
-                label="公司共享"
-                value="company" /><el-option label="仅指定人员" value="selected" /></el-select
-          ></el-form-item>
-        </div>
-        <el-form-item v-if="!docForm.id" label="归属组织"
-          ><el-select v-model="docForm.node_id" class="full"
-            ><el-option v-for="n in orgs" :key="n.id" :label="n.name" :value="n.id" /></el-select
-        ></el-form-item>
-        <div v-if="!docForm.id" class="upload-row">
-          <input
-            ref="fileInput"
-            type="file"
-            accept=".pdf,.docx,.txt,.md"
-            hidden
-            @change="picked"
-          /><el-button @click="fileInput?.click()">选择附件</el-button
-          ><span>{{ selectedFile?.name || '支持 PDF、Word、文本；最大 20 MB' }}</span>
-        </div>
-        <el-form-item v-if="!selectedFile" label="正文"
-          ><el-input
-            v-model="docForm.body"
-            type="textarea"
-            :rows="10"
-            placeholder="粘贴经过确认的企业资料" /></el-form-item
-        ><el-alert
-          title="草稿在解析、密级确认与发布审核完成前不开放。"
-          type="info"
-          :closable="false" /></el-form
-      ><template #footer
-        ><el-button @click="docEdit = false">取消</el-button
-        ><el-button type="primary" :loading="busy" @click="saveDoc"
-          >保存并提交解析</el-button
-        ></template
-      ></el-dialog
-    >
-    <el-dialog v-model="policyOpen" title="资料权限设置" width="560px"
-      ><el-form label-position="top"
-        ><el-form-item label="密级"
-          ><el-select
-            v-model="policyForm.level"
-            @change="policyForm.level === 3 && (policyForm.ai_allowed = false)"
-            ><el-option
-              v-for="l in [1, 2, 3]"
-              :key="l"
-              :label="level(l)"
-              :value="l" /></el-select></el-form-item
-        ><el-form-item label="范围"
-          ><el-select v-model="policyForm.scope"
-            ><el-option label="所属组织" value="org" /><el-option
-              label="公司共享"
-              value="company" /><el-option
-              label="仅指定人员"
-              value="selected" /></el-select></el-form-item
-        ><el-form-item label="归属组织"
-          ><el-select v-model="policyForm.node_id"
-            ><el-option
-              v-for="n in orgs"
-              :key="n.id"
-              :label="n.name"
-              :value="n.id" /></el-select></el-form-item
-        ><el-checkbox v-model="policyForm.ai_allowed">允许授权资料发送外部 AI 处理</el-checkbox
-        ><el-checkbox v-model="policyForm.download_allowed"
-          >允许符合常规阅读权限的人员下载</el-checkbox
-        ><el-alert
-          title="密级、范围与外部 AI 许可需老板审批。"
-          type="warning"
-          :closable="false" /></el-form
-      ><template #footer
-        ><el-button @click="policyOpen = false">取消</el-button
-        ><el-button type="primary" @click="savePolicy">提交审批</el-button></template
-      ></el-dialog
-    >
-    <el-dialog v-model="grantOpen" title="单文档授权申请" width="560px"
-      ><div v-if="currentGrants.length" class="missing-box">
-        <strong>当前单独授权</strong>
-        <p v-for="g in currentGrants" :key="g.user_id">
-          {{ g.display_name }} · {{ kind(g.effect) }} ·
-          {{ g.can_download ? '可下载' : '不可下载' }} · 只读 ·
-          {{ g.expires_at ? date(g.expires_at) : '长期' }}
-        </p>
-      </div>
-      <el-form label-position="top"
-        ><el-form-item label="授权人员"
-          ><el-select v-model="grantForm.user_id"
-            ><el-option
-              v-for="u in people"
-              :key="u.id"
-              :label="u.display_name + '（' + u.username + '）'"
-              :value="u.id" /></el-select></el-form-item
-        ><el-form-item label="授权方式"
-          ><el-select v-model="grantForm.effect"
-            ><el-option label="允许读取" value="allow" /><el-option
-              label="明确禁止访问"
-              value="deny" /></el-select></el-form-item
-        ><el-form-item label="有效期（留空表示长期）"
-          ><el-date-picker
-            v-model="grantForm.expires_at"
-            type="datetime"
-            placeholder="选择到期时间" /></el-form-item
-        ><el-checkbox v-model="grantForm.can_download">允许下载</el-checkbox
-        ><el-checkbox v-model="grantForm.revoke">撤销该人员的单独授权</el-checkbox
-        ><el-alert
-          title="仅授予本资料的阅读权限，不提升人员角色。"
-          type="info"
-          :closable="false" /></el-form
-      ><template #footer
-        ><el-button @click="grantOpen = false">取消</el-button
-        ><el-button type="primary" @click="saveGrant">提交审批</el-button></template
-      ></el-dialog
-    >
-    <el-dialog v-model="historyOpen" title="资料版本记录" width="760px"
-      ><el-collapse
-        ><el-collapse-item
-          v-for="v in history"
-          :key="v.version"
-          :title="'第 ' + v.version + ' 版 · ' + date(v.created_at)"
-        >
-          <pre class="document-body">{{ v.body }}</pre>
-        </el-collapse-item></el-collapse
-      ></el-dialog
-    >
-    <el-dialog v-model="accountOpen" title="新增企业账号" width="560px"
-      ><el-form label-position="top"
-        ><el-form-item label="姓名"><el-input v-model="accountForm.display_name" /></el-form-item
-        ><el-form-item label="账号"><el-input v-model="accountForm.username" /></el-form-item
-        ><el-form-item label="初始密码"
-          ><el-input v-model="accountForm.password" type="password" show-password /></el-form-item
-        ><el-form-item label="申请身份"
-          ><el-select v-model="accountForm.role"
-            ><el-option
-              v-for="r in ['employee', 'leader', 'boss', 'admin']"
-              :key="r"
-              :label="r === 'admin' ? '管理员' : kind(r)"
-              :value="r" /></el-select></el-form-item
-        ><el-form-item label="任职组织"
-          ><el-select v-model="accountForm.node_id"
-            ><el-option
-              v-for="n in orgs"
-              :key="n.id"
-              :label="n.name"
-              :value="n.id" /></el-select></el-form-item
-        ><el-alert
-          title="任职或管理员身份须经审批；创建账号不自动取得机密权限。"
-          type="info"
-          :closable="false" /></el-form
-      ><template #footer
-        ><el-button @click="accountOpen = false">取消</el-button
-        ><el-button type="primary" @click="saveAccount">创建并申请任职</el-button></template
-      ></el-dialog
-    >
-    <el-dialog v-model="memberOpen" title="组织任职调整" width="560px"
-      ><el-form label-position="top"
-        ><el-form-item label="人员"
-          ><el-input :model-value="personName(memberForm.user_id)" disabled /></el-form-item
-        ><el-form-item label="组织"
-          ><el-select v-model="memberForm.node_id"
-            ><el-option
-              v-for="n in orgs"
-              :key="n.id"
-              :label="n.name"
-              :value="n.id" /></el-select></el-form-item
-        ><el-form-item label="身份"
-          ><el-select v-model="memberForm.role"
-            ><el-option
-              v-for="r in ['employee', 'leader', 'boss']"
-              :key="r"
-              :label="kind(r)"
-              :value="r" /></el-select></el-form-item
-        ><el-checkbox v-model="memberForm.remove">移除此项任职</el-checkbox></el-form
-      ><template #footer
-        ><el-button @click="memberOpen = false">取消</el-button
-        ><el-button type="primary" @click="saveMembership">提交审批</el-button></template
-      ></el-dialog
-    >
-    <el-dialog v-model="orgOpen" :title="orgForm.id ? '调整组织' : '新增组织'" width="560px"
-      ><el-form label-position="top"
-        ><el-form-item label="名称"><el-input v-model="orgForm.name" /></el-form-item
-        ><el-form-item label="组织类型"
-          ><el-select v-model="orgForm.kind" :disabled="!!orgForm.id"
-            ><el-option label="部门" value="department" /><el-option
-              label="小组"
-              value="team" /></el-select></el-form-item
-        ><el-form-item label="上级组织"
-          ><el-select v-model="orgForm.parent_id"
-            ><el-option
-              v-for="n in orgs.filter((x) =>
-                orgForm.kind === 'department' ? x.kind === 'company' : x.kind === 'department',
-              )"
-              :key="n.id"
-              :label="n.name"
-              :value="n.id" /></el-select></el-form-item
-        ><el-checkbox v-if="orgForm.id" v-model="orgForm.active">启用组织</el-checkbox></el-form
-      ><template #footer
-        ><el-button @click="orgOpen = false">取消</el-button
-        ><el-button type="primary" @click="saveOrg">{{
-          orgForm.id ? '提交调整审批' : '创建组织'
-        }}</el-button></template
-      ></el-dialog
-    >
-    <el-dialog v-model="permissionIdOpen" title="按资料编号配置权限" width="500px"
-      ><p class="muted">输入资料编号，仅查询授权配置，不展示正文与标题。</p>
-      <el-input v-model="permissionId" placeholder="资料编号" /><template #footer
-        ><el-button @click="permissionIdOpen = false">取消</el-button
-        ><el-button type="primary" @click="manageById">查询权限配置</el-button></template
-      ></el-dialog
-    >
-    <el-dialog v-model="accessOpen" title="申请资料访问" width="500px"
-      ><p class="muted">输入资料编号申请访问，系统不公开未授权文档信息。</p>
-      <el-input v-model="accessId" placeholder="资料编号" /><template #footer
-        ><el-button @click="accessOpen = false">取消</el-button
-        ><el-button type="primary" @click="requestAccess">提交申请</el-button></template
-      ></el-dialog
-    >
-  </div>
-</template>
