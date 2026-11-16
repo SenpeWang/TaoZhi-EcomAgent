@@ -134,12 +134,10 @@ settings: Settings = get_settings()
 # ---------------------------------------------------------------------------
 # 企业服务运行时配置（数据层与中间件）
 # ---------------------------------------------------------------------------
-import os
 from dataclasses import dataclass
-from pathlib import Path
 from dotenv import dotenv_values
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = PROJECT_ROOT
 @dataclass(frozen=True)
 class Config:
     dsn: str
@@ -175,7 +173,7 @@ class Config:
     ann_max_distance: float = 0.45
     # RRF 融合后用本地交叉编码器（bge-reranker-v2-m3，挂嵌入服务 /rerank）对候选精排；失败自动回落融合序
     rerank_enabled: bool = True
-    rerank_candidates: int = 20
+    rerank_candidates: int = 30
     # 精排请求超时（秒）。精排是增强项：超时即回落融合序，绝不能拖慢问答主链路。
     rerank_timeout: float = 20.0
     # 检索结果单条正文字符上限（入库已按 850 窗口切分，这里是对外部写入/未来 chunker 的兜底闸门）
@@ -187,6 +185,26 @@ class Config:
     # 精排分数过滤：绝对阈值挡无关噪音，相对阈值挡远落后于首条的陪跑候选
     rerank_min_score: float = 0.05
     rerank_relative: float = 0.15
+    # 切片与检索调优参数（均可通过 ECOM_* 环境变量覆盖）
+    chunk_size: int = 850
+    chunk_overlap: int = 200
+    adaptive_hyde: bool = True
+    hyde_rerank_threshold: float = 0.65
+    hyde_max_tokens: int = 220
+    hyde_passage_chars: int = 800
+    recency_boost: float = 0.08
+    entity_quota: int = 2
+    tfidf_max_features: int = 24000
+    # 语义缓存参数（均可通过 ECOM_SEMANTIC_CACHE_* 覆盖）
+    semantic_cache_threshold: float = 0.96
+    semantic_cache_ttl: int = 3600
+    semantic_cache_max_entries: int = 10000
+    # 专家智能体推理参数（均可通过 ECOM_SPECIALIST_* 覆盖）
+    specialist_timeout: int = 45
+    specialist_max_tokens: int = 4096
+    specialist_concurrency: int = 2
+    # API 基址（供评测或客户端动态解析，不写死）
+    api_base_url: str = "http://127.0.0.1:18080"
     # 运维便利：登录页展示真实账号快速切换（默认关闭）
     quick_login: bool = False
     # 仅在 quick_login 打开且显式开启时，才把口令一并返回（仅限内网自用，禁止公网生产开启）
@@ -225,13 +243,29 @@ def load_config() -> Config:
       es_search_analyzer=values.get("ECOM_ES_SEARCH_ANALYZER","ik_smart"),
       ann_max_distance=float(values.get("ECOM_ANN_MAX_DIST","0.45")),
       rerank_enabled=values.get("ECOM_RERANK_ENABLED","true")=="true",
-      rerank_candidates=int(values.get("ECOM_RERANK_CANDIDATES","20")),
+      rerank_candidates=int(values.get("ECOM_RERANK_CANDIDATES","30")),
       rerank_timeout=float(values.get("ECOM_RERANK_TIMEOUT","20")),
       quote_max_chars=int(values.get("ECOM_QUOTE_MAX_CHARS","1200")),
       rerank_chars=int(values.get("ECOM_RERANK_CHARS","1000")),
       max_chunks_per_doc=int(values.get("ECOM_MAX_CHUNKS_PER_DOC","3")),
       rerank_min_score=float(values.get("ECOM_RERANK_MIN_SCORE","0.05")),
       rerank_relative=float(values.get("ECOM_RERANK_RELATIVE","0.15")),
+      chunk_size=int(values.get("ECOM_CHUNK_SIZE","850")),
+      chunk_overlap=int(values.get("ECOM_CHUNK_OVERLAP","200")),
+      adaptive_hyde=values.get("ECOM_ADAPTIVE_HYDE","true")=="true",
+      hyde_rerank_threshold=float(values.get("ECOM_HYDE_RERANK_THRESHOLD","0.65")),
+      hyde_max_tokens=int(values.get("ECOM_HYDE_MAX_TOKENS","220")),
+      hyde_passage_chars=int(values.get("ECOM_HYDE_PASSAGE_CHARS","800")),
+      recency_boost=float(values.get("ECOM_RECENCY_BOOST","0.08")),
+      entity_quota=int(values.get("ECOM_ENTITY_QUOTA","2")),
+      tfidf_max_features=int(values.get("ECOM_TFIDF_MAX_FEATURES","24000")),
+      semantic_cache_threshold=float(values.get("ECOM_SEMANTIC_CACHE_THRESHOLD","0.96")),
+      semantic_cache_ttl=int(values.get("ECOM_SEMANTIC_CACHE_TTL","3600")),
+      semantic_cache_max_entries=int(values.get("ECOM_SEMANTIC_CACHE_MAX_ENTRIES","10000")),
+      specialist_timeout=int(values.get("ECOM_SPECIALIST_TIMEOUT","45")),
+      specialist_max_tokens=int(values.get("ECOM_SPECIALIST_MAX_TOKENS","4096")),
+      specialist_concurrency=int(values.get("ECOM_SPECIALIST_CONCURRENCY","2")),
+      api_base_url=values.get("ECOM_API_BASE_URL","http://127.0.0.1:18080"),
       quick_login=values.get("ECOM_QUICK_LOGIN","false")=="true",
       quick_login_passwords=values.get("ECOM_QUICK_LOGIN_PASSWORDS","false")=="true",
       quick_login_password=values.get("ECOM_QUICK_LOGIN_PASSWORD",""))

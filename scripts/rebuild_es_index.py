@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 
 from taozhi.knowledge.db import database_connection, fetch_all
-from taozhi.enterprise import es_index
+from taozhi.knowledge import es_index
 
 
 def main() -> int:
@@ -38,8 +38,9 @@ def main() -> int:
     total, batch = 0, 2000
     with database_connection() as c:
         cur = c.cursor()
-        cur.execute("""SELECT c.id,c.tenant_id,c.document_id,c.version,c.ordinal,c.page,c.text
+        cur.execute("""SELECT c.id,c.tenant_id,c.document_id,c.version,c.ordinal,c.page,c.text,d.title
             FROM chunks c JOIN documents d ON d.id=c.document_id AND d.current_version=c.version
+            WHERE d.state='published'
             ORDER BY c.document_id,c.ordinal""")
         while True:
             rows = cur.fetchmany(batch)

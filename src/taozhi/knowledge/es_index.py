@@ -41,6 +41,7 @@ def index_mapping(es=None) -> dict:
             "version":{"type":"integer"},
             "ordinal":{"type":"integer"},
             "page":{"type":"integer"},
+            "title":{"type":"text","analyzer":analyzer,"search_analyzer":search_analyzer},
             "text":{"type":"text","analyzer":analyzer,"search_analyzer":search_analyzer},
         }},
     }
@@ -74,7 +75,7 @@ def index_chunks(rows) -> int:
         for r in rows:
             yield {"_index":index,"_id":r["id"],"_source":{
                 "tenant_id":r["tenant_id"],"document_id":r["document_id"],"version":r["version"],
-                "ordinal":r["ordinal"],"page":r["page"],"text":r["text"]}}
+                "ordinal":r["ordinal"],"page":r["page"],"title":r.get("title") or "","text":r["text"]}}
     ok,_=bulk(es,gen(),raise_on_error=False,refresh=False)
     return ok
 
@@ -92,6 +93,6 @@ def search_bm25(tenant_id: str, allowed_doc_ids: list, query: str, size: int=200
     acl={"bool":{"filter":[
         {"term":{"tenant_id":tenant_id}},
         {"terms":{"document_id":list(allowed_doc_ids)}}]}}
-    q={"bool":{"must":[{"match":{"text":query}}],"filter":acl["bool"]["filter"]}} if query else acl
+    q={"bool":{"must":[{"multi_match":{"query":query,"fields":["text","title^1.5"]}}],"filter":acl["bool"]["filter"]}} if query else acl
     r=es.search(index=index,size=size,query=q,_source=False)
     return {hit["_id"]:rank for rank,hit in enumerate(r["hits"]["hits"],1)}

@@ -130,7 +130,6 @@ def test_query_embedding_cache_evicts_oldest(monkeypatch):
                         lambda texts, instruct=False: np.tile(
                             np.arange(DIM, dtype="float32"), (len(texts), 1)))
     monkeypatch.setattr(embedding, "QUERY_CACHE_MAX", 3)
-    calls = []
     for i in range(5):
         embedding.encode_query(f"问题{i}")
     embedding.encode_query("问题0")      # 把 0 提到最新

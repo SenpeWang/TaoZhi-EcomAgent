@@ -15,7 +15,6 @@ import time
 from ..config import load_config
 from ..knowledge.db import fetch_all, fetch_one
 from taozhi.domain.errors import Denied
-from ..knowledge.retriever import words
 
 # 指标 SQL 只允许访问的表（企业工作台自身表 + 业务系统表，接入时在此登记）
 ALLOWED_METRIC_TABLES = frozenset({

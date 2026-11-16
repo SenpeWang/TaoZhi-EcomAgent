@@ -18,7 +18,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from ..config import Settings, get_settings
-from .observability import record_llm_call, record_llm_error
+from .observability import get_active_usage, record_llm_call, record_llm_error
 from .parsers import _JSON_RULES, clean_model_output, get_pydantic_parser
 from .router import (
     _PREFERRED_ENDPOINT,
@@ -135,6 +135,39 @@ class LLMClient:
         if recorder is not None:
             recorder.record(event)
 
+    def _on_invoke_success(
+        self,
+        ep: SensenovaEndpoint,
+        tier: ModelTier,
+        result: AIMessage,
+        elapsed_s: float,
+        *,
+        failover: bool,
+        reason: str,
+    ) -> None:
+        latency_ms = int(elapsed_s * 1000)
+        usage = extract_usage(result)
+        record_llm_call(
+            tier.value,
+            elapsed_s,
+            usage["prompt_tokens"],
+            usage["completion_tokens"],
+            failover=failover,
+        )
+        self._registry.record_success(ep, latency_ms)
+        self._record_route(
+            {
+                "endpoint_id": ep.endpoint_id,
+                "label": ep.label,
+                "region": ep.region,
+                "model": ep.model,
+                "outcome": "ok",
+                "reason": reason,
+                "latency_ms": latency_ms,
+                "failover": failover,
+            }
+        )
+
     def chat(
         self,
         prompt: Union[str, List[Message]],
@@ -152,7 +185,7 @@ class LLMClient:
             tier: 模型调用层级。
             system: 系统提示词。
             temperature: 采样温度。
-            max_tokens: 最大生成 Token 数。
+            max_tokens: 最大生成 Token 数（显式传入时按调用方上限控制，不再被强拉高至 2048）。
             _empty_retry: 空回复内部重试计数器。
             allow_overseas: 可选覆盖是否允许转移至商汤海外版。
 
@@ -164,7 +197,10 @@ class LLMClient:
             messages = [SystemMessage(content=system)] + messages
 
         effective_overseas = self.allow_overseas if allow_overseas is None else allow_overseas
-        budget = max(2048, min(max_tokens or self.settings.llm_max_tokens, self.settings.llm_output_cap))
+        if max_tokens is not None:
+            budget = max(64, min(int(max_tokens), self.settings.llm_output_cap))
+        else:
+            budget = max(2048, min(self.settings.llm_max_tokens, self.settings.llm_output_cap))
         eff_temp = temperature if temperature is not None else self.settings.llm_temperature
 
         endpoints = build_sensenova_endpoints(self.settings)
@@ -199,22 +235,13 @@ class LLMClient:
                     bound_client = raw_client.bind(temperature=eff_temp, max_tokens=budget)
                     t0 = time.perf_counter()
                     result = bound_client.invoke(messages)
-                    elapsed_s = time.perf_counter() - t0
-                    latency_ms = int(elapsed_s * 1000)
-                    usage = extract_usage(result)
-                    record_llm_call(tier.value, elapsed_s, usage["prompt_tokens"], usage["completion_tokens"])
-                    self._registry.record_success(ep, latency_ms)
-                    self._record_route(
-                        {
-                            "endpoint_id": ep.endpoint_id,
-                            "label": ep.label,
-                            "region": ep.region,
-                            "model": ep.model,
-                            "outcome": "ok",
-                            "reason": "failover_recovered" if had_failover else "primary_ok",
-                            "latency_ms": latency_ms,
-                            "failover": had_failover,
-                        }
+                    self._on_invoke_success(
+                        ep,
+                        tier,
+                        result,
+                        time.perf_counter() - t0,
+                        failover=had_failover,
+                        reason="failover_recovered" if had_failover else "primary_ok",
                     )
                     break
                 except Exception as exc:
@@ -244,24 +271,13 @@ class LLMClient:
                         try:
                             t0 = time.perf_counter()
                             result = raw_client.bind(temperature=eff_temp, max_tokens=budget).invoke(messages)
-                            elapsed_s = time.perf_counter() - t0
-                            latency_ms = int(elapsed_s * 1000)
-                            usage = extract_usage(result)
-                            record_llm_call(
-                                tier.value, elapsed_s, usage["prompt_tokens"], usage["completion_tokens"]
-                            )
-                            self._registry.record_success(ep, latency_ms)
-                            self._record_route(
-                                {
-                                    "endpoint_id": ep.endpoint_id,
-                                    "label": ep.label,
-                                    "region": ep.region,
-                                    "model": ep.model,
-                                    "outcome": "ok",
-                                    "reason": "single_endpoint_retry_ok",
-                                    "latency_ms": latency_ms,
-                                    "failover": False,
-                                }
+                            self._on_invoke_success(
+                                ep,
+                                tier,
+                                result,
+                                time.perf_counter() - t0,
+                                failover=False,
+                                reason="single_endpoint_retry_ok",
                             )
                             break
                         except Exception as exc2:
@@ -323,6 +339,9 @@ class LLMClient:
         last_raw = ""
 
         for attempt in range(retries):
+            acc = get_active_usage()
+            if acc is not None:
+                acc.add_json_attempt(is_retry=(attempt > 0))
             try:
                 raw = self.chat(
                     full_prompt

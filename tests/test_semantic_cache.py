@@ -80,3 +80,66 @@ def test_level_gate_still_blocks_upward(cache):
               [{"kind": "document", "document_id": "d2"}], input_level=2, redacted=False)
 
     assert cache.get("t1", "毛利率", input_level=1, boss=False) is None
+
+
+def test_boss_skips_redacted_without_occluding_boss_entry(monkeypatch):
+    """staff 已脱敏条目的相似度更高时，boss 应跳过它并命中同问题未脱敏的 boss 条目。"""
+    monkeypatch.setattr(sc, "embedding_available", lambda: True)
+    # 先放入一条相似度更高的 staff 脱敏条目，再放一条相似度略低但未脱敏的 boss 条目
+    v_high = np.zeros(512, dtype="float32")
+    v_high[0] = 1.0
+    v_mid = np.zeros(512, dtype="float32")
+    v_mid[0] = 0.9
+    v_mid[1] = 0.435
+    seq = iter([np.expand_dims(v_high, 0), np.expand_dims(v_mid, 0), np.expand_dims(v_high, 0)])
+    monkeypatch.setattr(sc, "encode_query", lambda q: next(seq))
+
+    cache_inst = SemanticCache(similarity_threshold=0.8)
+    cache_inst.put("t1", "客户电话多少", "138****5678", [{"title": "资料", "quote": "138****5678"}],
+                   [{"kind": "document", "document_id": "d1"}], input_level=1, redacted=True)
+    cache_inst.put("t1", "客户电话是什么", RAW_ANSWER, [{"title": "资料", "quote": RAW_QUOTE}],
+                   [{"kind": "document", "document_id": "d1"}], input_level=1, redacted=False)
+
+    hit = cache_inst.get("t1", "客户电话多少", input_level=1, boss=True)
+    assert hit is not None
+    assert hit["answer"] == RAW_ANSWER
+
+
+def test_invalidate_by_document_and_entry_id(cache):
+    """按文档 ID 或条目 ID 精准驱逐后，其余文档缓存仍保留。"""
+    cache.put("t1", "问题A", "答案A", [{"title": "D1", "quote": "q1"}], [{"kind": "document", "document_id": "d1"}])
+    cache.put("t1", "问题B", "答案B", [{"title": "D2", "quote": "q2"}], [{"kind": "document", "document_id": "d2"}])
+
+    removed = cache.invalidate("t1", document_id="d1")
+    assert removed == 1
+    hit = cache.get("t1", "问题B", input_level=1, boss=False)
+    assert hit is not None and hit["answer"] == "答案B"
+    assert cache.invalidate("t1", entry_id=hit["entry_id"]) == 1
+    assert cache.get("t1", "问题B", input_level=1, boss=False) is None
+
+
+def test_cross_entity_query_does_not_collide(cache):
+    """不同商品型号/实体（如 LX-20 vs LX-21）即使向量极高相似也禁止互相命中缓存。"""
+    cache.put(
+        "t1",
+        "用 LX-20 65W 氮化镓充电器搭配 iPhone 15 兼容性结论是什么？",
+        "LX-20 适配 iPhone 15，峰值 65W",
+        [{"title": "LX-20 规格", "quote": "65W"}],
+        [{"kind": "document", "document_id": "d_lx20"}],
+    )
+    assert (
+        cache.get(
+            "t1",
+            "用 LX-21 140W 氮化镓充电器搭配 MacBook Pro 16 兼容性结论是什么？",
+            input_level=1,
+            boss=False,
+        )
+        is None
+    )
+    same = cache.get(
+        "t1",
+        "用 LX-20 充电器搭配 iPhone 15 行不行？",
+        input_level=1,
+        boss=False,
+    )
+    assert same is not None and "65W" in same["answer"]

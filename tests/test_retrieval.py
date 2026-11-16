@@ -11,7 +11,7 @@ from taozhi.knowledge import retriever as ent_retriever
 class _Cfg:
     def __init__(self, enabled=True, candidates=20, rerank_chars=1000,
                  max_chunks_per_doc=3, rerank_min_score=0.05, rerank_relative=0.15,
-                 quote_max_chars=1200):
+                 quote_max_chars=1200, ann_max_distance=0.45):
         self.rerank_enabled = enabled
         self.rerank_candidates = candidates
         self.rerank_chars = rerank_chars
@@ -19,6 +19,7 @@ class _Cfg:
         self.rerank_min_score = rerank_min_score
         self.rerank_relative = rerank_relative
         self.quote_max_chars = quote_max_chars
+        self.ann_max_distance = ann_max_distance
 
 
 def _fused_chunks(n=5):
@@ -144,3 +145,128 @@ def test_enterprise_dedup_removes_identical_text():
     chunks = _mk_chunks([("同一段正文", "d1"), ("同一 段\n正文", "d1"), ("另一段正文", "d2")])
     kept = ent_retriever._dedup_text(chunks)
     assert [c["id"] for c in kept] == ["k0", "k2"]
+
+
+def test_rerank_includes_document_title(monkeypatch):
+    """精排送入交叉编码器的文本应携带文档标题，避免标题写型号正文写参数被错杀。"""
+    chunks = [{"id": "k0", "text": "功率 65W", "doc_title": "LX-20 规格书", "document_id": "d1", "version": 1, "page": 1}]
+    chunks.append({"id": "k1", "text": "功率 140W", "document_id": "d2", "version": 1, "page": 1})
+    fused = np.array([0.03, 0.02])
+    captured = {}
+
+    def _fake_rerank(q, texts):
+        captured["texts"] = list(texts)
+        return [0.9, 0.2]
+
+    monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg())
+    monkeypatch.setattr(ent_embedding, "rerank", _fake_rerank)
+    ent_retriever._rerank_order("LX-20 功率", chunks, fused, allowed=_mk_allowed(["d1", "d2"]))
+    assert captured["texts"][0] == "功率 65W\nLX-20 规格书"
+    assert captured["texts"][1] == "功率 140W\n文档d2"
+
+
+def test_recency_tiebreak_and_entity_diversity(monkeypatch):
+    """同系列多版本非历史问句优先最新版本；多实体对比问句保底覆盖各个提及实体。"""
+    chunks = [
+        {"id": "k_v1", "text": "整机保修 12 个月", "doc_title": "保修政策 V1.0（2025-03-01 生效）", "document_id": "d_v1", "version": 1, "page": 1},
+        {"id": "k_v2", "text": "整机保修 18 个月", "doc_title": "保修政策 V2.0（2026-09-01 生效）", "document_id": "d_v2", "version": 1, "page": 1},
+    ]
+    allowed = {
+        "d_v1": {"id": "d_v1", "acl_version": 1, "title": chunks[0]["doc_title"], "level": 1, "node_id": "n1", "ai_allowed": True},
+        "d_v2": {"id": "d_v2", "acl_version": 1, "title": chunks[1]["doc_title"], "level": 1, "node_id": "n1", "ai_allowed": True},
+    }
+    monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg())
+    # V1.0 精排分略高但属于旧版本，当前问句应将 V2.0 提到首位
+    monkeypatch.setattr(ent_embedding, "rerank", lambda q, texts: [0.88, 0.85])
+    out_cur = ent_retriever._finalize("整机保修期现在是多久？", chunks, np.array([0.03, 0.03]), 5, allowed, _P())
+    assert out_cur[0]["document_id"] == "d_v2"
+    # 历史差异问句不做旧版降权
+    out_hist = ent_retriever._finalize("保修政策什么时候改的？", chunks, np.array([0.03, 0.03]), 5, allowed, _P())
+    assert out_hist[0]["document_id"] == "d_v1"
+
+    # 多实体对比保底：前 2 条同一款产品文档时，第 3 条的另一型号文档应被提上 top-2
+    cmp_chunks = [
+        {"id": "c0", "text": "LX-21 第一段 140W", "doc_title": "LX-21 手册", "document_id": "d21", "version": 1, "page": 1},
+        {"id": "c1", "text": "LX-21 第二段 三C口", "doc_title": "LX-21 手册", "document_id": "d21", "version": 1, "page": 2},
+        {"id": "c2", "text": "LX-30 参数 120W", "doc_title": "LX-30 规格表", "document_id": "d30", "version": 1, "page": 1},
+    ]
+    cmp_allowed = {
+        "d21": {"id": "d21", "acl_version": 1, "title": "LX-21 手册", "level": 1, "node_id": "n1", "ai_allowed": True},
+        "d30": {"id": "d30", "acl_version": 1, "title": "LX-30 规格表", "level": 1, "node_id": "n1", "ai_allowed": True},
+    }
+    monkeypatch.setattr(ent_embedding, "rerank", lambda q, texts: [0.95, 0.90, 0.82])
+    cmp_out = ent_retriever._finalize("LX-30 和 LX-21 哪个功率高？", cmp_chunks, np.array([0.03, 0.025, 0.02]), 2, cmp_allowed, _P())
+    assert {r["document_id"] for r in cmp_out} == {"d21", "d30"}
+
+
+def test_search_documents_fast_path_runs_hyde_pg_ann_and_title_rerank(monkeypatch):
+    """ES/PG 快道中 hyde_vector 应真实参与 _pg_ann 召回，且精选切片带标题送入 rerank。"""
+    from taozhi.knowledge import es_index
+
+    docs = [{"id": "d1", "title": "LX-30 规格", "scope": "company", "level": 1, "node_id": "n1", "ai_allowed": True, "acl_version": 1}]
+    chunks = [{"id": "c_hyde", "tenant_id": "t1", "document_id": "d1", "version": 1, "ordinal": 0, "page": 1, "text": "120W 双 C 口", "doc_title": "LX-30 规格", "embedding": None}]
+    ann_calls = []
+
+    monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg())
+    monkeypatch.setattr(ent_retriever, "can_read", lambda conn, p, d: True)
+    monkeypatch.setattr(es_index, "available", lambda: True)
+    monkeypatch.setattr(es_index, "search_bm25", lambda tid, allowed, q: {})
+    monkeypatch.setattr(ent_embedding, "available", lambda: True)
+    monkeypatch.setattr(ent_embedding, "encode_query", lambda q: np.ones((1, 512), dtype="float32"))
+
+    def _fake_pg_ann(conn, tid, allowed_ids, vec, size=200):
+        ann_calls.append(float(vec[0]))
+        return {"c_hyde": 1} if float(vec[0]) > 1.5 else {}
+
+    monkeypatch.setattr(ent_retriever, "_pg_ann", _fake_pg_ann)
+
+    def _fake_fetch_all(conn, sql, params=()):
+        if "FROM documents" in sql:
+            return docs
+        if "FROM chunks" in sql:
+            return chunks
+        return []
+
+    monkeypatch.setattr(ent_retriever, "fetch_all", _fake_fetch_all)
+    monkeypatch.setattr(ent_embedding, "rerank", lambda q, texts: [0.9])
+
+    hyde_vec = np.full(512, 2.0, dtype="float32")
+    out = ent_retriever.search_documents(None, _P(), "120W 充电器", limit=5, hyde_vector=hyde_vec)
+    assert len(ann_calls) == 2  # query ANN + hyde ANN
+    assert len(out) == 1 and out[0]["chunk_id"] == "c_hyde"
+    assert out[0]["title"] == "LX-30 规格"
+
+
+def test_ingest_split_preserves_markdown_table_blocks():
+    """结构化切片在预算内不得把 Markdown 表格从行中劈断。"""
+    from taozhi.knowledge.ingest import split
+
+    doc = (
+        "# 产品对比\n\n"
+        "| 型号 | 功率 | 接口 |\n"
+        "| --- | --- | --- |\n"
+        "| LX-20 | 65W | 2C1A |\n"
+        "| LX-30 | 120W | 2C |\n\n"
+        + ("补充说明段。" * 40)
+    )
+    chunks = split([(1, doc)], "doc_tbl", 1, max_chars=260, overlap=60)
+    assert len(chunks) >= 2
+    assert "| LX-20 | 65W | 2C1A |\n| LX-30 | 120W | 2C |" in chunks[0]["text"]
+
+
+def test_entity_diversity_prefers_title_dedicated_documents(monkeypatch):
+    """多实体保底应优先保送标题命中实体的专属文档，不被通用综述文档挤占。"""
+    chunks = [
+        {"id": "g0", "text": "培训手册提到 C1 与 C5 贴膜销售话术", "doc_title": "客服上岗培训手册", "document_id": "d_gen", "version": 1, "page": 1},
+        {"id": "c1", "text": "直板机屏幕保护 0.33mm", "doc_title": "C1 钢化膜（评测产品资料）", "document_id": "d_c1", "version": 1, "page": 1},
+        {"id": "c5", "text": "折叠屏内屏专用", "doc_title": "C5 全胶陶瓷膜（评测产品资料）", "document_id": "d_c5", "version": 1, "page": 1},
+    ]
+    allowed = {
+        "d_gen": {"id": "d_gen", "acl_version": 1, "title": "客服上岗培训手册", "level": 1, "node_id": "n1", "ai_allowed": True},
+        "d_c1": {"id": "d_c1", "acl_version": 1, "title": "C1 钢化膜（评测产品资料）", "level": 1, "node_id": "n1", "ai_allowed": True},
+        "d_c5": {"id": "d_c5", "acl_version": 1, "title": "C5 全胶陶瓷膜（评测产品资料）", "level": 1, "node_id": "n1", "ai_allowed": True},
+    }
+    monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg(max_chunks_per_doc=1))
+    monkeypatch.setattr(ent_embedding, "rerank", lambda q, texts: [0.99, 0.85, 0.84])
+    out = ent_retriever._finalize("iPhone 15 贴 C5 和 C1 怎么选？", chunks, np.array([0.04, 0.03, 0.02]), 2, allowed, _P())
+    assert {r["document_id"] for r in out} == {"d_c1", "d_c5"}

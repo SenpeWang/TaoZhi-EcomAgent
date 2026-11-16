@@ -1,6 +1,5 @@
 from __future__ import annotations
 import hashlib,secrets,re
-from datetime import datetime
 from ..config import load_config
 from ..knowledge.db import fetch_one,fetch_all,as_jsonb
 from taozhi.domain.access import can_review, can_task
@@ -88,6 +87,14 @@ def decide(conn,p,aid,approve,comment):
                 if not can_write(conn,p,d) or (not p.boss and (d["level"]>2 or a["requested_by"]==p.id)):raise Denied("需要另一位负责人审核发布")
                 if d["state"]!="review" or not fetch_one(conn,"SELECT id FROM chunks WHERE document_id=%s AND version=%s",(d["id"],d["current_version"])):raise Denied("资料尚未完成解析","NOT_READY",409)
                 conn.execute("UPDATE documents SET state='published',acl_version=acl_version+1,updated_at=now() WHERE id=%s",(d["id"],))
+                try:
+                    from ..knowledge import es_index
+                    if es_index.available():
+                        rows=fetch_all(conn,"SELECT c.id,c.tenant_id,c.document_id,c.version,c.ordinal,c.page,c.text,d.title FROM chunks c JOIN documents d ON d.id=c.document_id WHERE c.document_id=%s AND c.version=%s",(d["id"],d["current_version"]))
+                        es_index.delete_chunks(d["id"])
+                        es_index.index_chunks(rows)
+                except Exception as exc:
+                    print("ES 发布索引同步失败",type(exc).__name__,flush=True)
             elif kind=="grant":
                 if not p.boss:raise Denied()
                 target=fetch_one(conn,"SELECT id FROM users WHERE tenant_id=%s AND id=%s AND active",(p.tenant_id,v["user_id"]))
@@ -104,6 +111,8 @@ def decide(conn,p,aid,approve,comment):
                     if field in v:conn.execute("UPDATE documents SET "+field+"=%s WHERE id=%s",(v[field],d["id"]))
                 conn.execute("UPDATE documents SET acl_version=acl_version+1,updated_at=now() WHERE id=%s",(d["id"],))
             invalidate_authorization(conn,p.tenant_id)
+            from ..knowledge.semantic_cache import get_semantic_cache
+            get_semantic_cache().invalidate(p.tenant_id,document_id=d["id"])
         elif kind=="org":
             if not p.boss:raise Denied()
             n=fetch_one(conn,"SELECT * FROM org_nodes WHERE tenant_id=%s AND id=%s FOR UPDATE",(p.tenant_id,a["target_id"]))
@@ -172,6 +181,8 @@ def edit_document(conn,p,d,title,body,version):
         (p.tenant_id,d["id"],version,title,body,hashlib.sha256(body.encode()).hexdigest(),p.id,as_jsonb({k:d[k] for k in ("node_id","scope","level")})))
     conn.execute("UPDATE documents SET title=%s,current_version=%s,state='ingesting',acl_version=acl_version+1,updated_at=now() WHERE id=%s",(title,version,d["id"]))
     invalidate_authorization(conn,p.tenant_id)
+    from ..knowledge.semantic_cache import get_semantic_cache
+    get_semantic_cache().invalidate(p.tenant_id,document_id=d["id"])
     job=create_job(conn,p,"ingest",d["node_id"],dict(document_id=d["id"],version=version),level=d["level"])
     audit(conn,p,"编辑资料版本",d["id"],d["node_id"],d["level"],detail={"version":version})
     return {"message":"新版本正在解析，等待发布审核","task_id":job["id"]}

@@ -452,3 +452,124 @@ def test_ann_distance_gate_blocks_irrelevant():
     # 全剔除时返回空（调用方按资料不足处理）
     empty,_=_ann_gate([chunks[1]],[vecs[1]],qv,0.45)
     assert empty==[]
+
+
+def test_docx_header_footer_and_pdf_upload_ingestion_and_search(clients):
+    """上传真实带页眉页脚/表格的 DOCX 与 PDF 后，Worker 入库保留页眉信息且短型号 C5 可被提及索引并检索命中。"""
+    import io
+    import pymupdf
+    from docx import Document
+    from taozhi.knowledge.retriever import search_documents
+
+    boss = clients["boss"]
+    _, nodes = ids()
+
+    doc = Document()
+    doc.sections[0].header.paragraphs[0].text = "备案编号 BA-2099"
+    doc.sections[0].footer.paragraphs[0].text = "制度版本 V3.9"
+    tbl = doc.add_table(rows=1, cols=2)
+    tbl.rows[0].cells[0].text = "型号 C5"
+    tbl.rows[0].cells[1].text = "折叠内屏专用"
+    buf_docx = io.BytesIO()
+    doc.save(buf_docx)
+
+    r_docx = boss.post(
+        "/api/documents/upload",
+        data={"title": "C5 备案与规格书", "node_id": nodes["公司"], "scope": "company", "level": 1},
+        files={"file": ("spec.docx", buf_docx.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert r_docx.status_code == 201, r_docx.text
+    did_docx = r_docx.json()["id"]
+    assert process_next_job()
+
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    page.insert_text((60, 80), "PDFSpec LX-99 Output 180W", fontsize=12)
+    pdf_bytes = pdf.tobytes()
+    pdf.close()
+
+    r_pdf = boss.post(
+        "/api/documents/upload",
+        data={"title": "LX-99 电源手册", "node_id": nodes["公司"], "scope": "company", "level": 1},
+        files={"file": ("power.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert r_pdf.status_code == 201, r_pdf.text
+    did_pdf = r_pdf.json()["id"]
+    assert process_next_job()
+
+    for did in (did_docx, did_pdf):
+        appr = next(a for a in boss.get("/api/approvals").json()["items"] if a["target_id"] == did and a["kind"] == "publish")
+        approve(boss, type("Resp", (), {"status_code": 202, "text": "", "json": lambda self=None, aid=appr["id"]: {"id": aid}})())
+
+    p = _principal()
+    with database_connection() as c:
+        hits_hdr = search_documents(c, p, "C5 规格书的备案编号和制度版本是什么？")
+        hits_pdf = search_documents(c, p, "LX-99 电源手册输出功率是多少？")
+        mentions = {r["entity"] for r in fetch_all(c, "SELECT entity FROM knowledge_mentions WHERE document_id=%s", (did_docx,))}
+    assert any("BA-2099" in h["quote"] and "折叠内屏专用" in h["quote"] for h in hits_hdr)
+    assert any("LX-99" in h["quote"] for h in hits_pdf)
+    assert "C5" in mentions
+
+
+def test_semantic_cache_invalidated_on_delete_and_stale_worker_check(monkeypatch, clients):
+    """删除文档时清理语义缓存；worker 命中来源失效缓存条目时主动逐出，不阻塞新查询。"""
+    import numpy as np
+    from taozhi.knowledge import semantic_cache as sc
+
+    monkeypatch.setattr(sc, "embedding_available", lambda: True)
+    monkeypatch.setattr(sc, "encode_query", lambda q: np.ones((1, 512), dtype="float32"))
+
+    cache = sc.get_semantic_cache()
+    cache.clear()
+    cache.put(
+        "tenant_test",
+        "公司切幅是多少",
+        "旧缓存答案",
+        [{"title": "公开资料", "quote": "旧引用"}],
+        [{"kind": "document", "document_id": "test_doc_company", "version": 1, "acl_version": 1, "tenant_id": "tenant_test"}],
+        input_level=1,
+        redacted=True,
+    )
+    assert cache.get("tenant_test", "公司切幅是多少", input_level=1, boss=False) is not None
+    assert clients["boss"].delete("/api/documents/test_doc_company").status_code == 200
+    assert cache.get("tenant_test", "公司切幅是多少", input_level=1, boss=False) is None
+
+    # 模拟跨进程遗留的失效版本缓存条目：worker 检查 sources_valid 失败后主动驱逐并回落正常流水线
+    cache.put(
+        "tenant_test",
+        "团队文档写什么",
+        "跨进程脏缓存",
+        [{"title": "组内", "quote": "脏引用"}],
+        [{"kind": "document", "document_id": "test_doc_team", "version": 999, "acl_version": 1, "tenant_id": "tenant_test"}],
+        input_level=1,
+        redacted=True,
+    )
+    fake_model(monkeypatch)
+    tid = task_id(clients["staff"], "团队文档写什么")
+    assert process_next_job()
+    assert cache.get("tenant_test", "团队文档写什么", input_level=1, boss=False) is None or (
+        cache.get("tenant_test", "团队文档写什么", input_level=1, boss=False)["answer"] != "跨进程脏缓存"
+    )
+    assert clients["staff"].get(f"/api/tasks/{tid}").json()["state"] == "completed"
+
+
+def test_pipeline_quote_and_arithmetic_derivation_guards():
+    """验证有序省略号引文校验与可溯源四则/比例算式推导校验（防幻觉且不误杀数学推算）。"""
+    from taozhi.server.pipeline import _numbers_supported, _quote_supported
+
+    doc_body = (
+        "1. 第一步：展开折叠转轴至 65° 人体工学倾角，确认防滑硅胶底座稳固。\n"
+        "2. 第二步：向客户演示搭配 30W 及以上 PD 供电头插电自检。"
+    )
+    assert _quote_supported("第一步：展开折叠转轴至 65°...搭配 30W 及以上 PD 供电头", doc_body)
+    assert not _quote_supported("搭配 30W 及以上...展开折叠转轴至 65°", doc_body)
+    assert not _quote_supported("第一步...凭空捏造的片段", doc_body)
+
+    policy_doc = "退回寄件运费 12 元由客户承担，赠品缺失按单件估值折抵 39 元。平台与商家按 3:7 比例分摊。"
+    question = "客户 299 元下单，退货丢失赠品应退多少钱？"
+    assert _numbers_supported("应退金额 = 299 - 39 - 12 = 248 元，扣除 39 元与 12 元。", policy_doc, question=question)
+    assert _numbers_supported("跨店满减按 3:7 分摊，商家承担 7 成即 70%。", policy_doc, question=question)
+    assert _numbers_supported("旧 5V2A 充电头功率仅 5 * 2 = 10W。", "不能用普通 5V2A 旧头", question="")
+    # 无依据编造数字（如凭空写 45W 或虚假退款额 199）必须被拦截
+    assert not _numbers_supported("iPhone 16 支持 45W 快充。", policy_doc, question=question)
+    assert not _numbers_supported("应退金额 = 299 - 39 - 12 = 199 元。", policy_doc, question=question)

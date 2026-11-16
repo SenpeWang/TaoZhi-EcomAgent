@@ -277,6 +277,12 @@ def remove(doc_id:str,p=Depends(identity)):
         if not can_write(c,p,d):raise Denied("没有资料删除权限")
         c.execute("UPDATE documents SET state='deleted',acl_version=acl_version+1,updated_at=now() WHERE id=%s",(d["id"],))
         invalidate_authorization(c,p.tenant_id);audit(c,p,"删除资料",d["id"],d["node_id"],d["level"])
+        from ..knowledge.semantic_cache import get_semantic_cache
+        get_semantic_cache().invalidate(p.tenant_id,document_id=d["id"])
+        try:
+            from ..knowledge import es_index
+            if es_index.available():es_index.delete_chunks(d["id"])
+        except Exception:pass
     return {"message":"资料已删除，历史来源不再可用"}
 @app.post("/api/documents/{doc_id}/policy",status_code=202)
 def policy_change(doc_id:str,payload:DocPolicy,p=Depends(identity)):

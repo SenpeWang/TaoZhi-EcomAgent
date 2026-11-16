@@ -1,6 +1,6 @@
 from __future__ import annotations
 import secrets,threading,signal,hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from ..config import get_settings, load_config
 from ..knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
 from taozhi.domain.errors import Denied
@@ -83,28 +83,39 @@ def process_ingestion_job(job):
         c.execute("UPDATE documents SET state='review',error='' WHERE id=%s",(d["id"],))
         approval(c,p,"publish",d["id"],dict(expected_acl=d["acl_version"],expected_version=v["version"]),d["node_id"],"boss" if d["level"]==3 or d["scope"]=="company" else "leader")
         c.execute("UPDATE jobs SET state='completed',progress=100,stage='解析完成，等待发布审核',finished_at=now(),lease_until=NULL WHERE id=%s AND run_version=%s",(job["id"],job["run_version"]))
-    try:  # 事务提交后同步 ES（尽力而为，失败不阻断入库；ES 仅承担 BM25，不含向量）
-        from ..knowledge import es_index
-        if es_index.available():
-            es_index.delete_chunks(d["id"],v["version"])
-            with database_connection() as c2:
-                rows=fetch_all(c2,"SELECT id,tenant_id,document_id,version,ordinal,page,text FROM chunks WHERE document_id=%s AND version=%s",(d["id"],v["version"]))
-            es_index.index_chunks(rows)
-    except Exception as exc:
-        print("ES 索引同步失败",type(exc).__name__,flush=True)
+def _diff_ms(start_dt, end_dt=None) -> int:
+    """计算两个时间戳之间的毫秒差，兼容时区缺失场景。"""
+    if start_dt is None:
+        return 0
+    if end_dt is None:
+        end_dt = datetime.now(timezone.utc) if start_dt.tzinfo else datetime.now()
+    elif bool(start_dt.tzinfo) != bool(end_dt.tzinfo):
+        end_dt = end_dt.replace(tzinfo=start_dt.tzinfo)
+    return max(0, int((end_dt - start_dt).total_seconds() * 1000))
+
+
 def process_question_job(job):
     # 1. 语义缓存层（大促高并发热点削峰拦截，时延 < 15ms，0 LLM 开销）
     from ..knowledge.semantic_cache import get_semantic_cache
     cache = get_semantic_cache()
-    # 先取身份再查缓存：命中与否取决于密级，返回的文本脱不脱敏取决于是不是 boss。
+    queue_wait_ms = _diff_ms(job.get("created_at"), job.get("started_at"))
+    # 先取身份再查缓存；若命中来源已失效则立即驱逐该脏条目后再继续检查或回落完整链路。
     with database_connection() as c:
         p = load_principal(c, job["owner_id"])
-        cached = cache.get(job["tenant_id"], job["question"], input_level=job["input_level"], boss=p.boss)
+        cached = None
+        for _ in range(5):
+            cand = cache.get(job["tenant_id"], job["question"], input_level=job["input_level"], boss=p.boss)
+            if not cand:
+                break
+            if cand.get("sources") and sources_valid(c, p, cand.get("sources", [])):
+                cached = cand
+                break
+            if cand.get("entry_id"):
+                cache.invalidate(job["tenant_id"], entry_id=cand["entry_id"])
     if cached:
         with database_connection() as c:
-            # 来源为空的条目谁都能命中（all([]) 为真），这里显式拒绝，
-            # 不放过任何"无来源却带答案"的缓存项。
             if cached.get("sources") and sources_valid(c, p, cached.get("sources", [])):
+                e2e_ms = _diff_ms(job.get("created_at"))
                 result = dict(
                     answer=cached["answer"],
                     citations=cached["citations"],
@@ -115,7 +126,11 @@ def process_question_job(job):
                     model_calls=0,
                     usage=[{"role": "semantic_cache", "elapsed_ms": cached["latency_ms"], "outcome": "hit"}],
                     cache_hit=True,
-                    similarity=cached["similarity"]
+                    similarity=cached["similarity"],
+                    timing={"queue_wait_ms": queue_wait_ms, "cache_lookup_ms": cached["latency_ms"], "e2e_ms": e2e_ms},
+                    token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0,
+                                 "llm_attempts": 0, "llm_errors": 0, "failovers": 0, "json_retries": 0, "by_role": {}},
+                    degraded={},
                 )
                 c.execute("UPDATE jobs SET result=%s,sources=%s,input_level=%s,state='completed',stage='已完成（命中语义缓存）',progress=100,lease_until=NULL,finished_at=now() WHERE id=%s AND run_version=%s",
                     (as_jsonb(result), as_jsonb(cached["sources"]), job["input_level"], job["id"], job["run_version"]))
@@ -139,8 +154,16 @@ def process_question_job(job):
         p=load_principal(c,row["owner_id"])
         if p.version!=row["owner_version"] or not sources_valid(c,p,state["sources"]):raise Denied("人员或来源权限已变化","SOURCE_CHANGED",409)
         citations=[{k:e[k] for k in ("document_id","version","title","quote","page","chunk_id")} for e in state["evidence"]]
+        timing = dict(state.get("timing") or {})
+        timing["queue_wait_ms"] = queue_wait_ms
+        timing["e2e_ms"] = _diff_ms(row.get("created_at") or job.get("created_at"))
+        token_usage = state.get("token_usage") or {
+            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0,
+            "llm_attempts": 0, "llm_errors": 0, "failovers": 0, "json_retries": 0, "by_role": {},
+        }
         result=dict(answer=state["answer"],citations=citations,specialists=[{"name":SPECIALIST_AGENTS[r][0],"count":sum(f["role"]==SPECIALIST_AGENTS[r][0] for f in state["findings"])} for r in state["selected_agents"]],
-           missing=state["missing"],hard_block=state["hard_block"],external_blocked=state["external_blocked"],model_calls=state["model_calls"],usage=state["usage"])
+           missing=state["missing"],hard_block=state["hard_block"],external_blocked=state["external_blocked"],model_calls=state["model_calls"],usage=state["usage"],
+           cache_hit=False,timing=timing,token_usage=token_usage,degraded=state.get("degraded") or {})
         # 执行轨迹回传：评测报告逐例记录 trace_id，可与 Phoenix 精确关联归因
         if trace_id:result["trace_id"]=trace_id
         # 问数（ChatBI）：结构化结果透传给前端渲染表格与图表；denied 结果不透传 data

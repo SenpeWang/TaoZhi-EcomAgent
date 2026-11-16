@@ -17,12 +17,15 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from ..config import Config, load_config
 from ..knowledge.embedding import available as embedding_available, encode_query
+from ..knowledge.facts import extract_entities
+from ..knowledge.retriever import SEMANTIC_DIM
 from taozhi.domain.privacy import redact
 
 logger = logging.getLogger("taozhi.server.semantic_cache")
@@ -44,6 +47,12 @@ class CacheEntry:
     # 存进去的 answer / citations 是否已脱敏。False 表示当初是 boss 问的、
     # 内容是未脱敏原文；命中者不是 boss 时必须重新脱敏后再返回。
     redacted: bool = False
+    entities: Tuple[str, ...] = field(default_factory=tuple)
+
+
+def _norm_entities(query: str) -> Tuple[str, ...]:
+    """提取查询中的规范化型号/实体集合，阻止仅型号不同的问题跨命中缓存。"""
+    return tuple(sorted({e.upper() for e in extract_entities(query)}))
 
 
 class SemanticCache:
@@ -51,13 +60,27 @@ class SemanticCache:
 
     def __init__(
         self,
-        similarity_threshold: float = 0.85,
-        ttl_seconds: int = 3600,
-        max_entries_per_tenant: int = 10000,
+        similarity_threshold: Optional[float] = None,
+        ttl_seconds: Optional[int] = None,
+        max_entries_per_tenant: Optional[int] = None,
     ) -> None:
-        self.similarity_threshold = similarity_threshold
-        self.ttl_seconds = ttl_seconds
-        self.max_entries_per_tenant = max_entries_per_tenant
+        try:
+            cfg = load_config()
+        except Exception:
+            cfg = None
+        self.similarity_threshold = float(
+            similarity_threshold
+            if similarity_threshold is not None
+            else getattr(cfg, "semantic_cache_threshold", Config.semantic_cache_threshold)
+        )
+        self.ttl_seconds = int(
+            ttl_seconds if ttl_seconds is not None else getattr(cfg, "semantic_cache_ttl", Config.semantic_cache_ttl)
+        )
+        self.max_entries_per_tenant = int(
+            max_entries_per_tenant
+            if max_entries_per_tenant is not None
+            else getattr(cfg, "semantic_cache_max_entries", Config.semantic_cache_max_entries)
+        )
 
         self._lock = threading.Lock()
         # {tenant_id: [CacheEntry, ...]}
@@ -73,7 +96,7 @@ class SemanticCache:
         """重构租户向量矩阵，供矩阵点积批量加速。"""
         entries = self._entries.get(tenant_id, [])
         if not entries:
-            self._matrices[tenant_id] = np.zeros((0, 512), dtype="float32")
+            self._matrices[tenant_id] = np.zeros((0, SEMANTIC_DIM), dtype="float32")
         else:
             self._matrices[tenant_id] = np.vstack([e.embedding for e in entries])
 
@@ -118,48 +141,62 @@ class SemanticCache:
                 return None
 
             now = time.monotonic()
+            q_entities = _norm_entities(query)
             # 批量余弦相似度计算（向量均已 L2 归一化，点积即余弦相似度）
             sims = np.dot(matrix, q_vec)
-            best_idx = int(np.argmax(sims))
-            best_sim = float(sims[best_idx])
-            best_entry = entries[best_idx]
+            candidates = [int(i) for i in np.argsort(-sims) if float(sims[i]) >= self.similarity_threshold]
 
-            # 检查 TTL
-            if now - best_entry.created_at > self.ttl_seconds:
-                # 已过期
-                entries.pop(best_idx)
-                self._rebuild_matrix(tenant_id)
-                self._misses += 1
-                return None
-
-            # 检查相似度阈值与密级隔离
-            if best_sim >= self.similarity_threshold and best_entry.input_level <= input_level:
-                # 脱敏对齐：缓存存的是"当初那位提问者"看到的文本。boss 的答案是
-                # 未脱敏原文，staff 用相似问题命中后必须重新脱敏；反过来 boss 命中
-                # staff 那条已脱敏的残缺内容也没意义，直接当未命中走完整链路。
-                if boss and best_entry.redacted:
-                    self._misses += 1
-                    return None
-                answer = best_entry.answer
-                citations = best_entry.citations
-                if not boss and not best_entry.redacted:
+            expired_indices = []
+            matched_payload: Optional[Dict[str, Any]] = None
+            for idx in candidates:
+                entry = entries[idx]
+                if now - entry.created_at > self.ttl_seconds:
+                    expired_indices.append(idx)
+                    continue
+                if entry.input_level > input_level:
+                    continue
+                if entry.entities != q_entities:
+                    continue
+                # 脱敏对齐：boss 命中 staff 已脱敏残缺条目时继续查找更合适候选或回落完整链路
+                if boss and entry.redacted:
+                    continue
+                answer = entry.answer
+                citations = entry.citations
+                if not boss and not entry.redacted:
                     answer = redact(answer)
-                    citations = [dict(c, quote=redact(c["quote"])) if c.get("quote") else c
-                                 for c in citations]
-                best_entry.hits += 1
+                    citations = [
+                        dict(c, quote=redact(c["quote"])) if c.get("quote") else c
+                        for c in citations
+                    ]
+                entry.hits += 1
                 self._hits += 1
                 elapsed = (time.monotonic() - t0) * 1000
-                logger.info("语义缓存命中! 相似度: %.4f, 匹配原问题: '%s', 耗时: %.2fms",
-                            best_sim, best_entry.query, elapsed)
-                return {
+                best_sim = float(sims[idx])
+                logger.info(
+                    "语义缓存命中! 相似度: %.4f, 匹配原问题: '%s', 耗时: %.2fms",
+                    best_sim,
+                    entry.query,
+                    elapsed,
+                )
+                matched_payload = {
+                    "entry_id": entry.id,
                     "cache_hit": True,
-                    "matched_query": best_entry.query,
+                    "matched_query": entry.query,
                     "similarity": round(best_sim, 4),
                     "answer": answer,
                     "citations": citations,
-                    "sources": best_entry.sources,
+                    "sources": entry.sources,
                     "latency_ms": round(elapsed, 2),
                 }
+                break
+
+            if expired_indices:
+                for idx in sorted(expired_indices, reverse=True):
+                    entries.pop(idx)
+                self._rebuild_matrix(tenant_id)
+
+            if matched_payload is not None:
+                return matched_payload
 
             self._misses += 1
             return None
@@ -205,10 +242,36 @@ class SemanticCache:
                 input_level=input_level,
                 created_at=time.monotonic(),
                 redacted=redacted,
+                entities=_norm_entities(query),
             )
             entries.append(entry)
             self._rebuild_matrix(tenant_id)
             return True
+
+    def invalidate(
+        self,
+        tenant_id: str,
+        entry_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+    ) -> int:
+        """按条目 ID 或来源文档 ID 精准淘汰失效缓存，避免阻塞后续合规条目。"""
+        with self._lock:
+            entries = self._entries.get(tenant_id)
+            if not entries:
+                return 0
+            before = len(entries)
+            kept = []
+            for entry in entries:
+                if entry_id and entry.id == entry_id:
+                    continue
+                if document_id and any(s.get("document_id") == document_id for s in (entry.sources or [])):
+                    continue
+                kept.append(entry)
+            removed = before - len(kept)
+            if removed:
+                self._entries[tenant_id] = kept
+                self._rebuild_matrix(tenant_id)
+            return removed
 
     def clear(self, tenant_id: Optional[str] = None) -> None:
         """清空缓存（如知识库大版本变更时调用）。"""

@@ -595,3 +595,85 @@ def test_checkpoint_cross_version_resume_hydrates_evidence_and_route_history():
     assert any(s.startswith("[system]") and "检查点恢复" in s for s, _ in resume_events)
     assert len(res_v2["evidence_pool"]) >= 1
     assert "V2 断点续跑报告" in res_v2["report"]
+
+
+def test_usage_scope_isolates_concurrent_threads_and_tracks_json_retries():
+    """验证 usage_scope() 在并发线程间严格隔离，并准确累计 chat_json 重试与 token 消耗。"""
+    from concurrent.futures import ThreadPoolExecutor
+    from taozhi.ai import observability as obs
+    from taozhi.ai.client import LLMClient, ModelTier
+
+    obs.reset()
+
+    def _worker(tokens_pair: tuple[int, int]):
+        pt, ct = tokens_pair
+        with obs.usage_scope() as u:
+            obs.record_llm_call("fast", 0.05, pt, ct, failover=(pt > 100))
+            return u.to_dict()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        r1, r2 = list(pool.map(_worker, [(60, 20), (140, 40)]))
+
+    assert r1["prompt_tokens"] == 60 and r1["completion_tokens"] == 20 and r1["failover_count"] == 0
+    assert r2["prompt_tokens"] == 140 and r2["completion_tokens"] == 40 and r2["failover_count"] == 1
+
+    # chat_json 第 1 次返回坏 JSON，第 2 次返回合法 JSON，应记录 json_retries == 1
+    c = LLMClient()
+    with patch.object(c, "chat", side_effect=["not json", '{"ok": true}']):
+        with obs.usage_scope() as ju:
+            parsed = c.chat_json("测试", expect="object", retries=3, tier=ModelTier.FAST)
+    assert parsed == {"ok": True}
+    assert ju.json_parse_attempts == 2
+    assert ju.json_retries == 1
+
+
+def test_llm_client_respects_explicit_small_max_tokens():
+    """显式传入小额 max_tokens（如 HyDE 220）不得被强拉高至 2048，缺省时才使用 2048 保底。"""
+    from types import SimpleNamespace
+    from langchain_core.messages import AIMessage
+    from taozhi.ai.client import LLMClient, ModelTier
+    from taozhi.ai.router import CircuitBreakerRegistry
+
+    fake_settings = SimpleNamespace(
+        base_url="https://api.sensenova.cn/v1",
+        api_key="test-key",
+        model="sensenova-6.8-flash",
+        llm_fast_model="sensenova-6.8-flash",
+        llm_strong_model="sensenova-6.8-flash",
+        llm_vision_model="sensenova-6.8-flash",
+        llm_temperature=0.0,
+        llm_max_tokens=4096,
+        llm_output_cap=8192,
+        llm_timeout=10,
+        llm_max_retries=0,
+        llm_empty_retries=0,
+        llm_max_concurrency=2,
+        llm_direct_connection=True,
+        sensenova_overseas_api_key="",
+        sensenova_overseas_base_url="",
+        sensenova_fallback_api_keys="",
+        sensenova_fallback_base_url="",
+        llm_circuit_cooldown_auth=600,
+        llm_circuit_cooldown_rate_limit=45,
+        llm_circuit_cooldown_transient=25,
+    )
+    bound_budgets = []
+    client = LLMClient(settings=fake_settings, allow_overseas=False, registry=CircuitBreakerRegistry())  # type: ignore[arg-type]
+
+    def _fake_client(_ep):
+        raw = MagicMock()
+
+        def _bind(**kw):
+            bound_budgets.append(kw.get("max_tokens"))
+            b = MagicMock()
+            b.invoke.return_value = AIMessage(content="ok", response_metadata={})
+            return b
+
+        raw.bind.side_effect = _bind
+        return raw
+
+    with patch.object(client, "_client_for_endpoint", side_effect=_fake_client):
+        client.chat("hyde query", tier=ModelTier.FAST, max_tokens=220)
+        client.chat("normal query", tier=ModelTier.FAST)
+
+    assert bound_budgets == [220, 4096]
