@@ -75,7 +75,17 @@ def build(entry: dict, out_dir: Path) -> tuple[Path, str]:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
     from taozhi.knowledge.corpus import read_corpus_text
+    from taozhi.knowledge.ingest import parse as ingest_parse
 
+    mime = (
+        "application/pdf"
+        if fmt == "pdf"
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    prod_body, _ = ingest_parse(path.read_bytes(), mime)
+    missing_prod = [f for f in entry.get("facts", []) if f not in prod_body]
+    if not prod_body.strip() or missing_prod:
+        raise AssertionError(f"{entry['doc_id']}: 生产解析器 ingest.parse 丢失事实 {missing_prod}")
     return path, read_corpus_text(path)
 
 

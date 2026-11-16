@@ -16,7 +16,8 @@ SPEC = Path(__file__).resolve().parent / "spec"
 
 # 检索类：必须有可判定锚点与预期文档（否则"答没答对"无法机器判断）
 RETRIEVAL_CATEGORIES = ("product", "compat", "aftersale", "multi_doc", "insufficient", "conflict",
-                        "robust", "troubleshoot", "edge", "timeliness", "citation", "long_context")
+                        "robust", "troubleshoot", "edge", "timeliness", "citation", "long_context",
+                        "operations", "supply", "coach", "finance", "calculation", "exclusion")
 # 模糊/歧义类：不能有单点答案，判定靠 pass_criteria（是否澄清/分情况），不强制锚点事实
 AMBIGUOUS_CATEGORIES = ("ambiguous",)
 # 权限类：判定口径必须写死（pass_criteria），不允许 judge 自由发挥
@@ -25,8 +26,11 @@ PERMISSION_CATEGORIES = ("role", "grant", "revocation", "injection", "leakage")
 MULTI_TURN_CATEGORIES = ("multi_turn",)
 # 解析层：必须有预期文档与可判定事实，否则测不出"读进来还在不在"
 PARSING_CATEGORIES = ("parsing",)
+# 问数层（ChatBI）：走指标语义层受控 SQL，不强制 expected_documents，但必须给 expected_facts 与 pass_criteria
+CHATBI_CATEGORIES = ("chatbi",)
 KNOWN_CATEGORIES = (RETRIEVAL_CATEGORIES + PERMISSION_CATEGORIES
-                    + MULTI_TURN_CATEGORIES + PARSING_CATEGORIES + AMBIGUOUS_CATEGORIES)
+                    + MULTI_TURN_CATEGORIES + PARSING_CATEGORIES
+                    + AMBIGUOUS_CATEGORIES + CHATBI_CATEGORIES)
 
 # 五维标注：任何一条用例都必须带齐，否则报告无法按维度归因
 DIM_VALUES = {
@@ -34,24 +38,28 @@ DIM_VALUES = {
     "qtype": ("fact", "process", "multihop", "compare", "troubleshoot",
               "edge", "ambiguous", "security"),
     "difficulty": ("easy", "medium", "hard"),
-    # real = 线上日志采样，当前无日志通道，仅保留取值以便接入
+    # real = 线上/真实口语噪声采样
     "source": ("synthetic", "badcase", "adversarial", "real"),
     "risk": ("high", "medium", "low"),
 }
 
+# 领域路由标签：对齐运行期 SPECIALIST_AGENTS + 问数/安全，防数据集只在 product/after_sales 打转
+DOMAIN_ROLES = ("product", "compatibility", "after_sales", "coach", "operations", "supply", "finance", "data", "security")
+ROLE_TYPES_MIN = {"employee": 100, "leader": 6, "boss": 6}
+
 # 覆盖下限：维度矩阵不能只写进文档，数量不够就拒绝生成——
 # 否则"覆盖 5 个维度"会退化成一句无法验证的话。
 COVERAGE_MIN = {
-    "answerability": {"answerable": 60, "partial": 8, "unanswerable": 18},
-    "qtype": {"fact": 40, "process": 3, "multihop": 4, "compare": 8,
-              "troubleshoot": 5, "edge": 5, "ambiguous": 4, "security": 14},
-    "difficulty": {"easy": 20, "medium": 25, "hard": 20},
-    "source": {"synthetic": 60, "badcase": 4, "adversarial": 4},
-    "risk": {"high": 15, "medium": 10, "low": 30},
+    "answerability": {"answerable": 72, "partial": 8, "unanswerable": 22},
+    "qtype": {"fact": 45, "process": 3, "multihop": 6, "compare": 9,
+              "troubleshoot": 5, "edge": 7, "ambiguous": 4, "security": 16},
+    "difficulty": {"easy": 22, "medium": 30, "hard": 25},
+    "source": {"synthetic": 70, "badcase": 4, "adversarial": 4, "real": 4},
+    "risk": {"high": 18, "medium": 14, "low": 35},
 }
 
 REQUIRED_FIELDS = ("case_id", "category", "dataset", "test_identity", "question",
-                   "expected_behavior", "pass_criteria", "forbidden_disclosure")
+                   "expected_behavior", "reference_answer", "pass_criteria", "forbidden_disclosure")
 IDENTITY_FIELDS = ("logical_id", "username")
 
 
@@ -89,6 +97,11 @@ def known_identities() -> set:
     return {i["logical_id"] for i in org.get("identities", [])}
 
 
+def known_identity_roles() -> dict[str, str]:
+    org, _, _, _ = load_spec()
+    return {i["logical_id"]: str(i.get("role") or "employee") for i in org.get("identities", [])}
+
+
 def known_canaries() -> set:
     _, fixtures, _, _ = load_spec()
     return set(fixtures.get("canaries", []))
@@ -104,6 +117,12 @@ def validate_case(case: dict, doc_ids: set, identities: set, canaries: set,
             errs.append(f"{cid}: 缺字段 {f}")
     if case.get("category") not in KNOWN_CATEGORIES:
         errs.append(f"{cid}: 未知类别 {case.get('category')!r}")
+    if "domain_role" in case and case["domain_role"] not in DOMAIN_ROLES:
+        errs.append(f"{cid}: 未知领域角色 domain_role={case['domain_role']!r}")
+    if "input_level" in case and case["input_level"] not in (1, 2, 3):
+        errs.append(f"{cid}: 非法密级 input_level={case['input_level']!r}")
+    if "payload" in case and not isinstance(case["payload"], dict):
+        errs.append(f"{cid}: payload 必须是对象字典")
     for dim, allowed in DIM_VALUES.items():
         v = case.get(dim)
         if v is None:
@@ -130,17 +149,26 @@ def validate_case(case: dict, doc_ids: set, identities: set, canaries: set,
     if q in seen_questions:
         errs.append(f"{cid}: 问题重复（与更早用例相同）")
     seen_questions.add(q)
+    if not (case.get("reference_answer") or "").strip():
+        errs.append(f"{cid}: reference_answer 不能为空（用于 Answer Correctness 对比）")
     cat = case.get("category")
     if cat in RETRIEVAL_CATEGORIES + PARSING_CATEGORIES:
         facts = case.get("expected_facts") or []
         if not facts:
             errs.append(f"{cid}: 检索类用例必须给 expected_facts（可判定锚点）")
         docs = case.get("expected_documents") or []
-        if not docs:
+        allow_empty_docs = (cat == "insufficient" and bool(case.get("out_of_corpus")))
+        if not docs and not allow_empty_docs:
             errs.append(f"{cid}: 检索类用例必须给 expected_documents")
         for d in docs:
             if d not in doc_ids:
                 errs.append(f"{cid}: 预期文档 {d} 不在 spec（会空转：查无此文档→拒答→判过）")
+    if cat in CHATBI_CATEGORIES:
+        if not (case.get("expected_facts") or []) and not (case.get("pass_criteria") or "").strip():
+            errs.append(f"{cid}: ChatBI 用例必须给 expected_facts 或 pass_criteria")
+        for d in case.get("expected_documents") or []:
+            if d not in doc_ids:
+                errs.append(f"{cid}: 预期文档 {d} 不在 spec")
     if cat in PERMISSION_CATEGORIES and not (case.get("pass_criteria") or "").strip():
         errs.append(f"{cid}: 权限类用例必须给 pass_criteria")
     if cat in MULTI_TURN_CATEGORIES:
@@ -173,6 +201,24 @@ def validate_coverage(cases: list) -> list:
             got = actual.get(value, 0)
             if got < min_n:
                 errs.append(f"维度 {dim}={value} 仅 {got} 例，低于下限 {min_n}")
+    domain_counts = {}
+    for c in cases:
+        dr = c.get("domain_role")
+        if dr:
+            domain_counts[dr] = domain_counts.get(dr, 0) + 1
+    for dr in DOMAIN_ROLES:
+        if domain_counts.get(dr, 0) < 2:
+            errs.append(f"领域角色 domain_role={dr} 仅 {domain_counts.get(dr, 0)} 例，低于下限 2")
+    role_map = known_identity_roles()
+    id_counts = {}
+    for c in cases:
+        lid = (c.get("test_identity") or {}).get("logical_id")
+        role = role_map.get(lid)
+        if role:
+            id_counts[role] = id_counts.get(role, 0) + 1
+    for role, min_n in ROLE_TYPES_MIN.items():
+        if id_counts.get(role, 0) < min_n:
+            errs.append(f"身份角色 {role} 仅 {id_counts.get(role, 0)} 例，低于下限 {min_n}")
     return errs
 
 

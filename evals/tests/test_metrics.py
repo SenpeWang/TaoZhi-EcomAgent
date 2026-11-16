@@ -38,6 +38,7 @@ def test_precision_and_recall_are_not_the_same_number():
     ranked = ["相关X", "无关A", "相关Y", "无关B"]
     relevant = {"相关X", "相关Y", "相关Z"}
     assert precision_at_k(ranked, relevant, 2) == pytest.approx(0.5)
+    assert precision_at_k(["相关X"], relevant, 8) == pytest.approx(1 / 8)
     assert recall_at_k(ranked, relevant, 2) == pytest.approx(1 / 3)
     assert recall_at_k(ranked, relevant, 4) == pytest.approx(2 / 3)
 
@@ -177,3 +178,80 @@ def test_accuracy_report_carries_confidence_interval():
     ci = rep["ci95"]["accuracy"]
     assert ci[0] <= rep["accuracy"] <= ci[1]
     assert rep["ci95"]["relevant_rate"] is not None
+
+
+from metrics import (  # noqa: E402
+    answer_correctness,
+    citation_accuracy,
+    context_relevancy,
+    fact_recall,
+    latency_slo_report,
+    refusal_breakdown,
+    sut_token_report,
+    throughput_report,
+)
+
+
+def test_context_relevancy_and_fact_recall_and_citations():
+    assert context_relevancy(["doc1", "doc2", "doc1"], {"doc1"}) == pytest.approx(2 / 3)
+    assert context_relevancy([], {"doc1"}) == 0.0
+    assert fact_recall("支持 140W 与 USB-C，须使用 C1 口", ["140W", "usb-c", "5A"]) == pytest.approx(2 / 3)
+    assert fact_recall("abc", []) is None
+    cites = [{"document_id": "d1"}, {"document_id": "d2"}]
+    ca = citation_accuracy("结论A [1]，结论B [3]，结论C [2]", cites, expected_docs={"d1"})
+    assert ca["total_refs"] == 3
+    assert ca["valid_refs"] == 2
+    assert ca["in_bounds_rate"] == pytest.approx(2 / 3)
+    assert ca["expected_doc_rate"] == pytest.approx(1 / 3)
+
+
+def test_refusal_breakdown_and_answer_correctness():
+    cases = [
+        {"answerability": "answerable", "abstain": True, "pass": False},   # 误拒
+        {"answerability": "answerable", "abstain": False, "pass": True},
+        {"answerability": "unanswerable", "abstain": True, "pass": True}, # 真拒
+        {"answerability": "unanswerable", "abstain": False, "pass": False},
+    ]
+    rb = refusal_breakdown(cases)
+    assert rb["false_refusal_rate"] == pytest.approx(0.5)
+    assert rb["true_abstain_rate"] == pytest.approx(0.5)
+    assert answer_correctness(1.0, 0.8) == pytest.approx(0.25 + 0.6)
+
+
+def test_sut_token_slo_and_throughput_reports():
+    recs = [
+        {
+            "prompt_tokens": 200, "completion_tokens": 50, "total_tokens": 250, "cost_usd": 0.0001,
+            "llm_attempts": 2, "llm_errors": 0, "failovers": 1, "json_retries": 1, "cache_hit": False,
+            "by_role": {"hyde": {"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60, "cost_usd": 0.000024, "llm_attempts": 1},
+                        "product": {"prompt_tokens": 150, "completion_tokens": 40, "total_tokens": 190, "cost_usd": 0.000076, "llm_attempts": 1}},
+        },
+        {
+            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0,
+            "llm_attempts": 0, "llm_errors": 0, "failovers": 0, "json_retries": 0, "cache_hit": True,
+            "by_role": {},
+        },
+    ]
+    sut = sut_token_report(recs)
+    assert sut["total_tokens"] == 250
+    assert sut["cache_hit_rate"] == pytest.approx(0.5)
+    assert sut["tokens_per_uncached_case"] == pytest.approx(250.0)
+    assert sut["estimated_cache_tokens_saved"] == 250
+    assert sut["json_retry_rate"] == pytest.approx(1.0)
+    assert sut["failover_rate"] == pytest.approx(1.0)
+    assert sut["by_role"]["hyde"]["total_tokens"] == 60
+
+    slo = latency_slo_report(
+        [1.0, 15.0],
+        stage_records=[{"queue_wait_ms": 20, "rerank_ms": 100}, {"queue_wait_ms": 40, "rerank_ms": 300}],
+        sla_pairs=[(1.0, 10.0), (15.0, 10.0)],
+        degraded_records=[{"es_fallback": True, "rerank_fallback": False}, {"es_fallback": False, "rerank_fallback": False}],
+    )
+    assert slo["sla_breach_count"] == 1
+    assert slo["sla_breach_rate"] == pytest.approx(0.5)
+    assert slo["stage_p50_ms"]["queue_wait_ms"] == 30
+    assert slo["degraded_rates"]["es_fallback_rate"] == pytest.approx(0.5)
+
+    tp = throughput_report(4.0, 8, 4, [1.0, 2.0])
+    assert tp["qps"] == pytest.approx(2.0)
+    assert tp["concurrency"] == 4

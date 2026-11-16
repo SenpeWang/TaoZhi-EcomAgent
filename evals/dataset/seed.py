@@ -127,7 +127,7 @@ def seed_users(conn, tenant_id, org):
     return ids
 
 
-def seed_documents(conn, tenant_id, creator_id, docs):
+def seed_documents(conn, tenant_id, creator_id, docs, force: bool = False):
     """写入文档/版本/切片/向量/ES。切片与入库口径一致：嵌入输入带标题前缀。"""
     from taozhi.knowledge.embedding import available as embed_available, encode_passages, embedding_input
     from taozhi.knowledge.facts import index_mentions
@@ -141,9 +141,10 @@ def seed_documents(conn, tenant_id, creator_id, docs):
         content_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
         old = fetch_one(conn, "SELECT current_version FROM documents WHERE tenant_id=%s AND id=%s", (tenant_id, d["doc_id"]))
         old_v = fetch_one(conn, "SELECT content_hash FROM document_versions WHERE document_id=%s AND version=1", (d["doc_id"],))
-        if old and old_v and old_v["content_hash"] == content_hash:
+        if not force and old and old_v and old_v["content_hash"] == content_hash:
             stats["updated"] += 1
             continue  # 内容未变：不重建切片（幂等且不浪费嵌入算力）
+        conn.execute("DELETE FROM knowledge_mentions WHERE document_id=%s", (d["doc_id"],))
         conn.execute("DELETE FROM chunks WHERE document_id=%s", (d["doc_id"],))
         conn.execute("DELETE FROM document_versions WHERE document_id=%s", (d["doc_id"],))
         conn.execute("DELETE FROM documents WHERE tenant_id=%s AND id=%s", (tenant_id, d["doc_id"]))
@@ -167,10 +168,62 @@ def seed_documents(conn, tenant_id, creator_id, docs):
         index_mentions(conn, tenant_id, d["doc_id"], 1, chunks)
         if es_index.available():
             es_index.delete_chunks(d["doc_id"], 1)
-            rows = fetch_all(conn, "SELECT id,tenant_id,document_id,version,ordinal,page,text FROM chunks WHERE document_id=%s AND version=1", (d["doc_id"],))
+            rows = fetch_all(conn, "SELECT c.id,c.tenant_id,c.document_id,c.version,c.ordinal,c.page,c.text,d.title FROM chunks c JOIN documents d ON d.id=c.document_id WHERE c.document_id=%s AND c.version=1", (d["doc_id"],))
             es_index.index_chunks(rows)
         stats["inserted"] += 1
     return stats
+
+
+REQUIRED_EVAL_METRICS = [
+    ("biz.gsv", "销售额", ["销售额", "GMV", "营业额", "卖了多少钱", "卖了多少", "成交金额"],
+     "SELECT channel_name, category, round(sum(amount)/100.0, 2) AS value FROM (SELECT c.name AS channel_name, p.category AS category, o.amount_minor AS amount FROM orders o JOIN channels c ON c.id=o.channel_id AND c.tenant_id=o.tenant_id JOIN skus s ON s.id=o.sku_id AND s.tenant_id=o.tenant_id JOIN products p ON p.id=s.spu_id AND p.tenant_id=s.tenant_id WHERE o.tenant_id=%(tenant_id)s AND o.status <> 'cancelled' AND o.created_at >= %(since)s AND o.created_at < %(until)s) base WHERE 1=1 %(filters)s GROUP BY 1, 2 ORDER BY 3 DESC",
+     ["channel_name", "category"], "orders", "元", "currency", 1, "company",
+     "统计周期内有效订单（不含取消）的销售金额，按渠道与品类分列。"),
+    ("biz.order_count", "订单量", ["订单量", "多少订单", "单量", "订单数"],
+     "SELECT channel_name, category, status, count(*) AS value FROM (SELECT c.name AS channel_name, p.category AS category, o.status AS status FROM orders o JOIN channels c ON c.id=o.channel_id AND c.tenant_id=o.tenant_id JOIN skus s ON s.id=o.sku_id AND s.tenant_id=o.tenant_id JOIN products p ON p.id=s.spu_id AND p.tenant_id=s.tenant_id WHERE o.tenant_id=%(tenant_id)s AND o.created_at >= %(since)s AND o.created_at < %(until)s) base WHERE 1=1 %(filters)s GROUP BY 1, 2, 3 ORDER BY 4 DESC",
+     ["channel_name", "category", "status"], "orders", "单", "number", 1, "company",
+     "统计周期内订单数，按渠道、品类、状态分列（含取消与退款单）。"),
+    ("biz.refund_rate", "退货退款率", ["退货率", "退款率", "售后率", "退单比例"],
+     "SELECT channel_name, round(100.0 * sum(refunded) / NULLIF(count(*), 0), 2) AS value FROM (SELECT c.name AS channel_name, CASE WHEN EXISTS(SELECT 1 FROM after_sales a WHERE a.tenant_id=o.tenant_id AND a.order_id=o.id) THEN 1 ELSE 0 END AS refunded FROM orders o JOIN channels c ON c.id=o.channel_id AND c.tenant_id=o.tenant_id WHERE o.tenant_id=%(tenant_id)s AND o.status <> 'cancelled' AND o.created_at >= %(since)s AND o.created_at < %(until)s) base WHERE 1=1 %(filters)s GROUP BY 1 ORDER BY 2 DESC",
+     ["channel_name"], "orders", "%", "percent", 1, "company",
+     "有效订单中产生售后工单的比例，按渠道分列——售后质量的核心监控指标。"),
+    ("biz.aftersales_count", "售后工单量", ["售后工单", "售后量", "售后多少单", "退换货数量"],
+     "SELECT type, reason, count(*) AS value FROM (SELECT a.type AS type, a.reason AS reason FROM after_sales a WHERE a.tenant_id=%(tenant_id)s AND a.created_at >= %(since)s AND a.created_at < %(until)s) base WHERE 1=1 %(filters)s GROUP BY 1, 2 ORDER BY 3 DESC",
+     ["type", "reason"], "after_sales", "单", "number", 1, "company",
+     "统计周期内售后工单数，按类型（退款/退货/换新）与原因分列。"),
+    ("biz.gross_profit", "毛利", ["毛利", "赚了多少", "利润", "毛利润"],
+     "SELECT channel_name, category, round(sum(amount - cost)/100.0, 2) AS value FROM (SELECT c.name AS channel_name, p.category AS category, o.amount_minor AS amount, o.cost_minor AS cost FROM orders o JOIN channels c ON c.id=o.channel_id AND c.tenant_id=o.tenant_id JOIN skus s ON s.id=o.sku_id AND s.tenant_id=o.tenant_id JOIN products p ON p.id=s.spu_id AND p.tenant_id=s.tenant_id WHERE o.tenant_id=%(tenant_id)s AND o.status <> 'cancelled' AND o.created_at >= %(since)s AND o.created_at < %(until)s) base WHERE 1=1 %(filters)s GROUP BY 1, 2 ORDER BY 3 DESC",
+     ["channel_name", "category"], "orders", "元", "currency", 2, "org",
+     "销售额减去商品成本（未扣营销与履约费用），按渠道与品类分列。二级机密：成本敏感。"),
+    ("biz.procurement_cost", "采购成本", ["采购成本", "进货成本", "底价", "成本多少", "进货额"],
+     "SELECT category, round(sum(cost)/100.0, 2) AS value FROM (SELECT p.category AS category, o.cost_minor AS cost FROM orders o JOIN skus s ON s.id=o.sku_id AND s.tenant_id=o.tenant_id JOIN products p ON p.id=s.spu_id AND p.tenant_id=s.tenant_id WHERE o.tenant_id=%(tenant_id)s AND o.status <> 'cancelled' AND o.created_at >= %(since)s AND o.created_at < %(until)s) base WHERE 1=1 %(filters)s GROUP BY 1 ORDER BY 2 DESC",
+     ["category"], "orders", "元", "currency", 3, "company",
+     "统计周期内售出商品的进货成本合计。三级机密：供应商底价，仅老板可见。"),
+]
+
+
+def ensure_eval_metrics(conn, tenant_id, boss_id) -> int:
+    """若库内缺失 ChatBI 评测所需指标，按幂等 SYN_METRIC_* 前缀补齐。"""
+    root = fetch_one(conn, "SELECT id FROM org_nodes WHERE tenant_id=%s AND kind='company' ORDER BY id LIMIT 1", (tenant_id,))
+    existing = {r["metric_key"] for r in fetch_all(conn, "SELECT metric_key FROM metrics WHERE tenant_id=%s AND state='published'", (tenant_id,))}
+    inserted = 0
+    for key, name, aliases, tpl, dims, table, unit, fmt, level, scope, desc in REQUIRED_EVAL_METRICS:
+        if key in existing or not root:
+            continue
+        mid = "SYN_METRIC_" + key.replace(".", "_").upper()
+        conn.execute(
+            """INSERT INTO metrics(id,tenant_id,metric_key,name,aliases,description,sql_template,
+                  dimensions,base_table,unit,format,level,scope,node_id,owner_id,state)
+               VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'published')
+               ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,aliases=EXCLUDED.aliases,
+                  description=EXCLUDED.description,sql_template=EXCLUDED.sql_template,
+                  dimensions=EXCLUDED.dimensions,base_table=EXCLUDED.base_table,unit=EXCLUDED.unit,
+                  format=EXCLUDED.format,level=EXCLUDED.level,scope=EXCLUDED.scope,
+                  node_id=EXCLUDED.node_id,state='published',updated_at=now()""",
+            (mid, tenant_id, key, name, aliases, desc, tpl, dims, table, unit, fmt, level, scope, root["id"], boss_id),
+        )
+        inserted += 1
+    return inserted
 
 
 def seed_grants(conn, tenant_id, fixtures, user_ids):
@@ -198,6 +251,11 @@ VERIFY_MATRIX = [
     ("SYN_A_STAFF002", "SYN_DOC_A_DENY01", False, "deny 授权优先于密级通路"),
     ("SYN_A_STAFF001", "SYN_DOC_A_DRAFT01", False, "草稿状态员工不可读"),
     ("SYN_A_BOSS001", "SYN_DOC_A_BOSS01", True, "老板可读老板级"),
+    ("SYN_A_BOSS001", "SYN_DOC_A_FIN_AI", True, "老板可读 L3 ai_allowed 财务文档"),
+    ("SYN_A_LDR001", "SYN_DOC_A_FIN_AI", False, "组长 grade=2 不可读 level=3 财务文档"),
+    ("SYN_A_STAFF001", "SYN_DOC_A_FIN_AI", False, "员工 grade=1 不可读 level=3 财务文档"),
+    ("SYN_A_LDR001", "SYN_DOC_A_CS01", False, "运营组长不可跨部门读 SYN_NODE_CS org 文档"),
+    ("SYN_A_STAFF004", "SYN_DOC_A_CS01", False, "CS 一线员工 grade=1 不可读 CS level=2 文档"),
     ("SYN_A_STAFF001", "SYN_DOC_A_BOSS01", False, "level=3 仅老板"),
     ("SYN_A_STAFF001", "SYN_DOC_A_PUB01", True, "公司级公开资料全员可读"),
     ("SYN_A_STAFF001", "SYN_CORPUS_LX20", True, "检索语料可读"),
@@ -242,11 +300,36 @@ def verify(conn, tenant_id, org, fixtures, user_ids):
         got = can_read(conn, p, d)
         if got != expect:
             problems.append(f"权限语义不符：{logical} 读 {doc_id} 实际 {got} 期望 {expect}（{why}）")
+    # 5. ChatBI 指标语义与权限矩阵校验
+    from taozhi.knowledge import metrics as metrics_mod
+    staff1 = load_principal(conn, user_ids["SYN_A_STAFF001"])
+    leader1 = load_principal(conn, user_ids["SYN_A_LDR001"])
+    boss1 = load_principal(conn, user_ids["SYN_A_BOSS001"])
+    metric_checks = [
+        ("biz.gsv", staff1, True, "员工可读 L1 销售额"),
+        ("biz.order_count", staff1, True, "员工可读 L1 订单量"),
+        ("biz.refund_rate", staff1, True, "员工可读 L1 退货率"),
+        ("biz.aftersales_count", staff1, True, "员工可读 L1 售后工单量"),
+        ("biz.gross_profit", staff1, False, "员工不可读 L2 毛利"),
+        ("biz.gross_profit", leader1, True, "组长可读 L2 毛利"),
+        ("biz.gross_profit", boss1, True, "老板可读 L2 毛利"),
+        ("biz.procurement_cost", staff1, False, "员工不可读 L3 采购成本"),
+        ("biz.procurement_cost", boss1, True, "老板可读 L3 采购成本"),
+    ]
+    for mkey, principal, expect_ok, why in metric_checks:
+        mrow = fetch_one(conn, "SELECT * FROM metrics WHERE tenant_id=%s AND metric_key=%s AND state='published'", (tenant_id, mkey))
+        if not mrow:
+            problems.append(f"ChatBI 缺失指标 {mkey}")
+            continue
+        got_m = metrics_mod.can_read_metric(conn, principal, mrow)
+        if got_m != expect_ok:
+            problems.append(f"ChatBI 指标权限不符：{mkey} {why} 实际 {got_m} 期望 {expect_ok}")
     return problems
 
 
 def clean(conn, tenant_id):
     from taozhi.knowledge import es_index
+    conn.execute("DELETE FROM metrics WHERE tenant_id=%s AND left(id,11)=%s", (tenant_id, "SYN_METRIC_"))
     docs = [r["id"] for r in fetch_all(conn, "SELECT id FROM documents WHERE tenant_id=%s AND left(id,4)=%s", (tenant_id, "SYN_"))]
     for did in docs:
         conn.execute("DELETE FROM chunks WHERE document_id=%s", (did,))
@@ -268,6 +351,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="灌库/校验/清除评测夹具")
     ap.add_argument("--verify", action="store_true", help="只校验不写入")
     ap.add_argument("--clean", action="store_true", help="清除全部 SYN_ 夹具与账号")
+    ap.add_argument("--reseed", action="store_true", help="强制重建所有 SYN_ 文档切片、向量与 ES 索引")
     args = ap.parse_args()
     org, fixtures = load_spec()
     with database_connection() as conn:
@@ -282,10 +366,12 @@ def main() -> int:
             seed_nodes(conn, tenant["id"], org)
             user_ids = seed_users(conn, tenant["id"], org)
             creator = user_ids["SYN_A_ADMIN001"]
-            st = seed_documents(conn, tenant["id"], creator, load_corpus_docs())
+            st = seed_documents(conn, tenant["id"], creator, load_corpus_docs(), force=args.reseed)
             n_grants = seed_grants(conn, tenant["id"], fixtures, user_ids)
+            n_met = ensure_eval_metrics(conn, tenant["id"], user_ids["SYN_A_BOSS001"])
             print(f"灌库完成：节点 {len(org['nodes'])}、账号 {len(org['identities'])}、"
-                  f"文档 新增 {st['inserted']}/未变 {st['updated']}（切片 {st['chunks']}）、授权 {n_grants}")
+                  f"文档 新增 {st['inserted']}/未变 {st['updated']}（切片 {st['chunks']}）、"
+                  f"授权 {n_grants}、补齐指标 {n_met}")
         if True:  # 灌完必校验：夹具写坏比不写更危险（白检的安全感）
             if not user_ids:
                 user_ids = {i["logical_id"]: "usr_syn_" + i["username"] for i in org["identities"]}

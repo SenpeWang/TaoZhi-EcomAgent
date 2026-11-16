@@ -37,7 +37,8 @@ from evals.dataset.seed import EVAL_PASSWORD       # noqa: E402
 
 GEN_LATEST = ROOT / "evals/datasets/generated/latest"
 REQUIRED_CATEGORIES = {"product", "compat", "aftersale", "multi_doc", "insufficient",
-                       "conflict", "role", "grant", "revocation", "injection", "leakage"}
+                       "conflict", "role", "grant", "revocation", "injection", "leakage",
+                       "operations", "supply", "coach", "finance", "calculation", "exclusion"}
 
 
 def load_jsonl(path: Path) -> list:
@@ -139,6 +140,20 @@ def test_identities_map_one_to_one():
 def test_every_category_has_cases():
     cats = {c["category"] for c in generated_cases()}
     assert REQUIRED_CATEGORIES <= cats, f"缺少类别: {REQUIRED_CATEGORIES - cats}"
+
+
+def test_production_domain_role_and_identity_balance():
+    """验证生产级领域角色（7大专家+问数+安全）与多身份分布均衡（含多页PDF夹具）。"""
+    manifest = json.loads((GEN_LATEST / "manifest.json").read_text(encoding="utf-8"))
+    by_domain = manifest["counts"]["by_domain_role"]
+    assert set(schema_mod.DOMAIN_ROLES) <= set(by_domain), f"缺少领域角色: {set(schema_mod.DOMAIN_ROLES) - set(by_domain)}"
+    for dr, n in by_domain.items():
+        assert n >= 2, f"domain_role={dr} 样本数过少: {n}"
+    by_id_role = manifest["counts"]["by_identity_role"]
+    for role, min_n in schema_mod.ROLE_TYPES_MIN.items():
+        assert by_id_role.get(role, 0) >= min_n, f"身份 {role} 仅 {by_id_role.get(role, 0)} < {min_n}"
+    corpus_ids = {d["doc_id"] for d in load_jsonl(GEN_LATEST / "corpus_docs.jsonl")}
+    assert {"SYN_DOC_A_FIN_AI", "SYN_DOC_A_CS01", "SYN_PARSE_PDF_T06", "SYN_CORPUS_CASE_MS", "SYN_CORPUS_G_SUPPLY", "SYN_CORPUS_G_COACH"} <= corpus_ids
 
 
 def test_eval_password_survives_production_policy():

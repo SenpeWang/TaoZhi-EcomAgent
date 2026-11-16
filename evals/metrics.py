@@ -18,7 +18,8 @@
 """
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+import re
+from typing import Any, Dict, Iterable, Optional, Sequence
 
 import numpy as np
 
@@ -35,14 +36,14 @@ def hit_at_k(ranked: Sequence[str], relevant: Iterable[str], k: int) -> float:
 
 
 def precision_at_k(ranked: Sequence[str], relevant: Iterable[str], k: int) -> float:
-    """前 k 条中的相关项占比。"""
+    """前 k 个槽位中的相关项占比（固定以 k 为分母，避免返回条数不足时虚高）。"""
     if k <= 0:
         return 0.0
     exp = set(relevant)
     top = ranked[:k]
     if not top:
         return 0.0
-    return sum(1 for t in top if t in exp) / len(top)
+    return sum(1 for t in top if t in exp) / k
 
 
 def recall_at_k(ranked: Sequence[str], relevant: Iterable[str], k: int) -> float:
@@ -180,12 +181,235 @@ def cost_report(before: dict, after: dict, n: int = 0) -> dict:
 
 
 def latency_report(seconds: Sequence[float]) -> dict:
-    """延迟分布：p50 / p95 / 均值（秒）。空样本不编造。"""
+    """延迟分布：p50 / p95 / p99 / max / 均值（秒）。空样本不编造。"""
     arr = np.asarray([float(x) for x in seconds], dtype="float64")
     if arr.size == 0:
-        return {"n": 0, "p50_s": None, "p95_s": None, "mean_s": None}
-    return {"n": int(arr.size), "p50_s": float(np.percentile(arr, 50)),
-            "p95_s": float(np.percentile(arr, 95)), "mean_s": float(arr.mean())}
+        return {"n": 0, "p50_s": None, "p95_s": None, "p99_s": None, "max_s": None, "mean_s": None}
+    return {
+        "n": int(arr.size),
+        "p50_s": float(np.percentile(arr, 50)),
+        "p95_s": float(np.percentile(arr, 95)),
+        "p99_s": float(np.percentile(arr, 99)),
+        "max_s": float(arr.max()),
+        "mean_s": float(arr.mean()),
+    }
+
+
+_CITE_REF_RE = re.compile(r"\[(\d+)\]")
+
+
+def context_relevancy(retrieved_docs: Sequence[str], expected_docs: Iterable[str]) -> float:
+    """上下文信噪比：返回切片中属于预期文档的比例（0~1）。"""
+    exp = set(expected_docs)
+    if not retrieved_docs or not exp:
+        return 0.0
+    return sum(1 for d in retrieved_docs if d in exp) / len(retrieved_docs)
+
+
+def fact_recall(answer: str, expected_facts: Sequence[str]) -> Optional[float]:
+    """核心事实覆盖率：空白归一化+大小写无关子串命中比例；无预期事实返回 None。"""
+    facts = [str(f).strip() for f in (expected_facts or []) if str(f).strip()]
+    if not facts:
+        return None
+    norm_ans = re.sub(r"\s+", "", answer or "").casefold()
+    hits = sum(1 for f in facts if re.sub(r"\s+", "", f).casefold() in norm_ans)
+    return hits / len(facts)
+
+
+def citation_accuracy(
+    answer: str,
+    citations: Sequence[Dict[str, Any]],
+    expected_docs: Optional[Iterable[str]] = None,
+) -> dict:
+    """回答内 [i] 引用标号的越界校验与预期出处对齐率。"""
+    refs = [int(x) for x in _CITE_REF_RE.findall(answer or "")]
+    n_cites = len(citations or [])
+    exp = set(expected_docs or [])
+    if not refs:
+        return {
+            "total_refs": 0,
+            "valid_refs": 0,
+            "in_bounds_rate": None,
+            "expected_doc_rate": None,
+        }
+    valid = [idx for idx in refs if 1 <= idx <= n_cites]
+    exp_hits = (
+        sum(1 for idx in valid if (citations[idx - 1].get("document_id") in exp))
+        if exp
+        else None
+    )
+    return {
+        "total_refs": len(refs),
+        "valid_refs": len(valid),
+        "in_bounds_rate": len(valid) / len(refs),
+        "expected_doc_rate": (exp_hits / len(refs)) if (exp and exp_hits is not None) else None,
+    }
+
+
+def refusal_breakdown(cases: Sequence[Dict[str, Any]]) -> dict:
+    """拒答双拆：False Refusal Rate（可答却拒答）vs True Abstain Rate（不可答真拒答）。"""
+    answerable = [c for c in cases if c.get("answerability") == "answerable"]
+    unanswerable = [c for c in cases if c.get("answerability") == "unanswerable"]
+    frr_n = sum(1 for c in answerable if c.get("abstain"))
+    tar_n = sum(1 for c in unanswerable if c.get("abstain"))
+    return {
+        "answerable_n": len(answerable),
+        "false_refusal_n": frr_n,
+        "false_refusal_rate": (frr_n / len(answerable)) if answerable else None,
+        "unanswerable_n": len(unanswerable),
+        "true_abstain_n": tar_n,
+        "true_abstain_rate": (tar_n / len(unanswerable)) if unanswerable else None,
+    }
+
+
+def answer_correctness(
+    faithfulness_val: Optional[float],
+    semantic_similarity: Optional[float],
+    weight_faith: float = 0.25,
+    weight_sim: float = 0.75,
+) -> Optional[float]:
+    """RAGAS 口径答案正确性组合分（忠实度与参考答案语义相似度加权）。"""
+    if semantic_similarity is None and faithfulness_val is None:
+        return None
+    if semantic_similarity is None:
+        return float(faithfulness_val)
+    if faithfulness_val is None:
+        return float(semantic_similarity)
+    return float(weight_faith * float(faithfulness_val) + weight_sim * float(semantic_similarity))
+
+
+def sut_token_report(records: Sequence[Dict[str, Any]]) -> dict:
+    """汇总业务端（SUT）真实 Token 消耗、调用放大倍率、重试与故障转移统计。"""
+    n = len(records)
+    if not n:
+        return {
+            "n": 0,
+            "cache_hits": 0,
+            "cache_hit_rate": None,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cost_usd": 0.0,
+            "tokens_per_case": None,
+            "tokens_per_uncached_case": None,
+            "estimated_cache_tokens_saved": 0,
+            "token_p50": None,
+            "token_p95": None,
+            "total_llm_attempts": 0,
+            "avg_attempts_per_uncached_case": None,
+            "json_retry_rate": None,
+            "failover_rate": None,
+            "llm_error_rate": None,
+            "by_role": {},
+        }
+    p_tok = sum(int(r.get("prompt_tokens") or 0) for r in records)
+    c_tok = sum(int(r.get("completion_tokens") or 0) for r in records)
+    tot_tok = p_tok + c_tok
+    cost = sum(float(r.get("cost_usd") or 0.0) for r in records)
+    cache_hits = sum(1 for r in records if r.get("cache_hit"))
+    uncached = [r for r in records if not r.get("cache_hit")]
+    uncached_n = len(uncached)
+    uncached_tok = sum(int(r.get("total_tokens") or 0) for r in uncached)
+    avg_uncached = (uncached_tok / uncached_n) if uncached_n else None
+    saved = int(round(cache_hits * avg_uncached)) if (cache_hits and avg_uncached is not None) else 0
+    per_case_tok = np.asarray([int(r.get("total_tokens") or 0) for r in records], dtype="float64")
+    attempts = sum(int(r.get("llm_attempts") or 0) for r in records)
+    errors = sum(int(r.get("llm_errors") or 0) for r in records)
+    with_json_retry = sum(1 for r in uncached if int(r.get("json_retries") or 0) > 0)
+    with_failover = sum(1 for r in uncached if int(r.get("failovers") or 0) > 0)
+    by_role: Dict[str, Dict[str, Any]] = {}
+    for r in records:
+        for role, rv in (r.get("by_role") or {}).items():
+            b = by_role.setdefault(
+                role,
+                {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0, "llm_attempts": 0},
+            )
+            b["prompt_tokens"] += int(rv.get("prompt_tokens") or 0)
+            b["completion_tokens"] += int(rv.get("completion_tokens") or 0)
+            b["total_tokens"] += int(rv.get("total_tokens") or 0)
+            b["cost_usd"] = round(b["cost_usd"] + float(rv.get("cost_usd") or 0.0), 6)
+            b["llm_attempts"] += int(rv.get("llm_attempts") or 0)
+    return {
+        "n": n,
+        "cache_hits": cache_hits,
+        "cache_hit_rate": round(cache_hits / n, 4),
+        "prompt_tokens": p_tok,
+        "completion_tokens": c_tok,
+        "total_tokens": tot_tok,
+        "cost_usd": round(cost, 6),
+        "tokens_per_case": round(tot_tok / n, 1),
+        "tokens_per_uncached_case": round(avg_uncached, 1) if avg_uncached is not None else None,
+        "estimated_cache_tokens_saved": saved,
+        "token_p50": int(round(float(np.percentile(per_case_tok, 50)))),
+        "token_p95": int(round(float(np.percentile(per_case_tok, 95)))),
+        "total_llm_attempts": attempts,
+        "avg_attempts_per_uncached_case": round(attempts / uncached_n, 2) if uncached_n else None,
+        "json_retry_rate": round(with_json_retry / uncached_n, 4) if uncached_n else None,
+        "failover_rate": round(with_failover / uncached_n, 4) if uncached_n else None,
+        "llm_error_rate": round(errors / attempts, 4) if attempts else 0.0,
+        "by_role": by_role,
+    }
+
+
+def latency_slo_report(
+    e2e_seconds: Sequence[float],
+    stage_records: Optional[Sequence[Dict[str, Any]]] = None,
+    sla_pairs: Optional[Sequence[tuple]] = None,
+    degraded_records: Optional[Sequence[Dict[str, Any]]] = None,
+) -> dict:
+    """端到端延迟分布 + 分阶段耗时 p50/p95（ms）+ SLA 超标率 + 基础设施降级率。"""
+    base = latency_report(e2e_seconds)
+    stage_buckets: Dict[str, list] = {}
+    for sr in (stage_records or []):
+        for k, v in (sr or {}).items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and k.endswith("_ms"):
+                stage_buckets.setdefault(k, []).append(float(v))
+    stage_p50_ms: Dict[str, int] = {}
+    stage_p95_ms: Dict[str, int] = {}
+    for k, vals in sorted(stage_buckets.items()):
+        arr = np.asarray(vals, dtype="float64")
+        stage_p50_ms[k] = int(round(float(np.percentile(arr, 50))))
+        stage_p95_ms[k] = int(round(float(np.percentile(arr, 95))))
+
+    breach_count = 0
+    if sla_pairs:
+        breach_count = sum(1 for actual, limit in sla_pairs if actual is not None and limit is not None and actual > limit)
+    sla_n = len(sla_pairs or [])
+
+    degraded_rates: Dict[str, float] = {}
+    if degraded_records:
+        dn = len(degraded_records)
+        for flag in ("es_fallback", "rerank_fallback", "ann_blocked", "hyde_used", "adaptive_retry",
+                     "json_retry_used", "llm_failover_used", "specialist_failed"):
+            cnt = sum(1 for d in degraded_records if d and d.get(flag))
+            degraded_rates[f"{flag}_rate"] = round(cnt / dn, 4)
+
+    base.update({
+        "stage_p50_ms": stage_p50_ms,
+        "stage_p95_ms": stage_p95_ms,
+        "sla_n": sla_n,
+        "sla_breach_count": breach_count,
+        "sla_breach_rate": round(breach_count / sla_n, 4) if sla_n else None,
+        "degraded_rates": degraded_rates,
+    })
+    return base
+
+
+def throughput_report(
+    wall_seconds: float,
+    n: int,
+    concurrency: int,
+    e2e_seconds: Sequence[float],
+) -> dict:
+    """并发压测吞吐与延迟分布报告。"""
+    rep = latency_report(e2e_seconds)
+    rep.update({
+        "concurrency": int(concurrency),
+        "submitted_n": int(n),
+        "wall_seconds": round(float(wall_seconds), 3),
+        "qps": round(n / wall_seconds, 3) if wall_seconds > 0 else 0.0,
+    })
+    return rep
 
 
 def faithfulness_report(cases: Sequence[dict]) -> dict:

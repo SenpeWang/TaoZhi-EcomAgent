@@ -98,3 +98,16 @@ documents:
       - ["保修期", "12 个月"]
       - ["受理渠道", "官方旗舰店"]
     facts: ["12 个月", "官方旗舰店", "保修政策 2026 版"]
+
+  - doc_id: SYN_PARSE_PDF_T06
+    title: WZ-30 多页渠道供货参数表（5 页 PDF）
+    format: pdf
+    pages: 5
+    header: 多页采购合集 2026Q4
+    footer: 文档编号 PARSE-MULTI-5P
+    rows:
+      - ["型号", "WZ-30"]
+      - ["无线功率", "Qi2 15W"]
+      - ["最小起订量", "100 台"]
+      - ["版本标识", "五页全表V5"]
+    facts: ["多页采购合集 2026Q4", "WZ-30", "Qi2 15W", "100 台", "PARSE-MULTI-5P"]

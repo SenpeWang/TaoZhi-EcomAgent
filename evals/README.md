@@ -8,7 +8,8 @@
 ```
 evals/
 ├── rag_eval/                    ★企业知识库 RAG 三层评测运行器（检索 · 对抗 · 行为）
-│   └── run.py                   独立评测执行器（原 run_evals.py 已彻底迁入此处）
+│   ├── run.py                   独立评测执行器（原 run_evals.py 已彻底迁入此处）
+│   └── 测评记录.md              知识文档 RAG 评测基线、改动对比与归因档案
 ├── agent_eval/                  ★电商真·自主多智能体（Supervisor Loop）质效评测体系
 │   ├── harness.py               单臂会话沙箱与链路追踪
 │   ├── judges.py                4 大声明式判定器（工具契约/交付大纲/去伪/动态干预）

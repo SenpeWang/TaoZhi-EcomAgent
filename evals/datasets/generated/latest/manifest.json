@@ -2,79 +2,103 @@
   "dataset": "generated/v2",
   "seed": 20261018,
   "spec_sha256": {
-    "corpus.yaml": "df04aa82c490ec4e08e08c3e055aa088b26e5a05058f669013ca21ca88e60784",
-    "fixtures.yaml": "ef6127d6f39c40adea649977e124e838332d3005f3907ba5ded8af2fa25a2ca9",
+    "corpus.yaml": "1b913a4c0a4e871d4bd1db08316e1095a25ee0abcbede247d5dd945901187e7e",
+    "fixtures.yaml": "91951bb8cdb317a646f1f524270a10dd97d5ba31d5cbdc30b0f371110c70c1ee",
     "org.yaml": "f2c83b49afaa9966f05ebb31e58aba951b22c8235fc056f83a474b520b6139e0",
-    "parsing.yaml": "8ad8d16f49a395ca2e2039fb9857a244c30498c0c79f0cd062f806765d1f3f2d",
-    "templates.yaml": "98a2461a4096e658c9cf4ad20ca9ae5ad82205116670af67e5521b1d86f7b988"
+    "parsing.yaml": "29874a2099631d5f4b9b42902952dbd341b689bde917835f6dcb19a70776a44b",
+    "templates.yaml": "7fe8e0d7e855da565fd0f9cb138bcd8dec4f45fb1ab57aa98e541d0958d857f5"
   },
   "counts": {
-    "cases": 108,
+    "cases": 180,
     "by_category": {
-      "aftersale": 6,
+      "aftersale": 7,
       "ambiguous": 5,
-      "citation": 2,
+      "calculation": 4,
+      "chatbi": 12,
+      "citation": 5,
+      "coach": 5,
       "compat": 10,
       "conflict": 3,
       "edge": 5,
+      "exclusion": 4,
+      "finance": 4,
       "grant": 2,
       "injection": 2,
-      "insufficient": 4,
+      "insufficient": 8,
       "leakage": 2,
-      "long_context": 2,
+      "long_context": 6,
       "multi_doc": 8,
-      "multi_turn": 10,
-      "parsing": 10,
-      "product": 13,
+      "multi_turn": 13,
+      "operations": 6,
+      "parsing": 11,
+      "product": 16,
       "revocation": 2,
-      "robust": 10,
-      "role": 4,
-      "timeliness": 3,
+      "robust": 15,
+      "role": 8,
+      "supply": 6,
+      "timeliness": 6,
       "troubleshoot": 5
     },
     "by_dimension": {
       "answerability": {
-        "answerable": 78,
-        "partial": 11,
-        "unanswerable": 19
+        "answerable": 134,
+        "partial": 14,
+        "unanswerable": 32
       },
       "qtype": {
         "ambiguous": 5,
-        "compare": 10,
-        "edge": 5,
-        "fact": 59,
-        "multihop": 5,
-        "process": 5,
-        "security": 14,
-        "troubleshoot": 5
+        "compare": 13,
+        "edge": 14,
+        "fact": 89,
+        "multihop": 15,
+        "process": 8,
+        "security": 27,
+        "troubleshoot": 9
       },
       "difficulty": {
-        "easy": 36,
-        "hard": 30,
-        "medium": 42
+        "easy": 44,
+        "hard": 57,
+        "medium": 79
       },
       "source": {
-        "adversarial": 4,
-        "badcase": 5,
-        "synthetic": 99
+        "adversarial": 15,
+        "badcase": 7,
+        "real": 6,
+        "synthetic": 152
       },
       "risk": {
-        "high": 19,
-        "low": 75,
-        "medium": 14
+        "high": 40,
+        "low": 102,
+        "medium": 38
       }
     },
-    "templates": 90
+    "by_domain_role": {
+      "after_sales": 13,
+      "coach": 12,
+      "compatibility": 12,
+      "data": 12,
+      "finance": 4,
+      "operations": 8,
+      "product": 94,
+      "security": 18,
+      "supply": 7
+    },
+    "by_identity_role": {
+      "boss": 11,
+      "employee": 158,
+      "leader": 11
+    },
+    "templates": 160
   },
   "docs": {
-    "total": 32,
+    "total": 42,
     "by_kind": {
       "conflict": 2,
-      "fixture": 5,
-      "guide": 6,
-      "parsing": 10,
+      "fixture": 7,
+      "guide": 12,
+      "parsing": 11,
       "policy": 3,
-      "product": 6
+      "product": 7
     }
   },
   "identities": [

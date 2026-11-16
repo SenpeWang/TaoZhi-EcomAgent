@@ -136,6 +136,25 @@ def emit_corpus_docs(fixtures, corpus):
     return out
 
 
+_DEFAULT_DOMAIN_BY_CAT = {
+    "product": "product",
+    "compat": "compatibility",
+    "aftersale": "after_sales",
+    "calculation": "after_sales",
+    "troubleshoot": "coach",
+    "coach": "coach",
+    "operations": "operations",
+    "supply": "supply",
+    "finance": "finance",
+    "chatbi": "data",
+    "role": "security",
+    "grant": "security",
+    "revocation": "security",
+    "injection": "security",
+    "leakage": "security",
+}
+
+
 def generate():
     org, fixtures, corpus, templates = load_specs()
     ctx, docs = build_context(org, fixtures, corpus)
@@ -162,6 +181,7 @@ def generate():
             for alias, ref in (tpl.get("context") or {}).items():
                 local[alias] = eval(ref, {"__builtins__": {}}, ctx)  # noqa: S307
             ident = ctx["identities"][tpl["identity"]]
+            ref_ans = render(tpl.get("reference_answer") or tpl["expected_behavior"], local)
             case = {
                 "case_id": f"GEN-{tid}-{seq:03d}",
                 "template": tid,
@@ -177,6 +197,7 @@ def generate():
                 "expected_documents": [render(d, local) for d in tpl.get("expected_documents", [])],
                 "expected_facts": [render(f, local) for f in tpl.get("expected_facts", [])],
                 "expected_behavior": render(tpl["expected_behavior"], local),
+                "reference_answer": ref_ans,
                 "forbidden_disclosure": [render(w, local) for w in tpl.get("forbidden", [])],
                 "pass_criteria": tpl.get("pass_criteria", ""),
                 "evidence_location": render(tpl.get("evidence", ""), local),
@@ -186,7 +207,16 @@ def generate():
                 "difficulty": tpl["difficulty"],
                 "source": tpl["source"],
                 "risk": tpl["risk"],
+                "domain_role": tpl.get("domain_role") or _DEFAULT_DOMAIN_BY_CAT.get(tpl["category"], "product"),
             }
+            if tpl.get("out_of_corpus"):
+                case["out_of_corpus"] = True
+            if tpl.get("expected_metric"):
+                case["expected_metric"] = tpl["expected_metric"]
+            if "input_level" in tpl:
+                case["input_level"] = int(tpl["input_level"])
+            if tpl.get("payload"):
+                case["payload"] = dict(tpl["payload"])
             cases.append(case)
     return cases, dataset, org, fixtures, corpus
 
@@ -245,12 +275,23 @@ def main() -> int:
         for c in cases:
             agg[c[dim]] = agg.get(c[dim], 0) + 1
         by_dim[dim] = dict(sorted(agg.items()))
+    by_domain = {}
+    for c in cases:
+        dr = c.get("domain_role") or "product"
+        by_domain[dr] = by_domain.get(dr, 0) + 1
+    role_map = {i["logical_id"]: str(i.get("role") or "employee") for i in org.get("identities", [])}
+    by_id_role = {}
+    for c in cases:
+        rl = role_map.get((c.get("test_identity") or {}).get("logical_id"), "employee")
+        by_id_role[rl] = by_id_role.get(rl, 0) + 1
     manifest = {
         "dataset": dataset,
         "seed": SEED,
         "spec_sha256": {f.name: sha256_file(f) for f in sorted(SPEC.glob("*.yaml"))},
         "counts": {"cases": len(cases), "by_category": dict(sorted(by_cat.items())),
                    "by_dimension": by_dim,
+                   "by_domain_role": dict(sorted(by_domain.items())),
+                   "by_identity_role": dict(sorted(by_id_role.items())),
                    "templates": len(yaml.safe_load((SPEC / "templates.yaml").read_text(encoding="utf-8"))["templates"])},
         "docs": {"total": len(corpus_docs),
                  "by_kind": {k: sum(1 for d in corpus_docs if d["kind"] == k)
