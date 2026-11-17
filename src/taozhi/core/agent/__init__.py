@@ -1,6 +1,7 @@
 """智能体核心上下文与通信协议定义。"""
 
 from .context import ArtifactMetadata, SubagentContext
+from .session import AgentSession
 from .protocol import (
     Message,
     MessageType,
@@ -13,6 +14,7 @@ from ..memory.store import LongTermMemoryStore
 from ..memory.transcript import TranscriptLogger, TranscriptStep
 
 __all__ = [
+    "AgentSession",
     "ArtifactMetadata",
     "LongTermMemoryStore",
     "Message",

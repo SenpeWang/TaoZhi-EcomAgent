@@ -1,12 +1,14 @@
-"""动态并行 Orchestrator–Workers 状态图构建与统一执行入口。"""
+"""市场调研自治多智能体 LangGraph 编排图组装与执行入口。"""
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from langgraph.graph import END, START, StateGraph
 
+from taozhi.core.agent.session import AgentSession
 from taozhi.domain.research import StopReason
 from .hooks import RuntimeHooks, emit_progress, normalize_steering_item, register_hooks, unregister_hooks
 from .planner import lead_orchestrator_node, orchestrator_router
@@ -14,13 +16,19 @@ from .reporter import final_persistence_node, synthesizer_node
 from .schemas import AutonomousAgentState
 from .subagents import subagent_worker_node
 
+_LOG = logging.getLogger(__name__)
 
-def build_autonomous_agent_graph(
-    checkpointer: Optional[Any] = None,
-    *,
-    require_checkpointer: bool = False,
-) -> Any:
-    """构建动态并行 Orchestrator–Workers 多智能体 LangGraph 状态图。"""
+
+def build_autonomous_agent_graph(checkpointer: Any = None, *, require_checkpointer: bool = False) -> Any:
+    """编译真·自治多智能体 Supervisor Loop 状态图。
+
+    Args:
+        checkpointer: LangGraph 状态检查点持久化器。
+        require_checkpointer: 为 True 时强制断言 ``checkpointer`` 非空。
+
+    Returns:
+        编译完成的可执行 LangGraph StateGraph 实例。
+    """
     if require_checkpointer and checkpointer is None:
         raise ValueError("启用持久化或中断恢复时必须传入非空 checkpointer（如 PostgresSaver）")
     builder = StateGraph(AutonomousAgentState)
@@ -30,138 +38,68 @@ def build_autonomous_agent_graph(
     builder.add_node("final_node", final_persistence_node)
 
     builder.add_edge(START, "orchestrator")
-    builder.add_conditional_edges("orchestrator", orchestrator_router, ["subagent_worker", "synthesizer", "final_node"])
+    builder.add_conditional_edges(
+        "orchestrator",
+        orchestrator_router,
+        ["subagent_worker", "synthesizer", "final_node"],
+    )
     builder.add_edge("subagent_worker", "orchestrator")
     builder.add_edge("synthesizer", "final_node")
     builder.add_edge("final_node", END)
+
     return builder.compile(checkpointer=checkpointer)
 
 
-def execute_autonomous_agents(
+def _resume_from_prior_checkpoint(
+    *,
+    graph: Any,
+    checkpointer: Any,
+    job_id: str,
+    run_version: int,
+    max_turns: int,
+    init_state: AutonomousAgentState,
+    seen_init_ids: set[str],
+    hooks: RuntimeHooks,
+) -> None:
+    """若当前为失败/取消后的断点重试执行，逆序从上一版本检查点继承黑板证据与路由轨迹。"""
+    if checkpointer is None or not job_id or run_version <= 1:
+        return
+    for prev_ver in range(run_version - 1, 0, -1):
+        try:
+            snap = graph.get_state({"configurable": {"thread_id": f"research_{job_id}_{prev_ver}"}})
+            vals = (snap.values or {}) if snap else {}
+        except Exception as exc:
+            _LOG.debug("读取上一版检查点失败 (%s_v%s): %s", job_id, prev_ver, exc)
+            vals = {}
+        if vals and (vals.get("evidence_pool") or vals.get("outline") or vals.get("llm_route_history")):
+            for list_k in ("evidence_pool", "invalidated_evidence_ids", "outline", "audit_trail", "artifacts", "llm_route_history"):
+                if vals.get(list_k):
+                    init_state[list_k] = list(vals.get(list_k) or [])  # type: ignore[literal-required]
+            if vals.get("active_llm_endpoint"):
+                init_state["active_llm_endpoint"] = str(vals.get("active_llm_endpoint") or "")
+            for txt, eid in zip(vals.get("steering_inbox") or [], vals.get("steering_event_ids") or []):
+                if eid not in seen_init_ids:
+                    seen_init_ids.add(eid)
+                    init_state["steering_inbox"].append(txt)
+                    init_state["steering_event_ids"].append(eid)
+            init_state["processed_steering_count"] = int(vals.get("processed_steering_count") or 0)
+            prior_turn = int(vals.get("turn_count") or 0)
+            if prior_turn > 0:
+                init_state["turn_count"] = min(prior_turn, max(0, max_turns - 1))
+            emit_progress(hooks, f"[system] [检查点续跑] 已从上一版本检查点恢复 {len(init_state['evidence_pool'])} 份黑板证据与路由状态，继续推进", 5)
+            break
+
+
+def _build_research_result_payload(
+    *,
+    merged_state: Dict[str, Any],
     keyword: str,
-    user_query: str = "",
-    job_id: str = "",
-    tenant_id: str = "default",
-    run_version: int = 1,
-    conversation_id: str = "",
-    checkpointer: Optional[Any] = None,
-    emit_event_fn: Optional[Callable[[str, int], None]] = None,
-    initial_steering: Optional[List[Any]] = None,
-    timeout_seconds: float = 180.0,
-    max_turns: int = 5,
-    max_parallel_subagents: int = 4,
-    max_subagent_steps: int = 3,
-    check_cancel_fn: Optional[Callable[[], bool]] = None,
-    fetch_steering_fn: Optional[Callable[[], List[Any]]] = None,
-    require_checkpointer: bool = False,
+    conversation_id: str,
+    total_elapsed: float,
+    session: AgentSession,
+    hooks: RuntimeHooks,
 ) -> Dict[str, Any]:
-    """执行动态并行多智能体调研系统并实时推送各层可审计事件。"""
-    if require_checkpointer and checkpointer is None:
-        raise ValueError("启用持久化或中断恢复时必须传入非空 checkpointer（如 PostgresSaver）")
-
-    started_at = time.time()
-    hook_run_id = f"run_{uuid.uuid4().hex}"
-    hooks = RuntimeHooks(check_cancel_fn=check_cancel_fn, fetch_steering_fn=fetch_steering_fn, emit_fn=emit_event_fn)
-
-    init_steering_texts: List[str] = []
-    init_steering_ids: List[str] = []
-    seen_init_ids = set()
-    for raw_item in initial_steering or []:
-        norm = normalize_steering_item(raw_item)
-        if norm is None:
-            continue
-        eid, text = norm
-        if eid in seen_init_ids:
-            continue
-        seen_init_ids.add(eid)
-        init_steering_ids.append(eid)
-        init_steering_texts.append(text)
-
-    register_hooks(hook_run_id, hooks)
-    init_state: AutonomousAgentState = {
-        "job_id": job_id or f"job_{int(time.time())}",
-        "tenant_id": tenant_id,
-        "run_version": run_version,
-        "conversation_id": conversation_id or f"conv_{int(time.time())}",
-        "hook_run_id": hook_run_id,
-        "user_query": user_query or keyword,
-        "keyword": keyword,
-        "steering_inbox": init_steering_texts,
-        "steering_event_ids": init_steering_ids,
-        "processed_steering_count": 0,
-        "system_status": "INIT",
-        "next_action": "orchestrator",
-        "current_rationale": "激活 Orchestrator-Workers 自治多智能体调研系统",
-        "turn_count": 0,
-        "max_turns": max_turns,
-        "max_parallel_subagents": max_parallel_subagents,
-        "max_subagent_steps": max_subagent_steps,
-        "started_at": started_at,
-        "timeout_seconds": timeout_seconds,
-        "cancelled": False,
-        "stop_reason": StopReason.CONTINUE.value,
-        "outline": [],
-        "pending_tasks": [],
-        "guard_notices": [],
-        "evidence_pool": [],
-        "invalidated_evidence_ids": [],
-        "audit_trail": [],
-        "active_llm_endpoint": "",
-        "llm_route_history": [],
-        "artifacts": [],
-        "report": "",
-    }
-
-    graph = build_autonomous_agent_graph(checkpointer=checkpointer, require_checkpointer=require_checkpointer)
-
-    if checkpointer is not None and job_id and run_version > 1:
-        for prev_ver in range(run_version - 1, 0, -1):
-            try:
-                snap = graph.get_state({"configurable": {"thread_id": f"research_{job_id}_{prev_ver}"}})
-                vals = (snap.values or {}) if snap else {}
-            except Exception:
-                vals = {}
-            if vals and (vals.get("evidence_pool") or vals.get("outline") or vals.get("llm_route_history")):
-                for list_k in ("evidence_pool", "invalidated_evidence_ids", "outline", "audit_trail", "artifacts", "llm_route_history"):
-                    if vals.get(list_k):
-                        init_state[list_k] = list(vals.get(list_k) or [])  # type: ignore[literal-required]
-                if vals.get("active_llm_endpoint"):
-                    init_state["active_llm_endpoint"] = str(vals.get("active_llm_endpoint") or "")
-                for txt, eid in zip(vals.get("steering_inbox") or [], vals.get("steering_event_ids") or []):
-                    if eid not in seen_init_ids:
-                        seen_init_ids.add(eid)
-                        init_state["steering_inbox"].append(txt)
-                        init_state["steering_event_ids"].append(eid)
-                init_state["processed_steering_count"] = int(vals.get("processed_steering_count") or 0)
-                prior_turn = int(vals.get("turn_count") or 0)
-                if prior_turn > 0:
-                    init_state["turn_count"] = min(prior_turn, max(0, max_turns - 1))
-                emit_progress(hooks, f"[system] [检查点续跑] 已从上一版本检查点恢复 {len(init_state['evidence_pool'])} 份黑板证据与路由状态，继续推进", 5)
-                break
-
-    thread_id = f"research_{job_id}_{run_version}" if job_id else f"research_{int(time.time())}"
-    config = {"configurable": {"thread_id": thread_id}}
-    emit_progress(hooks, f"[agent_start] 激活自治多智能体主协调代理 (main_agent) · 目标品类: 【{keyword}】", 5)
-
-    list_fields = ("steering_inbox", "steering_event_ids", "evidence_pool", "invalidated_evidence_ids", "audit_trail", "llm_route_history", "artifacts")
-    merged_state: Dict[str, Any] = dict(init_state)
-    for list_key in list_fields:
-        merged_state[list_key] = list(init_state[list_key])
-
-    try:
-        for chunk in graph.stream(init_state, config=config, stream_mode="updates"):
-            for _, delta in chunk.items():
-                if not isinstance(delta, dict):
-                    continue
-                for k, v in delta.items():
-                    if k in list_fields and isinstance(v, list):
-                        merged_state[k].extend(v)
-                    else:
-                        merged_state[k] = v
-    finally:
-        unregister_hooks(hook_run_id)
-
-    total_elapsed = round(max(0.0, time.time() - started_at), 1)
+    """聚合并发子智能体证据池与审计轨迹，同时沉淀 Piagent 会话长效记忆。"""
     subagents_trace: List[Dict[str, Any]] = []
     for tr in merged_state.get("audit_trail", []):
         tool_records = tr.get("tools", [])
@@ -238,6 +176,14 @@ def execute_autonomous_agents(
     if merged_state.get("cancelled"):
         emit_progress(hooks, f"[system] 任务已按用户取消请求提前终止 (耗时 {total_elapsed}s)", 100)
     else:
+        for ev in active_ev:
+            if ev.get("status") == "ok" and ev.get("summary"):
+                session.record_fact(
+                    subject=keyword,
+                    predicate=str(ev.get("role") or "调研洞察"),
+                    obj=str(ev["summary"])[:300],
+                    source=str(ev.get("evidence_id") or conversation_id or "research"),
+                )
         emit_progress(hooks, f"[agent_end] 多智能体自主协同达成目标 · 终审研报交付就绪 (总耗时 {total_elapsed}s)", 100)
 
     return {
@@ -259,3 +205,145 @@ def execute_autonomous_agents(
         "stop_reason": merged_state.get("stop_reason", StopReason.COMPLETED.value),
         "cancelled": bool(merged_state.get("cancelled", False)),
     }
+
+
+def execute_autonomous_agents(
+    keyword: str,
+    user_query: str = "",
+    job_id: str = "",
+    tenant_id: str = "default",
+    run_version: int = 1,
+    conversation_id: str = "",
+    checkpointer: Any = None,
+    emit_event_fn: Optional[Callable[[str, int], None]] = None,
+    initial_steering: Optional[List[Any]] = None,
+    timeout_seconds: float = 180.0,
+    max_turns: int = 5,
+    max_parallel_subagents: int = 4,
+    max_subagent_steps: int = 3,
+    check_cancel_fn: Optional[Callable[[], bool]] = None,
+    fetch_steering_fn: Optional[Callable[[], List[Any]]] = None,
+    require_checkpointer: bool = False,
+) -> Dict[str, Any]:
+    """在 AgentSession 与检查点保护下启动电商市场自主协同调研系统。
+
+    Args:
+        keyword: 目标商品或品类关键词。
+        user_query: 用户原始完整提问。
+        job_id: 数据库任务主编号（用于组装唯一 LangGraph ``thread_id``）。
+        tenant_id: 租户标识符。
+        run_version: 当前执行版本号。
+        conversation_id: 多轮协同调研会话标识。
+        checkpointer: LangGraph PostgreSQL 检查点持久化器。
+        emit_event_fn: 运行期阶段进度与审计信标推送回调。
+        initial_steering: 启动前已入队的用户动态干预列表。
+        timeout_seconds: 调研总时间预算上限（秒）。
+        max_turns: 主协调器最大决策轮数。
+        max_parallel_subagents: 单轮并发子智能体数量上限。
+        max_subagent_steps: 单个子智能体最大 ReAct 步数。
+        check_cancel_fn: 轮询检查任务是否已取消的回调。
+        fetch_steering_fn: 轮询拉取新追加动态干预指令的回调。
+        require_checkpointer: 为 True 时未传入持久化 checkpointer 将快速失败。
+
+    Returns:
+        包含终审 Markdown 研报、平台分布、子智能体审计轨迹及路由记录的结果字典。
+    """
+    if require_checkpointer and checkpointer is None:
+        raise ValueError("启用持久化或中断恢复时必须传入非空 checkpointer（如 PostgresSaver）")
+
+    hook_run_id = f"run_{uuid.uuid4().hex[:12]}"
+    hooks = RuntimeHooks(check_cancel_fn=check_cancel_fn, fetch_steering_fn=fetch_steering_fn, emit_fn=emit_event_fn)
+    register_hooks(hook_run_id, hooks)
+    session = AgentSession(
+        conversation_id=conversation_id or job_id or hook_run_id,
+        tenant_id=tenant_id,
+        keyword=keyword,
+        user_query=user_query or keyword,
+        cancel_event=hooks.cancel_event,
+    )
+
+    started_at = time.time()
+    init_steering_texts: List[str] = []
+    init_steering_ids: List[str] = []
+    seen_init_ids: set[str] = set()
+    for raw_item in initial_steering or []:
+        norm = normalize_steering_item(raw_item)
+        if norm is not None and norm[0] not in seen_init_ids:
+            seen_init_ids.add(norm[0])
+            init_steering_ids.append(norm[0])
+            init_steering_texts.append(norm[1])
+
+    init_state: AutonomousAgentState = {
+        "job_id": job_id,
+        "tenant_id": tenant_id,
+        "run_version": run_version,
+        "conversation_id": conversation_id,
+        "hook_run_id": hook_run_id,
+        "keyword": keyword,
+        "user_query": user_query or keyword,
+        "steering_inbox": init_steering_texts,
+        "steering_event_ids": init_steering_ids,
+        "processed_steering_count": 0,
+        "turn_count": 0,
+        "max_turns": max_turns,
+        "max_parallel_subagents": max_parallel_subagents,
+        "max_subagent_steps": max_subagent_steps,
+        "started_at": started_at,
+        "timeout_seconds": timeout_seconds,
+        "cancelled": False,
+        "stop_reason": StopReason.CONTINUE.value,
+        "outline": [],
+        "pending_tasks": [],
+        "guard_notices": [],
+        "evidence_pool": [],
+        "invalidated_evidence_ids": [],
+        "audit_trail": [],
+        "active_llm_endpoint": "",
+        "llm_route_history": [],
+        "artifacts": [],
+        "report": "",
+    }
+
+    graph = build_autonomous_agent_graph(checkpointer=checkpointer, require_checkpointer=require_checkpointer)
+    _resume_from_prior_checkpoint(
+        graph=graph,
+        checkpointer=checkpointer,
+        job_id=job_id,
+        run_version=run_version,
+        max_turns=max_turns,
+        init_state=init_state,
+        seen_init_ids=seen_init_ids,
+        hooks=hooks,
+    )
+
+    thread_id = f"research_{job_id}_{run_version}" if job_id else f"research_{int(time.time())}"
+    config = {"configurable": {"thread_id": thread_id}}
+    emit_progress(hooks, f"[agent_start] 激活自治多智能体主协调代理 (main_agent) · 目标品类: 【{keyword}】", 5)
+
+    list_fields = ("steering_inbox", "steering_event_ids", "evidence_pool", "invalidated_evidence_ids", "audit_trail", "llm_route_history", "artifacts")
+    merged_state: Dict[str, Any] = dict(init_state)
+    for list_key in list_fields:
+        merged_state[list_key] = list(init_state[list_key])
+
+    try:
+        for chunk in graph.stream(init_state, config=config, stream_mode="updates"):
+            for _, delta in chunk.items():
+                if not isinstance(delta, dict):
+                    continue
+                for k, v in delta.items():
+                    if k in list_fields and isinstance(v, list):
+                        merged_state[k].extend(v)
+                    else:
+                        merged_state[k] = v
+    finally:
+        unregister_hooks(hook_run_id)
+
+    total_elapsed = round(max(0.0, time.time() - started_at), 1)
+    return _build_research_result_payload(
+        merged_state=merged_state,
+        keyword=keyword,
+        conversation_id=conversation_id,
+        total_elapsed=total_elapsed,
+        session=session,
+        hooks=hooks,
+    )

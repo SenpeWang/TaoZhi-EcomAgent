@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
+
+_LOG = logging.getLogger(__name__)
 
 from taozhi.config import get_settings, load_config
 from taozhi.domain.entities import Principal
@@ -44,10 +47,11 @@ def get_portal_info() -> dict[str, Any]:
             default = cfg.quick_login_password if cfg.quick_login_passwords else ""
             creds: dict[str, Any] = {}
             if cfg.quick_login_passwords and not default:
-                cred_path = Path.home() / ".local/share/ecom-agent/accounts.json"
+                cred_path = cfg.runtime_dir / "accounts.json"
                 try:
                     creds = json.loads(cred_path.read_text()) if cred_path.exists() else {}
-                except Exception:
+                except Exception as exc:
+                    _LOG.warning("读取快捷登录凭据文件失败 (%s): %s", cred_path, exc)
                     creds = {}
             result = []
             for r in rows:
@@ -56,8 +60,8 @@ def get_portal_info() -> dict[str, Any]:
                     display_name=r["display_name"],
                     role="admin" if r["system_admin"] else (r["roles"] or "-"),
                 )
-                if r["username"].startswith("syn_"):
-                    item["password"] = "taozhi2026eval"
+                if r["username"].startswith("syn_") and cfg.quick_eval_password:
+                    item["password"] = cfg.quick_eval_password
                 elif default:
                     item["password"] = default
                 elif creds:
@@ -87,13 +91,12 @@ def change_own_password(p: Principal, current_password: str, new_password: str) 
         admin_repo.update_user_password(c, p.id, hash_password(new_password, cfg.mode), must_change=False)
         admin_repo.invalidate_authorization(c, p.tenant_id, p.id)
         audit(c, p, "修改本人密码", p.id, system=True)
-    for folder in (Path.home() / ".local/share/ecom-copilot", Path.home() / ".local/share/ecom-agent"):
-        for private in folder.glob("bootstrap-*.json"):
-            try:
-                if json.loads(private.read_text()).get("user_id") == p.id:
-                    private.unlink()
-            except (OSError, ValueError):
-                pass
+    for private in cfg.runtime_dir.glob("bootstrap-*.json"):
+        try:
+            if json.loads(private.read_text()).get("user_id") == p.id:
+                private.unlink()
+        except (OSError, ValueError) as exc:
+            _LOG.debug("清理历史引导密码文件跳过 (%s): %s", private, exc)
     return {"message": "密码已修改，请重新登录"}
 
 

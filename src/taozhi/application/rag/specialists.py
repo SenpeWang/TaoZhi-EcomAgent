@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import List
+from typing import Any, List
+
+_LOG = logging.getLogger(__name__)
 
 from pydantic import BaseModel, Field
 
@@ -146,8 +149,8 @@ def domain_node(state: State) -> dict:
             try:
                 with database_connection() as c:
                     update_model_call(c, call_id, elapsed, u["prompt_tokens"], u["completion_tokens"], outcome)
-            except Exception:
-                pass
+            except Exception as exc:
+                _LOG.warning("回写专家模型调用消耗失败 (%s): %s", call_id, exc)
         return {
             "findings": agent_findings,
             "missing": agent_missing,

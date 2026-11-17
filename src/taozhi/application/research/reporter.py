@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any, Dict, List
+
+_LOG = logging.getLogger(__name__)
 
 from taozhi.ai.client import LLMClient, ModelTier
 from taozhi.ai.router import route_audit_scope
@@ -138,8 +141,8 @@ def final_persistence_node(state: AutonomousAgentState) -> Dict[str, Any]:
             mem.remember_fact(subject=keyword, predicate="全景调研大纲", object_val="；".join(outline), confidence=1.0)
         if keyword and report:
             mem.remember_fact(subject=keyword, predicate="全景调研报告摘要", object_val=report[:250], confidence=0.95)
-    except Exception:
-        pass
+    except Exception as exc:
+        _LOG.warning("沉淀终态调研记忆事实失败 (%s): %s", keyword, exc)
 
     final_status = "TIMEOUT" if state.get("stop_reason") == StopReason.TIMEOUT.value and not report else "COMPLETED"
     return {"system_status": final_status}

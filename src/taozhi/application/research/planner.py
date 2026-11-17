@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from langgraph.types import Send
 
@@ -22,9 +23,11 @@ from taozhi.domain.research import (
     classify_steering_impact,
     evaluate_hard_stop,
 )
+from taozhi.domain.text_guard import sanitize
 from taozhi.infrastructure.mcp.adapter import McpClientAdapter
 from taozhi.infrastructure.mcp.server import default_mcp_server
 from .hooks import (
+    RuntimeHooks,
     attach_route_delta,
     attach_steering_delta,
     bump_progress,
@@ -35,6 +38,8 @@ from .hooks import (
     make_failover_emitter,
 )
 from .schemas import AutonomousAgentState, _OrchestratorDecisionSchema, _ProposedSubtaskSchema, active_evidence
+
+_LOG = logging.getLogger(__name__)
 
 
 def default_fallback_tasks(keyword: str, scope: ResearchScope, steering: List[str]) -> List[SubagentTaskSpec]:
@@ -59,38 +64,38 @@ def default_fallback_tasks(keyword: str, scope: ResearchScope, steering: List[st
                     role="1688源头工厂采购专员",
                     goal=f"核查【{keyword}】在1688源头工厂的一手出厂价梯度、MOQ起订量与核心产区",
                     allowed_tools=("search_1688_wholesale",),
-                    seed_queries=(base_query, keyword),
+                    seed_queries=(extract_search_keyword(keyword) or keyword,),
                     channel_hint="sourcing",
                 )
             )
         if "search_amazon" in scope.allowed_tools:
             tasks.append(
                 SubagentTaskSpec(
-                    task_id="sub_amazon_init",
-                    role="海外亚马逊对标研究员",
-                    goal=f"采集【{keyword}】在海外亚马逊的零售美元定价带、主力规格与竞品特征",
+                    task_id="sub_amz_init",
+                    role="亚马逊跨境比价专员",
+                    goal=f"核查【{keyword}】在Amazon全球站的美元定价带、星级评价与跨境机会",
                     allowed_tools=("search_amazon",),
-                    seed_queries=(base_query, keyword),
+                    seed_queries=(extract_search_keyword(keyword) or keyword,),
                     channel_hint="sourcing",
                 )
             )
     return tasks
 
 
-def serialize_task(task: SubagentTaskSpec) -> Dict[str, Any]:
-    """序列化受派子任务规范。"""
+def serialize_task(spec: SubagentTaskSpec) -> Dict[str, Any]:
+    """将领域子任务规约序列化为 LangGraph 可持久化字典。"""
     return {
-        "task_id": task.task_id,
-        "role": task.role,
-        "goal": task.goal,
-        "allowed_tools": list(task.allowed_tools),
-        "seed_queries": list(task.seed_queries),
-        "channel_hint": task.channel_hint,
+        "task_id": spec.task_id,
+        "role": spec.role,
+        "goal": spec.goal,
+        "allowed_tools": list(spec.allowed_tools),
+        "seed_queries": list(spec.seed_queries),
+        "channel_hint": spec.channel_hint,
     }
 
 
 def deserialize_task(raw: Dict[str, Any]) -> SubagentTaskSpec:
-    """反序列化待执行子任务规范。"""
+    """将检查点中的任务字典反序列化为领域子任务规约。"""
     return SubagentTaskSpec(
         task_id=str(raw.get("task_id") or f"sub_{uuid.uuid4().hex[:6]}"),
         role=str(raw.get("role") or "市场调研专员"),
@@ -101,22 +106,130 @@ def deserialize_task(raw: Dict[str, Any]) -> SubagentTaskSpec:
     )
 
 
+def _build_orchestrator_prompt(
+    *,
+    keyword: str,
+    query: str,
+    newly_arrived: List[str],
+    all_inbox: List[str],
+    notices: List[str],
+    mcp_specs: List[Dict[str, Any]],
+    remaining_turns: int,
+    remaining_sec: float,
+    max_parallel_subagents: int,
+    active_ev: List[Dict[str, Any]],
+) -> str:
+    """构造主协调代理本轮调度决策提示词，清洗外部摘要防止间接提示注入。"""
+    ev_digest = [
+        {
+            "evidence_id": ev.get("evidence_id"),
+            "role": ev.get("role"),
+            "channel": ev.get("channel"),
+            "status": ev.get("status"),
+            "summary": sanitize(str(ev.get("summary", "")))[:500],
+            "key_metrics": ev.get("key_metrics", [])[:8],
+            "gaps_or_errors": ev.get("gaps_or_errors", [])[:5],
+        }
+        for ev in active_ev
+    ]
+    steer_note = f"最新动态干预指令（必须优先响应）：{newly_arrived}\n" if newly_arrived else ""
+    all_steer_note = f"累计干预指令：{all_inbox}\n" if all_inbox else ""
+    notice_note = f"上轮领域守卫拦截提示：{notices}\n" if notices else ""
+    return (
+        f"你是一名电商市场调研多智能体系统的主协调代理（Lead Research Agent）。\n"
+        f"目标品类：【{keyword}】\n"
+        f"用户完整诉求：{query}\n"
+        f"{steer_note}{all_steer_note}{notice_note}"
+        f"当前合法允许授权的 MCP 工具列表（tools/list 契约，严禁越界使用未列出工具）：\n{json.dumps(mcp_specs, ensure_ascii=False)}\n"
+        f"剩余调度轮次：{remaining_turns}；剩余时间预算：{remaining_sec:.1f}s；单轮最多并发子智能体：{max_parallel_subagents}。\n"
+        f"当前黑板已有有效证据包（{len(ev_digest)} 份）：\n{json.dumps(ev_digest, ensure_ascii=False)}\n\n"
+        "请自主判断当前决策：\n"
+        "1. 若关键维度尚缺、存在口径矛盾或刚收到 Steering 纠偏需要重抓：输出 action='spawn_subagents'，"
+        "合理拆解 1 到多个互不重叠的子任务并发执行（比如区分全网痛点、1688源头底价、Amazon海外竞品、交叉核验等），"
+        "每个子任务明确 role、goal、allowed_tools（仅从白名单选）与 seed_queries；如旧证据被纠偏推翻，可在 invalidate_evidence_ids 中作废。\n"
+        "2. 若已有证据已充分覆盖用户核心问题（且无高价值可补查缺口）：输出 action='finish' 并完善 3-4 条 outline 研报章节大纲。"
+    )
+
+
+def _decide_orchestrator_action(
+    *,
+    state: AutonomousAgentState,
+    hooks: RuntimeHooks,
+    prompt: str,
+    keyword: str,
+    scope: ResearchScope,
+    all_inbox: List[str],
+    outline: List[str],
+    active_ev: List[Dict[str, Any]],
+) -> Tuple[_OrchestratorDecisionSchema, List[Dict[str, Any]], str]:
+    """调用主脑模型获取结构化规划，解析失败时降级至安全规则决策。"""
+    llm = LLMClient()
+    parsed: Optional[_OrchestratorDecisionSchema] = None
+    route_events: List[Dict[str, Any]] = []
+    last_ep = ""
+    with route_audit_scope(
+        preferred_endpoint_id=str(state.get("active_llm_endpoint") or "") or None,
+        on_failover=make_failover_emitter(hooks),
+    ) as route_rec:
+        try:
+            raw_decision = llm.chat_json(
+                prompt=prompt,
+                schema=_OrchestratorDecisionSchema,
+                tier=ModelTier.FAST,
+                system="你是客观严谨、擅长并行任务分解与质量核查的电商调研主协调智能体。严禁编造数据。",
+                retries=2,
+            )
+            if isinstance(raw_decision, _OrchestratorDecisionSchema):
+                parsed = raw_decision
+            elif isinstance(raw_decision, dict) and raw_decision.get("action"):
+                parsed = _OrchestratorDecisionSchema.model_validate(raw_decision)
+        except Exception as exc:
+            _LOG.warning("主协调代理规划结构化输出降级: %s", exc)
+            parsed = None
+        route_events = route_rec.snapshot()
+        last_ep = route_rec.last_active_endpoint
+
+    if parsed is None:
+        if not active_ev:
+            parsed = _OrchestratorDecisionSchema(
+                action="spawn_subagents",
+                thought="主脑结构化输出降级，按当前合法工具边界并发启动基础调研子智能体",
+                outline=outline or ["市场需求与消费者痛点分析", "产品价格带与竞争格局", "供应链成本与选品建议"],
+                subtasks=[
+                    _ProposedSubtaskSchema(
+                        role=t.role,
+                        goal=t.goal,
+                        allowed_tools=list(t.allowed_tools),
+                        seed_queries=list(t.seed_queries),
+                        channel_hint="sourcing" if t.channel_hint == "sourcing" else "web",
+                    )
+                    for t in default_fallback_tasks(keyword, scope, all_inbox)
+                ],
+            )
+        else:
+            parsed = _OrchestratorDecisionSchema(
+                action="finish",
+                thought="主脑结构化输出降级，基于黑板既有有效证据收敛生成研报",
+                outline=outline or ["市场需求与竞品格局", "多渠道数据汇总", "选品与操盘建议"],
+            )
+    return parsed, route_events, last_ep
+
+
 def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
-    """主协调代理（Lead Research Agent）：自主审查黑板证据、响应实时干预并动态组队派单。"""
+    """主脑规划节点：吸收 Steering 信号、领域准入授权并动态拆分子任务。"""
     hooks = get_hooks(state.get("hook_run_id", ""))
+    keyword = state.get("keyword", "")
+    query = state.get("user_query") or keyword
     turn = int(state.get("turn_count", 0)) + 1
-    query = state.get("user_query") or state.get("keyword") or ""
-    keyword = state.get("keyword") or extract_search_keyword(query) or query
     outline = list(state.get("outline") or [])
 
-    cancelled = is_cancelled(hooks, bool(state.get("cancelled", False)))
     steering_delta, steering_id_delta, all_inbox = collect_new_steering(state, hooks)
-    processed_count = int(state.get("processed_steering_count", 0))
-    newly_arrived = all_inbox[processed_count:]
-
+    processed_cnt = int(state.get("processed_steering_count", 0))
+    newly_arrived = all_inbox[processed_cnt:]
     if newly_arrived:
-        emit_progress(hooks, f"[steering] 主脑接收运行期动态干预指令并重新评估黑板: {newly_arrived[-1]}")
+        emit_progress(hooks, f"[steering] 主协调代理捕获用户中途动态干预 ({len(newly_arrived)} 条)，正在动态重规划调研路线")
 
+    cancelled = is_cancelled(hooks, bool(state.get("cancelled", False)))
     scope = classify_research_scope(query, all_inbox)
     budget = ResearchBudget(
         max_turns=int(state.get("max_turns", 5)),
@@ -151,89 +264,29 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
         }
         return attach_steering_delta(res, steering_delta, steering_id_delta)
 
-    ev_digest = [
-        {
-            "evidence_id": ev.get("evidence_id"),
-            "role": ev.get("role"),
-            "channel": ev.get("channel"),
-            "status": ev.get("status"),
-            "summary": ev.get("summary", "")[:500],
-            "key_metrics": ev.get("key_metrics", [])[:8],
-            "gaps_or_errors": ev.get("gaps_or_errors", [])[:5],
-        }
-        for ev in active_ev
-    ]
-    notices = list(state.get("guard_notices") or [])
-    remaining_turns = max(0, budget.max_turns - turn)
-    remaining_sec = max(0.0, budget.timeout_seconds - elapsed_seconds)
-    steer_note = f"最新动态干预指令（必须优先响应）：{newly_arrived}\n" if newly_arrived else ""
-    all_steer_note = f"累计干预指令：{all_inbox}\n" if all_inbox else ""
-    notice_note = f"上轮领域守卫拦截提示：{notices}\n" if notices else ""
     mcp_specs = McpClientAdapter(server=default_mcp_server).list_tool_specs(scope.allowed_tools)
-
-    prompt = (
-        f"你是一名电商市场调研多智能体系统的主协调代理（Lead Research Agent）。\n"
-        f"目标品类：【{keyword}】\n"
-        f"用户完整诉求：{query}\n"
-        f"{steer_note}{all_steer_note}{notice_note}"
-        f"当前合法允许授权的 MCP 工具列表（tools/list 契约，严禁越界使用未列出工具）：\n{json.dumps(mcp_specs, ensure_ascii=False)}\n"
-        f"剩余调度轮次：{remaining_turns}；剩余时间预算：{remaining_sec:.1f}s；单轮最多并发子智能体：{budget.max_parallel_subagents}。\n"
-        f"当前黑板已有有效证据包（{len(ev_digest)} 份）：\n{json.dumps(ev_digest, ensure_ascii=False)}\n\n"
-        "请自主判断当前决策：\n"
-        "1. 若关键维度尚缺、存在口径矛盾或刚收到 Steering 纠偏需要重抓：输出 action='spawn_subagents'，"
-        "合理拆解 1 到多个互不重叠的子任务并发执行（比如区分全网痛点、1688源头底价、Amazon海外竞品、交叉核验等），"
-        "每个子任务明确 role、goal、allowed_tools（仅从白名单选）与 seed_queries；如旧证据被纠偏推翻，可在 invalidate_evidence_ids 中作废。\n"
-        "2. 若已有证据已充分覆盖用户核心问题（且无高价值可补查缺口）：输出 action='finish' 并完善 3-4 条 outline 研报章节大纲。"
+    prompt = _build_orchestrator_prompt(
+        keyword=keyword,
+        query=query,
+        newly_arrived=newly_arrived,
+        all_inbox=all_inbox,
+        notices=list(state.get("guard_notices") or []),
+        mcp_specs=mcp_specs,
+        remaining_turns=max(0, budget.max_turns - turn),
+        remaining_sec=max(0.0, budget.timeout_seconds - elapsed_seconds),
+        max_parallel_subagents=budget.max_parallel_subagents,
+        active_ev=active_ev,
     )
-
-    llm = LLMClient()
-    parsed: Optional[_OrchestratorDecisionSchema] = None
-    route_events: List[Dict[str, Any]] = []
-    last_ep = ""
-    with route_audit_scope(
-        preferred_endpoint_id=str(state.get("active_llm_endpoint") or "") or None,
-        on_failover=make_failover_emitter(hooks),
-    ) as route_rec:
-        try:
-            raw_decision = llm.chat_json(
-                prompt=prompt,
-                schema=_OrchestratorDecisionSchema,
-                tier=ModelTier.FAST,
-                system="你是客观严谨、擅长并行任务分解与质量核查的电商调研主协调智能体。严禁编造数据。",
-                retries=2,
-            )
-            if isinstance(raw_decision, _OrchestratorDecisionSchema):
-                parsed = raw_decision
-            elif isinstance(raw_decision, dict) and raw_decision.get("action"):
-                parsed = _OrchestratorDecisionSchema.model_validate(raw_decision)
-        except Exception:
-            parsed = None
-        route_events = route_rec.snapshot()
-        last_ep = route_rec.last_active_endpoint
-
-    if parsed is None:
-        if not active_ev:
-            parsed = _OrchestratorDecisionSchema(
-                action="spawn_subagents",
-                thought="主脑结构化输出降级，按当前合法工具边界并发启动基础调研子智能体",
-                outline=outline or ["市场需求与消费者痛点分析", "产品价格带与竞争格局", "供应链成本与选品建议"],
-                subtasks=[
-                    _ProposedSubtaskSchema(
-                        role=t.role,
-                        goal=t.goal,
-                        allowed_tools=list(t.allowed_tools),
-                        seed_queries=list(t.seed_queries),
-                        channel_hint="sourcing" if t.channel_hint == "sourcing" else "web",
-                    )
-                    for t in default_fallback_tasks(keyword, scope, all_inbox)
-                ],
-            )
-        else:
-            parsed = _OrchestratorDecisionSchema(
-                action="finish",
-                thought="主脑结构化输出降级，基于黑板既有有效证据收敛生成研报",
-                outline=outline or ["市场需求与竞品格局", "多渠道数据汇总", "选品与操盘建议"],
-            )
+    parsed, route_events, last_ep = _decide_orchestrator_action(
+        state=state,
+        hooks=hooks,
+        prompt=prompt,
+        keyword=keyword,
+        scope=scope,
+        all_inbox=all_inbox,
+        outline=outline,
+        active_ev=active_ev,
+    )
 
     if parsed.outline:
         outline = [str(x) for x in parsed.outline[:4]]

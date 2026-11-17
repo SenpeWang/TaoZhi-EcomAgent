@@ -376,10 +376,8 @@ def get_bi_dashboard(p: Principal, days: int) -> dict[str, Any]:
     )
 
 
-def process_question_job(job: dict[str, Any]) -> None:
-    """执行 RAG / ChatBI 问答流水线：语义缓存拦截、多智能体核验及安全回灌。"""
-    cache = get_semantic_cache()
-    queue_wait_ms = _diff_ms(job.get("created_at"), job.get("started_at"))
+def _try_answer_from_semantic_cache(job: dict[str, Any], cache: Any, queue_wait_ms: int) -> bool:
+    """检索语义缓存并在来源权限实时有效时直接回填问答终态。"""
     with database_connection() as c:
         p = load_principal(c, job["owner_id"])
         cached = None
@@ -392,47 +390,107 @@ def process_question_job(job: dict[str, Any]) -> None:
                 break
             if cand.get("entry_id"):
                 cache.invalidate(job["tenant_id"], entry_id=cand["entry_id"])
-    if cached:
-        with database_connection() as c:
-            if cached.get("sources") and sources_valid(c, p, cached.get("sources", [])):
-                e2e_ms = _diff_ms(job.get("created_at"))
-                result = dict(
-                    answer=cached["answer"],
-                    citations=cached["citations"],
-                    specialists=[{"name": "Main 调度 / 语义缓存", "count": 1}],
-                    missing=[],
-                    hard_block=False,
-                    external_blocked=False,
-                    model_calls=0,
-                    usage=[{"role": "semantic_cache", "elapsed_ms": cached["latency_ms"], "outcome": "hit"}],
-                    cache_hit=True,
-                    similarity=cached["similarity"],
-                    timing={"queue_wait_ms": queue_wait_ms, "cache_lookup_ms": cached["latency_ms"], "e2e_ms": e2e_ms},
-                    token_usage={
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": 0,
-                        "cost_usd": 0.0,
-                        "llm_attempts": 0,
-                        "llm_errors": 0,
-                        "failovers": 0,
-                        "json_retries": 0,
-                        "by_role": {},
-                    },
-                    degraded={},
-                )
-                job_repo.complete_job(
-                    c,
-                    tenant_id=p.tenant_id,
-                    job_id=job["id"],
-                    run_version=job["run_version"],
-                    state="completed",
-                    stage="已完成（命中语义缓存）",
-                    result=result,
-                    sources=cached["sources"],
-                    input_level=job["input_level"],
-                )
-                return
+    if not cached:
+        return False
+
+    with database_connection() as c:
+        if not (cached.get("sources") and sources_valid(c, p, cached.get("sources", []))):
+            return False
+        e2e_ms = _diff_ms(job.get("created_at"))
+        result = dict(
+            answer=cached["answer"],
+            citations=cached["citations"],
+            specialists=[{"name": "Main 调度 / 语义缓存", "count": 1}],
+            missing=[],
+            hard_block=False,
+            external_blocked=False,
+            model_calls=0,
+            usage=[{"role": "semantic_cache", "elapsed_ms": cached["latency_ms"], "outcome": "hit"}],
+            cache_hit=True,
+            similarity=cached["similarity"],
+            timing={"queue_wait_ms": queue_wait_ms, "cache_lookup_ms": cached["latency_ms"], "e2e_ms": e2e_ms},
+            token_usage={
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+                "llm_attempts": 0,
+                "llm_errors": 0,
+                "failovers": 0,
+                "json_retries": 0,
+                "by_role": {},
+            },
+            degraded={},
+        )
+        job_repo.complete_job(
+            c,
+            tenant_id=p.tenant_id,
+            job_id=job["id"],
+            run_version=job["run_version"],
+            state="completed",
+            stage="已完成（命中语义缓存）",
+            result=result,
+            sources=cached["sources"],
+            input_level=job["input_level"],
+        )
+        return True
+
+
+def _build_question_result(
+    *,
+    state: dict[str, Any],
+    citations: list[dict[str, Any]],
+    queue_wait_ms: int,
+    e2e_ms: int,
+    trace_id: str | None,
+) -> dict[str, Any]:
+    """将问答工作流终态裁剪组装为前端与报告可消费的结果负载。"""
+    timing = dict(state.get("timing") or {})
+    timing["queue_wait_ms"] = queue_wait_ms
+    timing["e2e_ms"] = e2e_ms
+    token_usage = state.get("token_usage") or {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cost_usd": 0.0,
+        "llm_attempts": 0,
+        "llm_errors": 0,
+        "failovers": 0,
+        "json_retries": 0,
+        "by_role": {},
+    }
+    result = dict(
+        answer=state["answer"],
+        citations=citations,
+        specialists=[
+            {"name": SPECIALIST_AGENTS[r][0], "count": sum(f["role"] == SPECIALIST_AGENTS[r][0] for f in state["findings"])}
+            for r in state["selected_agents"]
+        ],
+        missing=state["missing"],
+        hard_block=state["hard_block"],
+        external_blocked=state["external_blocked"],
+        model_calls=state["model_calls"],
+        usage=state["usage"],
+        cache_hit=False,
+        timing=timing,
+        token_usage=token_usage,
+        degraded=state.get("degraded") or {},
+    )
+    if trace_id:
+        result["trace_id"] = trace_id
+    dr = state.get("data_result")
+    if dr and not dr.get("denied"):
+        result["data"] = dr
+        result["specialists"] = [{"name": "指标语义层（受控 SQL）", "count": 1}]
+    return result
+
+
+def process_question_job(job: dict[str, Any]) -> None:
+    """执行 RAG / ChatBI 问答流水线：语义缓存拦截、多智能体核验及安全回灌。"""
+    cache = get_semantic_cache()
+    queue_wait_ms = _diff_ms(job.get("created_at"), job.get("started_at"))
+    if _try_answer_from_semantic_cache(job, cache, queue_wait_ms):
+        return
 
     from langgraph.checkpoint.postgres import PostgresSaver
 
@@ -454,43 +512,13 @@ def process_question_job(job: dict[str, Any]) -> None:
         if p.version != row["owner_version"] or not sources_valid(c, p, state["sources"]):
             raise Denied("人员或来源权限已变化", "SOURCE_CHANGED", 409)
         citations = [{k: e[k] for k in ("document_id", "version", "title", "quote", "page", "chunk_id")} for e in state["evidence"]]
-        timing = dict(state.get("timing") or {})
-        timing["queue_wait_ms"] = queue_wait_ms
-        timing["e2e_ms"] = _diff_ms(row.get("created_at") or job.get("created_at"))
-        token_usage = state.get("token_usage") or {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-            "cost_usd": 0.0,
-            "llm_attempts": 0,
-            "llm_errors": 0,
-            "failovers": 0,
-            "json_retries": 0,
-            "by_role": {},
-        }
-        result = dict(
-            answer=state["answer"],
+        result = _build_question_result(
+            state=state,
             citations=citations,
-            specialists=[
-                {"name": SPECIALIST_AGENTS[r][0], "count": sum(f["role"] == SPECIALIST_AGENTS[r][0] for f in state["findings"])}
-                for r in state["selected_agents"]
-            ],
-            missing=state["missing"],
-            hard_block=state["hard_block"],
-            external_blocked=state["external_blocked"],
-            model_calls=state["model_calls"],
-            usage=state["usage"],
-            cache_hit=False,
-            timing=timing,
-            token_usage=token_usage,
-            degraded=state.get("degraded") or {},
+            queue_wait_ms=queue_wait_ms,
+            e2e_ms=_diff_ms(row.get("created_at") or job.get("created_at")),
+            trace_id=trace_id,
         )
-        if trace_id:
-            result["trace_id"] = trace_id
-        dr = state.get("data_result")
-        if dr and not dr.get("denied"):
-            result["data"] = dr
-            result["specialists"] = [{"name": "指标语义层（受控 SQL）", "count": 1}]
         status = "review" if state["review"] else "completed"
         stage = "等待业务负责人审核" if state["review"] else "已完成"
         job_repo.complete_job(
@@ -516,8 +544,8 @@ def process_question_job(job: dict[str, Any]) -> None:
                 state.get("input_level", job["input_level"]),
                 redacted=not p.boss,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOG.warning("写入问答语义缓存失败 (%s): %s", job["id"], exc)
 
 
 def process_research_job(job: dict[str, Any]) -> None:

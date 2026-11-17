@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from .schemas import AutonomousAgentState
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass
@@ -54,8 +57,8 @@ def emit_progress(hooks: RuntimeHooks, stage: str, target_pct: Optional[int] = N
     if hooks.emit_fn is not None:
         try:
             hooks.emit_fn(stage, pct)
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOG.debug("推送调研进度事件失败: %s", exc)
 
 
 def bump_progress(hooks: RuntimeHooks, delta: int, cap: int, stage: str) -> None:
@@ -67,8 +70,8 @@ def bump_progress(hooks: RuntimeHooks, delta: int, cap: int, stage: str) -> None
     if hooks.emit_fn is not None:
         try:
             hooks.emit_fn(stage, pct)
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOG.debug("递增推送调研进度失败: %s", exc)
 
 
 def is_cancelled(hooks: RuntimeHooks, state_cancelled: bool = False) -> bool:
@@ -81,8 +84,8 @@ def is_cancelled(hooks: RuntimeHooks, state_cancelled: bool = False) -> bool:
             if hooks.check_cancel_fn():
                 hooks.cancel_event.set()
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOG.warning("轮询任务取消状态失败: %s", exc)
     return False
 
 

@@ -1,8 +1,11 @@
 """资料上传、解析入库、版本编辑、权限策略与知识地图应用服务。"""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
+
+_LOG = logging.getLogger(__name__)
 
 from taozhi.config import load_config
 from taozhi.domain.entities import Principal
@@ -230,8 +233,8 @@ def delete_document(p: Principal, doc_id: str) -> dict[str, str]:
         try:
             if es_index.available():
                 es_index.delete_chunks(d["id"])
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOG.warning("删除文档时同步清理 ES 切片失败 (%s): %s", d["id"], exc)
     return {"message": "资料已删除，历史来源不再可用"}
 
 
