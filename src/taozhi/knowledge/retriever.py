@@ -10,8 +10,11 @@
 """
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any, Dict, List, Optional
+
+_LOG = logging.getLogger(__name__)
 
 import numpy as np
 from rank_bm25 import BM25Okapi
@@ -501,8 +504,8 @@ def search_documents(
                         hy = np.zeros(len(chunks))
                         hy[idx] = cosine_similarity(matrix, np.asarray(hyde_vector, dtype="float32").reshape(1, -1)).reshape(-1)
                         signals.append(hy)
-            except Exception:
-                pass
+            except Exception as exc:
+                _LOG.warning("语义向量矩阵评分失败，已降级为 BM25+TF-IDF+词面信号: %s", exc)
         fused = np.zeros(len(chunks))
         for s in signals:
             if np.max(s) > np.min(s):

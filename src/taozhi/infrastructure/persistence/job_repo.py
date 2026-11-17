@@ -233,6 +233,35 @@ def claim_next_job(worker_id: str | None = None) -> dict | None:
         )
 
 
+def claim_job_by_id(job_id: str, worker_id: str | None = None) -> dict | None:
+    """按 Kafka 指定任务编号幂等抢占排队或租约已过期的任务。
+
+    Args:
+        job_id: 任务主键标识。
+        worker_id: 认领该任务的 Worker 标识。
+
+    Returns:
+        成功抢占后的任务记录；若任务已被其他节点领走或终止则返回 None。
+    """
+    wid = worker_id or f"worker_{secrets.token_hex(8)}"
+    cfg = load_config()
+    with database_connection() as c:
+        row = fetch_one(
+            c,
+            "SELECT id FROM jobs WHERE id=%s AND NOT cancel_requested AND attempts<%s "
+            "AND (state='queued' OR (state='running' AND lease_until<now())) FOR UPDATE SKIP LOCKED",
+            (job_id, cfg.max_attempts),
+        )
+        if not row:
+            return None
+        return fetch_one(
+            c,
+            "UPDATE jobs SET state='running',run_version=run_version+1,attempts=attempts+1,worker_id=%s,"
+            "lease_until=now()+(%s*interval '1 second'),started_at=COALESCE(started_at,now()),error='' WHERE id=%s RETURNING *",
+            (wid, cfg.lease_seconds, row["id"]),
+        )
+
+
 def touch_worker_heartbeat(conn: Any, worker_id: str, prune: bool = False) -> None:
     """刷新 Worker 心跳并按需清理 1 天前的离线心跳。"""
     conn.execute("INSERT INTO worker_heartbeats(id) VALUES(%s) ON CONFLICT(id) DO UPDATE SET updated_at=now()", (worker_id,))
@@ -327,15 +356,33 @@ def list_research_conversation_turns(conn: Any, tenant_id: str, owner_id: str, c
 
 
 def delete_research_conversation_records(conn: Any, tenant_id: str, owner_id: str, conversation_id: str) -> None:
-    """删除个人调研会话下全部任务及事件流记录。"""
-    conn.execute(
-        "DELETE FROM task_events WHERE tenant_id=%s AND job_id IN (SELECT id FROM jobs WHERE tenant_id=%s AND owner_id=%s AND conversation_id=%s)",
-        (tenant_id, tenant_id, owner_id, conversation_id),
-    )
-    conn.execute(
-        "DELETE FROM jobs WHERE tenant_id=%s AND owner_id=%s AND kind='research' AND conversation_id=%s",
+    """级联删除个人调研会话下全部任务、外键子表及对应 LangGraph 检查点记录。
+
+    Args:
+        conn: 事务中的数据库连接。
+        tenant_id: 所属租户标识。
+        owner_id: 会话所属用户标识。
+        conversation_id: 待删除的调研会话编号。
+    """
+    rows = fetch_all(
+        conn,
+        "SELECT id FROM jobs WHERE tenant_id=%s AND owner_id=%s AND kind='research' AND conversation_id=%s",
         (tenant_id, owner_id, conversation_id),
     )
+    job_ids = [r["id"] for r in rows]
+    if not job_ids:
+        return
+    conn.execute("DELETE FROM task_reviews WHERE job_id = ANY(%s)", (job_ids,))
+    conn.execute("DELETE FROM model_calls WHERE job_id = ANY(%s)", (job_ids,))
+    conn.execute("DELETE FROM task_events WHERE tenant_id=%s AND job_id = ANY(%s)", (tenant_id, job_ids))
+    conn.execute("DELETE FROM jobs WHERE tenant_id=%s AND id = ANY(%s)", (tenant_id, job_ids))
+
+    # 同步清理 LangGraph PostgresSaver 遗留检查点，防止长期增长
+    patterns = [f"research_{jid}_%" for jid in job_ids]
+    for tbl in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+        exists = fetch_one(conn, "SELECT to_regclass(%s) AS tbl", (tbl,))
+        if exists and exists.get("tbl"):
+            conn.execute(f"DELETE FROM {tbl} WHERE thread_id LIKE ANY(%s)", (patterns,))
 
 
 def mark_job_cancelled(conn: Any, job_id: str) -> None:
@@ -364,7 +411,14 @@ def append_steering_to_job(conn: Any, tenant_id: str, job_id: str, run_ver: int,
 
 
 def requeue_job(conn: Any, tenant_id: str, job_id: str, new_ver: int) -> None:
-    """递增执行版本并重新入队调度任务。"""
+    """递增执行版本并重新入队调度任务（仅启用 Kafka 时写入 Outbox）。
+
+    Args:
+        conn: 事务中的数据库连接。
+        tenant_id: 所属租户标识。
+        job_id: 任务主键编号。
+        new_ver: 递增后的执行版本号。
+    """
     conn.execute(
         "UPDATE jobs SET state='queued',stage='工作流重新排队调度中...',progress=0,error='',cancel_requested=false,"
         "run_version=%s,started_at=NULL,finished_at=NULL,lease_until=NULL WHERE id=%s",
@@ -374,7 +428,8 @@ def requeue_job(conn: Any, tenant_id: str, job_id: str, new_ver: int) -> None:
         "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,'工作流重新排队调度中...',0,'queued')",
         (tenant_id, job_id, new_ver),
     )
-    conn.execute("INSERT INTO task_outbox(job_id) VALUES(%s)", (job_id,))
+    if load_config().kafka_enabled:
+        conn.execute("INSERT INTO task_outbox(job_id) VALUES(%s)", (job_id,))
 
 
 def save_task_review(conn: Any, tenant_id: str, job_id: str, reviewer_id: str, approve: bool, comment: str) -> None:
@@ -390,18 +445,29 @@ def save_task_review(conn: Any, tenant_id: str, job_id: str, reviewer_id: str, a
 
 
 def present_job(conn: Any, p: Any, job: dict, full: bool = True) -> dict:
-    """按当前用户权限与来源实时有效状态构造任务展示视图。"""
+    """按当前用户权限与来源实时有效状态构造任务展示视图。
+
+    Args:
+        conn: 数据库连接。
+        p: 当前请求主体。
+        job: 原始任务行字典。
+        full: 是否展开 result 与完整事件时间线。
+
+    Returns:
+        已完成字段脱敏与越权过滤的展示字典。
+    """
     if not can_task(p, job):
         raise Denied("任务不存在或没有访问权限", "NOT_FOUND", 404)
     valid = job["state"] != "legacy" and sources_valid(conn, p, job["sources"])
     result = job["result"] if valid and (job["state"] == "completed" or (job["state"] == "review" and can_review(p, job))) else None
+    is_privileged_viewer = p.boss or p.id == job["owner_id"]
     events = []
     if full:
         rows = list_task_events(conn, p.tenant_id, job["id"])
         events = [
             dict(
                 id=r["id"],
-                stage=r["stage"],
+                stage=r["stage"] if is_privileged_viewer else redact(str(r["stage"])),
                 progress=r["progress"],
                 status=r["status"],
                 created_at=r["created_at"].isoformat() if r.get("created_at") else None,
@@ -410,7 +476,7 @@ def present_job(conn: Any, p: Any, job: dict, full: bool = True) -> dict:
         ]
     return dict(
         id=job["id"],
-        question=(job["question"] if p.boss or p.id == job["owner_id"] else redact(job["question"])) if valid else "来源权限已变化，请重新查询",
+        question=(job["question"] if is_privileged_viewer else redact(job["question"])) if valid else "来源权限已变化，请重新查询",
         kind=job["kind"],
         state=job["state"],
         stage=job["stage"],

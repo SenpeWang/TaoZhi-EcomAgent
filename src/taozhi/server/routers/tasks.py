@@ -92,7 +92,7 @@ def review(task_id: str, payload: Decision, p=Depends(identity)):
 @router.get("/tasks/{task_id}/events")
 async def events(task_id: str, request: Request, after: int = Query(0, ge=0), p=Depends(identity)):
     """以 SSE 流推送任务执行阶段进展，并在终态后通知客户端回源拉取权限过滤结果。"""
-    task_service.get_task(p, task_id)
+    await asyncio.to_thread(task_service.get_task, p, task_id)
 
     async def stream():
         cursor = after
@@ -100,8 +100,8 @@ async def events(task_id: str, request: Request, after: int = Query(0, ge=0), p=
             if await request.is_disconnected():
                 return
             try:
-                current = identity(request)
-                allowed, rows, terminal = task_service.poll_task_events(current, task_id, cursor)
+                current = await asyncio.to_thread(identity, request)
+                allowed, rows, terminal = await asyncio.to_thread(task_service.poll_task_events, current, task_id, cursor)
                 if not allowed:
                     return
                 for row in rows:

@@ -97,12 +97,12 @@ CREATE TABLE jobs (
  CHECK(state IN ('queued','running','review','completed','cancelled','failed','rejected','legacy'))
 );
 CREATE TABLE task_events (
- id bigserial PRIMARY KEY, tenant_id text NOT NULL, job_id text NOT NULL REFERENCES jobs(id),
+ id bigserial PRIMARY KEY, tenant_id text NOT NULL, job_id text NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
  run_version bigint NOT NULL, stage text NOT NULL, progress integer NOT NULL, status text NOT NULL,
  created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE task_reviews (
- id bigserial PRIMARY KEY, tenant_id text NOT NULL, job_id text NOT NULL REFERENCES jobs(id),
+ id bigserial PRIMARY KEY, tenant_id text NOT NULL, job_id text NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
  reviewer_id text NOT NULL, decision text NOT NULL, comment text NOT NULL DEFAULT '',
  created_at timestamptz NOT NULL DEFAULT now(),
  FOREIGN KEY(tenant_id,reviewer_id) REFERENCES users(tenant_id,id)
@@ -114,7 +114,7 @@ CREATE TABLE audit_events (
  created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE model_calls (
- id bigserial PRIMARY KEY, tenant_id text NOT NULL, job_id text NOT NULL REFERENCES jobs(id),
+ id bigserial PRIMARY KEY, tenant_id text NOT NULL, job_id text NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
  role text NOT NULL, elapsed_ms integer NOT NULL, prompt_tokens integer NOT NULL DEFAULT 0,
  completion_tokens integer NOT NULL DEFAULT 0, outcome text NOT NULL,
  created_at timestamptz NOT NULL DEFAULT now()

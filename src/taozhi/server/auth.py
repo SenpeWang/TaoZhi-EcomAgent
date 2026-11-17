@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import threading
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Request
@@ -16,6 +17,7 @@ from taozhi.knowledge.db import database_connection, fetch_one
 
 SESSION_COOKIE = "ecom_session_" + load_config().mode
 CSRF_COOKIE = "ecom_csrf_" + load_config().mode
+_DUMMY_LOCK = threading.Lock()
 _dummy: str | None = None
 
 
@@ -28,7 +30,9 @@ def login(username: str, password: str, ip: str, tenant_code: str):
     """校验用户名口令、防御暴力破解并签发有界会话与 CSRF 令牌。"""
     global _dummy
     if _dummy is None:
-        _dummy = hash_password("dummy-password-for-timing", "production")
+        with _DUMMY_LOCK:
+            if _dummy is None:
+                _dummy = hash_password("dummy-password-for-timing", "production")
     keys = ["account:" + hash_token(tenant_code + ":" + username.casefold()), "ip:" + hash_token(ip)]
     now = datetime.now(timezone.utc)
     with database_connection() as c:

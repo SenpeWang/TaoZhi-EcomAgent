@@ -1,114 +1,197 @@
-"""Kafka 任务事件层：outbox 发布 + 消费认领。
+"""Kafka 任务事件层：Outbox 发布与消费认领。
 
 角色约定：
 - 发布：create_job 同事务写 task_outbox，relay 线程异步投递到 Kafka 后删除 outbox 行；
-- 消息体只带 job_id，认领走数据库 UPDATE（状态机天然幂等），重复消息安全；
-- 数据库轮询保留为对账兜底，Kafka 不可达时任务照常排队执行。
+- 消息体仅携带 job_id，认领复用持久化仓储中的状态机抢占方法，重复投递天然幂等；
+- 停机信号由 Worker 进程显式注入，统一实现优雅退出。
 """
 from __future__ import annotations
-import json,secrets,threading,time
-from ..config import load_config
-from ..knowledge.db import database_connection,fetch_all,fetch_one
 
-STOP=threading.Event()
-_group="ecom-workers"
-_worker_id="worker_"+secrets.token_hex(8)
+import json
+import logging
+import secrets
+import threading
+import time
+from typing import Any, Callable
+
+from taozhi.config import load_config
+from taozhi.infrastructure.persistence import job_repo
+from taozhi.knowledge.db import database_connection, fetch_all
+
+_LOG = logging.getLogger(__name__)
+_GROUP = "ecom-workers"
+
 
 def ensure_topic() -> None:
-    """确保任务主题存在且分区数达标。
+    """确保任务主题存在且分区数满足当前部署配置。"""
+    cfg = load_config()
+    from kafka.admin import KafkaAdminClient, NewPartitions, NewTopic
+    from kafka.errors import InvalidPartitionsError, TopicAlreadyExistsError, UnknownTopicOrPartitionError
 
-    自动创建的主题只吃 broker 的 num.partitions（常见为 1），并行消费失效；
-    这里显式建主题并按 ECOM_KAFKA_PARTITIONS 扩展分区，已达标时保持不动。
-    """
-    cfg=load_config()
-    from kafka.admin import KafkaAdminClient,NewTopic,NewPartitions
-    from kafka.errors import TopicAlreadyExistsError,InvalidPartitionsError,UnknownTopicOrPartitionError
-    admin=KafkaAdminClient(bootstrap_servers=cfg.kafka_brokers.split(","),request_timeout_ms=8000)
+    admin = KafkaAdminClient(bootstrap_servers=cfg.kafka_brokers.split(","), request_timeout_ms=8000)
     try:
         try:
-            admin.create_topics([NewTopic(name=cfg.kafka_topic,num_partitions=cfg.kafka_partitions,replication_factor=1)])
+            admin.create_topics([NewTopic(name=cfg.kafka_topic, num_partitions=cfg.kafka_partitions, replication_factor=1)])
             return
         except TopicAlreadyExistsError:
             pass
         try:
-            admin.create_partitions({cfg.kafka_topic:NewPartitions(total_count=cfg.kafka_partitions)})
-        except (InvalidPartitionsError,UnknownTopicOrPartitionError):
+            admin.create_partitions({cfg.kafka_topic: NewPartitions(total_count=cfg.kafka_partitions)})
+        except (InvalidPartitionsError, UnknownTopicOrPartitionError):
             pass
     finally:
-        try:admin.close()
-        except Exception:pass
+        try:
+            admin.close()
+        except Exception as exc:
+            _LOG.debug("关闭 KafkaAdminClient 异常: %s", exc)
 
-def publish_pending():
-    """把 outbox 中的待发任务投递到 Kafka；成功后在同一事务内删除对应行。
 
-    用 FOR UPDATE SKIP LOCKED 抢占待发行，多个 worker 的 relay 线程不会重复投递同一批；
-    行锁覆盖投递到删除的全过程；若投递中断，事务回滚后下游仍按 job_id 幂等认领兜底。
+def publish_pending(producer: Any = None) -> int:
+    """将 Outbox 待发任务投递到 Kafka 并在同事务内清理已发送行。
+
+    Args:
+        producer: 可复用的 KafkaProducer 实例；未传入时按单次调用临时创建并在结束后关闭。
+
+    Returns:
+        本次成功投递并删除的 Outbox 记录数量。
     """
-    cfg=load_config()
+    cfg = load_config()
     with database_connection() as c:
-        rows=fetch_all(c,"SELECT id,job_id FROM task_outbox ORDER BY id LIMIT 200 FOR UPDATE SKIP LOCKED")
-        if not rows:return 0
-        from kafka import KafkaProducer
-        producer=KafkaProducer(bootstrap_servers=cfg.kafka_brokers.split(","),acks="all",retries=5)
+        rows = fetch_all(c, "SELECT id,job_id FROM task_outbox ORDER BY id LIMIT 200 FOR UPDATE SKIP LOCKED")
+        if not rows:
+            return 0
+        owns_producer = producer is None
+        client = producer
+        if client is None:
+            from kafka import KafkaProducer
+
+            client = KafkaProducer(bootstrap_servers=cfg.kafka_brokers.split(","), acks="all", retries=5)
         try:
             for r in rows:
-                producer.send(cfg.kafka_topic,value=json.dumps({"job_id":r["job_id"]}).encode(),key=r["job_id"].encode())
-            producer.flush(timeout=10)
+                client.send(
+                    cfg.kafka_topic,
+                    value=json.dumps({"job_id": r["job_id"]}).encode(),
+                    key=r["job_id"].encode(),
+                )
+            client.flush(timeout=10)
         finally:
-            try:producer.close(timeout=5)
-            except Exception:pass
-        c.execute("DELETE FROM task_outbox WHERE id = ANY(%s)",([r["id"] for r in rows],))
+            if owns_producer:
+                try:
+                    client.close(timeout=5)
+                except Exception as exc:
+                    _LOG.debug("关闭临时 KafkaProducer 异常: %s", exc)
+        c.execute("DELETE FROM task_outbox WHERE id = ANY(%s)", ([r["id"] for r in rows],))
     return len(rows)
 
-def relay_loop():
-    topic_ready=False
-    while not STOP.is_set():
+
+def relay_loop(stop_event: threading.Event | None = None) -> None:
+    """持续轮询 Outbox 并将任务标识投递至 Kafka（复用长连接 Producer）。
+
+    Args:
+        stop_event: 控制循环优雅退出的线程事件信号。
+    """
+    stop = stop_event or threading.Event()
+    topic_ready = False
+    producer: Any = None
+    while not stop.is_set():
         if not topic_ready:
-            try:ensure_topic();topic_ready=True
+            try:
+                ensure_topic()
+                topic_ready = True
             except Exception as exc:
-                print("Kafka 主题初始化重试",type(exc).__name__,flush=True);STOP.wait(2);continue
-        try:publish_pending()
+                _LOG.warning("Kafka 主题初始化重试 (%s)", type(exc).__name__)
+                stop.wait(2)
+                continue
+        try:
+            if producer is None:
+                from kafka import KafkaProducer
+
+                cfg = load_config()
+                producer = KafkaProducer(bootstrap_servers=cfg.kafka_brokers.split(","), acks="all", retries=5)
+            publish_pending(producer=producer)
         except Exception as exc:
-            print("Kafka 投递重试",type(exc).__name__,flush=True);STOP.wait(2)
-        else:STOP.wait(0.5)
+            _LOG.warning("Kafka 投递重试 (%s): %s", type(exc).__name__, exc)
+            if producer is not None:
+                try:
+                    producer.close(timeout=2)
+                except Exception as close_exc:
+                    _LOG.debug("关闭异常 KafkaProducer: %s", close_exc)
+                producer = None
+            stop.wait(2)
+        else:
+            stop.wait(0.5)
+    if producer is not None:
+        try:
+            producer.close(timeout=5)
+        except Exception as exc:
+            _LOG.debug("停机关闭 KafkaProducer 异常: %s", exc)
 
-def claim_job_by_id(job_id):
-    """按消息认领任务；状态机保证同一任务只被一个执行体抢到。"""
-    with database_connection() as c:
-        row=fetch_one(c,"SELECT id FROM jobs WHERE id=%s AND NOT cancel_requested AND attempts<%s AND (state='queued' OR (state='running' AND lease_until<now())) FOR UPDATE SKIP LOCKED",
-            (job_id,load_config().max_attempts))
-        if not row:return None
-        return fetch_one(c,"UPDATE jobs SET state='running',run_version=run_version+1,attempts=attempts+1,worker_id=%s,lease_until=now()+(%s*interval '1 second'),started_at=COALESCE(started_at,now()),error='' WHERE id=%s RETURNING *",
-            (_worker_id,load_config().lease_seconds,row["id"]))
 
-def consume_forever(run_job,sweep):
-    """阻塞消费：逐条认领并同步执行，提交位点后继续；空闲期做对账清扫。
+def claim_job_by_id(job_id: str, worker_id: str | None = None) -> dict[str, Any] | None:
+    """按任务编号幂等抢占排队或租约过期任务。"""
+    wid = worker_id or f"worker_{secrets.token_hex(8)}"
+    return job_repo.claim_job_by_id(job_id, wid)
 
-    run_job(job)：执行已认领的任务；sweep()：对账兜底（自认领+执行+心跳）。
+
+def consume_forever(
+    run_job: Callable[[dict[str, Any]], None],
+    sweep: Callable[[], None],
+    *,
+    worker_id: str | None = None,
+    stop_event: threading.Event | None = None,
+) -> None:
+    """阻塞消费 Kafka 任务消息并调度执行，空闲周期执行数据库对账清扫。
+
+    Args:
+        run_job: 单条任务执行回调函数。
+        sweep: 空窗对账与超时清理回调函数。
+        worker_id: 当前 Worker 节点唯一标识。
+        stop_event: 优雅停机控制信号。
     """
     from kafka import KafkaConsumer
-    cfg=load_config()
-    while not STOP.is_set():
+
+    cfg = load_config()
+    wid = worker_id or f"worker_{secrets.token_hex(8)}"
+    stop = stop_event or threading.Event()
+    while not stop.is_set():
         try:
-            consumer=KafkaConsumer(cfg.kafka_topic,bootstrap_servers=cfg.kafka_brokers.split(","),group_id=_group,
-                auto_offset_reset="earliest",enable_auto_commit=False,consumer_timeout_ms=3000,
-                value_deserializer=lambda b:json.loads(b.decode()))
+            consumer = KafkaConsumer(
+                cfg.kafka_topic,
+                bootstrap_servers=cfg.kafka_brokers.split(","),
+                group_id=_GROUP,
+                auto_offset_reset="earliest",
+                enable_auto_commit=False,
+                consumer_timeout_ms=3000,
+                value_deserializer=lambda b: json.loads(b.decode()),
+            )
         except Exception as exc:
-            print("Kafka 消费重连",type(exc).__name__,flush=True);STOP.wait(3);continue
+            _LOG.warning("Kafka 消费重连 (%s)", type(exc).__name__)
+            stop.wait(3)
+            continue
         try:
-            it=iter(consumer);last_sweep=0.0
-            while not STOP.is_set():
-                try:msg=next(it)
+            it = iter(consumer)
+            last_sweep = 0.0
+            while not stop.is_set():
+                try:
+                    msg = next(it)
                 except StopIteration:
-                    if time.time()-last_sweep>=5:sweep();last_sweep=time.time()
+                    if time.time() - last_sweep >= 5:
+                        sweep()
+                        last_sweep = time.time()
                     continue
-                job_id=(msg.value or {}).get("job_id","")
-                job=claim_job_by_id(job_id) if job_id else None
-                if job:run_job(job)
+                job_id = (msg.value or {}).get("job_id", "")
+                job = claim_job_by_id(job_id, worker_id=wid) if job_id else None
+                if job:
+                    run_job(job)
                 consumer.commit()
-                if time.time()-last_sweep>=5:sweep();last_sweep=time.time()
+                if time.time() - last_sweep >= 5:
+                    sweep()
+                    last_sweep = time.time()
         except Exception as exc:
-            print("Kafka 消费重连",type(exc).__name__,flush=True);STOP.wait(3)
+            _LOG.warning("Kafka 消费循环重连 (%s): %s", type(exc).__name__, exc)
+            stop.wait(3)
         finally:
-            try:consumer.close()
-            except Exception:pass
+            try:
+                consumer.close()
+            except Exception as exc:
+                _LOG.debug("关闭 KafkaConsumer 异常: %s", exc)

@@ -7,7 +7,10 @@
 """
 from __future__ import annotations
 import io
+import logging
 from ..config import load_config
+
+_LOG = logging.getLogger(__name__)
 
 class LocalBlobStore:
     """回退实现：沿用 data/private/<mode>/<tenant>/ 目录。"""
@@ -36,7 +39,12 @@ class MinioBlobStore:
         from minio import Minio
         from minio.versioningconfig import ENABLED, VersioningConfig
         self.cfg = cfg
-        self.client = Minio(cfg.minio_endpoint, cfg.minio_access_key, cfg.minio_secret_key, secure=False)
+        self.client = Minio(
+            cfg.minio_endpoint,
+            cfg.minio_access_key,
+            cfg.minio_secret_key,
+            secure=getattr(cfg, "minio_secure", True),
+        )
         if not self.client.bucket_exists(cfg.minio_bucket):
             self.client.make_bucket(cfg.minio_bucket)
             self.client.set_bucket_versioning(cfg.minio_bucket, VersioningConfig(ENABLED))
@@ -48,8 +56,8 @@ class MinioBlobStore:
         from minio.error import S3Error
         try:
             self.client.remove_object(self.cfg.minio_bucket, self._key(tenant_id, name))
-        except S3Error:
-            pass
+        except S3Error as exc:
+            _LOG.debug("移除 MinIO 对象跳过 (%s/%s): %s", tenant_id, name, exc)
     def open_blob(self, tenant_id, name) -> bytes:
         resp = self.client.get_object(self.cfg.minio_bucket, self._key(tenant_id, name))
         try:

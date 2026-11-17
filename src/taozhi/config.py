@@ -1,25 +1,12 @@
 """淘智 (TaoZhi) 全局运行配置与环境加载中心。
 
-统一维护大模型参数、数据库连接池、中间件开关与租户运行上下文。
+统一维护模型网关配置 (`Settings`) 与企业运行时配置 (`Config`)：
+1. `.env` —— LLM 服务层与科研预算配置；
+2. `ECOM_ENV_FILE` —— 企业数据库、存储、消息队列与检索调优配置。
 严格遵循 Google Python Style 规范。
 """
 
 from __future__ import annotations
-
-
-"""电商商品知识智能问答系统 —— 全局配置（Pydantic Settings v2）。
-
-配置优先级：环境变量 > .env 文件 > 代码默认值。
-
-两份文件叠加读取，后者优先：
-1. 项目根 .env —— LLM 服务层配置所在地（BASE_URL / API_KEY / MODEL）。
-   企业链路刻意不读它，只认 ECOM_ENV_FILE，两边键名不重叠；
-2. ECOM_ENV_FILE 指向的环境文件 —— 让切环境时（make test 用 .env.test）
-   本层配置也能跟着切。
-
-只认 ECOM_ENV_FILE：仓库里没有第二个名字，别再发明 ENV_FILE 这类开关。
-"""
-
 
 import os
 from functools import lru_cache
@@ -84,31 +71,17 @@ class Settings(BaseSettings):
     llm_circuit_cooldown_transient: int = Field(default=25, ge=5, le=600, alias="LLM_CIRCUIT_COOLDOWN_TRANSIENT")
     llm_circuit_cooldown_auth: int = Field(default=600, ge=30, le=3600, alias="LLM_CIRCUIT_COOLDOWN_AUTH")
 
-    # ───────────────────── 检索与基础设施开关 ─────────────────────
-    hyde_enabled: bool = True
-    rerank_enabled: bool = True
-    es_enabled: bool = False
-    es_url: str = "http://localhost:9200"
-    es_index: str = "ecom_bm25"
-    minio_enabled: bool = False
-    minio_endpoint: str = "localhost:9000"
-    minio_access_key: str = "minioadmin"
-    minio_secret_key: str = "minioadmin"
-    minio_bucket: str = "ecom-docs"
-    kafka_enabled: bool = False
-    request_timeout: int = 30
-
     # ───────────────────── 调研多智能体预算（可环境变量覆盖） ─────────────────────
     research_max_turns: int = Field(default=5, ge=1, le=20)
     research_max_parallel_subagents: int = Field(default=4, ge=1, le=8)
     research_max_subagent_steps: int = Field(default=3, ge=1, le=8)
-    max_parallel_subagents: int = 4
 
     # ───────────────────── 业务系统对接 ─────────────────────
     business_api_url: str = ""
     business_api_token: str = ""
 
-    def model_post_init(self, __context) -> None:  # noqa: D105
+    def model_post_init(self, __context) -> None:
+        """将未显式指定的分级模型回落至主模型。"""
         self.llm_fast_model = self.llm_fast_model or self.model
         self.llm_strong_model = self.llm_strong_model or self.model
         self.llm_vision_model = self.llm_vision_model or self.model
@@ -116,6 +89,7 @@ class Settings(BaseSettings):
 
     @property
     def has_llm(self) -> bool:
+        """判断当前是否至少配置了一个可用的主备模型密钥。"""
         return bool(
             self.api_key
             or self.sensenova_cn_secondary_api_key
@@ -125,6 +99,7 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """读取并缓存全局大模型与科研预算配置实例。"""
     return Settings()
 
 
@@ -158,8 +133,10 @@ class Config:
     minio_access_key: str = ""
     minio_secret_key: str = ""
     minio_bucket: str = "ecom-private"
+    minio_secure: bool = True
     presign_ttl: int = 600
     blob_dual_write: bool = False
+    runtime_dir: Path = Path.home() / ".local/share/ecom-agent"
     kafka_enabled: bool = False
     kafka_brokers: str = "127.0.0.1:9092"
     kafka_topic: str = "ecom.tasks"
@@ -211,8 +188,19 @@ class Config:
     quick_login_passwords: bool = False
     # 快捷登录统一下发的默认口令（弱口令，仅内网自用；未配置时回落到运维凭据文件）
     quick_login_password: str = ""
+    # 合成测评账号在快捷登录中展示时的口令（从 ECOM_QUICK_EVAL_PASSWORD 注入）
+    quick_eval_password: str = ""
+
 
 def load_config() -> Config:
+    """从 ECOM_ENV_FILE 与进程环境变量加载企业在线运行时配置。
+
+    Returns:
+        校验通过的不可变 Config 对象。
+
+    Raises:
+        RuntimeError: 当 ECOM_DATABASE_URL 缺失或 ECOM_MODE 非法时抛出。
+    """
     source = Path(os.environ.get("ECOM_ENV_FILE", ROOT / ".env.production"))
     values = {**dotenv_values(source), **os.environ}
     mode = values.get("ECOM_MODE", "production")
@@ -220,18 +208,29 @@ def load_config() -> Config:
     if not dsn or mode not in ("production", "test"):
         raise RuntimeError("企业数据库或运行环境未配置（仅支持 production / test）")
     private = Path(values.get("ECOM_PRIVATE_DIR", ROOT / "data/private" / mode / "private"))
-    private.mkdir(parents=True,exist_ok=True,mode=0o700)
-    return Config(dsn, mode, private, values.get("ECOM_TENANT_CODE","mofa"), values.get("ECOM_COOKIE_SECURE","false")=="true",
+    private.mkdir(parents=True, exist_ok=True, mode=0o700)
+    minio_ep = values.get("ECOM_MINIO_ENDPOINT", "127.0.0.1:19000")
+    minio_secure_raw = values.get("ECOM_MINIO_SECURE")
+    minio_secure = (
+        not minio_ep.startswith(("127.0.0.1", "localhost"))
+        if minio_secure_raw is None
+        else minio_secure_raw == "true"
+    )
+    runtime_dir = Path(values.get("ECOM_RUNTIME_DIR", str(Path.home() / ".local/share/ecom-agent")))
+    return Config(
+      dsn, mode, private, values.get("ECOM_TENANT_CODE","mofa"), values.get("ECOM_COOKIE_SECURE","false")=="true",
       review_timeout=int(values.get("ECOM_REVIEW_TIMEOUT","86400")),
       embed_service_url=values.get("ECOM_EMBED_SERVICE_URL","http://127.0.0.1:18555"),
       hyde_enabled=values.get("ECOM_HYDE_ENABLED","true")=="true",
       minio_enabled=values.get("ECOM_MINIO_ENABLED","false")=="true",
-      minio_endpoint=values.get("ECOM_MINIO_ENDPOINT","127.0.0.1:19000"),
+      minio_endpoint=minio_ep,
       minio_access_key=values.get("ECOM_MINIO_ACCESS_KEY",""),
       minio_secret_key=values.get("ECOM_MINIO_SECRET_KEY",""),
       minio_bucket=values.get("ECOM_MINIO_BUCKET","ecom-private"),
+      minio_secure=minio_secure,
       presign_ttl=int(values.get("ECOM_PRESIGN_TTL","600")),
       blob_dual_write=values.get("ECOM_BLOB_DUAL_WRITE","false")=="true",
+      runtime_dir=runtime_dir,
       kafka_enabled=values.get("ECOM_KAFKA_ENABLED","false")=="true",
       kafka_brokers=values.get("ECOM_KAFKA_BROKERS","127.0.0.1:9092"),
       kafka_topic=values.get("ECOM_KAFKA_TOPIC","ecom.tasks"),
@@ -268,4 +267,5 @@ def load_config() -> Config:
       api_base_url=values.get("ECOM_API_BASE_URL","http://127.0.0.1:18080"),
       quick_login=values.get("ECOM_QUICK_LOGIN","false")=="true",
       quick_login_passwords=values.get("ECOM_QUICK_LOGIN_PASSWORDS","false")=="true",
-      quick_login_password=values.get("ECOM_QUICK_LOGIN_PASSWORD",""))
+      quick_login_password=values.get("ECOM_QUICK_LOGIN_PASSWORD",""),
+      quick_eval_password=values.get("ECOM_QUICK_EVAL_PASSWORD",""))

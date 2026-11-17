@@ -1,6 +1,7 @@
-"""后台异步任务守护进程：队列认领、租约续期与任务分发执行。"""
+"""后台异步任务守护进程：队列认领、租约续期、优雅停机与任务分发执行。"""
 from __future__ import annotations
 
+import logging
 import secrets
 import signal
 import threading
@@ -12,23 +13,29 @@ from taozhi.config import load_config
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence import document_repo, job_repo
 from taozhi.knowledge import queue
-from taozhi.knowledge.db import database_connection
+from taozhi.knowledge.db import close_pools, database_connection
 from taozhi.observability.tracing import setup_tracing
 
+_LOG = logging.getLogger(__name__)
 STOP = threading.Event()
 WORKER = "worker_" + secrets.token_hex(8)
 
 
 def renew_job_lease(job: dict, done: threading.Event) -> None:
-    """周期续约运行中任务租约与 Worker 心跳。"""
+    """周期续约运行中任务租约与 Worker 心跳。
+
+    Args:
+        job: 正在执行的任务记录字典。
+        done: 任务结束通知事件，置位后退出续约循环。
+    """
     wid = job.get("worker_id") or WORKER
     lease_seconds = load_config().lease_seconds
     while not done.wait(10):
         try:
             with database_connection() as c:
                 job_repo.renew_lease_once(c, job["id"], job["run_version"], wid, lease_seconds)
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOG.warning("续约任务租约失败 (%s): %s", job.get("id"), exc)
 
 
 def heartbeat() -> None:
@@ -84,27 +91,42 @@ def sweep() -> None:
 
 
 def main() -> None:
-    """Worker 守护进程主循环入口。"""
+    """Worker 守护进程主循环入口，支持单一信号量下的优雅停机与线程回收。"""
     signal.signal(signal.SIGTERM, lambda *_: STOP.set())
     signal.signal(signal.SIGINT, lambda *_: STOP.set())
     print("企业任务进程已启动", flush=True)
     print("执行轨迹:", "已启用（OTLP→Phoenix）" if setup_tracing("taozhi-worker") else "未启用", flush=True)
     cfg = load_config()
+    bg_threads: list[threading.Thread] = []
     if cfg.kafka_enabled:
-        queue._worker_id = WORKER
-        threading.Thread(target=queue.relay_loop, daemon=True).start()
-        threading.Thread(target=queue.consume_forever, args=(run_job, sweep), daemon=True).start()
+        relay_t = threading.Thread(target=queue.relay_loop, kwargs={"stop_event": STOP}, daemon=True)
+        consume_t = threading.Thread(
+            target=queue.consume_forever,
+            args=(run_job, sweep),
+            kwargs={"worker_id": WORKER, "stop_event": STOP},
+            daemon=True,
+        )
+        relay_t.start()
+        consume_t.start()
+        bg_threads.extend([relay_t, consume_t])
         idle = 3
     else:
         idle = 1
-    while not STOP.is_set():
-        try:
-            heartbeat()
-            if not process_next_job():
-                STOP.wait(idle)
-        except Exception as exc:
-            print("任务进程正在重连", type(exc).__name__, flush=True)
-            STOP.wait(3)
+
+    try:
+        while not STOP.is_set():
+            try:
+                heartbeat()
+                if not process_next_job():
+                    STOP.wait(idle)
+            except Exception as exc:
+                print("任务进程正在重连", type(exc).__name__, flush=True)
+                STOP.wait(3)
+    finally:
+        STOP.set()
+        for t in bg_threads:
+            t.join(timeout=5)
+        close_pools()
 
 
 if __name__ == "__main__":
