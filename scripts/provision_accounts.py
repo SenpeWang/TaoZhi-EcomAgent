@@ -41,7 +41,7 @@ def pick_node(conn, tenant: str, kind: str) -> str:
     row = fetch_one(conn, "SELECT id FROM org_nodes WHERE tenant_id=%s AND kind=%s ORDER BY name LIMIT 1",
                     (tenant, kind))
     if not row:
-        raise SystemExit(f"未找到 kind={kind} 的组织节点，请先执行 manage_database.py migrate")
+        raise SystemExit(f"未找到 kind={kind} 的组织节点，请先初始化企业租户与组织架构")
     return row["id"]
 
 

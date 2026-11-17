@@ -72,8 +72,7 @@ class MinioBlobStore:
 class DualBlobStore:
     """双写实现：MinIO 为主写、本地私有目录为镜像写，读优先 MinIO 并回落本地。
 
-    用于迁移期（ECOM_BLOB_DUAL_WRITE="true"）：两侧同时落盘后用
-    scripts/verify_blob_migration.py 比对哈希，全部一致后再关闭镜像写。
+    用于迁移期（ECOM_BLOB_DUAL_WRITE="true"）：两侧同时落盘并在核验一致后关闭镜像写。
     """
     def __init__(self, primary, mirror):
         self.primary = primary

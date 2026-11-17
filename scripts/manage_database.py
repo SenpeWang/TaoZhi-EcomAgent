@@ -1,5 +1,5 @@
-"""仅由远端部署账号运行：私有数据库初始化与企业库迁移。"""
-import os,sys,json,secrets,subprocess,sqlite3,hashlib,time
+"""仅由远端部署账号运行：私有数据库初始化、测试夹具建库与企业账号准备。"""
+import os,sys,json,secrets,subprocess,hashlib
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
@@ -38,60 +38,6 @@ def corpus():
     for chunk in json.loads(path.read_text()) if path.exists() else []:
         groups.setdefault(chunk["doc_id"],[]).append(chunk)
     return groups
-def sqlite_rows(name,table):
-    p=ROOT/"data/state"/name
-    if not p.exists():return []
-    c=sqlite3.connect(p);c.row_factory=sqlite3.Row
-    try:return [dict(r) for r in c.execute("SELECT * FROM "+table)]
-    finally:c.close()
-def migrate():
-    accounts=sqlite_rows("accounts.sqlite","users")
-    olddocs=sqlite_rows("document-access.sqlite","documents")
-    orgs=sorted(set([r["org_tag"] for r in accounts]+[r["org_tag"] for r in olddocs]))
-    groups=corpus()
-    with database_connection() as c:
-        tenantmap={};usermap={}
-        for index,name in enumerate(orgs or ["手机配件公司"]):
-            tenant="tenant_"+hashlib.sha256(name.encode()).hexdigest()[:18]
-            code="mofa" if name=="手机配件公司" else "org_"+hashlib.sha256(name.encode()).hexdigest()[:8]
-            c.execute("INSERT INTO tenants(id,code,name,mode) VALUES(%s,%s,%s,'production') ON CONFLICT(id) DO NOTHING",(tenant,code,name))
-            tenantmap[name]=(tenant,organization(c,tenant,name))
-        for r in accounts:
-            tenant,nodes=tenantmap[r["org_tag"]];usermap[r["id"]]=tenant
-            c.execute("INSERT INTO users(id,tenant_id,username,display_name,password_hash,system_admin,active,must_change,version) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING",(r["id"],tenant,r["username"],r["display_name"],r["password_hash"],r["role"]=="admin",bool(r["active"]),bool(r["must_change"]),r["version"]))
-            if r["role"]=="boss":
-                c.execute("INSERT INTO memberships(tenant_id,user_id,node_id,role) VALUES(%s,%s,%s,'boss') ON CONFLICT DO NOTHING",(tenant,r["id"],nodes["公司"]))
-            elif r["role"]=="employee":
-                c.execute("INSERT INTO memberships(tenant_id,user_id,node_id,role) VALUES(%s,%s,%s,'employee') ON CONFLICT DO NOTHING",(tenant,r["id"],nodes["公司"]))
-        for name,(tenant,nodes) in tenantmap.items():
-            creator=fetch_one(c,"SELECT id FROM users WHERE tenant_id=%s ORDER BY system_admin DESC LIMIT 1",(tenant,))
-            if not creator:continue
-            for r in olddocs:
-                if r["org_tag"]!=name:continue
-                body="\n".join(x["text"] for x in groups.get(r["id"],[])) or "历史资料未找到原文，需重新核验。"
-                scope="company" if r["visibility"]=="company" else ("selected" if r["visibility"]=="selected" else "company")
-                level=1 if r["visibility"]=="company" else 3
-                add_doc(c,tenant,creator["id"],r["id"],("【历史迁移】"+r["title"]) if groups.get(r["id"]) and all(x.get("source")=="local_corpus" for x in groups[r["id"]]) else r["title"],body,nodes["公司"],scope,level,"deleted" if r["deleted"] else ("published" if groups.get(r["id"]) else "draft"),max(1,r["version"]))
-                for reader in json.loads(r["allowed_users"] or "[]"):
-                    if usermap.get(reader)==tenant:
-                        c.execute("INSERT INTO document_grants(tenant_id,document_id,user_id,effect,can_read,granted_by) VALUES(%s,%s,%s,'allow',true,%s) ON CONFLICT DO NOTHING",(tenant,r["id"],reader,creator["id"]))
-                if not fetch_one(c,"SELECT id FROM audit_events WHERE tenant_id=%s AND target_id=%s AND action='迁移历史文档权限'",(tenant,r["id"])):
-                    c.execute("INSERT INTO audit_events(tenant_id,actor_id,action,target_id,node_id,level,system,detail) VALUES(%s,%s,'迁移历史文档权限',%s,%s,%s,true,%s)",(tenant,creator["id"],r["id"],nodes["公司"],level,as_jsonb({"scope":scope,"level":level,"count":len(json.loads(r["allowed_users"] or "[]"))})))
-        old_tasks={str(r["id"]):json.loads(r.get("task_json") or "{}") for r in sqlite_rows("tasks.sqlite","tasks")}
-        for name,table in [("tasks.sqlite","tasks"),("tasks.sqlite","events"),("accounts.sqlite","audit")]:
-            for r in sqlite_rows(name,table):
-                task=json.loads(r.get("task_json") or "{}") if table=="tasks" else old_tasks.get(str(r.get("task_id","")),{})
-                tenant=usermap.get(task.get("user_id"))
-                original_org=r.get("org_tag") or task.get("org_tag")
-                if not tenant and original_org in tenantmap:tenant=tenantmap[original_org][0]
-                tenant=tenant or next(iter(tenantmap.values()))[0]
-                rid=str(r["id"])
-                c.execute("INSERT INTO legacy_archive(source,source_id,tenant_id,record) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING",(name+":"+table,rid,tenant,as_jsonb(r)))
-                if table=="tasks" and task.get("user_id") in usermap:
-                    user=fetch_one(c,"SELECT * FROM users WHERE id=%s",(task["user_id"],))
-                    root=node_id(tenant,"公司")
-                    c.execute("INSERT INTO jobs(id,tenant_id,owner_id,owner_version,node_id,kind,question,input_level,state,stage,fingerprint) VALUES(%s,%s,%s,%s,%s,'ask',%s,3,'legacy','历史记录待重新核验',%s) ON CONFLICT(id) DO NOTHING",(r["id"],tenant,user["id"],user["version"],root,task.get("question",""),hashlib.sha256(r["task_json"].encode()).hexdigest()))
-    print("旧账号、资料权限与任务档案已迁移；旧会话未迁移")
 def seed_test():
     """初始化测试库：企业租户、四种身份账号与密级样文档（仅 test 模式，供在线验收使用）。"""
     from taozhi.config import load_config
@@ -131,18 +77,6 @@ def bootstrap_owner():
             path.write_text(json.dumps(dict(username="owner",password=password,user_id=user,tenant_code=tenant["code"]),ensure_ascii=False));path.chmod(0o600)
             c.execute("INSERT INTO audit_events(tenant_id,actor_id,action,target_id,system) VALUES(%s,%s,'受保护工具初始化老板身份',%s,true)",(tenant["id"],user,user))
     print("首次老板身份已初始化，凭据仅保存在部署账号私有目录")
-def migrate_task_list():
-    # 无法确认旧所有者的记录只交由本企业老板核验，不能猜测归属或公开旧答案。
-    with database_connection() as c:
-        for archived in fetch_all(c,"SELECT * FROM legacy_archive WHERE source='tasks.sqlite:tasks'"):
-            tenant=archived["tenant_id"];record=archived["record"]
-            task=json.loads(record.get("task_json") or "{}")
-            owner=fetch_one(c,"SELECT id,version FROM users WHERE tenant_id=%s AND id=%s",(tenant,task.get("user_id","")))
-            if not owner:
-                owner=fetch_one(c,"SELECT u.id,u.version FROM users u JOIN memberships m ON m.user_id=u.id AND m.tenant_id=u.tenant_id WHERE u.tenant_id=%s AND u.active AND m.active AND m.role='boss' ORDER BY u.created_at LIMIT 1",(tenant,))
-            if not owner:continue
-            c.execute("INSERT INTO jobs(id,tenant_id,owner_id,owner_version,node_id,kind,question,input_level,state,stage,fingerprint,payload) VALUES(%s,%s,%s,%s,%s,'ask',%s,3,'legacy','历史记录待重新核验',%s,%s) ON CONFLICT(id) DO NOTHING",(record["id"],tenant,owner["id"],owner["version"],node_id(tenant,"公司"),task.get("question",""),hashlib.sha256(record.get("task_json","").encode()).hexdigest(),as_jsonb({"legacy_source_id":archived["source_id"]})))
-    print("历史任务列表已恢复；旧答案保持受限并待重新核验")
 def provision():
     import psycopg
     from psycopg import sql
@@ -198,8 +132,7 @@ def quick_passwords():
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="企业数据库初始化与历史迁移管理")
-    parser.add_argument("command", choices=("provision", "migrate", "bootstrap-owner", "quick-passwords", "archive-tasks"))
+    parser = argparse.ArgumentParser(description="企业数据库初始化与账号准备")
+    parser.add_argument("command", choices=("provision", "bootstrap-owner", "quick-passwords"))
     args = parser.parse_args()
-    {"provision": provision, "migrate": migrate, "bootstrap-owner": bootstrap_owner,
-     "quick-passwords": quick_passwords, "archive-tasks": migrate_task_list}[args.command]()
+    {"provision": provision, "bootstrap-owner": bootstrap_owner, "quick-passwords": quick_passwords}[args.command]()
