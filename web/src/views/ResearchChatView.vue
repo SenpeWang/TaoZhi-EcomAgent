@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { User } from '../types'
 import robotUrl from '../assets/robot.svg'
 import MarkdownReport from './MarkdownReport.vue'
+import { openTaskEventStream } from '../composables/useTaskStream'
 
 interface ToolCallTrace {
   name: string
@@ -112,7 +113,7 @@ const thinkingCollapsed = ref<Record<string, boolean>>({})
 // 实时计时器
 const liveTimerSeconds = ref<number>(0)
 let timerHandle: number | null = null
-let activeEventSource: EventSource | null = null
+let closeActiveStream: (() => void) | null = null
 
 const chatScrollRef = ref<HTMLDivElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -257,10 +258,8 @@ async function loadConversations(): Promise<void> {
  * @returns 异步完成后无返回值
  */
 async function selectConversation(convId: string): Promise<void> {
-  if (activeEventSource) {
-    activeEventSource.close()
-    activeEventSource = null
-  }
+  closeActiveStream?.()
+  closeActiveStream = null
   stopThinkingTimer()
   activeConvId.value = convId
   localStorage.setItem(STORAGE_ACTIVE_KEY, convId)
@@ -289,10 +288,8 @@ async function selectConversation(convId: string): Promise<void> {
  * @param initKeyword - 可选初始关键词
  */
 function startNewConversation(initKeyword?: string): void {
-  if (activeEventSource) {
-    activeEventSource.close()
-    activeEventSource = null
-  }
+  closeActiveStream?.()
+  closeActiveStream = null
   stopThinkingTimer()
   const newId = 'conv_' + Date.now().toString(36)
   activeConvId.value = newId
@@ -342,26 +339,16 @@ async function deleteConversation(convId: string, e: MouseEvent): Promise<void> 
  */
 async function streamTaskEvents(taskId: string, targetTurn: ResearchTurn): Promise<void> {
   startThinkingTimer()
-  if (activeEventSource) {
-    activeEventSource.close()
-    activeEventSource = null
-  }
+  closeActiveStream?.()
+  closeActiveStream = null
 
   return new Promise<void>((resolve) => {
-    const es = new EventSource(`/api/tasks/${taskId}/events`)
-    activeEventSource = es
-
-    /**
-     * 处理服务端推来的流式阶段与思考日志事件。
-     * @param e - 消息事件对象
-     */
-    function handleMessage(e: MessageEvent): void {
-      try {
-        const payload = JSON.parse(e.data as string) as {
-          stage?: string
-          progress?: number
-          status?: string
-        }
+    closeActiveStream = openTaskEventStream(taskId, {
+      /**
+       * 处理服务端推来的流式阶段与思考日志事件。
+       * @param payload - 服务端推送的任务进展条目。
+       */
+      onMessage: (payload) => {
         if (payload.stage) {
           targetTurn.stage = payload.stage
           if (!targetTurn.thinkingLogs.includes(payload.stage)) {
@@ -372,36 +359,27 @@ async function streamTaskEvents(taskId: string, targetTurn: ResearchTurn): Promi
           targetTurn.progress = payload.progress
         }
         scrollToBottom()
-      } catch {
-        // 忽略心跳解析错误
-      }
-    }
-    es.onmessage = handleMessage
-
-    /**
-     * 处理智能调研完成事件，拉取终态研报。
-     */
-    function handleDone(): void {
-      es.close()
-      activeEventSource = null
-      const elapsed = liveTimerSeconds.value
-      stopThinkingTimer()
-      targetTurn.thinkingSeconds = elapsed > 0 ? elapsed : targetTurn.thinkingSeconds
-      void finalizeTaskResult(taskId, targetTurn)
-      resolve()
-    }
-    es.addEventListener('done', handleDone)
-
-    /**
-     * 处理连接异常或意外断开，切换为轮询兜底。
-     */
-    function handleError(): void {
-      es.close()
-      activeEventSource = null
-      void fallbackPoll(taskId, targetTurn)
-      resolve()
-    }
-    es.onerror = handleError
+      },
+      /**
+       * 处理智能调研完成事件，拉取终态研报。
+       */
+      onDone: () => {
+        closeActiveStream = null
+        const elapsed = liveTimerSeconds.value
+        stopThinkingTimer()
+        targetTurn.thinkingSeconds = elapsed > 0 ? elapsed : targetTurn.thinkingSeconds
+        void finalizeTaskResult(taskId, targetTurn)
+        resolve()
+      },
+      /**
+       * 处理连接异常或意外断开，切换为轮询兜底。
+       */
+      onError: () => {
+        closeActiveStream = null
+        void fallbackPoll(taskId, targetTurn)
+        resolve()
+      },
+    })
   })
 }
 
@@ -627,10 +605,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (activeEventSource) {
-    activeEventSource.close()
-    activeEventSource = null
-  }
+  closeActiveStream?.()
+  closeActiveStream = null
   stopThinkingTimer()
 })
 </script>

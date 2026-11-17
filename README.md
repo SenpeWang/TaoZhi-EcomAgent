@@ -67,11 +67,10 @@ flowchart TD
 
 | 智能体标识 | 角色名称 | 绑定工具集 (Tools) | 核心职责与任务边界 |
 | :--- | :--- | :---: | :--- |
-| **`main_agent`**<br>(`main`) | **调研协同总指挥**<br>(Supervisor) | *(调度原语)* | **中央决策大脑**：意图理解、探索维度大纲制定、动态任务拆解、专职智能体分派、审查反馈事实充分性与动态重规划。 |
-| **`web_agent`**<br>(`web`) | **全网市场情报专员** | `[search_web]` | **专注全网网页检索**：通过 DuckDuckGo 与自建检索网关抓取主流品牌热销卖点、行业最新趋势与买家差评痛点。 |
-| **`scanner_agent`**<br>(`scanner`) | **货源比价专员** | `[search_1688_wholesale,<br>search_amazon]` | **双渠道供应链与出海比价**：深入 1688 批发平台抓取一手源头工厂出厂底价与起订量阶梯；对标海外亚马逊跨境终端美元售价。 |
-| **`verifier_agent`**<br>(`verifier`) | **商品真实性验真专员** | `[cross_verify_margins]` | **交叉验真与毛利测算**：比对零售端宣称与工厂实际制造工艺，测算供应链到零售端的真实毛利空间，剔除虚假夸大营销。 |
-| **`reporter_agent`**<br>(`reporter`) | **电商调研研报专家** | `[generate_markdown_report]` | **结构化研报编排**：由 `ModelTier.STRONG` 强力驱动，聚合多智能体客观发现，生成严谨专业的全景 Markdown 研报工件。 |
+| **`main_agent`**<br>(`lead_orchestrator`) | **调研协同总指挥**<br>(Supervisor) | *(MCP 发现与派发)* | **中央决策大脑**：意图边界识别、大纲规划、并发扇出（`Send`）、审查黑板实证与动态重规划。 |
+| **`web_agent`**<br>(`subagent_worker`) | **全网市场情报专员** | `[search_web,<br>fetch_web_page]` | **全网检索与公网深抓**：抓取主流卖点、趋势与买家痛点；所有回传文本均经 `AgentSession` 防注入净化与 `url_guard` SSRF 校验。 |
+| **`scanner_agent`**<br>(`subagent_worker`) | **货源与跨境比价专员** | `[search_1688_wholesale,<br>search_amazon]` | **双渠道供应链与出海比价**：深入 1688 提取出厂底价与 MOQ，并对照 Amazon 美元售价、ASIN 与评论数（无结果绝不造假）。 |
+| **`synthesizer`**<br>(`reporter`) | **电商调研研报专家** | *(黑板证据聚合)* | **结构化研报编排**：由 `ModelTier.STRONG` 强力驱动，聚合有效证据包生成严谨 Markdown 研报并沉淀租户长效记忆。 |
 
 ### 生产级可审计工程原则（杜绝倾倒 CoT 思维链）
 - **客观进度推进**：自治智能体探索深度由模型自主决定，无法预知步骤，运行期仅以**决策轮次（Turn 1, Turn 2...）**推进，不搞“20% ➔ 50% ➔ 100%”等虚假百分比；

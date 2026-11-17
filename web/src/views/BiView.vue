@@ -324,6 +324,7 @@ import {
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import AnswerChart from './AnswerChart.vue'
+import { openTaskEventStream } from '../composables/useTaskStream'
 
 echarts.use([
   BarChart,
@@ -440,7 +441,7 @@ const quickQuestions = [
   '各仓库存预警情况',
 ]
 let charts: echarts.ECharts[] = []
-let stream: EventSource | null = null
+let closeStream: (() => void) | null = null
 
 const activeDays = computed(() => board.value?.days || periodDays.value)
 
@@ -917,32 +918,31 @@ async function ask(q: string): Promise<void> {
       question,
       input_level: 1,
     })
-    stream?.close()
-    stream = new EventSource('/api/tasks/' + r.id + '/events')
-    /**
-     * 接收进度事件：更新待处理消息的阶段与进度。
-     * @param ev SSE 消息事件，data 为 JSON 进度行
-     */
-    stream.onmessage = (ev) => {
-      try {
-        const row = JSON.parse(ev.data) as { stage?: string; progress?: number }
+    closeStream?.()
+    closeStream = openTaskEventStream(r.id, {
+      /**
+       * 接收进度事件：更新待处理消息的阶段与进度。
+       * @param row - 服务端推送的任务进度条目。
+       */
+      onMessage: (row) => {
         if (row.stage) pending.stage = row.stage
         if (typeof row.progress === 'number') pending.progress = row.progress
-      } catch {}
-    }
-    stream.addEventListener('done', () => {
-      stream?.close()
-      stream = null
-      void finish(r.id, pending)
+      },
+      /**
+       * 监听终态事件：清理句柄并拉取结果。
+       */
+      onDone: () => {
+        closeStream = null
+        void finish(r.id, pending)
+      },
+      /**
+       * SSE 断连兜底：清空句柄并转入轮询拉取终态。
+       */
+      onError: () => {
+        closeStream = null
+        void finish(r.id, pending)
+      },
     })
-    /**
-     * SSE 断连兜底：关闭连接并转入轮询拉取终态。
-     */
-    stream.onerror = () => {
-      stream?.close()
-      stream = null
-      void finish(r.id, pending)
-    }
   } catch (e: unknown) {
     asking.value = false
     messages.value.pop()
@@ -1031,7 +1031,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
-  stream?.close()
+  closeStream?.()
   charts.forEach((c) => c.dispose())
   charts = []
 })

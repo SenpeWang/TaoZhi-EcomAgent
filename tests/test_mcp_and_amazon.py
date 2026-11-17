@@ -1,11 +1,14 @@
 """MCP 协议规范、EcommerceMcpServer / McpClientAdapter 与领域工具边界测试。"""
 from __future__ import annotations
 
+import importlib
 import json
 import threading
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from taozhi.core.tools.search_amazon import AMAZON_BASE_URL, search_amazon
+
+_search_amazon_mod = importlib.import_module("taozhi.core.tools.search_amazon")
 from taozhi.domain.research import classify_research_scope
 from taozhi.infrastructure.mcp.adapter import McpClientAdapter
 from taozhi.infrastructure.mcp.protocol import McpCallToolResult
@@ -30,25 +33,41 @@ def test_mcp_protocol_and_server_registration():
 
 
 def test_search_amazon_execution_and_data_structure():
-    """测试 search_amazon 工具的输出结构契约。"""
-    results = search_amazon("iphone 16 case", limit=3)
+    """测试 search_amazon 工具对 Amazon 搜索页 HTML DOM 的真实解析与结构契约。"""
+    fake_html = (
+        '<div data-component-type="s-search-result" data-asin="B0REAL0001">'
+        '<h2><span>iPhone 16 Magnetic Case</span></h2>'
+        '<span class="a-offscreen">$15.99</span>'
+        '<span class="a-icon-alt">4.6 out of 5 stars</span>'
+        '<span class="a-size-base s-underline-text">1,240</span>'
+        '<span class="a-icon-prime"></span></div>'
+    )
+    fake_resp = MagicMock(status_code=200, text=fake_html)
+    with patch.object(_search_amazon_mod.httpx, "Client") as mock_client_cls:
+        mock_client_cls.return_value.__enter__.return_value.get.return_value = fake_resp
+        results = search_amazon("iphone 16 case", limit=3)
+
     assert isinstance(results, list)
-    assert len(results) >= 1
+    assert len(results) == 1
 
     item = results[0]
-    assert "title" in item
-    assert "price" in item
-    assert "asin" in item
-    assert "url" in item
+    assert item["title"] == "iPhone 16 Magnetic Case"
+    assert item["price"] == "$15.99"
+    assert item["asin"] == "B0REAL0001"
+    assert item["reviews_count"] == 1240
     assert item["source"] == "amazon"
-    assert item["url"].startswith(AMAZON_BASE_URL) or "amazon.com" in item["url"]
+    assert item["url"] == f"{AMAZON_BASE_URL}dp/B0REAL0001"
 
 
 def test_mcp_server_call_tool_and_alias():
-    """测试 MCP 服务端 tools/call 执行、别名兼容及未知工具报错。"""
+    """测试 MCP 服务端 tools/call 执行、规范命名及未知工具报错。"""
     server = EcommerceMcpServer()
 
-    res = server.call_tool("search_amazon", {"query": "thermal mug", "limit": 2})
+    with patch(
+        "taozhi.infrastructure.mcp.server.search_amazon",
+        return_value=[{"title": "Thermal Mug", "price": "$22.50", "asin": "B0MUG00001", "url": f"{AMAZON_BASE_URL}dp/B0MUG00001", "source": "amazon"}],
+    ):
+        res = server.call_tool("search_amazon", {"query": "thermal mug", "limit": 2})
     assert isinstance(res, McpCallToolResult)
     assert not res.isError
     assert len(res.content) == 1
@@ -56,7 +75,7 @@ def test_mcp_server_call_tool_and_alias():
 
     parsed = json.loads(res.content[0].text)
     assert isinstance(parsed, list)
-    assert len(parsed) >= 1
+    assert len(parsed) == 1
     assert parsed[0]["source"] == "amazon"
 
     # 直接通过规范工具名 search_1688_wholesale 调用，并确认废弃别名 search_1688 不再放行

@@ -15,7 +15,7 @@
 
 | 不属于 | 实际情况 |
 |---|---|
-| `src/taozhi/enterprise/metrics.py` | 业务指标语义层（ChatBI 的 metric_key / dimensions / SQL 模板白名单），不是评估 |
+| `src/taozhi/knowledge/metrics.py` | 业务指标语义层（ChatBI 的 metric_key / dimensions / SQL 模板白名单），不是评估 |
 | `src/taozhi/observability/metrics.py` | 运行时 token / 延迟观测，链路算成本依赖它 |
 | `migrations/versions/007_metrics.py`、`scripts/seed_*_metrics.py` | 建表迁移与业务数据灌入 |
 | `src/taozhi/hypothesis/tracker.py` 的 `evaluate()` | 业务假设评估 |

@@ -897,6 +897,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { requestApi } from './api'
+import { openTaskEventStream } from './composables/useTaskStream'
 import robotUrl from './assets/robot.svg'
 import AccountCenter from './views/AccountCenter.vue'
 import BiView from './views/BiView.vue'
@@ -1562,80 +1563,58 @@ async function submitQuestion(): Promise<void> {
   })
 }
 
-let taskStream: EventSource | null = null
+let closeTaskStream: (() => void) | null = null
 
 /**
  * 订阅指定任务的服务端 SSE 进度流，连接异常时静默降级为轮询。
  * @param id - 任务 ID。
  */
 function streamTask(id: string): void {
-  taskStream?.close()
-  taskStream = new EventSource('/api/tasks/' + id + '/events')
-  taskStream.onmessage =
+  closeTaskStream?.()
+  closeTaskStream = openTaskEventStream(id, {
     /**
      * 处理实时阶段推送。
-     * @param ev - SSE 消息事件。
+     * @param row - 服务端推送的任务进展条目。
      */
-    (ev) => {
-      try {
-        const row = JSON.parse(ev.data) as {
-          id?: number
-          stage?: string
-          progress?: number
-          status?: string
-        }
-        if (!activeTask.value || activeTask.value.id !== id) return
-        if (row.stage) activeTask.value.stage = row.stage
-        if (typeof row.progress === 'number') activeTask.value.progress = row.progress
-        if (!activeTask.value.events) activeTask.value.events = []
-        let exists = false
-        for (const e of activeTask.value.events) {
-          if (e.stage === row.stage) {
-            exists = true
-            break
-          }
-        }
-        if (row.stage && !exists) {
-          activeTask.value.events.push({
-            id: row.id || Date.now(),
-            stage: row.stage,
-            progress: row.progress || 0,
-            status: row.status || 'running',
-          })
-        }
-      } catch {}
-    }
-  taskStream.addEventListener(
-    'done',
+    onMessage: (row) => {
+      if (!activeTask.value || activeTask.value.id !== id) return
+      if (row.stage) activeTask.value.stage = row.stage
+      if (typeof row.progress === 'number') activeTask.value.progress = row.progress
+      if (!activeTask.value.events) activeTask.value.events = []
+      const exists = activeTask.value.events.some((e) => e.stage === row.stage)
+      if (row.stage && !exists) {
+        activeTask.value.events.push({
+          id: row.id || Date.now(),
+          stage: row.stage,
+          progress: row.progress || 0,
+          status: row.status || 'running',
+        })
+      }
+    },
     /**
      * 监听终态事件并全量刷新任务结论。
-     * @param ev - 结束事件。
+     * @param done - 结束事件携带的任务标识。
      */
-    (ev) => {
-      taskStream?.close()
-      taskStream = null
-      try {
-        const done = JSON.parse((ev as MessageEvent).data) as { id: string }
-        if (activeTask.value?.id === done.id) {
-          api<Task>('/tasks/' + done.id).then(
-            /**
-             * 回写终态任务明细。
-             * @param t - 最新任务对象。
-             */
-            (t: Task) => {
-              if (activeTask.value?.id === done.id) activeTask.value = t
-            },
-          )
-        }
-      } catch {}
+    onDone: (done) => {
+      closeTaskStream = null
+      const doneId = done.id
+      if (doneId && activeTask.value?.id === doneId) {
+        api<Task>('/tasks/' + doneId).then(
+          /**
+           * 回写终态任务明细。
+           * @param t - 最新任务对象。
+           */
+          (t: Task) => {
+            if (activeTask.value?.id === doneId) activeTask.value = t
+          },
+        )
+      }
     },
-  )
-  taskStream.onerror =
-    /** 连接异常时静默关闭流，保留轮询兜底刷新。 */
-    () => {
-      taskStream?.close()
-      taskStream = null
-    }
+    /** 连接异常时清空句柄，保留轮询兜底刷新。 */
+    onError: () => {
+      closeTaskStream = null
+    },
+  })
 }
 
 /**
@@ -2157,6 +2136,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearInterval(timer)
-  taskStream?.close()
+  closeTaskStream?.()
 })
 </script>

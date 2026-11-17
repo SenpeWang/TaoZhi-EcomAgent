@@ -167,8 +167,9 @@ def run_agent_evaluations(
     # 联动 Phoenix
     if sync_phoenix:
         try:
-            print("🚀 正在将评测遥测同步至 Arize Phoenix (127.0.0.1:6006) ...")
-            py_bin = Path(os.path.expanduser("~/.local/share/ecom-agent/phoenix-venv/bin/python"))
+            print("🚀 正在将评测遥测同步至 Arize Phoenix ...")
+            runtime_base = Path(os.environ.get("ECOM_RUNTIME_DIR", str(Path.home() / ".local/share/ecom-agent")))
+            py_bin = runtime_base / "phoenix-venv/bin/python"
             if not py_bin.is_file():
                 py_bin = Path(sys.executable)
             subprocess.run([str(py_bin), str(ROOT / "evals/sync_phoenix.py"), "--agent"], check=False)

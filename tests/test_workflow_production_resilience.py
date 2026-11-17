@@ -49,14 +49,18 @@ def test_present_job_returns_task_events():
         assert "status" in ev
 
 
-def test_task_cancellation_and_retry_flow():
-    """测试任务在取消后可安全发起 retry（run_version 递增并重新排队）。"""
+def test_task_cancellation_and_retry_flow(monkeypatch):
+    """测试任务在取消后可安全发起 retry（run_version 递增并按 Kafka 开关投递 Outbox）。"""
+    from dataclasses import replace
+    from taozhi.config import load_config
+    from taozhi.infrastructure.persistence import job_repo
+
     client, job = _get_client_and_job()
     job_id = job["id"]
     orig_state = job["state"]
     orig_version = job.get("run_version") or 1
 
-    # 1. 尝试对非 running 任务重试
+    # 1. 非 Kafka 模式下重排不堆积孤立 task_outbox 行
     with database_connection() as c:
         c.execute("UPDATE jobs SET state='cancelled' WHERE id=%s", (job_id,))
 
@@ -65,16 +69,24 @@ def test_task_cancellation_and_retry_flow():
     retry_data = retry_res.json()
     assert retry_data["run_version"] == orig_version + 1
 
-    # 验证数据库状态恢复为 queued 且写入了 task_outbox
     with database_connection() as c:
         updated_job = fetch_one(c, "SELECT * FROM jobs WHERE id=%s", (job_id,))
         assert updated_job["state"] == "queued"
         assert updated_job["run_version"] == orig_version + 1
 
         outbox_row = fetch_one(c, "SELECT * FROM task_outbox WHERE job_id=%s", (job_id,))
-        assert outbox_row is not None
+        if load_config().kafka_enabled:
+            assert outbox_row is not None
+        else:
+            assert outbox_row is None
 
-        # 恢复初始状态
+    # 2. 开启 Kafka 时重试应写入 task_outbox
+    monkeypatch.setattr(job_repo, "load_config", lambda: replace(load_config(), kafka_enabled=True))
+    retry_kafka = client.post(f"/api/tasks/{job_id}/retry")
+    assert retry_kafka.status_code == 200
+    with database_connection() as c:
+        outbox_row = fetch_one(c, "SELECT * FROM task_outbox WHERE job_id=%s", (job_id,))
+        assert outbox_row is not None
         c.execute("UPDATE jobs SET state=%s, run_version=%s WHERE id=%s", (orig_state, orig_version, job_id))
         c.execute("DELETE FROM task_outbox WHERE job_id=%s", (job_id,))
 

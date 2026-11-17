@@ -50,10 +50,12 @@ function sanitizeHref(rawUrl: string): string {
 function renderInline(rawLine: string, allowTableBr = false): string {
   const escaped = escapeHtml(rawLine)
   const codeTokens: string[] = []
+  const rawCodeTokens: string[] = []
 
   // 先提取行内代码，避免内部星号或 URL 被二次解析
   let work = escaped.replace(/`([^`\n]+)`/g, (_match, code: string) => {
     const idx = codeTokens.length
+    rawCodeTokens.push(code)
     codeTokens.push(`<code class="md-inline-code">${code}</code>`)
     return `\uE000CODE${idx}\uE001`
   })
@@ -62,10 +64,18 @@ function renderInline(rawLine: string, allowTableBr = false): string {
     work = work.replace(/&lt;br\s*\/?&gt;/gi, '<br />')
   }
 
+  /**
+   * 还原链接地址内的代码占位符为纯文本，防止后续渲染成 HTML 标签混入 href 属性。
+   * @param text - 含占位符的原始链接文本。
+   * @returns 还原后的纯文本 URL。
+   */
+  const unwrapCodePlaceholders = (text: string): string =>
+    text.replace(/\uE000CODE(\d+)\uE001/g, (_m, idx: string) => rawCodeTokens[Number(idx)] ?? '')
+
   // 解析 [文本](url) 链接并占位保护，防止外层再次匹配裸 URL
   const linkTokens: string[] = []
   work = work.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label: string, url: string) => {
-    const safeUrl = sanitizeHref(url)
+    const safeUrl = sanitizeHref(unwrapCodePlaceholders(url))
     const idx = linkTokens.length
     if (!safeUrl) {
       linkTokens.push(label)
@@ -83,7 +93,7 @@ function renderInline(rawLine: string, allowTableBr = false): string {
     (fullUrl: string) => {
       const cleaned = fullUrl.replace(/[.,;:!?)]+$/, '')
       const suffix = fullUrl.slice(cleaned.length)
-      const safeUrl = sanitizeHref(cleaned)
+      const safeUrl = sanitizeHref(unwrapCodePlaceholders(cleaned))
       if (!safeUrl) {
         return fullUrl
       }

@@ -22,7 +22,7 @@
 | `src/taozhi/observability/` | 可观测性横切能力：Phoenix Trace 与 OpenTelemetry Span 埋点 |
 | `src/taozhi/ai/` | 大模型客户端、用量统计与结构化输出解析 |
 | `src/taozhi/core/` | 核心引擎与底层基础设施 |
-| `src/taozhi/core/agent/` | 智能体上下文隔离（Scratch / Artifacts）与工作区通信协议定义 |
+| `src/taozhi/core/agent/` | 智能体运行时核心：Piagent `AgentSession` 会话组合根、隔离沙箱（Scratch / Artifacts）与工作区通信协议 |
 | `src/taozhi/core/tools/` | 原子工具集与统一结构化 ToolOutcome / 行边界截断工具 |
 | `src/taozhi/core/memory/` | 租户物理隔离长效记忆库与双轨会话日志 |
 | `src/taozhi/application/` | 应用层：业务用例服务、RAG 问答工作流与多智能体自主调研执行图 |
@@ -49,6 +49,7 @@
 | `web/` | 前端依赖、锁与构建配置 |
 | `web/src/` | Vue 页面、类型、样式与 API 调用 |
 | `web/src/assets/` | 静态图片与品牌图标资源 |
+| `web/src/composables/` | 前端共享响应式组合式逻辑（如 `useTaskStream` 统一 SSE 任务进度订阅） |
 | `web/src/views/` | BI 看板与问数等业务页面组件 |
 
 ## 根文件
@@ -76,8 +77,8 @@ AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；
 
 ## 依赖与同步
 
-页面调用统一 API，API 加载当前会话并使用业务服务；权限判定集中在 taozhi/domain/access.py（纯规则），数据库取数与仓储在 taozhi/infrastructure/persistence/access_repo.py；Worker 和 Agent 使用同一权限与来源门禁。PostgreSQL 保存在线状态、任务队列和 outbox；附件原件存 MinIO 桶 ecom-private（enterprise/storage.py，可回落本地私有目录）；任务事件经 Kafka ecom.tasks 主题分发（enterprise/queue.py，outbox 发布 + 幂等认领，轮询兜底）；检索切片同步 ES 索引 chunks（enterprise/es_index.py，ES 仅中文 BM25，ANN 语义走 PG pgvector HNSW，双路 RRF 融合并前置权限过滤，可回落本地五信号链路）。
+页面调用统一 API，API 加载当前会话并使用业务服务；权限判定集中在 taozhi/domain/access.py（纯规则），数据库取数与仓储在 taozhi/infrastructure/persistence/access_repo.py；Worker 和 Agent 使用同一权限与来源门禁。PostgreSQL 保存在线状态、任务队列和 outbox；附件原件存 MinIO 桶 ecom-private（knowledge/storage.py，可回落本地私有目录）；任务事件经 Kafka ecom.tasks 主题分发（knowledge/queue.py，outbox 发布 + 幂等认领，轮询兜底）；检索切片同步 ES 索引 chunks（knowledge/es_index.py，ES 仅中文 BM25，ANN 语义走 PG pgvector HNSW，双路 RRF 融合并前置权限过滤，可回落本地五信号链路）。
 
 原模块仍用于共享或离线回归；删除前检查全部引用。新在线能力不得另起旧 JWT、SQLite 或平行授权路径。
 
-新增目录先明确职责和数据属性，再归位并登记。接口、角色、字段、配置、迁移、命名或脚本变更同步前后端、测试、启动和软件说明；完整对应表见 CONTRIBUTING.md。代码、契约、文档和验证一致才算完成。
+新增目录先明确职责和数据属性，再归位并登记。接口、角色、字段、配置、迁移、命名或脚本变更同步前后端、测试、启动和软件说明。代码、契约、文档和验证一致才算完成。
