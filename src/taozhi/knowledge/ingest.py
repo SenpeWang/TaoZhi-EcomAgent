@@ -1,15 +1,12 @@
 """文档入库校验、统一文本抽取与结构感知切片。"""
 from __future__ import annotations
 
-import hashlib
 import io
-import re
 import zipfile
 from typing import List, Optional, Tuple
 
 from taozhi.domain.errors import Denied
-
-_FENCE_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
+from taozhi.domain.ranking import split_document_chunks
 
 
 def validate_upload(name: str, data: bytes) -> str:
@@ -85,60 +82,6 @@ def parse(data: bytes, mime: str) -> Tuple[str, List[Tuple[int, str]]]:
     return body, pages
 
 
-def _split_long_block(block: str, max_chars: int) -> List[str]:
-    """对超出上限的单块按换行或中文句末标点细分，尽量不截断完整行或句子。"""
-    if len(block) <= max_chars:
-        return [block]
-    units: List[str] = []
-    for line in block.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if len(line) <= max_chars:
-            units.append(line)
-        else:
-            # 超长单行再按句界切分；仍超长才做字符兜底切分
-            sents = re.split(r"(?<=[。！？；\.\!\?;])\s*", line)
-            for s in sents:
-                s = s.strip()
-                if not s:
-                    continue
-                if len(s) <= max_chars:
-                    units.append(s)
-                else:
-                    for pos in range(0, len(s), max_chars):
-                        units.append(s[pos : pos + max_chars])
-    packed: List[str] = []
-    cur = ""
-    for u in units:
-        sep = "\n" if cur else ""
-        if cur and len(cur) + len(sep) + len(u) > max_chars:
-            packed.append(cur)
-            cur = u
-        else:
-            cur = cur + sep + u
-    if cur:
-        packed.append(cur)
-    return packed
-
-
-def _structural_blocks(text: str, max_chars: int) -> List[str]:
-    """保持代码块、表格块与段落边界完整地拆出基础语义单元。"""
-    blocks: List[str] = []
-    for part in _FENCE_RE.split(text):
-        part = part.strip()
-        if not part:
-            continue
-        if part.startswith("```") and part.endswith("```"):
-            blocks.extend(_split_long_block(part, max_chars))
-            continue
-        for para in re.split(r"\n{2,}", part):
-            para = para.strip()
-            if para:
-                blocks.extend(_split_long_block(para, max_chars))
-    return blocks
-
-
 def _chunk_limits() -> Tuple[int, int]:
     """从运行时配置读取切片尺寸与重叠；单测无库环境回落 Config 类定义默认值。"""
     from ..config import Config, load_config
@@ -157,57 +100,8 @@ def split(
     max_chars: Optional[int] = None,
     overlap: Optional[int] = None,
 ) -> List[dict]:
-    """按段落/表格/代码块边界聚合切片，并保留相邻块整句重叠，避免在表格或行中硬截断。"""
+    """读取切片配置并将结构化切片工作委托给领域内核 split_document_chunks。"""
     default_size, default_overlap = _chunk_limits()
     limit = max(128, max_chars if max_chars is not None else default_size)
     overlap_budget = max(0, min(limit // 2, overlap if overlap is not None else default_overlap))
-
-    result: List[dict] = []
-    for page, raw_text in pages:
-        text = (raw_text or "").strip()
-        if not text:
-            continue
-        blocks = _structural_blocks(text, limit)
-        buf: List[str] = []
-        buf_len = 0
-
-        def _flush() -> None:
-            nonlocal buf, buf_len
-            joined = "\n\n".join(buf).strip()
-            if not joined:
-                buf, buf_len = [], 0
-                return
-            cid = "chunk_" + hashlib.sha256(f"{doc_id}:{version}:{len(result)}".encode()).hexdigest()[:24]
-            result.append(dict(id=cid, ordinal=len(result), page=page, text=joined))
-            if overlap_budget <= 0:
-                buf, buf_len = [], 0
-                return
-            # 按完整块/行做重叠尾部继承，不从字词中间劈开
-            carry: List[str] = []
-            carry_len = 0
-            for prev_blk in reversed(buf):
-                if carry_len + len(prev_blk) <= overlap_budget:
-                    carry.insert(0, prev_blk)
-                    carry_len += len(prev_blk) + (2 if len(carry) > 1 else 0)
-                else:
-                    break
-            buf = carry
-            buf_len = sum(len(x) for x in buf) + max(0, len(buf) - 1) * 2
-
-        for blk in blocks:
-            added = len(blk) + (2 if buf else 0)
-            if buf and buf_len + added > limit:
-                _flush()
-            # 防止重叠后的单条块仍超出上限
-            while buf and buf_len + len(blk) + 2 > limit:
-                buf.pop(0)
-                buf_len = sum(len(x) for x in buf) + max(0, len(buf) - 1) * 2
-            buf.append(blk)
-            buf_len += len(blk) + (2 if len(buf) > 1 else 0)
-        if buf:
-            # 避免尾部仅仅是上一块已完整包含的纯重叠内容
-            tail = "\n\n".join(buf).strip()
-            if tail and (not result or tail not in result[-1]["text"]):
-                cid = "chunk_" + hashlib.sha256(f"{doc_id}:{version}:{len(result)}".encode()).hexdigest()[:24]
-                result.append(dict(id=cid, ordinal=len(result), page=page, text=tail))
-    return result
+    return split_document_chunks(pages, doc_id, version, max_chars=limit, overlap=overlap_budget)

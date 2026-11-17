@@ -10,7 +10,6 @@
 """
 from __future__ import annotations
 
-import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -19,12 +18,19 @@ from rank_bm25 import BM25Okapi
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from taozhi.domain.entity_extraction import extract_entities
 from taozhi.domain.privacy import redact
+from taozhi.domain.ranking import (
+    apply_entity_diversity,
+    apply_recency_tiebreak,
+    chunk_title,
+    dedup_chunks_by_text,
+    tokenize_zh,
+)
 from taozhi.infrastructure.persistence.access_repo import can_read
 from ..config import Config, load_config
 from ..knowledge.db import fetch_all, fetch_one
 from ..knowledge.embedding import to_vector
-from ..knowledge.facts import extract_entities
 from ..knowledge.index_cache import encode_index
 
 RRF_K = 60
@@ -38,17 +44,6 @@ _HYDE_SYSTEM = (
     "你是商品资料检索助手。根据用户问题，写一段可能出现在商品资料库中的正文段落："
     "陈述句、含型号、参数或步骤等具体细节。允许内容与事实不符，禁止任何解释、前言或标题，只输出段落正文。"
 )
-_HISTORY_QUERY_RE = re.compile(r"什么时候|以前|旧版|历史|差异|区别|变更|调整|改了")
-_VERSION_TAG_RE = re.compile(r"(?<![A-Za-z0-9])V(\d+(?:\.\d+)?)(?![A-Za-z0-9])", re.IGNORECASE)
-_DATE_TAG_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
-_BASE_TITLE_STRIP_RE = re.compile(r"(?:V\d+(?:\.\d+)?|\d{4}-\d{2}-\d{2}|（[^）]*）|\([^\)]*\)|\s+)", re.IGNORECASE)
-
-
-def words(text):
-    """中文分词并返回规范化词条列表。"""
-    import jieba
-
-    return [x.casefold() for x in jieba.lcut(text) if x.strip() and (len(x) > 1 or x.isalnum())]
 
 
 def _ranks(scores):
@@ -56,15 +51,6 @@ def _ranks(scores):
     ranks = np.empty(len(scores), dtype=np.int64)
     ranks[order] = np.arange(1, len(scores) + 1)
     return ranks
-
-
-def _chunk_title(chunk: Dict[str, Any], allowed: Optional[Dict[str, Any]] = None) -> str:
-    """统一读取切片所属文档标题，兼容未联表查询的测试夹具。"""
-    if chunk.get("doc_title"):
-        return str(chunk["doc_title"])
-    if allowed and chunk.get("document_id") in allowed:
-        return str(allowed[chunk["document_id"]].get("title") or "")
-    return ""
 
 
 def build_hyde_vector(
@@ -223,7 +209,7 @@ def _rerank_order(query, chunks, fused, allowed=None, trace_out: Optional[Dict[s
         from ..knowledge.embedding import rerank as rerank_client
 
         rerank_texts = [
-            _rerank_text(_chunk_title(chunks[i], allowed), chunks[i]["text"], cfg.rerank_chars)
+            _rerank_text(chunk_title(chunks[i], allowed), chunks[i]["text"], cfg.rerank_chars)
             for i in cand
         ]
         scores = np.asarray(rerank_client(query, rerank_texts), dtype="float32")
@@ -237,112 +223,6 @@ def _rerank_order(query, chunks, fused, allowed=None, trace_out: Optional[Dict[s
         return [(i, None) for i in cand]
 
 
-def _norm_key(text):
-    """正文归一化指纹：去空白后取前 200 字，用于识别复制粘贴造成的重复切片。"""
-    return re.sub(r"\s+", "", text)[:200]
-
-
-def _dedup_text(chunks):
-    """文本级去重：归一化指纹相同的切片只保留排序靠前的第一条。"""
-    seen = set()
-    out = []
-    for c in chunks:
-        key = _norm_key(c["text"])
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(c)
-    return out
-
-
-def _version_tuple(title: str, text: str) -> tuple:
-    """提取文档版本与生效日期元信息：(major_ver, date_str)。"""
-    probe = f"{title}\n{text[:200]}"
-    versions = [float(x) for x in _VERSION_TAG_RE.findall(probe)]
-    dates = _DATE_TAG_RE.findall(probe)
-    return (max(versions) if versions else 0.0, max(dates) if dates else "")
-
-
-def _apply_recency_tiebreak(query: str, ranked: list, chunks: list, allowed: dict, boost: float) -> list:
-    """非历史对比问句下，同系列多版本文档温和提升最新版本权重（不修改原 rerank_score）。"""
-    if boost <= 0 or len(ranked) < 2 or _HISTORY_QUERY_RE.search(query):
-        return ranked
-    families: Dict[str, Dict[str, tuple]] = {}
-    for i, _ in ranked:
-        c = chunks[int(i)]
-        title = _chunk_title(c, allowed)
-        base = _BASE_TITLE_STRIP_RE.sub("", title)
-        if len(base) < 2:
-            continue
-        ver = _version_tuple(title, c["text"])
-        if ver != (0.0, ""):
-            families.setdefault(base, {})[c["document_id"]] = ver
-
-    multi_ver_docs: Dict[str, float] = {}
-    for _, doc_vers in families.items():
-        unique_vers = set(doc_vers.values())
-        if len(unique_vers) < 2:
-            continue
-        latest = max(unique_vers)
-        for did, v in doc_vers.items():
-            multi_ver_docs[did] = boost if v == latest else -boost
-
-    if not multi_ver_docs:
-        return ranked
-
-    def _sort_key(pos_item):
-        pos, (idx, score) = pos_item
-        base_score = score if score is not None else float(len(ranked) - pos) * 0.01
-        did = chunks[int(idx)]["document_id"]
-        return (base_score + multi_ver_docs.get(did, 0.0), -pos)
-
-    reordered = sorted(enumerate(ranked), key=_sort_key, reverse=True)
-    return [item for _, item in reordered]
-
-
-def _apply_entity_diversity(query: str, ranked: list, chunks: list, allowed: dict, limit: int, max_per_doc: int, entity_quota: int) -> list:
-    """多实体对比问句下，先保底挑选覆盖不同提及实体的头部候选，防止综述文档霸榜。"""
-    entities = extract_entities(query)
-    if len(entities) < 2 or entity_quota <= 0 or len(ranked) <= 1:
-        return ranked
-
-    selected = []
-    selected_indices = set()
-    per_doc: Dict[str, int] = {}
-    # 为每个提及实体优先挑选 1 条文档标题命中且未超配额的专属切片，再回落正文顺带提及
-    for ent in entities:
-        ent_u = ent.upper()
-        picked = False
-        for title_only in (True, False):
-            for idx, score in ranked:
-                if idx in selected_indices:
-                    continue
-                c = chunks[int(idx)]
-                did = c["document_id"]
-                if did not in allowed or per_doc.get(did, 0) >= max_per_doc:
-                    continue
-                title_u = _chunk_title(c, allowed).upper()
-                if title_only:
-                    matched = ent_u in title_u
-                else:
-                    matched = ent_u in f"{title_u}\n{c['text']}".upper()
-                if matched:
-                    selected.append((idx, score))
-                    selected_indices.add(idx)
-                    per_doc[did] = per_doc.get(did, 0) + 1
-                    picked = True
-                    break
-            if picked:
-                break
-        if len(selected) >= min(limit, len(entities) * entity_quota):
-            break
-
-    for item in ranked:
-        if item[0] not in selected_indices:
-            selected.append(item)
-    return selected
-
-
 def _finalize(query, chunks, fused, limit, allowed, p, trace_out: Optional[Dict[str, Any]] = None):
     """结果装配：带标题精排 → 低分过滤 → 版本/多实体排序校正 → 同文档限流 → 超长截断。"""
     cfg = load_config()
@@ -353,8 +233,8 @@ def _finalize(query, chunks, fused, limit, allowed, p, trace_out: Optional[Dict[
         kept = [(i, s) for i, s in ranked if s is not None and s >= floor]
         ranked = kept or ranked[:1]
 
-    ranked = _apply_recency_tiebreak(query, ranked, chunks, allowed, float(getattr(cfg, "recency_boost", 0.08)))
-    ranked = _apply_entity_diversity(
+    ranked = apply_recency_tiebreak(query, ranked, chunks, allowed, float(getattr(cfg, "recency_boost", 0.08)))
+    ranked = apply_entity_diversity(
         query, ranked, chunks, allowed, limit, cfg.max_chunks_per_doc, int(getattr(cfg, "entity_quota", 2))
     )
 
@@ -449,8 +329,8 @@ def _mention_chunk_ids(conn, tenant_id: str, allowed_ids: list, entities: List[s
 
 def _lexical_signals(query: str, chunks: list, tfidf_features: int) -> tuple:
     """共享词法信号计算（词重叠率 + 字符 n-gram TF-IDF 余弦 + 分词列表），消除快慢路径重复逻辑。"""
-    tokens = [words(c["text"]) for c in chunks]
-    terms = words(query)
+    tokens = [tokenize_zh(c["text"]) for c in chunks]
+    terms = tokenize_zh(query)
     termset = set(terms)
     overlap = np.asarray([len(termset.intersection(ts)) / max(1, len(termset)) for ts in tokens])
     try:
@@ -561,7 +441,7 @@ def search_documents(
             ]
             if not chunks:
                 return []
-            chunks = _dedup_text(chunks)
+            chunks = dedup_chunks_by_text(chunks)
             vecs = [to_vector(c.get("embedding")) for c in chunks]
             pre_gate_n = len(chunks)
             chunks, vecs = _ann_gate(chunks, vecs, qv, load_config().ann_max_distance)
@@ -596,7 +476,7 @@ def search_documents(
         )
         if not chunks:
             return []
-        chunks = _dedup_text(chunks)
+        chunks = dedup_chunks_by_text(chunks)
         if qv is not None:
             vecs = [to_vector(c.get("embedding")) for c in chunks]
             pre_gate_n = len(chunks)

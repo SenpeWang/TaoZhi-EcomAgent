@@ -24,7 +24,7 @@ import numpy as np
 
 from ..config import Config, load_config
 from ..knowledge.embedding import available as embedding_available, encode_query
-from ..knowledge.facts import extract_entities
+from taozhi.domain.entity_extraction import extract_entities
 from ..knowledge.retriever import SEMANTIC_DIM
 from taozhi.domain.privacy import redact
 
