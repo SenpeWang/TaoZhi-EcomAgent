@@ -15,10 +15,9 @@
 | `scripts/` | 部署、数据管理、构建与运维；不含评估逻辑 |
 | `src/` | Python 源码根目录 |
 | `src/taozhi/` | 淘智 (TaoZhi) 智能体工程核心根包 |
-| `src/taozhi/domain/` | 领域层：核心实体、业务规则、权限判定、隐私策略与多智能体硬守卫（不依赖任何框架） |
-| `src/taozhi/infrastructure/persistence/` | 持久化实现：数据模型实现、仓储接口具体化 |
-| `src/taozhi/orchestration/` | 编排层：多智能体调研主副系统（Lead + Parallel ReAct Subagents）、知识问答控制器与离散决策 |
+| `src/taozhi/domain/` | 领域层：核心实体、权限规则、口令策略、注入防线、排序切片与数学/引文校验（零外部框架） |
 | `src/taozhi/infrastructure/` | 基础设施层：数据库仓储、向量库、MCP 服务与任务队列适配 |
+| `src/taozhi/infrastructure/persistence/` | 持久化仓储：租户、组织、审批、文档、指标、任务与访问控制 SQL 仓储 |
 | `src/taozhi/infrastructure/mcp/` | 电商与情报类标准 MCP 协议服务端（tools/list & tools/call）与智能体客户端适配器 |
 | `src/taozhi/observability/` | 可观测性横切能力：Phoenix Trace 与 OpenTelemetry Span 埋点 |
 | `src/taozhi/ai/` | 大模型客户端、用量统计与结构化输出解析 |
@@ -26,8 +25,13 @@
 | `src/taozhi/core/agent/` | 智能体上下文隔离（Scratch / Artifacts）与工作区通信协议定义 |
 | `src/taozhi/core/tools/` | 原子工具集与统一结构化 ToolOutcome / 行边界截断工具 |
 | `src/taozhi/core/memory/` | 租户物理隔离长效记忆库与双轨会话日志 |
-| `src/taozhi/server/` | FastAPI 接口服务、企业知识问答 Workflow 与异步 Worker 守护进程 |
-| `src/taozhi/knowledge/` | 知识库切片入库、混合检索器与数据库连接池 |
+| `src/taozhi/application/` | 应用层：业务用例服务、RAG 问答工作流与多智能体自主调研执行图 |
+| `src/taozhi/application/rag/` | 企业问答 LangGraph 状态机（意图路由、ChatBI、专职智能体与合规守卫） |
+| `src/taozhi/application/research/` | 自治多智能体调研系统（运行时钩子、主协调器、并行子智能体与研报合成） |
+| `src/taozhi/application/services/` | 应用服务层：账号审批、文档生命周期、问答/调研调度与经营看板用例 |
+| `src/taozhi/orchestration/` | 编排辅助层：知识问答确定性控制器与离散决策引擎 |
+| `src/taozhi/server/` | 接口适配层：FastAPI 应用装配、Session/CSRF 认证与 Worker 租约守护进程 |
+| `src/taozhi/knowledge/` | 知识检索与存储适配层：切片解析、混合检索器、语义缓存、ES/MinIO/Kafka/DB |
 | `evals/` | 评估模块（独立单元）：口径说明、数据集、指标、运行器、基线与报告 |
 | `evals/rag_eval/` | 企业知识库 RAG 三层评测运行器、质量门禁与实战测评记录（`测评记录.md`） |
 | `evals/agent_eval/` | 自治多智能体能力、工具调用、可观测评测体系与实战测评记录（`测评记录.md`） |

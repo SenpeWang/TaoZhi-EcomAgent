@@ -1,0 +1,347 @@
+"""主协调代理（Lead Research Agent）规划与并行扇出路由。"""
+from __future__ import annotations
+
+import json
+import time
+import uuid
+from typing import Any, Dict, List, Optional
+
+from langgraph.types import Send
+
+from taozhi.ai.client import LLMClient, ModelTier
+from taozhi.ai.router import route_audit_scope
+from taozhi.core.tools.search_web import extract_search_keyword
+from taozhi.domain.research import (
+    WEB_TOOLS,
+    ResearchBudget,
+    ResearchScope,
+    StopReason,
+    SubagentTaskSpec,
+    authorize_subagent_tasks,
+    classify_research_scope,
+    classify_steering_impact,
+    evaluate_hard_stop,
+)
+from taozhi.infrastructure.mcp.adapter import McpClientAdapter
+from taozhi.infrastructure.mcp.server import default_mcp_server
+from .hooks import (
+    attach_route_delta,
+    attach_steering_delta,
+    bump_progress,
+    collect_new_steering,
+    emit_progress,
+    get_hooks,
+    is_cancelled,
+    make_failover_emitter,
+)
+from .schemas import AutonomousAgentState, _OrchestratorDecisionSchema, _ProposedSubtaskSchema, active_evidence
+
+
+def default_fallback_tasks(keyword: str, scope: ResearchScope, steering: List[str]) -> List[SubagentTaskSpec]:
+    """当主脑结构化决策解析失败且黑板尚无证据时的安全起步任务生成。"""
+    steer_suffix = f" {' '.join(steering[-2:])}".strip() if steering else ""
+    base_query = f"{keyword} {steer_suffix}".strip()
+    tasks = [
+        SubagentTaskSpec(
+            task_id="sub_web_init",
+            role="全网口碑与市场情报专员",
+            goal=f"检索并提炼【{keyword}】的全网主流定价、热销卖点与消费者高频差评痛点",
+            allowed_tools=tuple(t for t in WEB_TOOLS if t in scope.allowed_tools),
+            seed_queries=(base_query,),
+            channel_hint="web",
+        )
+    ]
+    if scope.needs_sourcing:
+        if "search_1688_wholesale" in scope.allowed_tools:
+            tasks.append(
+                SubagentTaskSpec(
+                    task_id="sub_1688_init",
+                    role="1688源头工厂采购专员",
+                    goal=f"核查【{keyword}】在1688源头工厂的一手出厂价梯度、MOQ起订量与核心产区",
+                    allowed_tools=("search_1688_wholesale",),
+                    seed_queries=(base_query, keyword),
+                    channel_hint="sourcing",
+                )
+            )
+        if "search_amazon" in scope.allowed_tools:
+            tasks.append(
+                SubagentTaskSpec(
+                    task_id="sub_amazon_init",
+                    role="海外亚马逊对标研究员",
+                    goal=f"采集【{keyword}】在海外亚马逊的零售美元定价带、主力规格与竞品特征",
+                    allowed_tools=("search_amazon",),
+                    seed_queries=(base_query, keyword),
+                    channel_hint="sourcing",
+                )
+            )
+    return tasks
+
+
+def serialize_task(task: SubagentTaskSpec) -> Dict[str, Any]:
+    """序列化受派子任务规范。"""
+    return {
+        "task_id": task.task_id,
+        "role": task.role,
+        "goal": task.goal,
+        "allowed_tools": list(task.allowed_tools),
+        "seed_queries": list(task.seed_queries),
+        "channel_hint": task.channel_hint,
+    }
+
+
+def deserialize_task(raw: Dict[str, Any]) -> SubagentTaskSpec:
+    """反序列化待执行子任务规范。"""
+    return SubagentTaskSpec(
+        task_id=str(raw.get("task_id") or f"sub_{uuid.uuid4().hex[:6]}"),
+        role=str(raw.get("role") or "市场调研专员"),
+        goal=str(raw.get("goal") or "收集客观市场事实"),
+        allowed_tools=tuple(str(x) for x in (raw.get("allowed_tools") or [])),
+        seed_queries=tuple(str(x) for x in (raw.get("seed_queries") or [])),
+        channel_hint=str(raw.get("channel_hint") or "general"),
+    )
+
+
+def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
+    """主协调代理（Lead Research Agent）：自主审查黑板证据、响应实时干预并动态组队派单。"""
+    hooks = get_hooks(state.get("hook_run_id", ""))
+    turn = int(state.get("turn_count", 0)) + 1
+    query = state.get("user_query") or state.get("keyword") or ""
+    keyword = state.get("keyword") or extract_search_keyword(query) or query
+    outline = list(state.get("outline") or [])
+
+    cancelled = is_cancelled(hooks, bool(state.get("cancelled", False)))
+    steering_delta, steering_id_delta, all_inbox = collect_new_steering(state, hooks)
+    processed_count = int(state.get("processed_steering_count", 0))
+    newly_arrived = all_inbox[processed_count:]
+
+    if newly_arrived:
+        emit_progress(hooks, f"[steering] 主脑接收运行期动态干预指令并重新评估黑板: {newly_arrived[-1]}")
+
+    scope = classify_research_scope(query, all_inbox)
+    budget = ResearchBudget(
+        max_turns=int(state.get("max_turns", 5)),
+        max_parallel_subagents=int(state.get("max_parallel_subagents", 4)),
+        max_subagent_steps=int(state.get("max_subagent_steps", 3)),
+        timeout_seconds=float(state.get("timeout_seconds", 180.0)),
+    )
+    started_at = float(state.get("started_at") or time.time())
+    elapsed_seconds = max(0.0, time.time() - started_at)
+    active_ev = active_evidence(state)
+
+    hard_stop = evaluate_hard_stop(
+        turn=turn,
+        elapsed_seconds=elapsed_seconds,
+        cancelled=cancelled,
+        has_report=bool(state.get("report")),
+        evidence_count=len(active_ev),
+        budget=budget,
+    )
+    if hard_stop.should_stop:
+        res: Dict[str, Any] = {
+            "turn_count": turn,
+            "outline": outline,
+            "next_action": "synthesizer" if hard_stop.force_synthesize else "final_node",
+            "pending_tasks": [],
+            "guard_notices": [],
+            "current_rationale": hard_stop.rationale,
+            "system_status": hard_stop.system_status,
+            "cancelled": cancelled,
+            "stop_reason": hard_stop.stop_reason.value,
+            "processed_steering_count": len(all_inbox),
+        }
+        return attach_steering_delta(res, steering_delta, steering_id_delta)
+
+    ev_digest = [
+        {
+            "evidence_id": ev.get("evidence_id"),
+            "role": ev.get("role"),
+            "channel": ev.get("channel"),
+            "status": ev.get("status"),
+            "summary": ev.get("summary", "")[:500],
+            "key_metrics": ev.get("key_metrics", [])[:8],
+            "gaps_or_errors": ev.get("gaps_or_errors", [])[:5],
+        }
+        for ev in active_ev
+    ]
+    notices = list(state.get("guard_notices") or [])
+    remaining_turns = max(0, budget.max_turns - turn)
+    remaining_sec = max(0.0, budget.timeout_seconds - elapsed_seconds)
+    steer_note = f"最新动态干预指令（必须优先响应）：{newly_arrived}\n" if newly_arrived else ""
+    all_steer_note = f"累计干预指令：{all_inbox}\n" if all_inbox else ""
+    notice_note = f"上轮领域守卫拦截提示：{notices}\n" if notices else ""
+    mcp_specs = McpClientAdapter(server=default_mcp_server).list_tool_specs(scope.allowed_tools)
+
+    prompt = (
+        f"你是一名电商市场调研多智能体系统的主协调代理（Lead Research Agent）。\n"
+        f"目标品类：【{keyword}】\n"
+        f"用户完整诉求：{query}\n"
+        f"{steer_note}{all_steer_note}{notice_note}"
+        f"当前合法允许授权的 MCP 工具列表（tools/list 契约，严禁越界使用未列出工具）：\n{json.dumps(mcp_specs, ensure_ascii=False)}\n"
+        f"剩余调度轮次：{remaining_turns}；剩余时间预算：{remaining_sec:.1f}s；单轮最多并发子智能体：{budget.max_parallel_subagents}。\n"
+        f"当前黑板已有有效证据包（{len(ev_digest)} 份）：\n{json.dumps(ev_digest, ensure_ascii=False)}\n\n"
+        "请自主判断当前决策：\n"
+        "1. 若关键维度尚缺、存在口径矛盾或刚收到 Steering 纠偏需要重抓：输出 action='spawn_subagents'，"
+        "合理拆解 1 到多个互不重叠的子任务并发执行（比如区分全网痛点、1688源头底价、Amazon海外竞品、交叉核验等），"
+        "每个子任务明确 role、goal、allowed_tools（仅从白名单选）与 seed_queries；如旧证据被纠偏推翻，可在 invalidate_evidence_ids 中作废。\n"
+        "2. 若已有证据已充分覆盖用户核心问题（且无高价值可补查缺口）：输出 action='finish' 并完善 3-4 条 outline 研报章节大纲。"
+    )
+
+    llm = LLMClient()
+    parsed: Optional[_OrchestratorDecisionSchema] = None
+    route_events: List[Dict[str, Any]] = []
+    last_ep = ""
+    with route_audit_scope(
+        preferred_endpoint_id=str(state.get("active_llm_endpoint") or "") or None,
+        on_failover=make_failover_emitter(hooks),
+    ) as route_rec:
+        try:
+            raw_decision = llm.chat_json(
+                prompt=prompt,
+                schema=_OrchestratorDecisionSchema,
+                tier=ModelTier.FAST,
+                system="你是客观严谨、擅长并行任务分解与质量核查的电商调研主协调智能体。严禁编造数据。",
+                retries=2,
+            )
+            if isinstance(raw_decision, _OrchestratorDecisionSchema):
+                parsed = raw_decision
+            elif isinstance(raw_decision, dict) and raw_decision.get("action"):
+                parsed = _OrchestratorDecisionSchema.model_validate(raw_decision)
+        except Exception:
+            parsed = None
+        route_events = route_rec.snapshot()
+        last_ep = route_rec.last_active_endpoint
+
+    if parsed is None:
+        if not active_ev:
+            parsed = _OrchestratorDecisionSchema(
+                action="spawn_subagents",
+                thought="主脑结构化输出降级，按当前合法工具边界并发启动基础调研子智能体",
+                outline=outline or ["市场需求与消费者痛点分析", "产品价格带与竞争格局", "供应链成本与选品建议"],
+                subtasks=[
+                    _ProposedSubtaskSchema(
+                        role=t.role,
+                        goal=t.goal,
+                        allowed_tools=list(t.allowed_tools),
+                        seed_queries=list(t.seed_queries),
+                        channel_hint="sourcing" if t.channel_hint == "sourcing" else "web",
+                    )
+                    for t in default_fallback_tasks(keyword, scope, all_inbox)
+                ],
+            )
+        else:
+            parsed = _OrchestratorDecisionSchema(
+                action="finish",
+                thought="主脑结构化输出降级，基于黑板既有有效证据收敛生成研报",
+                outline=outline or ["市场需求与竞品格局", "多渠道数据汇总", "选品与操盘建议"],
+            )
+
+    if parsed.outline:
+        outline = [str(x) for x in parsed.outline[:4]]
+    elif not outline:
+        outline = ["市场概况与消费者痛点", "竞品价格带与卖点格局", "选品优化与落地建议"]
+
+    invalid_delta = [str(eid) for eid in parsed.invalidate_evidence_ids if eid]
+    if newly_arrived and not invalid_delta and active_ev:
+        for instr in newly_arrived:
+            impact = classify_steering_impact(instr)
+            for ev in active_ev:
+                ch = ev.get("channel")
+                if ((impact.invalidate_web and ch == "web") or (impact.invalidate_wholesale and ch == "sourcing")) and ev["evidence_id"] not in invalid_delta:
+                    invalid_delta.append(ev["evidence_id"])
+
+    remaining_valid_count = len([ev for ev in active_ev if ev.get("evidence_id") not in set(invalid_delta)])
+    if parsed.action == "finish" and remaining_valid_count > 0:
+        emit_progress(hooks, f"[agent_handoff] role=main_agent 确认黑板 {remaining_valid_count} 份证据充分，交接研报合成专家", 80)
+        res = {
+            "turn_count": turn,
+            "outline": outline,
+            "next_action": "synthesizer",
+            "pending_tasks": [],
+            "guard_notices": [],
+            "current_rationale": parsed.thought or "主脑确认各维度证据充实，开始合成终审研报",
+            "system_status": "REPORTING",
+            "cancelled": False,
+            "stop_reason": StopReason.CONTINUE.value,
+            "processed_steering_count": len(all_inbox),
+        }
+        if invalid_delta:
+            res["invalidated_evidence_ids"] = invalid_delta
+        return attach_route_delta(attach_steering_delta(res, steering_delta, steering_id_delta), route_events, last_ep)
+
+    proposed_specs = [
+        SubagentTaskSpec(
+            task_id=f"t{turn}_sub{idx + 1}_{uuid.uuid4().hex[:4]}",
+            role=st.role,
+            goal=st.goal,
+            allowed_tools=tuple(st.allowed_tools),
+            seed_queries=tuple(st.seed_queries or [keyword]),
+            channel_hint=st.channel_hint,
+        )
+        for idx, st in enumerate(parsed.subtasks)
+    ]
+    if not proposed_specs and not remaining_valid_count:
+        proposed_specs = default_fallback_tasks(keyword, scope, all_inbox)
+
+    auth_plan = authorize_subagent_tasks(proposed_specs, scope=scope, budget=budget)
+    authorized_tasks = list(auth_plan.tasks)
+    new_notices = list(auth_plan.rejected_reasons)
+
+    if not authorized_tasks and remaining_valid_count == 0:
+        fallback_plan = authorize_subagent_tasks(default_fallback_tasks(keyword, scope, all_inbox), scope=scope, budget=budget)
+        authorized_tasks = list(fallback_plan.tasks)
+        new_notices.append("主脑原提案均超出当前调研边界，已按允许白名单重置起步任务")
+
+    if not authorized_tasks:
+        emit_progress(hooks, "[agent_handoff] main_agent 暂无更多合法增量派工，收敛现有证据撰写研报", 80)
+        next_act = "synthesizer"
+        sys_status = "REPORTING"
+    else:
+        roles_str = " / ".join(t.role for t in authorized_tasks)
+        bump_progress(hooks, 10, 25, f"[agent_start] main_agent 第 {turn} 轮并行派发 {len(authorized_tasks)} 位子智能体 ({roles_str})")
+        next_act = "dispatch_subagents"
+        sys_status = "STEERING_REDIRECTED" if newly_arrived else "COLLECTING"
+
+    res = {
+        "turn_count": turn,
+        "outline": outline,
+        "next_action": next_act,
+        "pending_tasks": [serialize_task(t) for t in authorized_tasks],
+        "guard_notices": new_notices,
+        "current_rationale": parsed.thought or "主脑派发并行子智能体探索市场事实",
+        "system_status": sys_status,
+        "cancelled": False,
+        "stop_reason": StopReason.CONTINUE.value,
+        "processed_steering_count": len(all_inbox),
+    }
+    if invalid_delta:
+        res["invalidated_evidence_ids"] = invalid_delta
+    return attach_route_delta(attach_steering_delta(res, steering_delta, steering_id_delta), route_events, last_ep)
+
+
+def orchestrator_router(state: AutonomousAgentState) -> Any:
+    """动态扇出路由器：返回并行的 Send(subagent_worker) 列表，或跳转到终审/终止节点。"""
+    next_act = state.get("next_action", "final_node")
+    if next_act == "dispatch_subagents":
+        tasks = state.get("pending_tasks") or []
+        if tasks:
+            return [
+                Send(
+                    "subagent_worker",
+                    {
+                        "current_task": task,
+                        "hook_run_id": state.get("hook_run_id", ""),
+                        "user_query": state.get("user_query", ""),
+                        "keyword": state.get("keyword", ""),
+                        "steering_inbox": list(state.get("steering_inbox") or []),
+                        "started_at": state.get("started_at", 0.0),
+                        "timeout_seconds": state.get("timeout_seconds", 180.0),
+                        "max_subagent_steps": state.get("max_subagent_steps", 3),
+                        "current_rationale": state.get("current_rationale", ""),
+                    },
+                )
+                for task in tasks
+            ]
+        return "synthesizer"
+    if next_act == "synthesizer":
+        return "synthesizer"
+    return "final_node"
