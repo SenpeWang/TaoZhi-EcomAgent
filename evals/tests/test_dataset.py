@@ -158,7 +158,7 @@ def test_production_domain_role_and_identity_balance():
 
 def test_eval_password_survives_production_policy():
     """灌库口令必须过生产弱口令校验：否则 seed 失败、行为层全量登录失败。"""
-    from taozhi.server.passwords import hash_password
+    from taozhi.domain.passwords import hash_password
     assert hash_password(EVAL_PASSWORD, "production").startswith("scrypt$")
 
 

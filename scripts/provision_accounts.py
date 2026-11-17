@@ -23,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from taozhi.config import load_config  # noqa: E402
 from taozhi.knowledge.db import database_connection, fetch_one  # noqa: E402
-from taozhi.server.passwords import hash_password  # noqa: E402
-from taozhi.server.services import generate_id  # noqa: E402
+from taozhi.domain.passwords import hash_password  # noqa: E402
+from taozhi.infrastructure.persistence.job_repo import generate_id  # noqa: E402
 
 STATE = Path.home() / ".local/share/ecom-agent"
 

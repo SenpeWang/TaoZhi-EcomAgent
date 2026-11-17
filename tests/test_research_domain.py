@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import threading
 import time
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,16 +20,30 @@ from taozhi.domain.research import (
     enforce_tool_allowed,
     evaluate_hard_stop,
 )
-from taozhi.orchestration.agent_system import (
+from taozhi.application.research.hooks import (
+    RuntimeHooks as _RuntimeHooks,
+    collect_new_steering as _collect_new_steering,
+)
+from taozhi.application.research.schemas import (
     _OrchestratorDecisionSchema,
     _ProposedSubtaskSchema,
-    _RuntimeHooks,
     _SubagentStepSchema,
-    _collect_new_steering,
+)
+from taozhi.application.research.planner import lead_orchestrator_node
+from taozhi.application.research.graph import (
     build_autonomous_agent_graph,
     execute_autonomous_agents,
-    lead_orchestrator_node,
 )
+
+
+@contextmanager
+def _patch_llm(mock_llm):
+    with (
+        patch("taozhi.application.research.planner.LLMClient", return_value=mock_llm),
+        patch("taozhi.application.research.subagents.LLMClient", return_value=mock_llm),
+        patch("taozhi.application.research.reporter.LLMClient", return_value=mock_llm),
+    ):
+        yield
 
 
 def test_research_scope_and_task_tool_guard():
@@ -215,7 +230,7 @@ def test_parallel_orchestrator_and_react_query_refinement():
     mock_llm.chat_json.side_effect = fake_chat_json
     mock_llm.chat.return_value = "# 便携充气泵市场调研报告\n\n## 1. 市场需求与痛点\n散热噪音突出，零售 129 元；1688 出厂 38 元。"
 
-    with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm):
+    with _patch_llm(mock_llm):
         with patch("taozhi.infrastructure.mcp.server.search_web", side_effect=fake_search_web):
             with patch("taozhi.infrastructure.mcp.server.search_1688_wholesale", return_value=[{"title": "东莞充气泵源头厂", "price": 38}]):
                 res = execute_autonomous_agents(
@@ -247,7 +262,7 @@ def test_live_cancel_and_mid_flight_steering():
         _SubagentStepSchema(action="finish", thought="完成", findings_summary="全网销量高。"),
     ]
     cancel_checks = iter([False, True])
-    with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm_cancel):
+    with _patch_llm(mock_llm_cancel):
         with patch("taozhi.infrastructure.mcp.server.search_web", return_value=[{"title": "耳机", "snippet": "热销"}]):
             res_cancel = execute_autonomous_agents(
                 keyword="无线耳机",
@@ -290,7 +305,7 @@ def test_live_cancel_and_mid_flight_steering():
     mock_llm_steer.chat_json.side_effect = steer_chat_json
     mock_llm_steer.chat.return_value = "# 无线鼠标研报\n已按动态干预补充核查 1688 出厂底价 18 元。"
 
-    with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm_steer):
+    with _patch_llm(mock_llm_steer):
         res_steer = execute_autonomous_agents(
             keyword="无线鼠标",
             emit_event_fn=lambda s, p: events.append((s, p)),
@@ -358,11 +373,11 @@ def test_wall_clock_started_at_triggers_timeout_across_processes():
 
 def test_expire_stale_reviews_cancels_expired_rows():
     """测试 Worker 扫表能自动清理超过 review_timeout 的滞留待审任务并写审计事件。"""
-    from taozhi.server.worker import expire_stale_reviews
+    from taozhi.infrastructure.persistence.job_repo import expire_stale_reviews
 
     fake_conn = MagicMock()
     stale_rows = [{"id": "job_stale_1", "tenant_id": "mofa", "run_version": 2}]
-    with patch("taozhi.server.worker.fetch_all", return_value=stale_rows):
+    with patch("taozhi.infrastructure.persistence.job_repo.fetch_all", return_value=stale_rows):
         count = expire_stale_reviews(conn=fake_conn)
     assert count == 1
     fake_conn.execute.assert_called_once()
@@ -375,7 +390,7 @@ def test_process_research_job_reads_budgets_from_settings():
     """测试 process_research_job 从 get_settings() 读取 llm_timeout 与调研预算（避免 Config 缺属性报错）。"""
     from types import SimpleNamespace
     from contextlib import contextmanager
-    from taozhi.server.worker import process_research_job
+    from taozhi.application.services.task_service import process_research_job
 
     fake_cfg = SimpleNamespace(dsn="postgresql://unused")
     fake_settings = SimpleNamespace(
@@ -410,12 +425,15 @@ def test_process_research_job_reads_budgets_from_settings():
         "payload": {"keyword": "蓝牙耳机"},
     }
     with (
-        patch("taozhi.server.worker.load_config", return_value=fake_cfg),
-        patch("taozhi.server.worker.get_settings", return_value=fake_settings),
-        patch("taozhi.server.worker.database_connection", _fake_db),
-        patch("taozhi.server.worker.fetch_one", return_value={"state": "running", "run_version": 1, "cancel_requested": False}),
+        patch("taozhi.application.services.task_service.load_config", return_value=fake_cfg),
+        patch("taozhi.application.services.task_service.get_settings", return_value=fake_settings),
+        patch("taozhi.application.services.task_service.database_connection", _fake_db),
+        patch(
+            "taozhi.application.services.task_service.job_repo.get_job_by_id",
+            return_value={"state": "running", "run_version": 1, "cancel_requested": False},
+        ),
         patch("langgraph.checkpoint.postgres.PostgresSaver.from_conn_string", _fake_saver),
-        patch("taozhi.orchestration.agent_system.execute_autonomous_agents", side_effect=_fake_execute),
+        patch("taozhi.application.services.task_service.execute_autonomous_agents", side_effect=_fake_execute),
     ):
         process_research_job(job)
 
@@ -561,7 +579,7 @@ def test_checkpoint_cross_version_resume_hydrates_evidence_and_route_history():
     ]
     mock_llm_v1.chat.return_value = "# V1 调研报告"
 
-    with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm_v1):
+    with _patch_llm(mock_llm_v1):
         with patch("taozhi.infrastructure.mcp.server.search_web", return_value=[{"title": "测评", "snippet": "散热好"}]):
             res_v1 = execute_autonomous_agents(
                 keyword="无线充电器",
@@ -582,7 +600,7 @@ def test_checkpoint_cross_version_resume_hydrates_evidence_and_route_history():
     )
     mock_llm_v2.chat.return_value = "# V2 断点续跑报告\n已复用 V1 采集的磁吸快充实证。"
 
-    with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm_v2):
+    with _patch_llm(mock_llm_v2):
         res_v2 = execute_autonomous_agents(
             keyword="无线充电器",
             job_id="job_ckpt_resume_1",

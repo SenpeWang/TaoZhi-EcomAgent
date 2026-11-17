@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from taozhi.observability.tracing import current_trace_id, node_span
-from taozhi.orchestration.agent_system import execute_autonomous_agents
+from taozhi.application.research.graph import execute_autonomous_agents
 
 
 @dataclass

@@ -4,8 +4,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
 from taozhi.knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
-from taozhi.server.services import generate_id
-from taozhi.server.passwords import hash_password
+from taozhi.infrastructure.persistence.job_repo import generate_id
+from taozhi.domain.passwords import hash_password
 from taozhi.knowledge.ingest import split
 RUNTIME=Path.home()/".local/share/ecom-agent/runtime"
 STATE=Path.home()/".local/share/ecom-agent"
@@ -30,7 +30,7 @@ def add_doc(c,tenant,creator,did,title,body,node,scope="company",level=1,state="
     c.execute("INSERT INTO document_versions(tenant_id,document_id,version,title,body,content_hash,created_by,policy) VALUES(%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",(tenant,did,version,title,body,hashlib.sha256(body.encode()).hexdigest(),creator,as_jsonb(dict(node_id=node,scope=scope,level=level))))
     for ch in split([(0,body)],did,version):
         c.execute("INSERT INTO chunks(id,tenant_id,document_id,version,ordinal,page,text) VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",(ch["id"],tenant,did,version,ch["ordinal"],ch["page"],ch["text"]))
-    from taozhi.knowledge.facts import index_mentions
+    from taozhi.infrastructure.persistence.document_repo import index_mentions
     index_mentions(c,tenant,did,version,split([(0,body)],did,version))
 def corpus():
     path=ROOT/"data/index/chunks.json"

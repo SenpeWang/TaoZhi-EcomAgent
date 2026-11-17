@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from taozhi.core.agent import SubagentContext, WorkspaceMode
 from taozhi.core.tools.search_web import search_web
-from taozhi.orchestration.agent_system import execute_autonomous_agents
+from taozhi.application.research.graph import execute_autonomous_agents
+
+
+@contextmanager
+def _patch_llm(mock_llm):
+    with (
+        patch("taozhi.application.research.planner.LLMClient", return_value=mock_llm),
+        patch("taozhi.application.research.subagents.LLMClient", return_value=mock_llm),
+        patch("taozhi.application.research.reporter.LLMClient", return_value=mock_llm),
+    ):
+        yield
 
 
 def test_subagent_context_isolation(tmp_path):
@@ -59,7 +70,7 @@ def test_full_multi_agent_research_flow():
     关键词「磁吸手机壳」不含工厂/出厂/1688/跨境等供应链信号，领域硬守卫
     仅放行全网 MCP 工具并裁掉越权货源子任务，最终收敛生成研报。
     """
-    from taozhi.orchestration.agent_system import (
+    from taozhi.application.research.schemas import (
         _OrchestratorDecisionSchema,
         _ProposedSubtaskSchema,
         _SubagentStepSchema,
@@ -116,7 +127,7 @@ def test_full_multi_agent_research_flow():
     def on_progress(stage: str, pct: int):
         progress_stages.append((stage, pct))
 
-    with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm):
+    with _patch_llm(mock_llm):
         with patch(
             "taozhi.infrastructure.mcp.server.search_web",
             return_value=[{"title": "磁吸壳测评", "snippet": "热销39.9元"}],

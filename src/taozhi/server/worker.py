@@ -1,306 +1,111 @@
+"""后台异步任务守护进程：队列认领、租约续期与任务分发执行。"""
 from __future__ import annotations
-import secrets,threading,signal,hashlib
-from datetime import datetime, timezone
-from ..config import get_settings, load_config
-from ..knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
+
+import secrets
+import signal
+import threading
+import traceback
+
+from taozhi.application.services.document_service import process_ingestion_job
+from taozhi.application.services.task_service import process_question_job, process_research_job
+from taozhi.config import load_config
 from taozhi.domain.errors import Denied
-from taozhi.infrastructure.persistence.access_repo import (can_write, get_document, load_principal, sources_valid)
-from .services import approval
-from ..knowledge.storage import get_blob_store
-from ..knowledge.index_cache import encode_index
-STOP=threading.Event()
-WORKER="worker_"+secrets.token_hex(8)
-def expire_stale_reviews(conn=None):
-    """清理超期未审核任务，避免 review / interrupt 挂起状态无限期滞留。"""
-    ttl = int(load_config().review_timeout)
-    if ttl <= 0:
-        return 0
-    def _expire(c):
-        stale = fetch_all(
-            c,
-            "UPDATE jobs SET state='cancelled',error='审核等待超时，任务已自动关闭',stage='审核已超时关闭',finished_at=now(),lease_until=NULL "
-            "WHERE state='review' AND finished_at IS NOT NULL AND finished_at<now()-(%s*interval '1 second') "
-            "RETURNING id,tenant_id,run_version",
-            (ttl,),
-        )
-        for row in stale:
-            c.execute(
-                "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,'审核等待超时，任务已自动关闭',100,'cancelled')",
-                (row["tenant_id"], row["id"], row["run_version"]),
-            )
-        return len(stale)
-    if conn is not None:
-        return _expire(conn)
-    with database_connection() as c:
-        return _expire(c)
+from taozhi.infrastructure.persistence import document_repo, job_repo
+from taozhi.knowledge import queue
+from taozhi.knowledge.db import database_connection
+from taozhi.observability.tracing import setup_tracing
+
+STOP = threading.Event()
+WORKER = "worker_" + secrets.token_hex(8)
 
 
-def claim_next_job():
-    with database_connection() as c:
-        expire_stale_reviews(c)
-        # Expired executions have fencing numbers; stale workers cannot publish.
-        c.execute("UPDATE jobs SET state='failed',error='任务重试次数已达上限',finished_at=now() WHERE state IN ('queued','running') AND attempts>=%s AND (lease_until IS NULL OR lease_until<now())",(load_config().max_attempts,))
-        row=fetch_one(c,"SELECT * FROM jobs WHERE NOT cancel_requested AND attempts<%s AND (state='queued' OR (state='running' AND lease_until<now())) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",(load_config().max_attempts,))
-        if not row:return None
-        return fetch_one(c,"UPDATE jobs SET state='running',run_version=run_version+1,attempts=attempts+1,worker_id=%s,lease_until=now()+(%s*interval '1 second'),started_at=COALESCE(started_at,now()),error='' WHERE id=%s RETURNING *",(WORKER,load_config().lease_seconds,row["id"]))
-def renew_job_lease(job,done):
+def renew_job_lease(job: dict, done: threading.Event) -> None:
+    """周期续约运行中任务租约与 Worker 心跳。"""
     wid = job.get("worker_id") or WORKER
+    lease_seconds = load_config().lease_seconds
     while not done.wait(10):
         try:
             with database_connection() as c:
-                c.execute("INSERT INTO worker_heartbeats(id) VALUES(%s) ON CONFLICT(id) DO UPDATE SET updated_at=now()",(wid,))
-                c.execute("UPDATE jobs SET lease_until=now()+(%s*interval '1 second') WHERE id=%s AND run_version=%s AND worker_id=%s AND state='running'",(load_config().lease_seconds,job["id"],job["run_version"],wid))
-        except Exception:pass
-def process_ingestion_job(job):
-    from ..knowledge.ingest import parse,split
-    from .pipeline import validate_task_execution
-    state={"job_id":job["id"],"run_version":job["run_version"]}
-    p,_=validate_task_execution(state,"解析资料与登记来源",35)
-    with database_connection() as c:
-        d=get_document(c,p,job["payload"]["document_id"])
-        if not can_write(c,p,d) or d["current_version"]!=job["payload"]["version"]:raise Denied("资料版本或写权限已变化","STALE",409)
-        v=fetch_one(c,"SELECT * FROM document_versions WHERE document_id=%s AND version=%s",(d["id"],d["current_version"]))
-    if v["blob_name"]:body,pages=parse(get_blob_store().open_blob(p.tenant_id,v["blob_name"]),v["mime_type"])
-    else:body,pages=v["body"],[(0,v["body"])]
-    chunks=split(pages,d["id"],d["current_version"])
-    # 走索引缓存：正文没变的切片直接复用向量，只有新文本才烧嵌入算力
-    with database_connection() as c:
-        vectors=encode_index(c,p.tenant_id,[(d["title"],ch["text"]) for ch in chunks])
-    validate_task_execution(state,"建立版本索引与发布申请",75)
-    with database_connection() as c:
-        locked=fetch_one(c,"SELECT * FROM jobs WHERE id=%s FOR UPDATE",(job["id"],))
-        d=get_document(c,p,d["id"])
-        if locked["run_version"]!=job["run_version"] or locked["state"]!="running" or d["current_version"]!=v["version"]:raise Denied("执行版本已失效","STALE",409)
-        c.execute("UPDATE document_versions SET body=%s,content_hash=%s WHERE document_id=%s AND version=%s",(body,hashlib.sha256(body.encode()).hexdigest(),d["id"],v["version"]))
-        c.execute("DELETE FROM knowledge_mentions WHERE document_id=%s AND version=%s",(d["id"],v["version"]))
-        c.execute("DELETE FROM chunks WHERE document_id=%s AND version=%s",(d["id"],v["version"]))
-        for i,ch in enumerate(chunks):
-            c.execute("INSERT INTO chunks(id,tenant_id,document_id,version,ordinal,page,text,embedding) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
-              (ch["id"],p.tenant_id,d["id"],v["version"],ch["ordinal"],ch["page"],ch["text"],
-               None if vectors is None else vectors[i]))
-        from ..knowledge.facts import index_mentions
-        index_mentions(c,p.tenant_id,d["id"],v["version"],chunks)
-        c.execute("UPDATE documents SET state='review',error='' WHERE id=%s",(d["id"],))
-        approval(c,p,"publish",d["id"],dict(expected_acl=d["acl_version"],expected_version=v["version"]),d["node_id"],"boss" if d["level"]==3 or d["scope"]=="company" else "leader")
-        c.execute("UPDATE jobs SET state='completed',progress=100,stage='解析完成，等待发布审核',finished_at=now(),lease_until=NULL WHERE id=%s AND run_version=%s",(job["id"],job["run_version"]))
-def _diff_ms(start_dt, end_dt=None) -> int:
-    """计算两个时间戳之间的毫秒差，兼容时区缺失场景。"""
-    if start_dt is None:
-        return 0
-    if end_dt is None:
-        end_dt = datetime.now(timezone.utc) if start_dt.tzinfo else datetime.now()
-    elif bool(start_dt.tzinfo) != bool(end_dt.tzinfo):
-        end_dt = end_dt.replace(tzinfo=start_dt.tzinfo)
-    return max(0, int((end_dt - start_dt).total_seconds() * 1000))
-
-
-def process_question_job(job):
-    # 1. 语义缓存层（大促高并发热点削峰拦截，时延 < 15ms，0 LLM 开销）
-    from ..knowledge.semantic_cache import get_semantic_cache
-    cache = get_semantic_cache()
-    queue_wait_ms = _diff_ms(job.get("created_at"), job.get("started_at"))
-    # 先取身份再查缓存；若命中来源已失效则立即驱逐该脏条目后再继续检查或回落完整链路。
-    with database_connection() as c:
-        p = load_principal(c, job["owner_id"])
-        cached = None
-        for _ in range(5):
-            cand = cache.get(job["tenant_id"], job["question"], input_level=job["input_level"], boss=p.boss)
-            if not cand:
-                break
-            if cand.get("sources") and sources_valid(c, p, cand.get("sources", [])):
-                cached = cand
-                break
-            if cand.get("entry_id"):
-                cache.invalidate(job["tenant_id"], entry_id=cand["entry_id"])
-    if cached:
-        with database_connection() as c:
-            if cached.get("sources") and sources_valid(c, p, cached.get("sources", [])):
-                e2e_ms = _diff_ms(job.get("created_at"))
-                result = dict(
-                    answer=cached["answer"],
-                    citations=cached["citations"],
-                    specialists=[{"name": "Main 调度 / 语义缓存", "count": 1}],
-                    missing=[],
-                    hard_block=False,
-                    external_blocked=False,
-                    model_calls=0,
-                    usage=[{"role": "semantic_cache", "elapsed_ms": cached["latency_ms"], "outcome": "hit"}],
-                    cache_hit=True,
-                    similarity=cached["similarity"],
-                    timing={"queue_wait_ms": queue_wait_ms, "cache_lookup_ms": cached["latency_ms"], "e2e_ms": e2e_ms},
-                    token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0,
-                                 "llm_attempts": 0, "llm_errors": 0, "failovers": 0, "json_retries": 0, "by_role": {}},
-                    degraded={},
-                )
-                c.execute("UPDATE jobs SET result=%s,sources=%s,input_level=%s,state='completed',stage='已完成（命中语义缓存）',progress=100,lease_until=NULL,finished_at=now() WHERE id=%s AND run_version=%s",
-                    (as_jsonb(result), as_jsonb(cached["sources"]), job["input_level"], job["id"], job["run_version"]))
-                c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,'已完成（命中语义缓存）',100,'completed')",
-                    (p.tenant_id, job["id"], job["run_version"]))
-                return
-
-    from langgraph.checkpoint.postgres import PostgresSaver
-    from .pipeline import build_question_workflow,validate_task_execution,SPECIALIST_AGENTS
-    from ..observability.tracing import node_span, current_trace_id
-    with PostgresSaver.from_conn_string(load_config().dsn) as saver:
-        saver.setup()
-        flow=build_question_workflow(saver)
-        with node_span("worker.question", {"job_id": job["id"], "kind": "ask"}):
-            state=flow.invoke({"job_id":job["id"],"run_version":job["run_version"]},{"configurable":{"thread_id":job["id"]+":"+str(job["run_version"])}})
-            trace_id=current_trace_id()
-    validate_task_execution(state,"最终权限核验",98)
-    with database_connection() as c:
-        row=fetch_one(c,"SELECT * FROM jobs WHERE id=%s FOR UPDATE",(job["id"],))
-        if row["state"]!="running" or row["run_version"]!=job["run_version"] or row["cancel_requested"]:raise Denied("任务执行版本已失效","STALE",409)
-        p=load_principal(c,row["owner_id"])
-        if p.version!=row["owner_version"] or not sources_valid(c,p,state["sources"]):raise Denied("人员或来源权限已变化","SOURCE_CHANGED",409)
-        citations=[{k:e[k] for k in ("document_id","version","title","quote","page","chunk_id")} for e in state["evidence"]]
-        timing = dict(state.get("timing") or {})
-        timing["queue_wait_ms"] = queue_wait_ms
-        timing["e2e_ms"] = _diff_ms(row.get("created_at") or job.get("created_at"))
-        token_usage = state.get("token_usage") or {
-            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0,
-            "llm_attempts": 0, "llm_errors": 0, "failovers": 0, "json_retries": 0, "by_role": {},
-        }
-        result=dict(answer=state["answer"],citations=citations,specialists=[{"name":SPECIALIST_AGENTS[r][0],"count":sum(f["role"]==SPECIALIST_AGENTS[r][0] for f in state["findings"])} for r in state["selected_agents"]],
-           missing=state["missing"],hard_block=state["hard_block"],external_blocked=state["external_blocked"],model_calls=state["model_calls"],usage=state["usage"],
-           cache_hit=False,timing=timing,token_usage=token_usage,degraded=state.get("degraded") or {})
-        # 执行轨迹回传：评测报告逐例记录 trace_id，可与 Phoenix 精确关联归因
-        if trace_id:result["trace_id"]=trace_id
-        # 问数（ChatBI）：结构化结果透传给前端渲染表格与图表；denied 结果不透传 data
-        dr = state.get("data_result")
-        if dr and not dr.get("denied"):
-            result["data"]=dr
-            result["specialists"]=[{"name":"指标语义层（受控 SQL）","count":1}]
-        status="review" if state["review"] else "completed";stage="等待业务负责人审核" if state["review"] else "已完成"
-        c.execute("UPDATE jobs SET result=%s,sources=%s,input_level=%s,state=%s,stage=%s,progress=100,lease_until=NULL,finished_at=now() WHERE id=%s AND run_version=%s",
-            (as_jsonb(result),as_jsonb(state["sources"]),state["input_level"],status,stage,job["id"],job["run_version"]))
-        c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,100,%s)",(p.tenant_id,job["id"],job["run_version"],stage,status))
-
-    # 权威核验答案自动灌入语义缓存，赋能后续高频并发命中
-    # 安全边界：问数结果不进缓存（指标结果实时执行，且缓存按问题相似度命中会
-    # 跨角色泄露受限指标，如 boss 的毛利答案被 staff 命中）；
-    # 缓存密级必须用答案提升后的 input_level（含 L2/L3 引用时不得低于该密级）。
-    if not state.get("hard_block") and not state.get("review") and state.get("answer") and not state.get("data_result"):
-        try:
-            cache.put(job["tenant_id"], job["question"], state["answer"], citations,
-                      state.get("sources", []), state.get("input_level", job["input_level"]),
-                      redacted=not p.boss)
+                job_repo.renew_lease_once(c, job["id"], job["run_version"], wid, lease_seconds)
         except Exception:
             pass
-def process_research_job(job):
-    """平台调研任务：基于 LangGraph 的真·自治多智能体系统（Supervisor Agent Loop）。
 
-    不引用企业文档（公网电商数据），sources 恒为空；
-    进度与可审计信标（工具名、入参、结果摘要、状态变化、决策理由）经 emit 写入
-    jobs.stage/progress 与 task_events，复用同一条 SSE 事件流。
-    """
-    from ..orchestration.agent_system import execute_autonomous_agents
-    from langgraph.checkpoint.postgres import PostgresSaver
 
-    def emit(stage, progress):
-        with database_connection() as c:
-            c.execute("UPDATE jobs SET stage=%s,progress=%s WHERE id=%s AND run_version=%s", (stage, progress, job["id"], job["run_version"]))
-            c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,%s,'running')", (job["tenant_id"], job["id"], job["run_version"], stage, progress))
-
-    def check_cancel() -> bool:
-        with database_connection() as c:
-            r = fetch_one(c, "SELECT state, run_version, cancel_requested FROM jobs WHERE id=%s", (job["id"],))
-            return not r or r["state"] != "running" or r["run_version"] != job["run_version"] or bool(r["cancel_requested"])
-
-    def fetch_steering() -> list:
-        with database_connection() as c:
-            r = fetch_one(c, "SELECT payload FROM jobs WHERE id=%s", (job["id"],))
-            items = ((r or {}).get("payload") or {}).get("steering_inputs") or []
-            return list(items)
-
-    cfg = load_config()
-    settings = get_settings()
-    conv_id = job.get("conversation_id") or (job.get("payload") or {}).get("conversation_id") or ""
-    keyword = (job.get("payload") or {}).get("keyword") or job["question"]
-    initial_steering = (job.get("payload") or {}).get("steering_inputs") or []
-
-    with PostgresSaver.from_conn_string(cfg.dsn) as saver:
-        saver.setup()
-        result = execute_autonomous_agents(
-            keyword=keyword,
-            user_query=job["question"],
-            job_id=job["id"],
-            tenant_id=job.get("tenant_id") or "default",
-            run_version=job.get("run_version") or 1,
-            conversation_id=conv_id,
-            checkpointer=saver,
-            require_checkpointer=True,
-            emit_event_fn=emit,
-            initial_steering=initial_steering,
-            timeout_seconds=float(settings.llm_timeout or 180.0),
-            max_turns=int(settings.research_max_turns),
-            max_parallel_subagents=int(settings.research_max_parallel_subagents),
-            max_subagent_steps=int(settings.research_max_subagent_steps),
-            check_cancel_fn=check_cancel,
-            fetch_steering_fn=fetch_steering,
-        )
-
-    if result.get("cancelled"):
-        raise Denied("任务已被用户取消", "CANCELLED", 409)
-
-    stage_title = "调研报告已生成"
+def heartbeat() -> None:
+    """上报 Worker 存活心跳并清理 1 天前过期节点。"""
     with database_connection() as c:
-        row = fetch_one(c, "SELECT * FROM jobs WHERE id=%s FOR UPDATE", (job["id"],))
-        if row["state"] != "running" or row["run_version"] != job["run_version"] or row["cancel_requested"]:
-            raise Denied("任务执行版本已失效", "STALE", 409)
-        c.execute("UPDATE jobs SET result=%s,sources='[]'::jsonb,state='completed',stage=%s,progress=100,lease_until=NULL,finished_at=now() WHERE id=%s AND run_version=%s", (as_jsonb(result), stage_title, job["id"], job["run_version"]))
-        c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,100,'completed')", (job["tenant_id"], job["id"], job["run_version"], stage_title))
+        job_repo.touch_worker_heartbeat(c, WORKER, prune=True)
 
-def heartbeat():
-    with database_connection() as c:
-        c.execute("INSERT INTO worker_heartbeats(id) VALUES(%s) ON CONFLICT(id) DO UPDATE SET updated_at=now()",(WORKER,))
-        c.execute("DELETE FROM worker_heartbeats WHERE updated_at<now()-interval '1 day'")
-def run_job(job):
-    done=threading.Event();thread=threading.Thread(target=renew_job_lease,args=(job,done),daemon=True);thread.start()
+
+def run_job(job: dict) -> None:
+    """在独立租约保护下路由执行资料解析、自主调研或问答任务。"""
+    done = threading.Event()
+    thread = threading.Thread(target=renew_job_lease, args=(job, done), daemon=True)
+    thread.start()
     try:
-        if job["kind"]=="ingest":process_ingestion_job(job)
-        elif job["kind"]=="research":process_research_job(job)
-        else:process_question_job(job)
+        if job["kind"] == "ingest":
+            process_ingestion_job(job)
+        elif job["kind"] == "research":
+            process_research_job(job)
+        else:
+            process_question_job(job)
     except Exception as exc:
-        message=exc.message if isinstance(exc,Denied) else "任务处理失败，请重试或联系管理员"
+        message = exc.message if isinstance(exc, Denied) else "任务处理失败，请重试或联系管理员"
         with database_connection() as c:
-            row=fetch_one(c,"SELECT * FROM jobs WHERE id=%s FOR UPDATE",(job["id"],))
-            if row and row["state"]=="running" and row["run_version"]==job["run_version"]:
-                status="cancelled" if row["cancel_requested"] else "failed"
-                c.execute("UPDATE jobs SET state=%s,error=%s,stage=%s,finished_at=now(),lease_until=NULL WHERE id=%s",(status,message,"已取消" if status=="cancelled" else "处理失败",job["id"]))
-                c.execute("INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,100,%s)",(job["tenant_id"],job["id"],job["run_version"],message,status))
-                if job["kind"]=="ingest":c.execute("UPDATE documents SET state='failed',error=%s WHERE id=%s AND current_version=%s",(message,job["payload"]["document_id"],job["payload"]["version"]))
-        print("任务结束",job["id"],type(exc).__name__,flush=True)
-        import traceback;traceback.print_exc()
-    finally:done.set();thread.join(timeout=2)
-def process_next_job():
-    job=claim_next_job()
-    if not job:return False
+            row = job_repo.get_job_by_id(c, job["id"], for_update=True)
+            if row and row["state"] == "running" and row["run_version"] == job["run_version"]:
+                status = "cancelled" if row["cancel_requested"] else "failed"
+                job_repo.mark_job_failed_or_cancelled(c, job, status, message)
+                if job["kind"] == "ingest":
+                    document_repo.mark_document_ingest_failed(
+                        c, job["payload"]["document_id"], job["payload"]["version"], message
+                    )
+        print("任务结束", job["id"], type(exc).__name__, flush=True)
+        traceback.print_exc()
+    finally:
+        done.set()
+        thread.join(timeout=2)
+
+
+def process_next_job() -> bool:
+    """尝试认领并执行队列中的下一条待处理任务。"""
+    job = job_repo.claim_next_job(WORKER)
+    if not job:
+        return False
     run_job(job)
     return True
-def main():
-    signal.signal(signal.SIGTERM,lambda *_:STOP.set())
-    signal.signal(signal.SIGINT,lambda *_:STOP.set())
-    print("企业任务进程已启动",flush=True)
-    from ..observability.tracing import setup_tracing
+
+
+def sweep() -> None:
+    """Kafka 消费空窗对账回调：续报心跳、超时复核清理并补认领遗留任务。"""
+    heartbeat()
+    job_repo.expire_stale_reviews()
+    process_next_job()
+
+
+def main() -> None:
+    """Worker 守护进程主循环入口。"""
+    signal.signal(signal.SIGTERM, lambda *_: STOP.set())
+    signal.signal(signal.SIGINT, lambda *_: STOP.set())
+    print("企业任务进程已启动", flush=True)
     print("执行轨迹:", "已启用（OTLP→Phoenix）" if setup_tracing("taozhi-worker") else "未启用", flush=True)
-    cfg=load_config()
+    cfg = load_config()
     if cfg.kafka_enabled:
-        # Kafka 为主：relay 投递 outbox + 消费认领；数据库轮询降频保留为对账兜底。
-        from ..knowledge import queue
         queue._worker_id = WORKER
-        threading.Thread(target=queue.relay_loop,daemon=True).start()
-        threading.Thread(target=queue.consume_forever,args=(run_job,sweep),daemon=True).start()
-        idle=3
-    else:idle=1
+        threading.Thread(target=queue.relay_loop, daemon=True).start()
+        threading.Thread(target=queue.consume_forever, args=(run_job, sweep), daemon=True).start()
+        idle = 3
+    else:
+        idle = 1
     while not STOP.is_set():
         try:
             heartbeat()
-            if not process_next_job():STOP.wait(idle)
+            if not process_next_job():
+                STOP.wait(idle)
         except Exception as exc:
-            print("任务进程正在重连",type(exc).__name__,flush=True);STOP.wait(3)
-def sweep():
-    heartbeat()
-    expire_stale_reviews()
-    process_next_job()
-if __name__=="__main__":main()
+            print("任务进程正在重连", type(exc).__name__, flush=True)
+            STOP.wait(3)
+
+
+if __name__ == "__main__":
+    main()

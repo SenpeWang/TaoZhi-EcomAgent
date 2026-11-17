@@ -30,7 +30,9 @@
 | `src/taozhi/application/research/` | 自治多智能体调研系统（运行时钩子、主协调器、并行子智能体与研报合成） |
 | `src/taozhi/application/services/` | 应用服务层：账号审批、文档生命周期、问答/调研调度与经营看板用例 |
 | `src/taozhi/orchestration/` | 编排辅助层：知识问答确定性控制器与离散决策引擎 |
+| `src/taozhi/schemas/` | 接口 DTO 层：Pydantic 请求验证模型（认证、管理、文档、任务与工具） |
 | `src/taozhi/server/` | 接口适配层：FastAPI 应用装配、Session/CSRF 认证与 Worker 租约守护进程 |
+| `src/taozhi/server/routers/` | 接口路由层：系统监控、认证、组织审批、文档与任务 SSE 分领域 HTTP 路由 |
 | `src/taozhi/knowledge/` | 知识检索与存储适配层：切片解析、混合检索器、语义缓存、ES/MinIO/Kafka/DB |
 | `evals/` | 评估模块（独立单元）：口径说明、数据集、指标、运行器、基线与报告 |
 | `evals/rag_eval/` | 企业知识库 RAG 三层评测运行器、质量门禁与实战测评记录（`测评记录.md`） |

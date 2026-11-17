@@ -5,25 +5,17 @@ import ast
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from taozhi.orchestration.agent_system import (
+from taozhi.application.research.graph import execute_autonomous_agents
+from taozhi.application.research.schemas import (
     _OrchestratorDecisionSchema,
     _ProposedSubtaskSchema,
     _SubagentStepSchema,
-    execute_autonomous_agents,
 )
 
 
 def test_zero_fake_copy_in_research_workflow():
-    """严禁虚假伪造与硬编码：扫描 agent_system.py 源码，断言 0 处假思考与假工具文案。"""
-    src_file = Path(__file__).resolve().parents[1] / "src/taozhi/orchestration/agent_system.py"
-    content = src_file.read_text(encoding="utf-8")
-
-    assert "思考\n总指挥" not in content
-    assert "运行工具\n规划电商调研大纲" not in content
-    assert "运行工具\n并发执行全网搜索" not in content
-    assert "思考\n两路智能体采集完成" not in content
-    assert "思考\n全景调研报告编制完成" not in content
-
+    """严禁虚假伪造与硬编码：扫描 application/research/ 源码，断言 0 处假思考与假工具文案。"""
+    research_dir = Path(__file__).resolve().parents[1] / "src/taozhi/application/research"
     allowed_prefixes = (
         "[agent_start]",
         "[agent_handoff]",
@@ -33,22 +25,31 @@ def test_zero_fake_copy_in_research_workflow():
         "[steering]",
         "[system]",
     )
-    tree = ast.parse(content)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id == "_emit_progress" and len(node.args) >= 2:
-                stage_node = node.args[1]
-            elif node.func.id == "_bump_progress" and len(node.args) >= 4:
-                stage_node = node.args[3]
-            else:
-                continue
-            if isinstance(stage_node, ast.Constant) and isinstance(stage_node.value, str):
-                text = stage_node.value
-            elif isinstance(stage_node, ast.JoinedStr) and stage_node.values and isinstance(stage_node.values[0], ast.Constant):
-                text = str(stage_node.values[0].value)
-            else:
-                continue
-            assert any(text.startswith(prefix) for prefix in allowed_prefixes), f"发现未规范的事件输出: {text}"
+    for src_file in sorted(research_dir.glob("*.py")):
+        content = src_file.read_text(encoding="utf-8")
+
+        assert "思考\n总指挥" not in content
+        assert "运行工具\n规划电商调研大纲" not in content
+        assert "运行工具\n并发执行全网搜索" not in content
+        assert "思考\n两路智能体采集完成" not in content
+        assert "思考\n全景调研报告编制完成" not in content
+
+        tree = ast.parse(content)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id == "emit_progress" and len(node.args) >= 2:
+                    stage_node = node.args[1]
+                elif node.func.id == "bump_progress" and len(node.args) >= 4:
+                    stage_node = node.args[3]
+                else:
+                    continue
+                if isinstance(stage_node, ast.Constant) and isinstance(stage_node.value, str):
+                    text = stage_node.value
+                elif isinstance(stage_node, ast.JoinedStr) and stage_node.values and isinstance(stage_node.values[0], ast.Constant):
+                    text = str(stage_node.values[0].value)
+                else:
+                    continue
+                assert any(text.startswith(prefix) for prefix in allowed_prefixes), f"发现未规范的事件输出: {text}"
 
 
 def test_pipeline_a_events_emitted_during_research():
@@ -102,7 +103,11 @@ def test_pipeline_a_events_emitted_during_research():
     mock_llm.chat_json.side_effect = fake_chat_json
     mock_llm.chat.return_value = "# 测试保温杯市场调研报告\n\n## 1. 市场概览\n需求旺盛。"
 
-    with patch("taozhi.orchestration.agent_system.LLMClient", return_value=mock_llm):
+    with (
+        patch("taozhi.application.research.planner.LLMClient", return_value=mock_llm),
+        patch("taozhi.application.research.subagents.LLMClient", return_value=mock_llm),
+        patch("taozhi.application.research.reporter.LLMClient", return_value=mock_llm),
+    ):
         with patch("taozhi.infrastructure.mcp.server.search_web", return_value=[{"title": "保温杯测评", "snippet": "主流69元"}]):
             execute_autonomous_agents(
                 keyword="测试保温杯",

@@ -8,9 +8,10 @@ from taozhi.knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
 from taozhi.server.api import app
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import load_principal, source_valid, can_read
-from taozhi.server.worker import claim_next_job,process_question_job,process_next_job
-from taozhi.server.pipeline import validate_task_execution
-from taozhi.server.services import create_job
+from taozhi.server.worker import process_next_job
+from taozhi.application.rag.state import validate_task_execution
+from taozhi.application.services.task_service import process_question_job
+from taozhi.infrastructure.persistence.job_repo import claim_next_job, create_job
 import importlib.util
 spec=importlib.util.spec_from_file_location("v3_setup",Path(__file__).resolve().parents[1]/"scripts/manage_database.py")
 setup=importlib.util.module_from_spec(spec);spec.loader.exec_module(setup)
@@ -153,7 +154,7 @@ def test_cross_tenant_documents_tasks_and_tools(clients):
     with database_connection() as c:
         c.execute("INSERT INTO tenants(id,code,name,mode) VALUES('foreign','other','另一企业','test')")
         nodes=setup.organization(c,"foreign","另一企业")
-        from taozhi.server.passwords import hash_password
+        from taozhi.domain.passwords import hash_password
         c.execute("INSERT INTO users(id,tenant_id,username,display_name,password_hash,must_change) VALUES('foreign_user','foreign','owner','其他老板',%s,false)",(hash_password("123456","test"),))
         c.execute("INSERT INTO memberships VALUES('foreign','foreign_user',%s,'boss',true)",(nodes["公司"],))
         setup.add_doc(c,"foreign","foreign_user","foreign_doc","其他企业机密","跨企业秘密标记",nodes["公司"],"company",3)
@@ -555,7 +556,7 @@ def test_semantic_cache_invalidated_on_delete_and_stale_worker_check(monkeypatch
 
 def test_pipeline_quote_and_arithmetic_derivation_guards():
     """验证有序省略号引文校验与可溯源四则/比例算式推导校验（防幻觉且不误杀数学推算）。"""
-    from taozhi.server.pipeline import _numbers_supported, _quote_supported
+    from taozhi.domain.rag_verification import numbers_supported as _numbers_supported, quote_supported as _quote_supported
 
     doc_body = (
         "1. 第一步：展开折叠转轴至 65° 人体工学倾角，确认防滑硅胶底座稳固。\n"

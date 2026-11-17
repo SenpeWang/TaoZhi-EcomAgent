@@ -88,33 +88,37 @@ flowchart TD
 
 | 架构分层 | 核心技术选型 | 职责边界 |
 | :--- | :--- | :--- |
-| **接入层 (API)** | FastAPI、Uvicorn、HttpOnly Session、CSRF | 统一会话鉴权、权限上下文加载、流式 SSE 事件输出、中途动态干预端点。 |
-| **编排层 (Orchestration)** | LangGraph、StateGraph、DecisionEngine | 企业问答确定性流水线编排、多智能体 Supervisor 循环、离散选择与打分核验。 |
-| **智能体中台 (Agent Core)** | SubagentRunner、MessageBus、SubagentContext | 专职智能体沙箱执行、双轨行索引记忆（`TranscriptLogger`）、阶梯压实（`ContextCompactor`）。 |
-| **知识与检索层 (RAG)** | ES BM25 + pgvector HNSW + RRF + BGE-M3 | 混合检索排序、向量语义缓存、知识库切片解析、Prompt 防注入守卫。 |
-| **存储与基础设施** | PostgreSQL 18、Kafka、MinIO、Alembic | 状态机任务表（`jobs`）、事务发件箱（`task_outbox`）、事件流水（`task_events`）、分布式租约锁。 |
+| **接口层 (Interface)** | `schemas/`、`server/`、`server/routers/` | FastAPI 装配、分领域路由、HttpOnly Session/CSRF、Pydantic DTO、Worker 租约守护进程。 |
+| **应用层 (Application)** | `application/`、`orchestration/`、`core/agent/` | `services/` 业务用例、`rag/` 问答工作流、`research/` 主副多智能体闭环、`decision` 引擎。 |
+| **基础设施层 (Infrastructure)** | `infrastructure/`、`knowledge/`、`ai/`、`observability/`、`core/memory/`、`core/tools/` | PostgreSQL 分领域仓储（`persistence/`）、ES BM25 + pgvector、MCP、大模型与 Phoenix Trace。 |
+| **领域层 (Domain)** | `domain/` | 零外部框架依赖的实体权限、口令策略、注入防线、切片排序与四则/引文核验纯逻辑。 |
 | **前端交互中台** | Vue 3、TypeScript、Element Plus、Vite | 响应式工作台、模块化视图（`DocumentManager`、`PolicyMatrix`、`TaskTimeline`、`ResearchChatView`）。 |
 
 ### 模块目录映射
 
 ```text
 src/taozhi/
-├── api/                     接入层：同步问答、会话与系统健康检查
-├── orchestration/           编排层：真·自治多智能体中枢 (agent_system)、离散决策引擎 (decision)
-├── agents/                  专职电商智能体模板与统一注册中心 (registry)
+├── domain/                  领域层：访问规则、口令策略、注入防线、排序切片、数学/引文验证（零框架依赖）
+├── infrastructure/
+│   ├── persistence/         PostgreSQL 分领域仓储（access/admin/bi/document/job_repo）
+│   └── mcp/                 标准 MCP 协议服务端与智能体客户端适配
+├── knowledge/               文档解析、混合检索器、语义缓存、ES/MinIO/Kafka/PostgreSQL 连接池
+├── ai/                      大模型客户端、多 Key 故障转移、Token 用量与结构化解析
 ├── core/
-│   ├── agent/               智能体生命周期状态机、上下文沙箱、双管道事件中枢
-│   ├── compaction/          上下文治理、阶段压实与事实硬兜底
-│   ├── memory/              长效实体记忆库、双轨日志与会话投影
-│   ├── tools/               工具执行器、1688/Amazon/Web 工具集、行边界保持截断
-│   └── skills/              渐进式技能中心与斜杠指令集
-├── knowledge/               知识库切片入库、混合检索器、数据库连接与语义缓存
-├── domain/                  领域层：核心实体、权限规则与隐私策略（不依赖任何框架）
-├── application/             应用层：工作流、编排与契约
-├── infrastructure/          基础设施层：持久化仓储、检索实现与 SDK 适配
-├── server/                  FastAPI 路由服务、异步 Worker 守护进程（仅做适配）
-├── schemas/                 请求响应 DTO、Agent 状态机契约与全链路 Trace 规范
-└── observability/           全链路树状 Trace 收集器 (tracer) 与 Arize Phoenix 导出器
+│   ├── agent/               智能体上下文隔离（Scratch / Artifacts）与工作区通信协议
+│   ├── memory/              租户物理隔离长效记忆库与双轨会话日志
+│   └── tools/               1688 / Amazon / Web 原子工具集与行边界截断
+├── application/
+│   ├── services/            应用服务（admin_service、document_service、task_service）
+│   ├── rag/                 企业问答 LangGraph 状态机（state、intent、specialists、workflow）
+│   └── research/            自治多智能体调研（hooks、schemas、planner、subagents、reporter、graph）
+├── orchestration/           编排辅助：确定性控制器 (controller) 与离散决策引擎 (decision)
+├── schemas/                 接口层 Pydantic 请求 DTO（common、auth、admin、document、task）
+├── server/
+│   ├── api.py / auth.py     FastAPI 应用装配与会话/CSRF 鉴权
+│   ├── routers/             分领域 HTTP 路由（system、auth、admin、documents、tasks）
+│   └── worker.py            异步任务队列认领、租约续期与守护进程
+└── observability/           全链路 Span 追踪与 Arize Phoenix 导出器
 ```
 
 ---

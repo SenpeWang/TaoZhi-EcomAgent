@@ -31,8 +31,10 @@ LAYER_ORDER = {
 LAYER_MAP = {
     "interface": [
         "server/",
+        "schemas/",
     ],
     "application": [
+        "application/",
         "orchestration/",
         "core/agent/",
     ],
@@ -208,3 +210,60 @@ def test_domain_layer_does_not_read_config():
                 if n.module == "taozhi.config" or n.module.endswith(".config"):
                     violations.append(f"{p.relative_to(ROOT)}:{lineno} (domain) 读取配置 {n.module}")
     assert not violations, "领域层读取配置：\n" + "\n".join(violations)
+
+
+def test_interface_routers_do_not_access_db_directly():
+    """HTTP 路由与装配入口不得直接打开数据库连接或执行原始 SQL。"""
+    forbidden_targets = ("taozhi.knowledge.db", "knowledge.db")
+    forbidden_names = {"database_connection", "fetch_one", "fetch_all", "as_jsonb"}
+    targets = [ROOT / "server" / "api.py"] + sorted((ROOT / "server" / "routers").glob("*.py"))
+    violations = []
+    for p in targets:
+        if not p.exists():
+            continue
+        tree = ast.parse(p.read_text(encoding="utf-8"))
+        for n in ast.walk(tree):
+            lineno = getattr(n, "lineno", 0)
+            if isinstance(n, ast.Import):
+                for a in n.names:
+                    if a.name.endswith(forbidden_targets):
+                        violations.append(f"{p.relative_to(ROOT)}:{lineno} 引入 {a.name}")
+            elif isinstance(n, ast.ImportFrom):
+                mod = n.module or ""
+                if mod.endswith(forbidden_targets) or any(alias.name in forbidden_names for alias in n.names):
+                    violations.append(f"{p.relative_to(ROOT)}:{lineno} 从 {mod} 引入直连数据库符号")
+    assert not violations, "接口路由违规直连数据库：\n" + "\n".join(violations)
+
+
+def test_application_does_not_import_fastapi_or_schemas():
+    """应用层不得反向依赖 Web 框架或接口 DTO。"""
+    forbidden_roots = {"fastapi", "starlette", "uvicorn"}
+    violations = []
+    for p in sorted(ROOT.rglob("*.py")):
+        if get_layer(p) != "application":
+            continue
+        tree = ast.parse(p.read_text(encoding="utf-8"))
+        for n in ast.walk(tree):
+            lineno = getattr(n, "lineno", 0)
+            if isinstance(n, ast.Import):
+                for a in n.names:
+                    if a.name.split(".")[0] in forbidden_roots or a.name.startswith("taozhi.schemas"):
+                        violations.append(f"{p.relative_to(ROOT)}:{lineno} 引入 {a.name}")
+            elif isinstance(n, ast.ImportFrom) and n.module:
+                if n.module.split(".")[0] in forbidden_roots or n.module.startswith("taozhi.schemas"):
+                    violations.append(f"{p.relative_to(ROOT)}:{lineno} 引入 {n.module}")
+    assert not violations, "应用层违规依赖 Web/DTO：\n" + "\n".join(violations)
+
+
+def test_legacy_monolith_files_stay_deleted():
+    """防止已重构清理的旧混合单体与兼容别名文件回流。"""
+    legacy_paths = [
+        "server/pipeline.py",
+        "server/services.py",
+        "server/passwords.py",
+        "knowledge/guard.py",
+        "knowledge/facts.py",
+        "orchestration/agent_system.py",
+    ]
+    present = [rel for rel in legacy_paths if (ROOT / rel).exists()]
+    assert not present, "禁止保留已废弃的混合旧文件或别名文件：" + ", ".join(present)

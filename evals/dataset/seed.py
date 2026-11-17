@@ -33,7 +33,7 @@ import yaml  # noqa: E402
 from taozhi.config import load_config  # noqa: E402
 from taozhi.knowledge.db import database_connection, fetch_all, fetch_one  # noqa: E402
 from taozhi.knowledge.ingest import split  # noqa: E402
-from taozhi.server.passwords import hash_password, verify_password  # noqa: E402
+from taozhi.domain.passwords import hash_password, verify_password  # noqa: E402
 from taozhi.infrastructure.persistence.access_repo import can_read, load_principal  # noqa: E402
 
 SPEC = Path(__file__).resolve().parent / "spec"
@@ -130,7 +130,7 @@ def seed_users(conn, tenant_id, org):
 def seed_documents(conn, tenant_id, creator_id, docs, force: bool = False):
     """写入文档/版本/切片/向量/ES。切片与入库口径一致：嵌入输入带标题前缀。"""
     from taozhi.knowledge.embedding import available as embed_available, encode_passages, embedding_input
-    from taozhi.knowledge.facts import index_mentions
+    from taozhi.infrastructure.persistence.document_repo import index_mentions
     if not embed_available():
         print("嵌入服务不可用，终止（不留无向量文档）", file=sys.stderr)
         raise SystemExit(2)

@@ -142,8 +142,10 @@ def test_enterprise_finalize_truncates_overlong_quote(monkeypatch):
 
 def test_enterprise_dedup_removes_identical_text():
     """归一化后完全相同的切片只保留排序靠前的一条。"""
+    from taozhi.domain.ranking import dedup_chunks_by_text
+
     chunks = _mk_chunks([("同一段正文", "d1"), ("同一 段\n正文", "d1"), ("另一段正文", "d2")])
-    kept = ent_retriever._dedup_text(chunks)
+    kept = dedup_chunks_by_text(chunks)
     assert [c["id"] for c in kept] == ["k0", "k2"]
 
 
