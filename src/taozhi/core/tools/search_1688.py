@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 from pathlib import Path
@@ -14,23 +15,33 @@ from typing import Any, Dict, List
 
 import httpx
 
+_LOG = logging.getLogger(__name__)
+
+
+def _resolve_runtime_dir() -> Path:
+    """按环境变量或默认位置解析运维脚本根目录，避免跨模块强依赖 DB 配置。"""
+    env_dir = os.environ.get("ECOM_RUNTIME_DIR", "").strip()
+    if env_dir:
+        return Path(env_dir)
+    return Path.home() / ".local/share/ecom-agent"
+
+
 def search_1688_wholesale(
     keyword: str,
     limit: int = 20,
     timeout: float = 90.0,
 ) -> List[Dict[str, Any]]:
-    """搜索 1688 批发平台真实货源（优先 CPS 推广页免登录抓取）。
+    """搜索 1688 批发平台真实货源（优先网关，其次本地 Playwright 抓手）。
 
     Args:
-        keyword (str): 检索关键词。
-        limit (int): 返回的最大商品条数。
-        timeout (float): 超时预算（秒）。
+        keyword: 检索关键词。
+        limit: 返回的最大商品条数。
+        timeout: 超时预算（秒）。
 
     Returns:
-        List[Dict[str, Any]]: 商品列表，包含 title, price, sales, shop, url 等。
+        商品列表，包含 ``title``, ``price``, ``sales``, ``shop``, ``url`` 等；失败时返回空列表 ``[]``。
     """
     budget = max(1.0, float(timeout))
-    # 优先检测自建 1688 端点
     custom_url = os.environ.get("ECOM_RESEARCH_P1688_URL", "").strip()
     if custom_url:
         try:
@@ -42,17 +53,19 @@ def search_1688_wholesale(
                 resp = client.post(custom_url, json={"query": keyword, "limit": limit}, headers=headers)
                 resp.raise_for_status()
                 return resp.json().get("items", [])[:limit]
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOG.warning("1688 外部检索网关调用失败，尝试本地抓手: %s", exc)
 
-    # 本地 Playwright 抓取器
-    py = Path.home() / ".local/share/ecom-agent/scraper-venv/bin/python"
-    script = Path.home() / ".local/share/ecom-agent/p1688_mcp/p1688_search.py"
+    runtime_dir = _resolve_runtime_dir()
+    py = runtime_dir / "scraper-venv/bin/python"
+    script = runtime_dir / "p1688_mcp/p1688_search.py"
     if py.exists() and script.exists():
         try:
             proc = subprocess.run(
                 [str(py), str(script), keyword, "--limit", str(limit)],
-                capture_output=True, text=True, timeout=min(90.0, budget),
+                capture_output=True,
+                text=True,
+                timeout=min(90.0, budget),
             )
             for line in reversed((proc.stdout or "").strip().splitlines()):
                 line = line.strip()
@@ -60,7 +73,7 @@ def search_1688_wholesale(
                     res = json.loads(line)
                     if res.get("state") == "ok":
                         return res.get("items", [])[:limit]
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOG.warning("1688 本地抓手执行异常: %s", exc)
 
     return []

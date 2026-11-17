@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any, Dict, List, Tuple
 
 from ...knowledge.db import fetch_all, fetch_one
@@ -14,11 +15,12 @@ from taozhi.domain.privacy import redact
 from .store import LongTermMemoryStore
 from .transcript import TranscriptLogger, TranscriptStep
 
+_STORES_LOCK = threading.Lock()
 _stores: Dict[str, LongTermMemoryStore] = {}
 
 
 def get_memory_store(tenant_id: str = "default") -> LongTermMemoryStore:
-    """获取指定租户的长效记忆库实例（实现多租户物理存储隔离）。
+    """获取指定租户的长效记忆库实例（线程安全懒加载与物理隔离）。
 
     Args:
         tenant_id: 租户标识符。
@@ -26,11 +28,11 @@ def get_memory_store(tenant_id: str = "default") -> LongTermMemoryStore:
     Returns:
         LongTermMemoryStore: 租户专属长效记忆库实例。
     """
-    global _stores
     tid = str(tenant_id).strip() or "default"
-    if tid not in _stores:
-        _stores[tid] = LongTermMemoryStore(tenant_id=tid)
-    return _stores[tid]
+    with _STORES_LOCK:
+        if tid not in _stores:
+            _stores[tid] = LongTermMemoryStore(tenant_id=tid)
+        return _stores[tid]
 
 
 def get_followup_context(
