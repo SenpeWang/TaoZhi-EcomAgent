@@ -5,7 +5,6 @@ import logging
 import secrets
 import signal
 import threading
-import traceback
 
 from taozhi.application.services.document_service import process_ingestion_job
 from taozhi.application.services.task_service import process_question_job, process_research_job
@@ -67,8 +66,7 @@ def run_job(job: dict) -> None:
                     document_repo.mark_document_ingest_failed(
                         c, job["payload"]["document_id"], job["payload"]["version"], message
                     )
-        print("任务结束", job["id"], type(exc).__name__, flush=True)
-        traceback.print_exc()
+        _LOG.exception("任务执行失败 (%s, %s)", job["id"], type(exc).__name__)
     finally:
         done.set()
         thread.join(timeout=2)
@@ -92,10 +90,14 @@ def sweep() -> None:
 
 def main() -> None:
     """Worker 守护进程主循环入口，支持单一信号量下的优雅停机与线程回收。"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
     signal.signal(signal.SIGTERM, lambda *_: STOP.set())
     signal.signal(signal.SIGINT, lambda *_: STOP.set())
-    print("企业任务进程已启动", flush=True)
-    print("执行轨迹:", "已启用（OTLP→Phoenix）" if setup_tracing("taozhi-worker") else "未启用", flush=True)
+    _LOG.info("企业任务进程已启动")
+    _LOG.info("执行轨迹: %s", "已启用（OTLP→Phoenix）" if setup_tracing("taozhi-worker") else "未启用")
     cfg = load_config()
     bg_threads: list[threading.Thread] = []
     if cfg.kafka_enabled:
@@ -120,7 +122,7 @@ def main() -> None:
                 if not process_next_job():
                     STOP.wait(idle)
             except Exception as exc:
-                print("任务进程正在重连", type(exc).__name__, flush=True)
+                _LOG.warning("任务进程正在重连 (%s): %s", type(exc).__name__, exc)
                 STOP.wait(3)
     finally:
         STOP.set()

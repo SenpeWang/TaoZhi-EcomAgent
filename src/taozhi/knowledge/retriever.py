@@ -220,7 +220,7 @@ def _rerank_order(query, chunks, fused, allowed=None, trace_out: Optional[Dict[s
             trace_out.update(rerank_ms=int((time.perf_counter() - t0) * 1000), rerank_used=True, rerank_fallback=False)
         return [(cand[j], float(scores[j])) for j in np.argsort(-scores)]
     except Exception as exc:
-        print("Rerank 失败，保持融合序", type(exc).__name__, flush=True)
+        _LOG.warning("Rerank 失败，保持融合序 (%s): %s", type(exc).__name__, exc)
         if trace_out is not None:
             trace_out.update(rerank_ms=int((time.perf_counter() - t0) * 1000), rerank_used=False, rerank_fallback=True)
         return [(i, None) for i in cand]
@@ -402,7 +402,7 @@ def search_documents(
             else:
                 tr["es_fallback"] = True
         except Exception as exc:
-            print("ES BM25 召回失败，回落本地词法", type(exc).__name__, flush=True)
+            _LOG.warning("ES BM25 召回失败，回落本地词法 (%s): %s", type(exc).__name__, exc)
             bm25_rank = None
             tr["es_fallback"] = True
         tr["es_ms"] = int((time.perf_counter() - t_es) * 1000)
@@ -412,7 +412,7 @@ def search_documents(
             try:
                 ann_rank = _pg_ann(conn, p.tenant_id, list(allowed), np.asarray(qv, dtype="float32").reshape(-1))
             except Exception as exc:
-                print("PG ANN 召回失败，该路缺席", type(exc).__name__, flush=True)
+                _LOG.warning("PG ANN 召回失败，该路缺席 (%s): %s", type(exc).__name__, exc)
                 ann_rank = None
             tr["pg_ann_ms"] = int((time.perf_counter() - t_ann) * 1000)
 

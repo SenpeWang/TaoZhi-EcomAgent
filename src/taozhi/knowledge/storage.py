@@ -105,5 +105,5 @@ def get_blob_store():
                 return DualBlobStore(store, LocalBlobStore(cfg))
             return store
         except Exception as exc:
-            print("MinIO 不可用，附件回退本地目录:", type(exc).__name__, flush=True)
+            _LOG.warning("MinIO 不可用，附件回退本地目录 (%s): %s", type(exc).__name__, exc)
     return LocalBlobStore(cfg)

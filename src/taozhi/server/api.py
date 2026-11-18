@@ -1,6 +1,7 @@
 """FastAPI 应用装配入口：全局安全响应头、异常映射、分领域路由与前端静态托管。"""
 from __future__ import annotations
 
+import logging
 import secrets
 
 from fastapi import FastAPI, Request, Response
@@ -11,6 +12,12 @@ from fastapi.staticfiles import StaticFiles
 from taozhi.config import ROOT
 from taozhi.domain.errors import Denied
 from taozhi.server.routers import admin, auth, documents, system, tasks
+
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
 
 app = FastAPI(title="企业智能协作工作台", docs_url=None, redoc_url=None)
 

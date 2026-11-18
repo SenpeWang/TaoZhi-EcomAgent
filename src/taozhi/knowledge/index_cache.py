@@ -26,12 +26,15 @@ PG 主键 (tenant_id, model_tag, digest)：
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
 from ..knowledge.db import fetch_all
 from ..knowledge.embedding import digest, embedding_input, encode_passages, model_signature, to_vector
+
+_LOG = logging.getLogger(__name__)
 
 
 def _lookup(conn, tenant_id: str, tag: str, digests: Sequence[str],
@@ -45,7 +48,7 @@ def _lookup(conn, tenant_id: str, tag: str, digests: Sequence[str],
                                    "WHERE tenant_id=%s AND model_tag=%s AND digest=ANY(%s)",
                              (tenant_id, tag, list(digests)))
     except Exception as exc:
-        print("嵌入缓存读取失败（按未命中处理）", type(exc).__name__, flush=True)
+        _LOG.warning("嵌入缓存读取失败，按未命中处理 (%s): %s", type(exc).__name__, exc)
         return {}
     found = {}
     for row in rows:
@@ -66,7 +69,7 @@ def _store(conn, tenant_id: str, tag: str, dim: int, items) -> None:
                     "DO UPDATE SET embedding=EXCLUDED.embedding, last_used_at=now()",
                     (tenant_id, tag, d, dim, v))
     except Exception as exc:
-        print("嵌入缓存写入失败（不影响本次结果）", type(exc).__name__, flush=True)
+        _LOG.warning("嵌入缓存写入失败，不影响本次结果 (%s): %s", type(exc).__name__, exc)
 
 
 def encode_index(conn, tenant_id: str,

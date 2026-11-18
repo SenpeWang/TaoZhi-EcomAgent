@@ -7,8 +7,12 @@
 - ES 不可达时检索侧自动回落本地五信号链路，不阻断问答。
 """
 from __future__ import annotations
+
+import logging
+
 from ..config import load_config
 
+_LOG = logging.getLogger(__name__)
 FALLBACK_ANALYZER="cjk"
 
 def _analyzers(es) -> tuple:
@@ -25,8 +29,8 @@ def _analyzers(es) -> tuple:
         es.indices.analyze(analyzer=cfg.es_search_analyzer,text="分词探针")
         return cfg.es_analyzer,cfg.es_search_analyzer
     except Exception as exc:
-        print("IK 分词器不可用，回落内置 cjk:",type(exc).__name__,flush=True)
-        return FALLBACK_ANALYZER,FALLBACK_ANALYZER
+        _LOG.warning("IK 分词器不可用，回落内置 cjk (%s): %s", type(exc).__name__, exc)
+        return FALLBACK_ANALYZER, FALLBACK_ANALYZER
 
 def index_mapping(es=None) -> dict:
     """构造索引映射；传入 ES 客户端时按其实际插件能力选择分析器。"""

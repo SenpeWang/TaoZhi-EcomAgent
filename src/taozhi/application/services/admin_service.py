@@ -332,7 +332,7 @@ def decide_approval(p: Principal, aid: str, *, approve: bool, comment: str) -> d
                             es_index.delete_chunks(d["id"])
                             es_index.index_chunks(rows)
                     except Exception as exc:
-                        print("ES 发布索引同步失败", type(exc).__name__, flush=True)
+                        _LOG.warning("ES 发布索引同步失败 (%s): %s", type(exc).__name__, exc)
                 elif kind == "grant":
                     if not p.boss:
                         raise Denied()
