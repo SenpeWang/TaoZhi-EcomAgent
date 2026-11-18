@@ -22,7 +22,7 @@ from taozhi.config import load_config
 
 _LOG = logging.getLogger(__name__)
 _POOL_LOCK = threading.Lock()
-_POOLS: dict[str, ConnectionPool] = {}
+_POOLS: dict[tuple[str, bool], ConnectionPool] = {}
 _ACTIVE_CONN: contextvars.ContextVar[psycopg.Connection | None] = contextvars.ContextVar(
     "taozhi_active_conn", default=None
 )
@@ -38,21 +38,26 @@ def _configure_connection(conn: psycopg.Connection) -> None:
         _LOG.debug("pgvector 扩展注册跳过（退化为文本协议）: %s", exc)
 
 
-def _get_pool(dsn: str) -> ConnectionPool:
-    """按 DSN 懒加载并复用线程安全连接池。"""
+def _get_pool(dsn: str, *, autocommit: bool = False) -> ConnectionPool:
+    """按 (DSN, autocommit) 懒加载并复用线程安全连接池。"""
+    key = (dsn, autocommit)
     with _POOL_LOCK:
-        pool = _POOLS.get(dsn)
+        pool = _POOLS.get(key)
         if pool is None or pool.closed:
+            kwargs: dict[str, Any] = {"row_factory": dict_row, "connect_timeout": 8}
+            if autocommit:
+                kwargs["autocommit"] = True
+                kwargs["prepare_threshold"] = 0
             pool = ConnectionPool(
                 dsn,
-                min_size=1,
-                max_size=12,
+                min_size=0 if autocommit else 1,
+                max_size=6 if autocommit else 12,
                 timeout=8.0,
-                kwargs={"row_factory": dict_row, "connect_timeout": 8},
+                kwargs=kwargs,
                 configure=_configure_connection,
                 open=True,
             )
-            _POOLS[dsn] = pool
+            _POOLS[key] = pool
         return pool
 
 
@@ -91,6 +96,14 @@ def database_connection() -> Iterator[psycopg.Connection]:
                 yield conn
         finally:
             _ACTIVE_CONN.reset(token)
+
+
+@contextmanager
+def autocommit_connection(dsn: str | None = None) -> Iterator[psycopg.Connection]:
+    """从连接池借用自动提交模式连接（供 LangGraph PostgresSaver 检查点复用）。"""
+    pool = _get_pool(dsn or load_config().dsn, autocommit=True)
+    with pool.connection() as conn:
+        yield conn
 
 
 def fetch_one(conn: Any, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:

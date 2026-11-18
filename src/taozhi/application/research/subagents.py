@@ -258,115 +258,118 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
     emit_progress(hooks, f"[agent_start] 激活专职子智能体 【{task.role}】 (目标: {task.goal})")
 
-    for step_idx in range(1, max_steps + 1):
-        if is_cancelled(hooks):
-            gaps_or_errors.append("任务中途取消")
-            break
-        if timeout_seconds > 0 and (time.time() - started_at) >= timeout_seconds:
-            gaps_or_errors.append("达到全局时间预算上限")
-            break
+    try:
+        for step_idx in range(1, max_steps + 1):
+            if is_cancelled(hooks):
+                gaps_or_errors.append("任务中途取消")
+                break
+            if timeout_seconds > 0 and (time.time() - started_at) >= timeout_seconds:
+                gaps_or_errors.append("达到全局时间预算上限")
+                break
 
-        step_dec, sub_last_ep = _plan_subagent_step(
-            llm=llm,
-            task=task,
-            keyword=keyword,
-            user_query=query,
-            mcp_specs=mcp_specs,
-            step_idx=step_idx,
-            max_steps=max_steps,
-            react_observations=react_observations,
-            tools_records=tools_records,
-            last_endpoint=sub_last_ep,
-            hooks=hooks,
-            route_events_out=sub_route_events,
-        )
-        if step_dec.action == "finish":
-            final_summary = (step_dec.findings_summary or "").strip()
-            key_metrics = [str(m) for m in step_dec.key_metrics if m]
-            gaps_or_errors.extend(str(g) for g in step_dec.gaps_or_errors if g)
-            break
+            step_dec, sub_last_ep = _plan_subagent_step(
+                llm=llm,
+                task=task,
+                keyword=keyword,
+                user_query=query,
+                mcp_specs=mcp_specs,
+                step_idx=step_idx,
+                max_steps=max_steps,
+                react_observations=react_observations,
+                tools_records=tools_records,
+                last_endpoint=sub_last_ep,
+                hooks=hooks,
+                route_events_out=sub_route_events,
+            )
+            if step_dec.action == "finish":
+                final_summary = (step_dec.findings_summary or "").strip()
+                key_metrics = [str(m) for m in step_dec.key_metrics if m]
+                gaps_or_errors.extend(str(g) for g in step_dec.gaps_or_errors if g)
+                break
 
-        tool_name = (step_dec.tool_name or (task.allowed_tools[0] if task.allowed_tools else "")).strip()
-        q_arg = (step_dec.query_or_url or (task.seed_queries[0] if task.seed_queries else keyword)).strip()
-        outcome = _execute_guarded_mcp_tool(
-            mcp_client=mcp_client,
-            task=task,
-            scope=scope,
-            hooks=hooks,
-            ctx=ctx,
-            tool_name=tool_name,
-            arg_value=q_arg,
-            step_idx=step_idx,
-            started_at=started_at,
-            timeout_seconds=timeout_seconds,
-            tools_records=tools_records,
-            scratch_files=scratch_files,
-            platform_buckets=platform_buckets,
-        )
-        cleaned_preview, inj_hits = session.after_tool_sanitize(outcome.text_preview[:1500])
-        if inj_hits:
-            gaps_or_errors.append(f"{tool_name} 返回内容触发外部注入警告({','.join(inj_hits)})")
-        react_observations.append(
-            {
-                "step": step_idx,
-                "tool": tool_name,
-                "arg": q_arg,
-                "status": outcome.status,
-                "data_count": outcome.data_count,
-                "error_reason": outcome.error_reason,
-                "preview": cleaned_preview,
-            }
-        )
-        if outcome.status in ("error", "timeout", "cancelled") and outcome.error_reason:
-            gaps_or_errors.append(f"{tool_name}({outcome.status}): {outcome.error_reason}")
+            tool_name = (step_dec.tool_name or (task.allowed_tools[0] if task.allowed_tools else "")).strip()
+            q_arg = (step_dec.query_or_url or (task.seed_queries[0] if task.seed_queries else keyword)).strip()
+            outcome = _execute_guarded_mcp_tool(
+                mcp_client=mcp_client,
+                task=task,
+                scope=scope,
+                hooks=hooks,
+                ctx=ctx,
+                tool_name=tool_name,
+                arg_value=q_arg,
+                step_idx=step_idx,
+                started_at=started_at,
+                timeout_seconds=timeout_seconds,
+                tools_records=tools_records,
+                scratch_files=scratch_files,
+                platform_buckets=platform_buckets,
+            )
+            cleaned_preview, inj_hits = session.after_tool_sanitize(outcome.text_preview[:1500])
+            if inj_hits:
+                gaps_or_errors.append(f"{tool_name} 返回内容触发外部注入警告({','.join(inj_hits)})")
+            react_observations.append(
+                {
+                    "step": step_idx,
+                    "tool": tool_name,
+                    "arg": q_arg,
+                    "status": outcome.status,
+                    "data_count": outcome.data_count,
+                    "error_reason": outcome.error_reason,
+                    "preview": cleaned_preview,
+                }
+            )
+            if outcome.status in ("error", "timeout", "cancelled") and outcome.error_reason:
+                gaps_or_errors.append(f"{tool_name}({outcome.status}): {outcome.error_reason}")
 
-    if not final_summary:
-        final_summary, sub_last_ep = _synthesize_subagent_summary(
-            llm=llm,
-            task=task,
-            react_observations=react_observations,
-            tools_records=tools_records,
-            gaps_or_errors=gaps_or_errors,
-            last_endpoint=sub_last_ep,
-            hooks=hooks,
-            route_events_out=sub_route_events,
-        )
+        if not final_summary:
+            final_summary, sub_last_ep = _synthesize_subagent_summary(
+                llm=llm,
+                task=task,
+                react_observations=react_observations,
+                tools_records=tools_records,
+                gaps_or_errors=gaps_or_errors,
+                last_endpoint=sub_last_ep,
+                hooks=hooks,
+                route_events_out=sub_route_events,
+            )
 
-    elapsed = round(time.perf_counter() - t0, 2)
-    channel = "sourcing" if any(t["tool_name"] in SOURCING_TOOLS for t in tools_records) or task.channel_hint == "sourcing" else "web"
-    has_ok = any(t["status"] == "ok" and t["data_count"] > 0 for t in tools_records)
-    has_err = any(t["status"] in ("error", "timeout") for t in tools_records)
-    ev_status = "ok" if has_ok else ("error" if has_err else "empty")
-    emit_progress(hooks, f"[agent_end] 【{task.role}】完成探索 · 状态: {ev_status} (耗时 {elapsed}s)")
+        elapsed = round(time.perf_counter() - t0, 2)
+        channel = "sourcing" if any(t["tool_name"] in SOURCING_TOOLS for t in tools_records) or task.channel_hint == "sourcing" else "web"
+        has_ok = any(t["status"] == "ok" and t["data_count"] > 0 for t in tools_records)
+        has_err = any(t["status"] in ("error", "timeout") for t in tools_records)
+        ev_status = "ok" if has_ok else ("error" if has_err else "empty")
+        emit_progress(hooks, f"[agent_end] 【{task.role}】完成探索 · 状态: {ev_status} (耗时 {elapsed}s)")
 
-    transition: AuditableAgentTransition = {
-        "agent_id": ctx.conversation_id,
-        "role": task.role,
-        "type_name": task.task_id,
-        "state_from": "SPAWNED",
-        "state_to": "COMPLETED" if ev_status != "error" else "PARTIAL_OR_FAILED",
-        "decision_rationale": rationale,
-        "tools": tools_records,
-        "elapsed": elapsed,
-        "scratch_files": scratch_files,
-    }
-    tool_counts: Dict[str, int] = {}
-    for tr in tools_records:
-        tname = tr["tool_name"]
-        tool_counts[tname] = tool_counts.get(tname, 0) + 1
+        transition: AuditableAgentTransition = {
+            "agent_id": ctx.conversation_id,
+            "role": task.role,
+            "type_name": task.task_id,
+            "state_from": "SPAWNED",
+            "state_to": "COMPLETED" if ev_status != "error" else "PARTIAL_OR_FAILED",
+            "decision_rationale": rationale,
+            "tools": tools_records,
+            "elapsed": elapsed,
+            "scratch_files": scratch_files,
+        }
+        tool_counts: Dict[str, int] = {}
+        for tr in tools_records:
+            tname = tr["tool_name"]
+            tool_counts[tname] = tool_counts.get(tname, 0) + 1
 
-    evidence: EvidenceRecord = {
-        "evidence_id": task.task_id,
-        "subagent_id": ctx.conversation_id,
-        "role": task.role,
-        "channel": channel,
-        "goal": task.goal,
-        "status": ev_status,
-        "summary": session.after_tool_sanitize(final_summary)[0],
-        "key_metrics": key_metrics,
-        "gaps_or_errors": gaps_or_errors,
-        "platform_items": {k: v[:20] for k, v in platform_buckets.items() if v},
-        "tool_counts": tool_counts,
-        "elapsed": elapsed,
-    }
-    return attach_route_delta({"evidence_pool": [evidence], "audit_trail": [transition]}, sub_route_events, sub_last_ep)
+        evidence: EvidenceRecord = {
+            "evidence_id": task.task_id,
+            "subagent_id": ctx.conversation_id,
+            "role": task.role,
+            "channel": channel,
+            "goal": task.goal,
+            "status": ev_status,
+            "summary": session.after_tool_sanitize(final_summary)[0],
+            "key_metrics": key_metrics,
+            "gaps_or_errors": gaps_or_errors,
+            "platform_items": {k: v[:20] for k, v in platform_buckets.items() if v},
+            "tool_counts": tool_counts,
+            "elapsed": elapsed,
+        }
+        return attach_route_delta({"evidence_pool": [evidence], "audit_trail": [transition]}, sub_route_events, sub_last_ep)
+    finally:
+        ctx.cleanup()

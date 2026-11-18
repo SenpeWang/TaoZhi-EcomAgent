@@ -123,3 +123,96 @@ def test_queue_relay_loop_respects_external_stop_event():
     stop.set()
     # 若未响应外部 STOP 将死循环卡死
     queue.relay_loop(stop_event=stop)
+
+
+def test_batch_sources_validity_matches_single_checks():
+    """验证 batch_sources_validity 批量权限与单条 sources_valid 判定完全等价且仅用批量 SQL。"""
+    from taozhi.domain.entities import Principal
+    from taozhi.infrastructure.persistence.access_repo import batch_sources_validity
+
+    p = Principal(
+        id="u_staff",
+        tenant_id="t1",
+        username="staff1",
+        display_name="员工",
+        system_admin=False,
+        version=1,
+        must_change=False,
+        memberships=[{"node_id": "n1", "role": "employee"}],
+        nodes={"n1": {"id": "n1", "kind": "team", "parent_id": "root"}, "root": {"id": "root", "kind": "company", "parent_id": None}},
+    )
+    docs = [
+        {"id": "d_ok", "tenant_id": "t1", "node_id": "n1", "scope": "org", "level": 1, "state": "published", "current_version": 2, "acl_version": 3, "ai_allowed": True},
+        {"id": "d_l3", "tenant_id": "t1", "node_id": "root", "scope": "company", "level": 3, "state": "published", "current_version": 1, "acl_version": 1, "ai_allowed": True},
+    ]
+    jobs = [
+        {"id": "j_ok", "sources": [{"kind": "document", "document_id": "d_ok", "version": 2, "acl_version": 3}]},
+        {"id": "j_stale", "sources": [{"kind": "document", "document_id": "d_ok", "version": 1, "acl_version": 3}]},
+        {"id": "j_denied", "sources": [{"kind": "document", "document_id": "d_l3", "version": 1, "acl_version": 1}]},
+        {"id": "j_empty", "sources": []},
+    ]
+    with patch(
+        "taozhi.infrastructure.persistence.access_repo.fetch_all",
+        side_effect=[docs, []],
+    ) as mock_fetch:
+        res = batch_sources_validity(MagicMock(), p, jobs)
+
+    assert res == {"j_ok": True, "j_stale": False, "j_denied": False, "j_empty": True}
+    assert mock_fetch.call_count == 2
+
+
+def test_semantic_cache_invalidates_across_processes_on_epoch_bump():
+    """跨进程 tenants.epoch 递增时，Worker 内存 SemanticCache 必须自动驱逐旧纪元缓存。"""
+    import numpy as np
+    from taozhi.knowledge.semantic_cache import SemanticCache
+
+    vec = np.ones((1, 512), dtype="float32")
+    vec /= np.linalg.norm(vec)
+    sc = SemanticCache(similarity_threshold=0.90, ttl_seconds=600)
+    with (
+        patch("taozhi.knowledge.semantic_cache.embedding_available", return_value=True),
+        patch("taozhi.knowledge.semantic_cache.encode_query", return_value=vec),
+    ):
+        assert sc.put("t1", "钢化膜厚度是多少", "0.33mm", [], [{"document_id": "d1"}], input_level=1, epoch=10)
+        assert sc.get("t1", "钢化膜厚度是多少", input_level=1, epoch=10) is not None
+        assert sc.get("t1", "钢化膜厚度是多少", input_level=1, epoch=11) is None
+
+
+def test_prune_expired_runtime_records_cleans_dead_rows():
+    """验证 Worker 定时回收会清理过期会话、登录锁定与已完结 ask 检查点。"""
+    executed: list[str] = []
+    fake_conn = MagicMock()
+    fake_conn.execute.side_effect = lambda sql, params=None: executed.append(sql) or MagicMock()
+    with patch("taozhi.infrastructure.persistence.job_repo.fetch_one", return_value={"tbl": "checkpoints"}):
+        job_repo.prune_expired_runtime_records(fake_conn)
+
+    joined = "\n".join(executed)
+    assert "DELETE FROM worker_heartbeats" in joined
+    assert "DELETE FROM sessions" in joined
+    assert "DELETE FROM login_attempts" in joined
+    assert "kind='ask'" in joined
+
+
+def test_subagent_worker_cleans_sandbox_even_on_error(tmp_path):
+    """子智能体执行过程中发生异常时，finally 仍应清理临时 scratch 与 workspace。"""
+    from taozhi.application.research import subagents
+    from taozhi.core.agent.context import SubagentContext
+    from taozhi.core.agent.protocol import WorkspaceMode
+
+    sandbox = SubagentContext(conversation_id="sub_err_gc", role="专员", workspace_mode=WorkspaceMode.BRANCH, root_dir=tmp_path)
+    sandbox.write_scratch("tmp.json", "{}")
+    assert sandbox.scratch_dir.exists()
+
+    with (
+        patch("taozhi.application.research.subagents.AgentSession.open_subagent_sandbox", return_value=sandbox),
+        patch("taozhi.application.research.subagents._plan_subagent_step", side_effect=RuntimeError("boom")),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        subagents.subagent_worker_node(
+            {
+                "current_task": {"task_id": "t_err", "role": "专员", "goal": "测试", "allowed_tools": ["search_web"]},
+                "user_query": "test",
+                "keyword": "test",
+            }
+        )
+    assert not sandbox.scratch_dir.exists()

@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import logging
 import secrets
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterator
 
-from taozhi.application.rag.state import validate_task_execution
+from taozhi.application.rag.state import empty_token_usage, validate_task_execution
 from taozhi.application.rag.workflow import build_question_workflow
 from taozhi.application.research.graph import build_autonomous_agent_graph, execute_autonomous_agents
 from taozhi.application.services import document_service
@@ -18,15 +20,45 @@ from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
 from taozhi.domain.rag_verification import SPECIALIST_AGENTS
 from taozhi.infrastructure.persistence import bi_repo, job_repo
-from taozhi.infrastructure.persistence.access_repo import audit, load_principal, sources_valid
+from taozhi.infrastructure.persistence.access_repo import (
+    audit,
+    batch_sources_validity,
+    can_read_metric,
+    load_principal,
+    sources_valid,
+)
 from taozhi.knowledge import metrics as metrics_mod
 from taozhi.knowledge.business import lookup as business_lookup
-from taozhi.knowledge.db import database_connection
+from taozhi.knowledge.db import autocommit_connection, database_connection, fetch_one
 from taozhi.knowledge.retriever import search_documents
 from taozhi.knowledge.semantic_cache import get_semantic_cache
 from taozhi.observability.tracing import current_trace_id, node_span
 
 _LOG = logging.getLogger("taozhi.application.task_service")
+_CHECKPOINTER_SETUP_LOCK = threading.Lock()
+_CHECKPOINTER_SETUP_DSNS: set[str] = set()
+
+
+@contextmanager
+def _postgres_checkpointer(dsn: str | None = None) -> Iterator[Any]:
+    """从连接池复用自动提交连接打开 LangGraph PostgresSaver（每个 DSN 仅建表 setup 一次）。"""
+    from langgraph.checkpoint.postgres import PostgresSaver
+
+    conn_str = dsn or load_config().dsn
+    with autocommit_connection(conn_str) as conn:
+        saver = PostgresSaver(conn)
+        if conn_str not in _CHECKPOINTER_SETUP_DSNS:
+            with _CHECKPOINTER_SETUP_LOCK:
+                if conn_str not in _CHECKPOINTER_SETUP_DSNS:
+                    saver.setup()
+                    _CHECKPOINTER_SETUP_DSNS.add(conn_str)
+        yield saver
+
+
+def _tenant_epoch(conn: Any, tenant_id: str) -> int:
+    """读取租户权限/资料变更代际号（tenants.epoch），用于跨进程失效内存语义缓存。"""
+    row = fetch_one(conn, "SELECT epoch FROM tenants WHERE id=%s", (tenant_id,))
+    return int((row or {}).get("epoch") or 1)
 
 
 def _diff_ms(start_dt: Any, end_dt: Any = None) -> int:
@@ -72,13 +104,15 @@ def submit_task(
 
 
 def list_tasks(p: Principal) -> list[dict[str, Any]]:
-    """列出当前用户有权限查看的问答与调研任务。"""
+    """列出当前用户有权限查看的问答与调研任务（批量预检验来源以消除 N+1 查询）。"""
     with database_connection() as c:
         rows = job_repo.list_ask_and_research_jobs(c, p.tenant_id)
+        permitted = [r for r in rows if can_task(p, r)]
+        validity = batch_sources_validity(c, p, permitted)
         return [
-            job_repo.present_job(c, p, r, False)
-            for r in rows
-            if can_task(p, r) and (r["owner_id"] == p.id or sources_valid(c, p, r["sources"]))
+            job_repo.present_job(c, p, r, False, valid_override=validity.get(r["id"], False))
+            for r in permitted
+            if r["owner_id"] == p.id or validity.get(r["id"], False)
         ]
 
 
@@ -123,10 +157,7 @@ def steer_task(p: Principal, task_id: str, *, text: str, request_id: str = "") -
         audit(c, p, "中途动态干预", task_id, r["node_id"], r["input_level"], detail={"request_id": steer_id})
 
     try:
-        from langgraph.checkpoint.postgres import PostgresSaver
-
-        with PostgresSaver.from_conn_string(load_config().dsn) as saver:
-            saver.setup()
+        with _postgres_checkpointer() as saver:
             graph = build_autonomous_agent_graph(checkpointer=saver, require_checkpointer=True)
             thread_id = f"research_{task_id}_{run_ver}"
             cfg = {"configurable": {"thread_id": thread_id}}
@@ -271,7 +302,9 @@ def get_dashboard_summary(p: Principal) -> dict[str, Any]:
     docs = document_service.list_documents(p)
     with database_connection() as c:
         jobs = job_repo.list_ask_jobs(c, p.tenant_id)
-        visible = [r for r in jobs if can_task(p, r) and sources_valid(c, p, r["sources"])]
+        permitted = [r for r in jobs if can_task(p, r)]
+        validity = batch_sources_validity(c, p, permitted)
+        visible = [r for r in permitted if validity.get(r["id"], False)]
     settings = get_settings()
     return dict(
         documents=len(docs),
@@ -291,7 +324,7 @@ def get_bi_dashboard(p: Principal, days: int) -> dict[str, Any]:
     def run(key: str, intent: dict | None = None) -> dict[str, Any] | None:
         with database_connection() as c:
             m = bi_repo.get_published_metric_by_key(c, p.tenant_id, key)
-            if not m or not metrics_mod.can_read_metric(c, p, m):
+            if not m or not can_read_metric(c, p, m):
                 return None
             try:
                 cols, rows, meta = metrics_mod.execute_metric(c, p, m, intent or {})
@@ -377,12 +410,19 @@ def get_bi_dashboard(p: Principal, days: int) -> dict[str, Any]:
 
 
 def _try_answer_from_semantic_cache(job: dict[str, Any], cache: Any, queue_wait_ms: int) -> bool:
-    """检索语义缓存并在来源权限实时有效时直接回填问答终态。"""
+    """检索语义缓存并在来源权限实时有效时直接回填问答终态（同步租户跨进程代际水位）。"""
     with database_connection() as c:
         p = load_principal(c, job["owner_id"])
+        epoch = _tenant_epoch(c, job["tenant_id"])
         cached = None
         for _ in range(5):
-            cand = cache.get(job["tenant_id"], job["question"], input_level=job["input_level"], boss=p.boss)
+            cand = cache.get(
+                job["tenant_id"],
+                job["question"],
+                input_level=job["input_level"],
+                boss=p.boss,
+                epoch=epoch,
+            )
             if not cand:
                 break
             if cand.get("sources") and sources_valid(c, p, cand.get("sources", [])):
@@ -409,17 +449,7 @@ def _try_answer_from_semantic_cache(job: dict[str, Any], cache: Any, queue_wait_
             cache_hit=True,
             similarity=cached["similarity"],
             timing={"queue_wait_ms": queue_wait_ms, "cache_lookup_ms": cached["latency_ms"], "e2e_ms": e2e_ms},
-            token_usage={
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
-                "cost_usd": 0.0,
-                "llm_attempts": 0,
-                "llm_errors": 0,
-                "failovers": 0,
-                "json_retries": 0,
-                "by_role": {},
-            },
+            token_usage=empty_token_usage(),
             degraded={},
         )
         job_repo.complete_job(
@@ -448,17 +478,7 @@ def _build_question_result(
     timing = dict(state.get("timing") or {})
     timing["queue_wait_ms"] = queue_wait_ms
     timing["e2e_ms"] = e2e_ms
-    token_usage = state.get("token_usage") or {
-        "prompt_tokens": 0,
-        "completion_tokens": 0,
-        "total_tokens": 0,
-        "cost_usd": 0.0,
-        "llm_attempts": 0,
-        "llm_errors": 0,
-        "failovers": 0,
-        "json_retries": 0,
-        "by_role": {},
-    }
+    token_usage = state.get("token_usage") or empty_token_usage()
     result = dict(
         answer=state["answer"],
         citations=citations,
@@ -492,10 +512,7 @@ def process_question_job(job: dict[str, Any]) -> None:
     if _try_answer_from_semantic_cache(job, cache, queue_wait_ms):
         return
 
-    from langgraph.checkpoint.postgres import PostgresSaver
-
-    with PostgresSaver.from_conn_string(load_config().dsn) as saver:
-        saver.setup()
+    with _postgres_checkpointer() as saver:
         flow = build_question_workflow(saver)
         with node_span("worker.question", {"job_id": job["id"], "kind": "ask"}):
             state = flow.invoke(
@@ -532,6 +549,9 @@ def process_question_job(job: dict[str, Any]) -> None:
             sources=state["sources"],
             input_level=state["input_level"],
         )
+        epoch = _tenant_epoch(c, p.tenant_id)
+        if status == "completed":
+            job_repo.delete_checkpoint_threads(c, [f"{job['id']}:{job['run_version']}"])
 
     if not state.get("hard_block") and not state.get("review") and state.get("answer") and not state.get("data_result"):
         try:
@@ -543,6 +563,7 @@ def process_question_job(job: dict[str, Any]) -> None:
                 state.get("sources", []),
                 state.get("input_level", job["input_level"]),
                 redacted=not p.boss,
+                epoch=epoch,
             )
         except Exception as exc:
             _LOG.warning("写入问答语义缓存失败 (%s): %s", job["id"], exc)
@@ -550,7 +571,6 @@ def process_question_job(job: dict[str, Any]) -> None:
 
 def process_research_job(job: dict[str, Any]) -> None:
     """运行多智能体市场调研主副协作图并回传终态报告。"""
-    from langgraph.checkpoint.postgres import PostgresSaver
 
     def emit(stage: str, progress: int) -> None:
         with database_connection() as c:
@@ -572,8 +592,7 @@ def process_research_job(job: dict[str, Any]) -> None:
     keyword = (job.get("payload") or {}).get("keyword") or job["question"]
     initial_steering = (job.get("payload") or {}).get("steering_inputs") or []
 
-    with PostgresSaver.from_conn_string(cfg.dsn) as saver:
-        saver.setup()
+    with _postgres_checkpointer(cfg.dsn) as saver:
         result = execute_autonomous_agents(
             keyword=keyword,
             user_query=job["question"],

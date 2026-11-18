@@ -87,10 +87,22 @@ class SemanticCache:
         self._entries: Dict[str, List[CacheEntry]] = {}
         # {tenant_id: np.ndarray(N, 512)}
         self._matrices: Dict[str, np.ndarray] = {}
+        # {tenant_id: int} 跨进程租户权限/资料代际水位（对齐 tenants.epoch）
+        self._tenant_epochs: Dict[str, int] = {}
 
         # 监控统计
         self._hits = 0
         self._misses = 0
+
+    def _sync_epoch_unlocked(self, tenant_id: str, epoch: Optional[int]) -> None:
+        """在持有锁的前提下比对租户代际版本；若发生跨进程撤权或删改则清空旧缓存。"""
+        if epoch is None:
+            return
+        prev = self._tenant_epochs.get(tenant_id)
+        if prev is not None and prev != int(epoch):
+            self._entries.pop(tenant_id, None)
+            self._matrices.pop(tenant_id, None)
+        self._tenant_epochs[tenant_id] = int(epoch)
 
     def _rebuild_matrix(self, tenant_id: str) -> None:
         """重构租户向量矩阵，供矩阵点积批量加速。"""
@@ -106,6 +118,7 @@ class SemanticCache:
         query: str,
         input_level: int = 1,
         boss: bool = False,
+        epoch: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """检索语义缓存。
 
@@ -115,6 +128,7 @@ class SemanticCache:
             input_level: 当前用户密级上限（缓存内容不能高于此密级）。
             boss: 命中者是否老板。决定要不要对未脱敏的缓存内容重新脱敏；
                 默认 False，即缺省按最严格口径处理。
+            epoch: 可选租户权限代际号（``tenants.epoch``），跨进程变化时自动淘汰旧条目。
 
         Returns:
             若命中则返回包含 answer, citations, sources, similarity 的字典，未命中返回 None。
@@ -134,6 +148,7 @@ class SemanticCache:
             return None
 
         with self._lock:
+            self._sync_epoch_unlocked(tenant_id, epoch)
             entries = self._entries.get(tenant_id, [])
             matrix = self._matrices.get(tenant_id)
             if not entries or matrix is None or len(matrix) == 0:
@@ -210,10 +225,12 @@ class SemanticCache:
         sources: List[Dict[str, Any]],
         input_level: int = 1,
         redacted: bool = False,
+        epoch: Optional[int] = None,
     ) -> bool:
         """将高质量权威答案与证据写入语义缓存。
 
-        redacted 记的是这批内容有没有脱敏过（boss 的答案没有），命中时据此对齐。
+        redacted 记的是这批内容有没有脱敏过（boss 的答案没有），命中时据此对齐；
+        可选传入 epoch（``tenants.epoch``）以支持 API↔Worker 跨进程权限失效感知。
         """
         if not embedding_available() or not answer.strip():
             return False
@@ -224,6 +241,7 @@ class SemanticCache:
             return False
 
         with self._lock:
+            self._sync_epoch_unlocked(tenant_id, epoch)
             entries = self._entries.setdefault(tenant_id, [])
             if len(entries) >= self.max_entries_per_tenant:
                 # LRU / 最少命中淘汰
@@ -279,9 +297,11 @@ class SemanticCache:
             if tenant_id:
                 self._entries.pop(tenant_id, None)
                 self._matrices.pop(tenant_id, None)
+                self._tenant_epochs.pop(tenant_id, None)
             else:
                 self._entries.clear()
                 self._matrices.clear()
+                self._tenant_epochs.clear()
 
     def stats(self) -> Dict[str, Any]:
         """返回缓存统计监控指标。"""

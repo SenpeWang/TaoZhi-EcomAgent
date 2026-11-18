@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import threading
+import time
 from typing import Any
 
 from taozhi.config import load_config
@@ -40,9 +42,13 @@ def list_ask_and_research_jobs(conn: Any, tenant_id: str, limit: int = 500) -> l
     )
 
 
-def list_ask_jobs(conn: Any, tenant_id: str) -> list[dict]:
-    """列出租户下所有问答任务（用于工作台概览统计）。"""
-    return fetch_all(conn, "SELECT * FROM jobs WHERE tenant_id=%s AND kind='ask'", (tenant_id,))
+def list_ask_jobs(conn: Any, tenant_id: str, limit: int = 2000) -> list[dict]:
+    """按时间倒序列出租户问答任务（用于工作台概览统计，设置上限防止全表无限加载）。"""
+    return fetch_all(
+        conn,
+        "SELECT * FROM jobs WHERE tenant_id=%s AND kind='ask' ORDER BY created_at DESC LIMIT %s",
+        (tenant_id, limit),
+    )
 
 
 def count_jobs_by_state(conn: Any, tenant_id: str) -> list[dict]:
@@ -262,11 +268,49 @@ def claim_job_by_id(job_id: str, worker_id: str | None = None) -> dict | None:
         )
 
 
+def delete_checkpoint_threads(conn: Any, thread_patterns: list[str]) -> None:
+    """按 thread_id 模式批量清理 LangGraph PostgresSaver 三张检查点表。"""
+    if not thread_patterns:
+        return
+    for tbl in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+        exists = fetch_one(conn, "SELECT to_regclass(%s) AS tbl", (tbl,))
+        if exists and exists.get("tbl"):
+            conn.execute(f"DELETE FROM {tbl} WHERE thread_id LIKE ANY(%s)", (thread_patterns,))
+
+
+def prune_expired_runtime_records(conn: Any) -> None:
+    """回收超过 24 小时的离线心跳、过期/已吊销会话、登录锁定与已终结单轮问答检查点。"""
+    conn.execute("DELETE FROM worker_heartbeats WHERE updated_at<now()-interval '1 day'")
+    conn.execute("DELETE FROM sessions WHERE revoked OR expires_at<now()-interval '1 day'")
+    conn.execute("DELETE FROM login_attempts WHERE updated_at<now()-interval '1 day'")
+    for tbl in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+        exists = fetch_one(conn, "SELECT to_regclass(%s) AS tbl", (tbl,))
+        if exists and exists.get("tbl"):
+            conn.execute(
+                f"DELETE FROM {tbl} WHERE thread_id LIKE %s ESCAPE '\\' "
+                "AND split_part(thread_id, ':', 1) IN ("
+                "SELECT id FROM jobs WHERE kind='ask' AND state IN ('completed','failed','cancelled','rejected')"
+                ")",
+                (r"task\_%:%",),
+            )
+
+
+_PRUNE_LOCK = threading.Lock()
+_LAST_PRUNE_AT = 0.0
+
+
 def touch_worker_heartbeat(conn: Any, worker_id: str, prune: bool = False) -> None:
-    """刷新 Worker 心跳并按需清理 1 天前的离线心跳。"""
+    """刷新 Worker 心跳；开启 prune 时按 5 分钟节流窗口自动执行运行期垃圾回收。"""
+    global _LAST_PRUNE_AT
     conn.execute("INSERT INTO worker_heartbeats(id) VALUES(%s) ON CONFLICT(id) DO UPDATE SET updated_at=now()", (worker_id,))
-    if prune:
-        conn.execute("DELETE FROM worker_heartbeats WHERE updated_at<now()-interval '1 day'")
+    if not prune:
+        return
+    now_mono = time.monotonic()
+    with _PRUNE_LOCK:
+        if now_mono - _LAST_PRUNE_AT < 300.0:
+            return
+        _LAST_PRUNE_AT = now_mono
+    prune_expired_runtime_records(conn)
 
 
 def renew_lease_once(conn: Any, job_id: str, run_version: int, worker_id: str, lease_seconds: int) -> None:
@@ -378,11 +422,7 @@ def delete_research_conversation_records(conn: Any, tenant_id: str, owner_id: st
     conn.execute("DELETE FROM jobs WHERE tenant_id=%s AND id = ANY(%s)", (tenant_id, job_ids))
 
     # 同步清理 LangGraph PostgresSaver 遗留检查点，防止长期增长
-    patterns = [f"research_{jid}_%" for jid in job_ids]
-    for tbl in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
-        exists = fetch_one(conn, "SELECT to_regclass(%s) AS tbl", (tbl,))
-        if exists and exists.get("tbl"):
-            conn.execute(f"DELETE FROM {tbl} WHERE thread_id LIKE ANY(%s)", (patterns,))
+    delete_checkpoint_threads(conn, [f"research_{jid}_%" for jid in job_ids])
 
 
 def mark_job_cancelled(conn: Any, job_id: str) -> None:
@@ -444,7 +484,14 @@ def save_task_review(conn: Any, tenant_id: str, job_id: str, reviewer_id: str, a
     )
 
 
-def present_job(conn: Any, p: Any, job: dict, full: bool = True) -> dict:
+def present_job(
+    conn: Any,
+    p: Any,
+    job: dict,
+    full: bool = True,
+    *,
+    valid_override: bool | None = None,
+) -> dict:
     """按当前用户权限与来源实时有效状态构造任务展示视图。
 
     Args:
@@ -452,13 +499,15 @@ def present_job(conn: Any, p: Any, job: dict, full: bool = True) -> dict:
         p: 当前请求主体。
         job: 原始任务行字典。
         full: 是否展开 result 与完整事件时间线。
+        valid_override: 可选批量预校验的来源有效性布尔值（避免列表场景重复查询）。
 
     Returns:
         已完成字段脱敏与越权过滤的展示字典。
     """
     if not can_task(p, job):
         raise Denied("任务不存在或没有访问权限", "NOT_FOUND", 404)
-    valid = job["state"] != "legacy" and sources_valid(conn, p, job["sources"])
+    source_ok = valid_override if valid_override is not None else sources_valid(conn, p, job["sources"])
+    valid = job["state"] != "legacy" and source_ok
     result = job["result"] if valid and (job["state"] == "completed" or (job["state"] == "review" and can_review(p, job))) else None
     is_privileged_viewer = p.boss or p.id == job["owner_id"]
     events = []

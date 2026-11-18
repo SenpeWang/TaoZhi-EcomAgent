@@ -167,8 +167,10 @@ def run_agent_evaluations(
     # 联动 Phoenix
     if sync_phoenix:
         try:
+            from taozhi.config import resolve_runtime_dir
+
             print("🚀 正在将评测遥测同步至 Arize Phoenix ...")
-            runtime_base = Path(os.environ.get("ECOM_RUNTIME_DIR", str(Path.home() / ".local/share/ecom-agent")))
+            runtime_base = resolve_runtime_dir()
             py_bin = runtime_base / "phoenix-venv/bin/python"
             if not py_bin.is_file():
                 py_bin = Path(sys.executable)

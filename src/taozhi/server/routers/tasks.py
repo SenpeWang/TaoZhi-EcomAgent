@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
@@ -96,11 +97,16 @@ async def events(task_id: str, request: Request, after: int = Query(0, ge=0), p=
 
     async def stream():
         cursor = after
+        current = p
+        last_reauth = time.monotonic()
         for _ in range(1200):
             if await request.is_disconnected():
                 return
             try:
-                current = await asyncio.to_thread(identity, request)
+                now = time.monotonic()
+                if now - last_reauth >= 5.0:
+                    current = await asyncio.to_thread(identity, request)
+                    last_reauth = now
                 allowed, rows, terminal = await asyncio.to_thread(task_service.poll_task_events, current, task_id, cursor)
                 if not allowed:
                     return
@@ -108,6 +114,11 @@ async def events(task_id: str, request: Request, after: int = Query(0, ge=0), p=
                     cursor = row["id"]
                     yield f"id: {cursor}\ndata: {json.dumps(row, ensure_ascii=False)}\n\n"
                 if terminal is not None:
+                    # 终态回执前强制复核当前会话与权限代际，防止最后 5 秒窗口内发生撤权
+                    current = await asyncio.to_thread(identity, request)
+                    allowed, _, _ = await asyncio.to_thread(task_service.poll_task_events, current, task_id, cursor)
+                    if not allowed:
+                        return
                     yield f"event: done\ndata: {json.dumps(terminal, default=str, ensure_ascii=False)}\n\n"
                     return
             except Denied:

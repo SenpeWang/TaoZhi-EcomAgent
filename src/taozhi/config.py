@@ -136,7 +136,7 @@ class Config:
     minio_secure: bool = True
     presign_ttl: int = 600
     blob_dual_write: bool = False
-    runtime_dir: Path = Path.home() / ".local/share/ecom-agent"
+    runtime_dir: Path = Path.home() / ".local" / "share" / "ecom-agent"
     kafka_enabled: bool = False
     kafka_brokers: str = "127.0.0.1:9092"
     kafka_topic: str = "ecom.tasks"
@@ -192,6 +192,15 @@ class Config:
     quick_eval_password: str = ""
 
 
+def resolve_runtime_dir(env_values: dict[str, str | None] | None = None) -> Path:
+    """按环境变量或用户默认状态目录解析运行时根目录（不依赖数据库连接）。"""
+    env_map = os.environ if env_values is None else env_values
+    raw = str(env_map.get("ECOM_RUNTIME_DIR") or "").strip()
+    if raw:
+        return Path(raw)
+    return Path.home() / ".local" / "share" / "ecom-agent"
+
+
 def load_config() -> Config:
     """从 ECOM_ENV_FILE 与进程环境变量加载企业在线运行时配置。
 
@@ -216,56 +225,61 @@ def load_config() -> Config:
         if minio_secure_raw is None
         else minio_secure_raw == "true"
     )
-    runtime_dir = Path(values.get("ECOM_RUNTIME_DIR", str(Path.home() / ".local/share/ecom-agent")))
+    runtime_dir = resolve_runtime_dir(values)
     return Config(
-      dsn, mode, private, values.get("ECOM_TENANT_CODE","mofa"), values.get("ECOM_COOKIE_SECURE","false")=="true",
-      review_timeout=int(values.get("ECOM_REVIEW_TIMEOUT","86400")),
-      embed_service_url=values.get("ECOM_EMBED_SERVICE_URL","http://127.0.0.1:18555"),
-      hyde_enabled=values.get("ECOM_HYDE_ENABLED","true")=="true",
-      minio_enabled=values.get("ECOM_MINIO_ENABLED","false")=="true",
-      minio_endpoint=minio_ep,
-      minio_access_key=values.get("ECOM_MINIO_ACCESS_KEY",""),
-      minio_secret_key=values.get("ECOM_MINIO_SECRET_KEY",""),
-      minio_bucket=values.get("ECOM_MINIO_BUCKET","ecom-private"),
-      minio_secure=minio_secure,
-      presign_ttl=int(values.get("ECOM_PRESIGN_TTL","600")),
-      blob_dual_write=values.get("ECOM_BLOB_DUAL_WRITE","false")=="true",
-      runtime_dir=runtime_dir,
-      kafka_enabled=values.get("ECOM_KAFKA_ENABLED","false")=="true",
-      kafka_brokers=values.get("ECOM_KAFKA_BROKERS","127.0.0.1:9092"),
-      kafka_topic=values.get("ECOM_KAFKA_TOPIC","ecom.tasks"),
-      kafka_partitions=int(values.get("ECOM_KAFKA_PARTITIONS","6")),
-      es_enabled=values.get("ECOM_ES_ENABLED","false")=="true",
-      es_url=values.get("ECOM_ES_URL","http://127.0.0.1:9200"),
-      es_index=values.get("ECOM_ES_INDEX","chunks"),
-      es_analyzer=values.get("ECOM_ES_ANALYZER","ik_max_word"),
-      es_search_analyzer=values.get("ECOM_ES_SEARCH_ANALYZER","ik_smart"),
-      ann_max_distance=float(values.get("ECOM_ANN_MAX_DIST","0.45")),
-      rerank_enabled=values.get("ECOM_RERANK_ENABLED","true")=="true",
-      rerank_candidates=int(values.get("ECOM_RERANK_CANDIDATES","30")),
-      rerank_timeout=float(values.get("ECOM_RERANK_TIMEOUT","20")),
-      quote_max_chars=int(values.get("ECOM_QUOTE_MAX_CHARS","1200")),
-      rerank_chars=int(values.get("ECOM_RERANK_CHARS","1000")),
-      max_chunks_per_doc=int(values.get("ECOM_MAX_CHUNKS_PER_DOC","3")),
-      rerank_min_score=float(values.get("ECOM_RERANK_MIN_SCORE","0.05")),
-      rerank_relative=float(values.get("ECOM_RERANK_RELATIVE","0.15")),
-      chunk_size=int(values.get("ECOM_CHUNK_SIZE","850")),
-      chunk_overlap=int(values.get("ECOM_CHUNK_OVERLAP","200")),
-      adaptive_hyde=values.get("ECOM_ADAPTIVE_HYDE","true")=="true",
-      hyde_rerank_threshold=float(values.get("ECOM_HYDE_RERANK_THRESHOLD","0.65")),
-      hyde_max_tokens=int(values.get("ECOM_HYDE_MAX_TOKENS","220")),
-      hyde_passage_chars=int(values.get("ECOM_HYDE_PASSAGE_CHARS","800")),
-      recency_boost=float(values.get("ECOM_RECENCY_BOOST","0.08")),
-      entity_quota=int(values.get("ECOM_ENTITY_QUOTA","2")),
-      tfidf_max_features=int(values.get("ECOM_TFIDF_MAX_FEATURES","24000")),
-      semantic_cache_threshold=float(values.get("ECOM_SEMANTIC_CACHE_THRESHOLD","0.96")),
-      semantic_cache_ttl=int(values.get("ECOM_SEMANTIC_CACHE_TTL","3600")),
-      semantic_cache_max_entries=int(values.get("ECOM_SEMANTIC_CACHE_MAX_ENTRIES","10000")),
-      specialist_timeout=int(values.get("ECOM_SPECIALIST_TIMEOUT","45")),
-      specialist_max_tokens=int(values.get("ECOM_SPECIALIST_MAX_TOKENS","4096")),
-      specialist_concurrency=int(values.get("ECOM_SPECIALIST_CONCURRENCY","2")),
-      api_base_url=values.get("ECOM_API_BASE_URL","http://127.0.0.1:18080"),
-      quick_login=values.get("ECOM_QUICK_LOGIN","false")=="true",
-      quick_login_passwords=values.get("ECOM_QUICK_LOGIN_PASSWORDS","false")=="true",
-      quick_login_password=values.get("ECOM_QUICK_LOGIN_PASSWORD",""),
-      quick_eval_password=values.get("ECOM_QUICK_EVAL_PASSWORD",""))
+        dsn,
+        mode,
+        private,
+        values.get("ECOM_TENANT_CODE", "mofa"),
+        values.get("ECOM_COOKIE_SECURE", "false") == "true",
+        review_timeout=int(values.get("ECOM_REVIEW_TIMEOUT", "86400")),
+        embed_service_url=values.get("ECOM_EMBED_SERVICE_URL", "http://127.0.0.1:18555"),
+        hyde_enabled=values.get("ECOM_HYDE_ENABLED", "true") == "true",
+        minio_enabled=values.get("ECOM_MINIO_ENABLED", "false") == "true",
+        minio_endpoint=minio_ep,
+        minio_access_key=values.get("ECOM_MINIO_ACCESS_KEY", ""),
+        minio_secret_key=values.get("ECOM_MINIO_SECRET_KEY", ""),
+        minio_bucket=values.get("ECOM_MINIO_BUCKET", "ecom-private"),
+        minio_secure=minio_secure,
+        presign_ttl=int(values.get("ECOM_PRESIGN_TTL", "600")),
+        blob_dual_write=values.get("ECOM_BLOB_DUAL_WRITE", "false") == "true",
+        runtime_dir=runtime_dir,
+        kafka_enabled=values.get("ECOM_KAFKA_ENABLED", "false") == "true",
+        kafka_brokers=values.get("ECOM_KAFKA_BROKERS", "127.0.0.1:9092"),
+        kafka_topic=values.get("ECOM_KAFKA_TOPIC", "ecom.tasks"),
+        kafka_partitions=int(values.get("ECOM_KAFKA_PARTITIONS", "6")),
+        es_enabled=values.get("ECOM_ES_ENABLED", "false") == "true",
+        es_url=values.get("ECOM_ES_URL", "http://127.0.0.1:9200"),
+        es_index=values.get("ECOM_ES_INDEX", "chunks"),
+        es_analyzer=values.get("ECOM_ES_ANALYZER", "ik_max_word"),
+        es_search_analyzer=values.get("ECOM_ES_SEARCH_ANALYZER", "ik_smart"),
+        ann_max_distance=float(values.get("ECOM_ANN_MAX_DIST", "0.45")),
+        rerank_enabled=values.get("ECOM_RERANK_ENABLED", "true") == "true",
+        rerank_candidates=int(values.get("ECOM_RERANK_CANDIDATES", "30")),
+        rerank_timeout=float(values.get("ECOM_RERANK_TIMEOUT", "20")),
+        quote_max_chars=int(values.get("ECOM_QUOTE_MAX_CHARS", "1200")),
+        rerank_chars=int(values.get("ECOM_RERANK_CHARS", "1000")),
+        max_chunks_per_doc=int(values.get("ECOM_MAX_CHUNKS_PER_DOC", "3")),
+        rerank_min_score=float(values.get("ECOM_RERANK_MIN_SCORE", "0.05")),
+        rerank_relative=float(values.get("ECOM_RERANK_RELATIVE", "0.15")),
+        chunk_size=int(values.get("ECOM_CHUNK_SIZE", "850")),
+        chunk_overlap=int(values.get("ECOM_CHUNK_OVERLAP", "200")),
+        adaptive_hyde=values.get("ECOM_ADAPTIVE_HYDE", "true") == "true",
+        hyde_rerank_threshold=float(values.get("ECOM_HYDE_RERANK_THRESHOLD", "0.65")),
+        hyde_max_tokens=int(values.get("ECOM_HYDE_MAX_TOKENS", "220")),
+        hyde_passage_chars=int(values.get("ECOM_HYDE_PASSAGE_CHARS", "800")),
+        recency_boost=float(values.get("ECOM_RECENCY_BOOST", "0.08")),
+        entity_quota=int(values.get("ECOM_ENTITY_QUOTA", "2")),
+        tfidf_max_features=int(values.get("ECOM_TFIDF_MAX_FEATURES", "24000")),
+        semantic_cache_threshold=float(values.get("ECOM_SEMANTIC_CACHE_THRESHOLD", "0.96")),
+        semantic_cache_ttl=int(values.get("ECOM_SEMANTIC_CACHE_TTL", "3600")),
+        semantic_cache_max_entries=int(values.get("ECOM_SEMANTIC_CACHE_MAX_ENTRIES", "10000")),
+        specialist_timeout=int(values.get("ECOM_SPECIALIST_TIMEOUT", "45")),
+        specialist_max_tokens=int(values.get("ECOM_SPECIALIST_MAX_TOKENS", "4096")),
+        specialist_concurrency=int(values.get("ECOM_SPECIALIST_CONCURRENCY", "2")),
+        api_base_url=values.get("ECOM_API_BASE_URL", "http://127.0.0.1:18080"),
+        quick_login=values.get("ECOM_QUICK_LOGIN", "false") == "true",
+        quick_login_passwords=values.get("ECOM_QUICK_LOGIN_PASSWORDS", "false") == "true",
+        quick_login_password=values.get("ECOM_QUICK_LOGIN_PASSWORD", ""),
+        quick_eval_password=values.get("ECOM_QUICK_EVAL_PASSWORD", ""),
+    )

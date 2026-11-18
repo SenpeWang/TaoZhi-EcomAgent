@@ -181,9 +181,10 @@ def consume_forever(
                     continue
                 job_id = (msg.value or {}).get("job_id", "")
                 job = claim_job_by_id(job_id, worker_id=wid) if job_id else None
+                # 抢占状态已持久化落库（含租约与 sweep 兜底），立即提交偏移量避免长耗时任务阻塞重平衡
+                consumer.commit()
                 if job:
                     run_job(job)
-                consumer.commit()
                 if time.time() - last_sweep >= 5:
                     sweep()
                     last_sweep = time.time()

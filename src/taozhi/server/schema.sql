@@ -130,3 +130,6 @@ CREATE INDEX idx_chunks_doc ON chunks(tenant_id,document_id,version);
 CREATE INDEX idx_grants_user ON document_grants(tenant_id,user_id,expires_at);
 CREATE INDEX idx_audit_tenant ON audit_events(tenant_id,created_at DESC);
 CREATE INDEX idx_sessions_user ON sessions(tenant_id,user_id);
+CREATE INDEX idx_sessions_expires ON sessions(expires_at);
+CREATE INDEX idx_task_events_job_cursor ON task_events(tenant_id,job_id,id);
+CREATE INDEX idx_model_calls_job ON model_calls(job_id);

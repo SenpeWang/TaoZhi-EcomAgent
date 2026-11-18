@@ -15,15 +15,14 @@ from typing import Any, Dict, List
 
 import httpx
 
+from taozhi.config import resolve_runtime_dir
+
 _LOG = logging.getLogger(__name__)
 
 
 def _resolve_runtime_dir() -> Path:
-    """按环境变量或默认位置解析运维脚本根目录，避免跨模块强依赖 DB 配置。"""
-    env_dir = os.environ.get("ECOM_RUNTIME_DIR", "").strip()
-    if env_dir:
-        return Path(env_dir)
-    return Path.home() / ".local/share/ecom-agent"
+    """委托 config.resolve_runtime_dir 解析运维脚本根目录。"""
+    return resolve_runtime_dir()
 
 
 def search_1688_wholesale(

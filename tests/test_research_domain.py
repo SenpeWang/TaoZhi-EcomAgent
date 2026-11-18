@@ -432,7 +432,7 @@ def test_process_research_job_reads_budgets_from_settings():
             "taozhi.application.services.task_service.job_repo.get_job_by_id",
             return_value={"state": "running", "run_version": 1, "cancel_requested": False},
         ),
-        patch("langgraph.checkpoint.postgres.PostgresSaver.from_conn_string", _fake_saver),
+        patch("taozhi.application.services.task_service._postgres_checkpointer", _fake_saver),
         patch("taozhi.application.services.task_service.execute_autonomous_agents", side_effect=_fake_execute),
     ):
         process_research_job(job)
