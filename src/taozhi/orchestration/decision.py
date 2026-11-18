@@ -1,9 +1,7 @@
 """编排层离散决策与意图路由引擎。
 
-为智能体任务编排与多专家路由提供高确定性、低延迟、强类型的离散决策原语：
-- Choice: 离散类别与角色路由选择（基于本地向量余弦近邻、规则兜底或模型约束裁决）
-- Score: 连续标量评估（在指定区间内按准则打分）
-- Verify: 布尔断言核验（True/False 条件裁决）
+为智能体任务编排与多专家路由提供高确定性、低延迟、强类型的 Choice 离散类别选择原语
+（基于本地向量余弦近邻、规则兜底或模型约束裁决）。
 """
 
 from __future__ import annotations
@@ -37,24 +35,6 @@ class ChoiceResult(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, description="决策综合置信度")
     distribution: Dict[str, float] = Field(default_factory=dict, description="所有候选项的概率分布")
     rationale: str = Field(description="决策理由或推导依据")
-    path: DecisionPath = Field(description="实际执行路径")
-    latency_ms: float = Field(description="决策耗时（毫秒）")
-
-
-class ScoreResult(BaseModel):
-    """Score 原语决策结果。"""
-    score: float = Field(description="标量评分")
-    confidence: float = Field(ge=0.0, le=1.0, description="评分置信度")
-    rationale: str = Field(description="评分理由")
-    path: DecisionPath = Field(description="实际执行路径")
-    latency_ms: float = Field(description="决策耗时（毫秒）")
-
-
-class VerificationResult(BaseModel):
-    """布尔断言核验结果。"""
-    value: bool = Field(description="断言是否成立")
-    confidence: float = Field(ge=0.0, le=1.0, description="判断置信度")
-    rationale: str = Field(description="判断理由")
     path: DecisionPath = Field(description="实际执行路径")
     latency_ms: float = Field(description="决策耗时（毫秒）")
 
@@ -296,130 +276,6 @@ class DecisionEngine:
             confidence=0.5,
             distribution={fallback_key: 1.0},
             rationale="系统降级采用首选默认项",
-            path=DecisionPath.HEURISTIC_FALLBACK,
-            latency_ms=round(elapsed, 2),
-        )
-
-    def score(
-        self,
-        context: str,
-        criterion: str,
-        scale: Tuple[float, float] = (0.0, 1.0),
-    ) -> ScoreResult:
-        """执行标量打分评估（Score 原语）。
-
-        评估 context 是否满足 criterion 指定的评估准则。
-
-        Args:
-            context: 待评估内容。
-            criterion: 评估维度与打分规则。
-            scale: 允许的分值区间 (min, max)。
-
-        Returns:
-            ScoreResult: 标量分值、置信度与评估理由。
-        """
-        start_time = time.monotonic()
-        from ..ai import LLMClient, ModelTier
-        from langchain_core.output_parsers import JsonOutputParser
-
-        min_val, max_val = scale
-        system_prompt = f"""你是智能体评估核验引擎（Decision Primitive: Score）。
-请根据评估准则，对目标内容进行客观打分，范围为 [{min_val}, {max_val}]。
-
-【评估准则】
-{criterion}
-
-【输出格式】
-必须只输出严格的 JSON 对象：
-{{"score": 0.85, "confidence": 0.90, "rationale": "打分理由"}}
-"""
-        try:
-            client = LLMClient()
-            raw = client.chat(f"内容：{context}", system=system_prompt, tier=ModelTier.FAST, max_tokens=200)
-            try:
-                data = JsonOutputParser().parse(raw)
-            except Exception:
-                data = None
-            if isinstance(data, dict):
-                score_val = float(data.get("score", (min_val + max_val) / 2))
-                score_val = max(min_val, min(max_val, score_val))
-                conf = float(data.get("confidence", 0.85))
-                elapsed = (time.monotonic() - start_time) * 1000
-                return ScoreResult(
-                    score=round(score_val, 4),
-                    confidence=round(conf, 4),
-                    rationale=str(data.get("rationale", "标准评分核验")),
-                    path=DecisionPath.FAST_LLM,
-                    latency_ms=round(elapsed, 2),
-                )
-        except Exception as e:
-            logger.error("决策引擎 Score 执行异常: %s", e)
-
-        elapsed = (time.monotonic() - start_time) * 1000
-        return ScoreResult(
-            score=(min_val + max_val) / 2,
-            confidence=0.5,
-            rationale="系统降级默认中值评分",
-            path=DecisionPath.HEURISTIC_FALLBACK,
-            latency_ms=round(elapsed, 2),
-        )
-
-    def verify(
-        self,
-        context: str,
-        assertion: str,
-    ) -> VerificationResult:
-        """执行布尔事实断言核验（Verify 原语）。
-
-        核验在当前 context 条件下，断言 assertion 是否成立（True / False）。
-
-        Args:
-            context: 背景事实或上下文。
-            assertion: 待核验的具体断言。
-
-        Returns:
-            VerificationResult: 布尔真值、置信度与推导理由。
-        """
-        start_time = time.monotonic()
-        from ..ai import LLMClient, ModelTier
-        from langchain_core.output_parsers import JsonOutputParser
-
-        system_prompt = f"""你是智能体布尔事实核验引擎（Decision Primitive: Verification/Bool）。
-请核验断言在给定上下文中是否成立（true 为成立/满足，false 为不成立/不满足/违规）。
-
-【待核验断言】
-{assertion}
-
-【输出格式】
-必须只输出严格的 JSON 对象：
-{{"value": true, "confidence": 0.95, "rationale": "判定理由"}}
-"""
-        try:
-            client = LLMClient()
-            raw = client.chat(f"上下文：{context}", system=system_prompt, tier=ModelTier.FAST, max_tokens=200)
-            try:
-                data = JsonOutputParser().parse(raw)
-            except Exception:
-                data = None
-            if isinstance(data, dict):
-                val = bool(data.get("value", False))
-                conf = float(data.get("confidence", 0.9))
-                elapsed = (time.monotonic() - start_time) * 1000
-                return VerificationResult(
-                    value=val,
-                    confidence=round(conf, 4),
-                    rationale=str(data.get("rationale", "断言裁决完成")),
-                    path=DecisionPath.FAST_LLM,
-                    latency_ms=round(elapsed, 2),
-                )
-        except Exception as e:
-            logger.error("决策引擎 Verify 执行异常: %s", e)
-
-        elapsed = (time.monotonic() - start_time) * 1000
-        return VerificationResult(
-            value=False,
-            confidence=0.5,
-            rationale="系统降级默认判定不成立",
             path=DecisionPath.HEURISTIC_FALLBACK,
             latency_ms=round(elapsed, 2),
         )

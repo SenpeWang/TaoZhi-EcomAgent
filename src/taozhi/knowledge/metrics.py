@@ -13,8 +13,214 @@ import re
 import time
 
 from ..config import load_config
-from ..knowledge.db import fetch_all, fetch_one
+from ..knowledge.db import fetch_all
 from taozhi.domain.errors import Denied
+from taozhi.infrastructure.persistence.access_repo import can_read_metric
+
+# 内置企业电商核心业务指标目录（供初始化脚本与评测夹具共用单一事实来源）
+# tuple 结构：(metric_key, 名称, 别名, SQL模板, 维度白名单, 主表, 单位, 格式, 密级, scope, 归属节点名, 说明)
+BUILTIN_BUSINESS_METRICS: tuple[tuple, ...] = (
+    (
+        "biz.gsv",
+        "销售额",
+        ["销售额", "GMV", "营业额", "卖了多少钱", "卖了多少", "成交金额"],
+        """SELECT channel_name, category, round(sum(amount)/100.0, 2) AS value
+        FROM (SELECT c.name AS channel_name, p.category AS category, o.amount_minor AS amount
+              FROM orders o
+              JOIN channels c ON c.id=o.channel_id AND c.tenant_id=o.tenant_id
+              JOIN skus s ON s.id=o.sku_id AND s.tenant_id=o.tenant_id
+              JOIN products p ON p.id=s.spu_id AND p.tenant_id=s.tenant_id
+              WHERE o.tenant_id=%(tenant_id)s AND o.status <> 'cancelled'
+              AND o.created_at >= %(since)s AND o.created_at < %(until)s) base
+        WHERE 1=1 %(filters)s
+        GROUP BY 1, 2 ORDER BY 3 DESC""",
+        ["channel_name", "category"],
+        "orders",
+        "元",
+        "currency",
+        1,
+        "company",
+        "root",
+        "统计周期内有效订单（不含取消）的销售金额，按渠道与品类分列。",
+    ),
+    (
+        "biz.gsv_daily",
+        "日销售额",
+        ["日销售额", "每天卖多少", "销售趋势", "每日成交"],
+        """SELECT day, round(sum(amount)/100.0, 2) AS value
+        FROM (SELECT date_trunc('day', o.created_at)::date AS day, o.amount_minor AS amount,
+                     c.name AS channel_name, p.category AS category
+              FROM orders o
+              JOIN channels c ON c.id=o.channel_id AND c.tenant_id=o.tenant_id
+              JOIN skus s ON s.id=o.sku_id AND s.tenant_id=o.tenant_id
+              JOIN products p ON p.id=s.spu_id AND p.tenant_id=s.tenant_id
+              WHERE o.tenant_id=%(tenant_id)s AND o.status <> 'cancelled'
+              AND o.created_at >= %(since)s AND o.created_at < %(until)s) base
+        WHERE 1=1 %(filters)s
+        GROUP BY 1 ORDER BY 1""",
+        ["channel_name", "category"],
+        "orders",
+        "元",
+        "currency",
+        1,
+        "company",
+        "root",
+        "按自然日聚合的销售额时间序列，支持渠道/品类过滤，供趋势图使用。",
+    ),
+    (
+        "biz.order_count",
+        "订单量",
+        ["订单量", "多少订单", "单量", "订单数"],
+        """SELECT channel_name, category, status, count(*) AS value
+        FROM (SELECT c.name AS channel_name, p.category AS category, o.status AS status
+              FROM orders o
+              JOIN channels c ON c.id=o.channel_id AND c.tenant_id=o.tenant_id
+              JOIN skus s ON s.id=o.sku_id AND s.tenant_id=o.tenant_id
+              JOIN products p ON p.id=s.spu_id AND p.tenant_id=s.tenant_id
+              WHERE o.tenant_id=%(tenant_id)s
+              AND o.created_at >= %(since)s AND o.created_at < %(until)s) base
+        WHERE 1=1 %(filters)s
+        GROUP BY 1, 2, 3 ORDER BY 4 DESC""",
+        ["channel_name", "category", "status"],
+        "orders",
+        "单",
+        "number",
+        1,
+        "company",
+        "root",
+        "统计周期内订单数，按渠道、品类、状态分列（含取消与退款单）。",
+    ),
+    (
+        "biz.refund_rate",
+        "退货退款率",
+        ["退货率", "退款率", "售后率", "退单比例"],
+        """SELECT channel_name, round(100.0 * sum(refunded) / NULLIF(count(*), 0), 2) AS value
+        FROM (SELECT c.name AS channel_name,
+                     CASE WHEN EXISTS(SELECT 1 FROM after_sales a
+                        WHERE a.tenant_id=o.tenant_id AND a.order_id=o.id) THEN 1 ELSE 0 END AS refunded
+              FROM orders o
+              JOIN channels c ON c.id=o.channel_id AND c.tenant_id=o.tenant_id
+              WHERE o.tenant_id=%(tenant_id)s AND o.status <> 'cancelled'
+              AND o.created_at >= %(since)s AND o.created_at < %(until)s) base
+        WHERE 1=1 %(filters)s
+        GROUP BY 1 ORDER BY 2 DESC""",
+        ["channel_name"],
+        "orders",
+        "%",
+        "percent",
+        1,
+        "company",
+        "root",
+        "有效订单中产生售后工单的比例，按渠道分列——售后质量的核心监控指标。",
+    ),
+    (
+        "biz.aftersales_count",
+        "售后工单量",
+        ["售后工单", "售后量", "售后多少单", "退换货数量"],
+        """SELECT type, reason, count(*) AS value
+        FROM (SELECT a.type AS type, a.reason AS reason
+              FROM after_sales a
+              WHERE a.tenant_id=%(tenant_id)s
+              AND a.created_at >= %(since)s AND a.created_at < %(until)s) base
+        WHERE 1=1 %(filters)s
+        GROUP BY 1, 2 ORDER BY 3 DESC""",
+        ["type", "reason"],
+        "after_sales",
+        "单",
+        "number",
+        1,
+        "company",
+        "root",
+        "统计周期内售后工单数，按类型（退款/退货/换新）与原因分列。",
+    ),
+    (
+        "biz.gross_profit",
+        "毛利",
+        ["毛利", "赚了多少", "利润", "毛利润"],
+        """SELECT channel_name, category, round(sum(amount - cost)/100.0, 2) AS value
+        FROM (SELECT c.name AS channel_name, p.category AS category,
+                     o.amount_minor AS amount, o.cost_minor AS cost
+              FROM orders o
+              JOIN channels c ON c.id=o.channel_id AND c.tenant_id=o.tenant_id
+              JOIN skus s ON s.id=o.sku_id AND s.tenant_id=o.tenant_id
+              JOIN products p ON p.id=s.spu_id AND p.tenant_id=s.tenant_id
+              WHERE o.tenant_id=%(tenant_id)s AND o.status <> 'cancelled'
+              AND o.created_at >= %(since)s AND o.created_at < %(until)s) base
+        WHERE 1=1 %(filters)s
+        GROUP BY 1, 2 ORDER BY 3 DESC""",
+        ["channel_name", "category"],
+        "orders",
+        "元",
+        "currency",
+        2,
+        "org",
+        "电商运营部",
+        "销售额减去商品成本（未扣营销与履约费用），按渠道与品类分列。二级机密：成本敏感。",
+    ),
+    (
+        "biz.refund_amount",
+        "退款金额",
+        ["退款金额", "退了多少钱", "退款额"],
+        """SELECT type, reason, round(sum(amount)/100.0, 2) AS value
+        FROM (SELECT a.type AS type, a.reason AS reason, a.amount_minor AS amount
+              FROM after_sales a
+              WHERE a.tenant_id=%(tenant_id)s
+              AND a.created_at >= %(since)s AND a.created_at < %(until)s) base
+        WHERE 1=1 %(filters)s
+        GROUP BY 1, 2 ORDER BY 3 DESC""",
+        ["type", "reason"],
+        "after_sales",
+        "元",
+        "currency",
+        2,
+        "org",
+        "电商运营部",
+        "统计周期内售后工单涉及金额，按类型与原因分列。二级机密：财务敏感。",
+    ),
+    (
+        "biz.low_stock_count",
+        "低库存SKU数",
+        ["低库存", "缺货", "库存预警", "哪些要补货", "低于安全库存"],
+        """SELECT warehouse, count(*) AS value
+        FROM (SELECT st.warehouse AS warehouse, s.sku_code AS sku_code,
+                     st.qty AS qty, st.safety_qty AS safety_qty
+              FROM stock st
+              JOIN skus s ON s.id=st.sku_id AND s.tenant_id=st.tenant_id
+              WHERE st.tenant_id=%(tenant_id)s AND st.qty < st.safety_qty) base
+        WHERE 1=1 %(filters)s
+        GROUP BY 1 ORDER BY 2 DESC""",
+        ["warehouse"],
+        "stock",
+        "个",
+        "number",
+        2,
+        "org",
+        "电商运营部",
+        "当前库存低于安全线的 SKU 数，按仓库分列——补货预警信号。",
+    ),
+    (
+        "biz.procurement_cost",
+        "采购成本",
+        ["采购成本", "进货成本", "底价", "成本多少", "进货额"],
+        """SELECT category, round(sum(cost)/100.0, 2) AS value
+        FROM (SELECT p.category AS category, o.cost_minor AS cost
+              FROM orders o
+              JOIN skus s ON s.id=o.sku_id AND s.tenant_id=o.tenant_id
+              JOIN products p ON p.id=s.spu_id AND p.tenant_id=s.tenant_id
+              WHERE o.tenant_id=%(tenant_id)s AND o.status <> 'cancelled'
+              AND o.created_at >= %(since)s AND o.created_at < %(until)s) base
+        WHERE 1=1 %(filters)s
+        GROUP BY 1 ORDER BY 2 DESC""",
+        ["category"],
+        "orders",
+        "元",
+        "currency",
+        3,
+        "company",
+        "root",
+        "统计周期内售出商品的进货成本合计。三级机密：供应商底价，仅老板可见。",
+    ),
+)
 
 # 指标 SQL 只允许访问的表（企业工作台自身表 + 业务系统表，接入时在此登记）
 ALLOWED_METRIC_TABLES = frozenset({
@@ -30,25 +236,8 @@ STATEMENT_TIMEOUT_MS = 5000
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def get_metric_grant(conn, p, m):
-    return fetch_one(conn, "SELECT * FROM metric_grants WHERE metric_id=%s AND user_id=%s", (m["id"], p.id))
-
-
-def can_read_metric(conn, p, m) -> bool:
-    """指标可见性：与文档同构——租户 + 发布状态 + deny 优先 + allow 例外 + 老板全通 + 密级/组织 grade。"""
-    if m["tenant_id"] != p.tenant_id or m["state"] != "published":
-        return False
-    g = get_metric_grant(conn, p, m)
-    if g and g["effect"] == "deny":
-        return False
-    if g and g["effect"] == "allow":
-        return True
-    if p.boss:
-        return True
-    return m["scope"] != "selected" and p.grade(m["node_id"], m["scope"]) >= m["level"]
-
-
 def list_metrics(conn, p):
+    """列出当前主体有权查询的发布态指标。"""
     rows = fetch_all(conn, "SELECT * FROM metrics WHERE tenant_id=%s AND state='published' ORDER BY metric_key", (p.tenant_id,))
     return [m for m in rows if can_read_metric(conn, p, m)]
 

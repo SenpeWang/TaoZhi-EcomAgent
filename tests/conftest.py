@@ -22,7 +22,6 @@ os.environ.setdefault("DATA_DIR", str(Path(_TMP) / "data"))
 os.environ.setdefault("REPORTS_DIR", str(Path(_TMP) / "reports"))
 os.environ.setdefault("TRACE_DIR", str(Path(_TMP) / "traces"))
 os.environ.setdefault("AUDIT_DIR", str(Path(_TMP) / "audit"))
-os.environ.setdefault("CHECKPOINT_DB", str(Path(_TMP) / "langgraph.sqlite"))
 
 
 def pytest_configure(config):  # noqa: ANN001

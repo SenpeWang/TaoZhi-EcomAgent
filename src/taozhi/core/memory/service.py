@@ -1,6 +1,6 @@
 """企业记忆系统与来源追踪。
 
-结合数据库历史检索与自研长效记忆存储、双轨行号日志与上下文压实引擎。
+结合数据库历史检索与自研长效记忆存储管理租户隔离记忆。
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from ...knowledge.db import fetch_all, fetch_one
 from taozhi.infrastructure.persistence.access_repo import sources_valid
 from taozhi.domain.privacy import redact
 from .store import LongTermMemoryStore
-from .transcript import TranscriptLogger, TranscriptStep
 
 _STORES_LOCK = threading.Lock()
 _stores: Dict[str, LongTermMemoryStore] = {}
@@ -107,6 +106,4 @@ __all__ = [
     "get_followup_context",
     "get_memory_store",
     "LongTermMemoryStore",
-    "TranscriptLogger",
-    "TranscriptStep",
 ]

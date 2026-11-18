@@ -4,7 +4,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from taozhi.domain.access import evaluate_download_permission, evaluate_read_permission, evaluate_write_permission
+from taozhi.domain.access import (
+    evaluate_download_permission,
+    evaluate_metric_read_permission,
+    evaluate_read_permission,
+    evaluate_write_permission,
+)
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.knowledge.db import as_jsonb, fetch_all, fetch_one
@@ -106,6 +111,22 @@ def require_document_read(conn: Any, p: Principal, d: dict[str, Any]) -> None:
         raise Denied("资料不存在或没有访问权限", "NOT_FOUND", 404)
 
 
+def get_metric_grant(conn: Any, p: Principal, m: dict[str, Any] | str) -> dict[str, Any] | None:
+    """查询指定主体针对 BI 指标的显式个人特例授权记录。"""
+    metric_id = m.get("id") if isinstance(m, dict) else m
+    return fetch_one(
+        conn,
+        "SELECT * FROM metric_grants WHERE tenant_id=%s AND metric_id=%s AND user_id=%s",
+        (p.tenant_id, metric_id, p.id),
+    )
+
+
+def can_read_metric(conn: Any, p: Principal, m: dict[str, Any]) -> bool:
+    """判定主体是否有权访问或执行目标发布态 BI 指标。"""
+    g = get_metric_grant(conn, p, m)
+    return evaluate_metric_read_permission(p, m, g)
+
+
 def source_valid(conn: Any, p: Principal, source: dict[str, Any], external: bool = False) -> bool:
     """实时核验单条引用来源（文档版本/ACL 或业务快照）是否仍对主体有效。
 
@@ -145,6 +166,78 @@ def source_valid(conn: Any, p: Principal, source: dict[str, Any], external: bool
 def sources_valid(conn: Any, p: Principal, sources: list[dict[str, Any]], external: bool = False) -> bool:
     """批量实时核验任务依赖的全部引用来源是否仍有效。"""
     return all(source_valid(conn, p, s, external) for s in sources)
+
+
+def batch_sources_validity(
+    conn: Any,
+    p: Principal,
+    jobs: list[dict[str, Any]],
+    external: bool = False,
+) -> dict[str, bool]:
+    """批量预取文档与授权字典，一次性校验多条任务的引用来源有效性（消除 N+1 查询）。
+
+    Args:
+        conn: 数据库连接。
+        p: 当前请求主体。
+        jobs: 待校验的任务行列表。
+        external: 是否涉及外发大模型处理许可校验。
+
+    Returns:
+        ``{job_id: is_valid}`` 布尔映射字典。
+    """
+    if not jobs:
+        return {}
+    doc_ids = sorted(
+        {
+            str(s.get("document_id"))
+            for j in jobs
+            for s in (j.get("sources") or [])
+            if s.get("kind") != "business" and s.get("document_id")
+        }
+    )
+    docs_by_id: dict[str, dict[str, Any]] = {}
+    readable_by_id: dict[str, bool] = {}
+    if doc_ids:
+        doc_rows = fetch_all(
+            conn,
+            "SELECT * FROM documents WHERE tenant_id=%s AND id=ANY(%s)",
+            (p.tenant_id, doc_ids),
+        )
+        grant_rows = fetch_all(
+            conn,
+            "SELECT * FROM document_grants WHERE tenant_id=%s AND user_id=%s AND document_id=ANY(%s) "
+            "AND (expires_at IS NULL OR expires_at>now())",
+            (p.tenant_id, p.id, doc_ids),
+        )
+        grants_by_doc = {g["document_id"]: g for g in grant_rows}
+        for d in doc_rows:
+            did = d["id"]
+            docs_by_id[did] = d
+            readable_by_id[did] = evaluate_read_permission(p, d, grants_by_doc.get(did))
+
+    validity: dict[str, bool] = {}
+    for j in jobs:
+        ok = True
+        for s in j.get("sources") or []:
+            if s.get("kind") == "business":
+                if not source_valid(conn, p, s, external):
+                    ok = False
+                    break
+                continue
+            did = str(s.get("document_id") or "")
+            d = docs_by_id.get(did)
+            if not (
+                d
+                and d["state"] == "published"
+                and readable_by_id.get(did, False)
+                and d["current_version"] == s.get("version")
+                and d["acl_version"] == s.get("acl_version")
+                and (not external or d["ai_allowed"])
+            ):
+                ok = False
+                break
+        validity[j["id"]] = ok
+    return validity
 
 
 def audit(

@@ -12,7 +12,7 @@ from taozhi.core.tools.search_web import extract_search_keyword
 from taozhi.domain.errors import Denied
 from taozhi.domain.rag_verification import norm_text
 from taozhi.domain.text_guard import detect_injection
-from taozhi.infrastructure.persistence.access_repo import sources_valid
+from taozhi.infrastructure.persistence.access_repo import can_read_metric, sources_valid
 from taozhi.infrastructure.persistence.bi_repo import get_published_metric_by_id
 from taozhi.infrastructure.persistence.job_repo import last_conversation_question, list_recent_completed_ask
 from taozhi.knowledge import metrics as metrics_mod
@@ -142,7 +142,7 @@ def data_query_node(state: State) -> dict:
     if di.get("metric_key"):
         with database_connection() as c:
             m = get_published_metric_by_id(c, p.tenant_id, di["metric_id"])
-            if not m or not metrics_mod.can_read_metric(c, p, m):
+            if not m or not can_read_metric(c, p, m):
                 result = {"denied": True, "message": "该指标不存在，或您当前的角色与密级无权查看。"}
             else:
                 try:

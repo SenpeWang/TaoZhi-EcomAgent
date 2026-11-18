@@ -4,9 +4,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 import pytest
 from taozhi.orchestration.decision import (
-    DecisionEngine,
     DecisionPath,
-    VerificationResult,
     get_decision_engine,
 )
 
@@ -69,64 +67,9 @@ def test_decision_choice_llm_multi_select():
     assert res.confidence > 0.0
 
 
-@pytest.mark.slow
-def test_decision_score_primitive():
-    """测试连续打分评估原语。"""
-    from taozhi.config import get_settings
-    if not get_settings().has_llm:
-        pytest.skip("未配置真实 LLM API 凭据，跳过 LLM 打分原语测试")
-    engine = get_decision_engine()
-
-    criterion = "根据回答是否严谨陈述了保修换新条款进行打分，1.0为完全严谨，0.0为完全未提及"
-    content = "根据售后政策，凡在自营渠道购买并在7天内出现非人为起泡开胶的，可凭订单截图申请免费包邮换新一次。"
-
-    res = engine.score(content, criterion, scale=(0.0, 1.0))
-    if res.path == DecisionPath.HEURISTIC_FALLBACK:
-        pytest.skip("上游 LLM 触发 TPM/RPM 速率限制降级，跳过打分断言")
-    assert 0.7 <= res.score <= 1.0
-    assert res.confidence >= 0.5
-    assert len(res.rationale) > 0
-
-
-@pytest.mark.slow
-def test_decision_verify_primitive():
-    """测试布尔事实断言核验原语（Verify）。"""
-    from taozhi.config import get_settings
-    if not get_settings().has_llm:
-        pytest.skip("未配置真实 LLM API 凭据，跳过 LLM 断言核验测试")
-    engine = get_decision_engine()
-
-    context = "本商品为直屏专用钢化膜，不支持任何曲面屏或折叠屏机型。"
-
-    # 核验断言 1: 是否支持折叠屏 (应为 False)
-    res_false = engine.verify(context, "该钢化膜可用于华为折叠屏手机")
-    if res_false.path == DecisionPath.HEURISTIC_FALLBACK:
-        pytest.skip("上游 LLM 触发 TPM/RPM 速率限制降级，跳过布尔断言")
-    assert res_false.value is False
-    assert res_false.confidence >= 0.7
-
-    # 核验断言 2: 是否直屏专用 (应为 True)
-    res_true = engine.verify(context, "该产品适用于直屏手机")
-    if res_true.path == DecisionPath.HEURISTIC_FALLBACK:
-        pytest.skip("上游 LLM 触发 TPM/RPM 速率限制降级，跳过布尔断言")
-    assert res_true.value is True
-    assert res_true.confidence >= 0.7
-
-
 def test_decision_offline_safe_fallback():
-    """测试在完全离线无外部模型凭据与无向量服务环境下，决策原语安全降级保障。"""
+    """测试在完全离线无外部模型凭据与无向量服务环境下，Choice 决策原语安全降级保障。"""
     engine = get_decision_engine()
-    # Choice 离线降级
     res = engine.choice("用了一周边缘起泡开胶了，给换新吗？", SPECIALIST_OPTIONS, allow_llm=False)
     assert res.selected
     assert res.path in (DecisionPath.FAST_SEMANTIC, DecisionPath.HEURISTIC_FALLBACK)
-
-    # Score 安全降级/执行
-    score_res = engine.score("测试内容", "评分标准")
-    assert 0.0 <= score_res.score <= 1.0
-    assert score_res.path in (DecisionPath.FAST_LLM, DecisionPath.HEURISTIC_FALLBACK)
-
-    # Verify 安全降级/执行
-    verify_res = engine.verify("直屏专用", "适用于折叠屏")
-    assert isinstance(verify_res.value, bool)
-    assert verify_res.path in (DecisionPath.FAST_LLM, DecisionPath.HEURISTIC_FALLBACK)

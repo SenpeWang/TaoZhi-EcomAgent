@@ -6,8 +6,6 @@ from .decision import (
     ChoiceResult,
     DecisionEngine,
     DecisionPath,
-    ScoreResult,
-    VerificationResult,
     get_decision_engine,
 )
 
@@ -16,7 +14,5 @@ __all__ = [
     "DecisionEngine",
     "DecisionPath",
     "DeterministicController",
-    "ScoreResult",
-    "VerificationResult",
     "get_decision_engine",
 ]

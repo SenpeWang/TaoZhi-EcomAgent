@@ -124,3 +124,29 @@ def evaluate_download_permission(
             and doc.get("download_allowed", False)
         )
     )
+
+
+def evaluate_metric_read_permission(
+    p: Principal,
+    metric: dict,
+    grant: Optional[dict] = None,
+) -> bool:
+    """按指标租户、发布状态、密级与个人特例授权判定可见性（与文档权限同构）。
+
+    Args:
+        p: 当前用户主体。
+        metric: 指标定义字典。
+        grant: 该用户针对本指标的个人特例授权记录。
+
+    Returns:
+        允许查询返回 True，否则返回 False。
+    """
+    if metric.get("tenant_id") != p.tenant_id or metric.get("state") != "published":
+        return False
+    if grant and grant.get("effect") == "deny":
+        return False
+    if grant and grant.get("effect") == "allow":
+        return True
+    if p.boss:
+        return True
+    return metric.get("scope") != "selected" and p.grade(metric.get("node_id"), metric.get("scope", "org")) >= metric.get("level", 1)
