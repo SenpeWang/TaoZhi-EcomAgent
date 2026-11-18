@@ -5,18 +5,18 @@
 
 ---
 
-## 概览：34 张表，分 7 组
+## 概览：34 张表，分 8 组
 
 | 组 | 表 | 行数 |
 |---|---|---|
-| 身份与组织 | tenants / users / org_nodes / memberships / sessions / login_attempts | 1 / 13 / 18 / 12 / 595 / 4 |
-| 文档与检索 | documents / document_versions / chunks / knowledge_mentions | 163 / 163 / 455 / 417 |
-| 权限与授权 | document_grants / metric_grants | 3 / 0 |
-| 任务与编排 | jobs / task_events / task_outbox / task_reviews / worker_heartbeats | 902 / 4652 / 0 / 0 / 5 |
+| 身份与组织 | tenants / users / org_nodes / memberships / sessions / login_attempts | 1 / 13 / 18 / 12 / — / — |
+| 文档与检索 | documents / document_versions / chunks / knowledge_mentions / embedding_cache | 173 / 173 / 468 / — / — |
+| 权限与授权 | document_grants / metric_grants / approvals | — / — / — |
+| 任务与编排 | jobs / task_events / task_outbox / task_reviews / worker_heartbeats | — / — / — / — / — |
 | 指标语义层 | metrics | 18 |
-| 审计与观测 | audit_events / model_calls | 1970 / 1028 |
-| 业务数据 | orders / after_sales / products / skus / stock / channels | 10958 / 557 / 8 / 15 / 30 / 5 |
-| 框架/系统 | alembic_version / checkpoints / checkpoint_blobs / checkpoint_writes / checkpoint_migrations | 1 / 4165 / 9587 / 19176 / 10 |
+| 审计与观测 | audit_events / model_calls | — / — |
+| 业务数据 | orders / after_sales / products / skus / stock / channels | 11789 / 607 / 8 / 15 / — / 5 |
+| 框架/系统 | alembic_version / legacy_archive / checkpoints / checkpoint_blobs / checkpoint_writes / checkpoint_migrations | 1 / — / — / — / — / — |
 
 ---
 
@@ -61,7 +61,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | tenant_id / user_id / node_id | text | 租户/用户/节点 |
-| role | text | 角色（owner/admin/manager/staff/…） |
+| role | text | 角色（`'employee'` / `'leader'` / `'boss'`；系统管理员由 `users.system_admin` 标识） |
 | active | boolean | 是否有效 |
 
 > 主键是 `(user_id, node_id, role)` —— 决定"谁能看到什么"。
@@ -95,8 +95,8 @@
 | node_id | text | 归属组织节点 |
 | creator_id | text | 创建者 |
 | title | text | 标题 |
-| scope | text | 可见范围（company/dept/…） |
-| **level** | integer | **密级（1-5）** |
+| scope | text | 可见范围（company / org / selected） |
+| **level** | integer | **密级（1 公开 / 2 内部 / 3 机密，CHECK `BETWEEN 1 AND 3`）** |
 | ai_allowed | boolean | 是否允许 AI 使用 |
 | download_allowed | boolean | 是否允许下载 |
 | state | text | 状态（draft/published/…） |
@@ -256,8 +256,9 @@
 
 ## 八、框架/系统表（6 张）
 
-- **alembic_version**(1)：迁移版本号（当前 `010_embedding_cache` 链路）
-- **checkpoints**(4165)、**checkpoint_blobs**(9587)、**checkpoint_writes**(19176)、**checkpoint_migrations**(10)：LangGraph 工作流状态持久化
+- **alembic_version**(1)：迁移版本号（当前已演进至 `012_system_indexes`，含 `011_job_fk_cascade` 与 `012_system_indexes`）
+- **legacy_archive**：旧版 SQLite 归档只读记录表
+- **checkpoints** / **checkpoint_blobs** / **checkpoint_writes** / **checkpoint_migrations**：LangGraph 工作流状态持久化（`ask` 完结后自动回收，保留 `research` 检查点）
 
 ---
 

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { Task } from '../types'
+import { levelText, stateText } from '../labels'
 import MarkdownReport from './MarkdownReport.vue'
 
 const props = defineProps<{
@@ -20,28 +21,13 @@ const emit = defineEmits<{
 
 const steerInput = ref('')
 
-const stateMap: Record<string, string> = {
-  queued: '排队中',
-  running: '处理中',
-  completed: '已完成',
-  failed: '执行失败',
-  cancelled: '已取消',
-  review: '等待审核',
-}
-
-const levelMap: Record<number, string> = {
-  1: 'L1 公开',
-  2: 'L2 内部',
-  3: 'L3 机密',
-}
-
 /**
  * 格式化任务状态描述。
  * @param s - 状态码。
  * @returns 中文描述。
  */
-function state(s?: string) {
-  return (s && stateMap[s]) || s || '未知'
+function state(s?: string): string {
+  return stateText(s)
 }
 
 /**
@@ -49,8 +35,8 @@ function state(s?: string) {
  * @param l - 密级数值。
  * @returns 中文描述。
  */
-function level(l?: number) {
-  return (l && levelMap[l]) || '未知'
+function level(l?: number): string {
+  return levelText(l)
 }
 
 /**

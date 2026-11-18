@@ -41,19 +41,14 @@ flowchart TD
 
     subgraph ResearchAgents["电商智能调研中枢 (LangGraph Autonomous Supervisor Loop)"]
         direction TB
-        Supervisor["🎯 main_agent (主管决策大脑)<br>自主反思 · 动态大纲 · 状态跃迁"]
+        Supervisor["🎯 lead_orchestrator (主管决策大脑)<br>自主反思 · 动态大纲 · 状态跃迁"]
 
-        Supervisor --> S_Router{自主路由裁决}
-        S_Router -->|网页情报| Web["🌐 web_agent<br>仅装备: search_web"]
-        S_Router -->|双端比价| Scanner["🏭 scanner_agent<br>装备: 1688 + Amazon 双工具"]
-        S_Router -->|真实性验真| Verifier["⚖️ verifier_agent<br>交叉核算毛利与合规去伪"]
-        S_Router -->|研报架构| Reporter["📑 reporter_agent<br>ModelTier.STRONG 终审研报"]
-        S_Router -->|完结收敛| Persist["💾 实体事实持久化"]
+        Supervisor --> S_Router{并行扇出 Send}
+        S_Router -->|网页情报 / 货源比价| Worker["🌐 subagent_worker (受控并行子智能体)<br>MCP 工具集: search_web · fetch_web_page · 1688 · Amazon"]
+        S_Router -->|事实核验与归口| Synth["📑 synthesizer (ModelTier.STRONG 研报合成)<br>结构化引文与研报编排"]
+        Synth --> Final["💾 final_node (实体记忆持久化 & 审计汇总)"]
 
-        Web --> Supervisor
-        Scanner --> Supervisor
-        Verifier --> Supervisor
-        Reporter --> Persist
+        Worker --> Supervisor
     end
 
     SteerAction["⚡ 用户中途动态干预 (Steering)"] -.->|PostgresSaver update_state / DB 事务| Supervisor
@@ -67,10 +62,9 @@ flowchart TD
 
 | 智能体标识 | 角色名称 | 绑定工具集 (Tools) | 核心职责与任务边界 |
 | :--- | :--- | :---: | :--- |
-| **`main_agent`**<br>(`lead_orchestrator`) | **调研协同总指挥**<br>(Supervisor) | *(MCP 发现与派发)* | **中央决策大脑**：意图边界识别、大纲规划、并发扇出（`Send`）、审查黑板实证与动态重规划。 |
-| **`web_agent`**<br>(`subagent_worker`) | **全网市场情报专员** | `[search_web,<br>fetch_web_page]` | **全网检索与公网深抓**：抓取主流卖点、趋势与买家痛点；所有回传文本均经 `AgentSession` 防注入净化与 `url_guard` SSRF 校验。 |
-| **`scanner_agent`**<br>(`subagent_worker`) | **货源与跨境比价专员** | `[search_1688_wholesale,<br>search_amazon]` | **双渠道供应链与出海比价**：深入 1688 提取出厂底价与 MOQ，并对照 Amazon 美元售价、ASIN 与评论数（无结果绝不造假）。 |
-| **`synthesizer`**<br>(`reporter`) | **电商调研研报专家** | *(黑板证据聚合)* | **结构化研报编排**：由 `ModelTier.STRONG` 强力驱动，聚合有效证据包生成严谨 Markdown 研报并沉淀租户长效记忆。 |
+| **`lead_orchestrator`**<br>(`orchestrator` 节点) | **调研协同总指挥**<br>(Supervisor) | *(MCP 发现与派发)* | **中央决策大脑**：意图边界识别、大纲规划、并发扇出（`Send`）、审查黑板实证与动态重规划。 |
+| **`subagent_worker`**<br>(`web` / `sourcing` 并行专员) | **受控多通道调研专员** | `[search_web, fetch_web_page,<br>search_1688_wholesale, search_amazon]` | **全网检索与供应链比价**：按范围门禁分配工具集，所有回传文本均经 `AgentSession` 防注入净化与 `url_guard` SSRF 校验，无结果绝不造假，执行结束自动清理临时沙箱。 |
+| **`synthesizer` / `final_node`** | **电商研报合成与持久化** | *(黑板证据聚合)* | **结构化研报编排**：由 `ModelTier.STRONG` 强力驱动生成 Markdown 研报并沉淀租户长效记忆。 |
 
 ### 生产级可审计工程原则（杜绝倾倒 CoT 思维链）
 - **客观进度推进**：自治智能体探索深度由模型自主决定，无法预知步骤，运行期仅以**决策轮次（Turn 1, Turn 2...）**推进，不搞“20% ➔ 50% ➔ 100%”等虚假百分比；
@@ -105,7 +99,7 @@ src/taozhi/
 ├── ai/                      大模型客户端、多 Key 故障转移、Token 用量与结构化解析
 ├── core/
 │   ├── agent/               智能体上下文隔离（Scratch / Artifacts）与工作区通信协议
-│   ├── memory/              租户物理隔离长效记忆库与双轨会话日志
+│   ├── memory/              租户物理隔离长效记忆库与上下文检索服务
 │   └── tools/               1688 / Amazon / Web 原子工具集与行边界截断
 ├── application/
 │   ├── services/            应用服务（admin_service、document_service、task_service）
@@ -181,7 +175,7 @@ make check
 # 门禁 3: 前端 ESLint、Prettier 格式化检查
 make lint-web check-format
 
-# 门禁 4: 自动化测试套件全量回归 (当前 208 项用例 100% 通过)
+# 门禁 4: 自动化离线回归测试套件 (100% 通过)
 make test
 
 # 门禁 5: 前端 TypeScript 类型检查与生产构建打包

@@ -324,7 +324,7 @@ import {
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import AnswerChart from './AnswerChart.vue'
-import { openTaskEventStream } from '../composables/useTaskStream'
+import { openTaskEventStream, pollTaskUntilTerminal } from '../composables/useTaskStream'
 
 echarts.use([
   BarChart,
@@ -632,9 +632,10 @@ async function changePeriod(days: number): Promise<void> {
 
 /**
  * 切换看板/问数页签；回到看板时重渲染图表。
- * @param t 目标页签：board 看板或 chat 问数
+ * @param t - 目标页签：board 看板或 chat 问数。
+ * @returns 切换完成后无返回值。
  */
-function switchTab(t: 'board' | 'chat') {
+function switchTab(t: 'board' | 'chat'): void {
   tab.value = t
   if (t === 'board') nextTick(() => renderCharts())
 }
@@ -726,8 +727,9 @@ function refundTooltipValue(v: number): string {
 
 /**
  * 渲染经营看板四组图表；对应数据集为空时跳过初始化。
+ * @returns 图表绘制完成后无返回值。
  */
-function renderCharts() {
+function renderCharts(): void {
   charts.forEach((c) => c.dispose())
   charts = []
   const b = board.value
@@ -961,18 +963,20 @@ async function ask(q: string): Promise<void> {
  */
 async function finish(taskId: string, pending: Message): Promise<void> {
   try {
-    let job: {
+    type BiTaskResult = {
       state: string
       result?: { answer?: string; data?: MetricBlock & { metric_name: string } }
-    } | null = null
-    for (let tries = 0; tries < 30; tries++) {
-      job = await props.api<{
-        state: string
-        result?: { answer?: string; data?: MetricBlock & { metric_name: string } }
-      }>('/tasks/' + taskId)
-      if (['completed', 'review', 'failed', 'cancelled'].includes(job.state)) break
-      await new Promise((r) => setTimeout(r, 2000))
     }
+    const job = await pollTaskUntilTerminal<BiTaskResult>({
+      /**
+       * 单次查询问数任务状态与结果。
+       * @returns 服务端最新任务对象。
+       */
+      fetchTask: () => props.api<BiTaskResult>('/tasks/' + taskId),
+      terminalStates: ['completed', 'review', 'failed', 'cancelled'],
+      maxAttempts: 30,
+      intervalMs: 2000,
+    })
     const res = job?.result
     if (res?.data && !res.data.denied && res.data.columns?.length) {
       messages.value.splice(messages.value.indexOf(pending), 1, {
@@ -1019,8 +1023,9 @@ async function scrollBottom(): Promise<void> {
 
 /**
  * 窗口尺寸变化时重算全部图表尺寸。
+ * @returns 图表重绘完成后无返回值。
  */
-function onResize() {
+function onResize(): void {
   charts.forEach((c) => c.resize())
 }
 

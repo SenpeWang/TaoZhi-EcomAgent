@@ -24,7 +24,7 @@
 | `src/taozhi/core/` | 核心引擎与底层基础设施 |
 | `src/taozhi/core/agent/` | 智能体运行时核心：Piagent `AgentSession` 会话组合根、隔离沙箱（Scratch / Artifacts）与工作区通信协议 |
 | `src/taozhi/core/tools/` | 原子工具集与统一结构化 ToolOutcome / 行边界截断工具 |
-| `src/taozhi/core/memory/` | 租户物理隔离长效记忆库与双轨会话日志 |
+| `src/taozhi/core/memory/` | 租户物理隔离长效记忆库与上下文检索服务 |
 | `src/taozhi/application/` | 应用层：业务用例服务、RAG 问答工作流与多智能体自主调研执行图 |
 | `src/taozhi/application/rag/` | 企业问答 LangGraph 状态机（意图路由、ChatBI、专职智能体与合规守卫） |
 | `src/taozhi/application/research/` | 自治多智能体调研系统（运行时钩子、主协调器、并行子智能体与研报合成） |

@@ -13,6 +13,52 @@ export interface TaskStreamHandlers {
   onError?: () => void
 }
 
+/** 终态任务轮询配置与回调契约 */
+export interface TaskPollingOptions<T extends { state: string }> {
+  fetchTask: () => Promise<T>
+  terminalStates?: readonly string[]
+  maxAttempts?: number
+  intervalMs?: number
+  onTick?: (task: T) => void
+  onError?: (err: unknown) => void
+}
+
+/**
+ * 在 SSE 断连或降级时按固定间隔轮询任务直至进入终态。
+ * @param options - 拉取函数、终态集合、重试上限与周期回调配置。
+ * @returns 进入终态后的最新任务对象；超过最大轮询次数且始终失败时返回 null。
+ */
+export async function pollTaskUntilTerminal<T extends { state: string }>(
+  options: TaskPollingOptions<T>,
+): Promise<T | null> {
+  const terminalStates = options.terminalStates ?? [
+    'completed',
+    'review',
+    'failed',
+    'cancelled',
+    'rejected',
+  ]
+  const maxAttempts = options.maxAttempts ?? 45
+  const intervalMs = options.intervalMs ?? 2000
+  let latest: T | null = null
+
+  for (let i = 0; i < maxAttempts; i++) {
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    }
+    try {
+      latest = await options.fetchTask()
+      options.onTick?.(latest)
+      if (terminalStates.includes(latest.state)) {
+        return latest
+      }
+    } catch (err: unknown) {
+      options.onError?.(err)
+    }
+  }
+  return latest
+}
+
 /**
  * 订阅指定任务的 Server-Sent Events 进度流，并提供显式关闭句柄。
  * @param taskId - 待监听任务唯一标识。

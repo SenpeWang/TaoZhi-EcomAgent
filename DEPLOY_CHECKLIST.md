@@ -2,7 +2,7 @@
 
 > 适用场景：把当前 WSL 开发机上的全套服务搬到一台 Lighthouse 实例，对外提供「前端 + 应用 API」。
 > 数据（知识库 / 运行时）与 LLM API（外部按量付费）的关系见对话图示；本清单只列「怎么落地」。
-> 所有事实均来自 `supervisor.conf`、`scripts/start_services.sh`、`enterprise/config.py`、`web/vite.config.ts`、`.env` / `.env.production` 实际核对，非凭记忆。
+> 所有事实均来自 `supervisor.conf`、`scripts/start_services.sh`、`src/taozhi/config.py`、`web/vite.config.ts`、`.env` / `.env.production` 实际核对，非凭记忆。
 
 ---
 
@@ -23,8 +23,8 @@
 |---|---|---|---|
 | database-guard | `scripts/watch_database.py` | ✅ | 内部用 `pg_ctl` 拉起 PostgreSQL（数据目录 `~/.local/share/ecom-agent/postgres`，端口 15432） |
 | embedding | `scripts/embedding_server.py` :18555 | ✅ | bge-small-zh-v1.5(512d) + bge-reranker-v2-m3；`EMBED_DEVICE=cuda:0` 需改 cpu |
-| worker-production | `ecom_copilot.enterprise.worker` | ✅ | 处理 jobs，无对外端口 |
-| api-production | uvicorn :18080（仅 127.0.0.1） | ✅ | 业务 API，**必须用 Nginx 反代暴露** |
+| worker-production | `python -m taozhi.server.worker` | ✅ | 处理 jobs，无对外端口 |
+| api-production | `uvicorn taozhi.server.api:app` :18080（仅 127.0.0.1） | ✅ | 业务 API，**必须用 Nginx 反代暴露** |
 | elasticsearch | :9200，堆 1G | ⚪ | 默认 `ECOM_ES_ENABLED=false` 未启用；supervisor 仍起，需装 ES 或禁 program |
 | kafka | :9092 | ⚪ | 默认 `ECOM_KAFKA_ENABLED=false`；同上 |
 | minio | :19000 / 19001 | ⚪ | 默认 `ECOM_MINIO_ENABLED=false`；同上 |
@@ -52,15 +52,14 @@
 - `BASE_URL`（当前 `https://token.sensenova.cn/v1`）
 - `API_KEY`（sensenova 密钥，产生费用）
 - `MODEL` / `LLM_FAST_MODEL` / `LLM_STRONG_MODEL` / `LLM_VISION_MODEL`
-- `JWT_SECRET`（会话签名，**必须换强随机值**）
-- `AUTH_ENABLED`、`APP_ENV`、`OFFLINE_MODE`、`SYNTHETIC_FALLBACK_ENABLED`、`LLM_TIMEOUT`
+- `AUTH_ENABLED`、`APP_ENV`、`OFFLINE_MODE`、`SYNTHETIC_FALLBACK_ENABLED`、`LLM_TIMEOUT`（企业工作台登录采用 PG `sessions` 表 + HttpOnly 同源 Cookie + CSRF Token，不再使用旧版 `JWT_SECRET`）
 
 **`.env.production`（ECOM_*，必填项已核对）：**
 - `ECOM_DATABASE_URL`（含 PG 端口，决定连哪）
 - `ECOM_TENANT_CODE`（默认 `mofa`）
 - `ECOM_MODE=production`
 - 可选开关：`ECOM_ES_ENABLED` / `ECOM_KAFKA_ENABLED` / `ECOM_MINIO_ENABLED`（默认均 false）
-- 其余 `ECOM_*` 在 `enterprise/config.py` 均有默认值，不填即用默认
+- 其余 `ECOM_*` 在 `src/taozhi/config.py` 均有默认值，不填即用默认
 
 > 部署动作：用 `scp` 把两份文件传到服务器（权限 `600`），**不要** `git add`。
 
@@ -99,7 +98,7 @@ server {
 
 两类数据，**都不随代码走**：
 
-1. **知识库（PG `ecom_production`：423 chunks / 131 docs + ES `chunks` 索引）**
+1. **知识库（PG `ecom_production`：468 chunks / 173 docs + ES `chunks` 索引）**
    - 方案 A（推荐演示）：服务器新建空 PG，跑 `python -m evals.dataset.seed` 重新灌库。
    - 方案 B（保真）：把开发机 `~/.local/share/ecom-agent/postgres` 数据目录整体拷到服务器同路径（注意 PG 大版本一致）。
 2. **运行时状态**

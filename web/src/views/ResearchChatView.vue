@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { User } from '../types'
 import robotUrl from '../assets/robot.svg'
 import MarkdownReport from './MarkdownReport.vue'
-import { openTaskEventStream } from '../composables/useTaskStream'
+import { openTaskEventStream, pollTaskUntilTerminal } from '../composables/useTaskStream'
 
 interface ToolCallTrace {
   name: string
@@ -418,10 +418,21 @@ async function finalizeTaskResult(taskId: string, targetTurn: ResearchTurn): Pro
  * @param targetTurn - 目标轮次对象
  */
 async function fallbackPoll(taskId: string, targetTurn: ResearchTurn): Promise<void> {
-  for (let i = 0; i < 45; i++) {
-    await new Promise((r) => setTimeout(r, 2000))
-    try {
-      const task = await props.api<ResearchTurn & { elapsed?: number }>(`/tasks/${taskId}`)
+  type ResearchTaskSnapshot = ResearchTurn & { elapsed?: number }
+  const terminal = await pollTaskUntilTerminal<ResearchTaskSnapshot>({
+    /**
+     * 拉取一次调研任务最新状态。
+     * @returns 任务状态快照。
+     */
+    fetchTask: () => props.api<ResearchTaskSnapshot>(`/tasks/${taskId}`),
+    terminalStates: ['completed', 'failed', 'cancelled'],
+    maxAttempts: 45,
+    intervalMs: 2000,
+    /**
+     * 更新进度与阶段日志轨迹。
+     * @param task - 单次轮询拉取的任务状态。
+     */
+    onTick: (task) => {
       targetTurn.state = task.state
       targetTurn.stage = task.stage
       targetTurn.progress = task.progress
@@ -429,24 +440,19 @@ async function fallbackPoll(taskId: string, targetTurn: ResearchTurn): Promise<v
         targetTurn.thinkingLogs.push(task.stage)
       }
       scrollToBottom()
-      if (task.state === 'completed') {
-        stopThinkingTimer()
-        if (task.result?.elapsed) {
-          targetTurn.thinkingSeconds = task.result.elapsed
-        } else if (liveTimerSeconds.value > 0) {
-          targetTurn.thinkingSeconds = liveTimerSeconds.value
-        }
-        await finalizeTaskResult(taskId, targetTurn)
-        break
-      }
-      if (task.state === 'failed') {
-        stopThinkingTimer()
-        ElMessage.error(task.stage || '任务异常')
-        break
-      }
-    } catch {
-      // 忽略单次网络抖动
+    },
+  })
+  if (!terminal) return
+  stopThinkingTimer()
+  if (terminal.state === 'completed') {
+    if (terminal.result?.elapsed) {
+      targetTurn.thinkingSeconds = terminal.result.elapsed
+    } else if (liveTimerSeconds.value > 0) {
+      targetTurn.thinkingSeconds = liveTimerSeconds.value
     }
+    await finalizeTaskResult(taskId, targetTurn)
+  } else if (terminal.state === 'failed') {
+    ElMessage.error(terminal.stage || '任务异常')
   }
 }
 

@@ -18,7 +18,7 @@ evals/
 ├── dataset/                     独立评测数据包：规格 → 确定性生成 → 幂等灌库（见其 README）
 ├── datasets/                    数据集（随代码进 Git，可追溯、可 diff）
 │   ├── golden_adversarial.json  18 例对抗集（全自动规则判定）
-│   └── generated/latest/        独立包生成产物：108 例 + 32 篇语料
+│   └── generated/latest/        独立包生成产物：180 例（27 类）+ 42 篇语料
 ├── metrics.py                   指标实现（全项目唯一口径）
 ├── sync_phoenix.py              Arize Phoenix 平台双轨数据同步中枢
 ├── BENCHMARK.md                 口径唯一来源：指标定义·判定协议·报告 schema·数据契约
@@ -48,7 +48,7 @@ behavior 层按类别覆盖三组专项：**robust**（同一事实的五种问�
 # 前置：企业服务在线（bash scripts/start_services.sh），评估跑真实生产库；
 # 独立数据包夹具已灌库（PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed）
 make evals-quick      # 检索 + 对抗，约 5 分钟
-make evals-full       # 三层全跑，约 3 小时（108 例逐题 judge；对比基线 + 门禁，不过则退出码 1）
+make evals-full       # 三层全跑（180 例逐题 judge；对比基线 + 门禁，不过则退出码 1）
 make evals-baseline   # 三层全跑后锁定为基线
 make evals-agent      # 多智能体自治调研评测（10大用例全跑，完成后自动同步至 Phoenix）
 make evals-tests      # 评估代码自身的单元测试（不需要在线服务）
@@ -85,7 +85,7 @@ ECOM_PHOENIX_URL=http://127.0.0.1:6006 \
 
 | 入口 | 去向 | 内容 |
 |---|---|---|
-| `--dataset` | Phoenix **Datasets** | 108 例：input=问题/身份/多轮，output=预期行为/金标准文档/必备事实/禁披露，metadata=类别/难度/风险 |
+| `--dataset` | Phoenix **Datasets** | 180 例：input=问题/身份/多轮，output=预期行为/金标准文档/必备事实/禁披露，metadata=类别/难度/风险 |
 | `--report` | Phoenix **Experiment** | 逐例 run（答案 + 引用标题/chunk_id/**引用正文**）+ evaluation（answer_pass / faithfulness_decl / answer_relevant / abstain / retrieval.*） |
 | `--follow` | Phoenix **Experiment**（同一次跑、边跑边写） | 同上，只是按"每完成一例"推送而不是整份报告 |
 
@@ -119,8 +119,7 @@ evaluation 由服务端按 `(run, name)` upsert。`--dry-run` 只打印计划不
   `Z1` / `N1` / `C1`，与评估集 `case_id`（`GEN-T-*`）实测零交集。拍平进同一个
   Experiment 只会全部落进「未匹配」——看着同步了，实际一条都没写。要让它可见，
   需单独建一个对抗数据集，暂未做。
-- **Traces**：项目代码没有 OTel 埋点，Traces 页不会自动出现线上调用链，
-  需要另行接 instrumentor。
+- **Traces**：已在 [observability/tracing.py](../src/taozhi/observability/tracing.py) 接入 OpenTelemetry OTLP Span 埋点；若目标主机未配置 `PHOENIX_COLLECTOR_ENDPOINT` 则静默跳过。
 
 ## 基线归档（只读）
 

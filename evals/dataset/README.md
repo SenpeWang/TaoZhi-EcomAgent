@@ -31,15 +31,15 @@ evals/dataset/
 │   ├── fixtures.yaml      5 篇权限夹具文档、2 个金丝雀、3 条授权（含过期=撤权、deny）
 │   ├── corpus.yaml        6 个产品、5 条兼容关系、3 条政策、2 对冲突文档、6 篇指引/手册类
 │   ├── parsing.yaml       10 个 PDF/DOCX 解析夹具的版面特征（表格 / 页眉页脚 / 多页）
-│   └── templates.yaml     90 个模板（带五维标注）；槽位语法 {a.b.c}
+│   └── templates.yaml     160 个模板（带五维标注）；槽位语法 {a.b.c}
 ├── schema.py              契约校验：必填字段、类别合法、五维合法、锚点可解析、覆盖下限
 ├── generate.py            确定性生成器 → datasets/generated/latest/（唯一一份，版本由 Git 承担）
 ├── parsing.py             PDF/DOCX 渲染 → 入库解析器读回
 └── seed.py                幂等灌库：组织/身份/文档/切片/向量/ES/授权 + 权限实测校验
 ```
 
-生成产物在 `evals/datasets/generated/`（进 Git）：`cases.jsonl`（108 例、20 类）、
-`corpus_docs.jsonl`（32 篇 = 26 篇文本 + 6 篇指引手册 + 10 篇 PDF/DOCX 解析夹具）、
+生成产物在 `evals/datasets/generated/`（进 Git）：`cases.jsonl`（180 例、27 类）、
+`corpus_docs.jsonl`（42 篇含文本、指引手册与 PDF/DOCX 解析夹具）、
 `manifest.json`（spec sha256 + 种子 + 类别与五维分布）。
 
 ## 使用
