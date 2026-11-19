@@ -116,27 +116,25 @@ src/taozhi/
 
 ---
 
-## 五、 本地部署与快速上手
+## 五、 容器化部署与快速上手
 
-当前验证基线环境为 Linux x86_64、Python 3.10、Node.js 24、PostgreSQL 18。无需 Docker 权限，一键脚本在用户目录准备独立隔离运行时：
+项目采用全官方基础镜像 + Docker Compose 多容器编排（PostgreSQL 18 + pgvector、Elasticsearch 9.2.3、Apache Kafka 4.1.2 KRaft、MinIO、GPU/CPU 语义向量服务、FastAPI Web 与 Worker），一键完成前端编译、数据库迁移与全链路拉起：
 
 ```bash
 # 1. 克隆代码仓库
 git clone git@github.com:SenpeWang/TaoZhi-EcomAgent.git
 cd TaoZhi-EcomAgent
 
-# 2. 安装本地隔离运行时与依赖
-bash scripts/install_runtime.sh
+# 2. 准备环境变量（填写 API_KEY、ECOM_PG_PASSWORD、MinIO 密钥等，切勿提交）
 cp .env.example .env
-# 在 .env 中填入大模型与向量服务配置 (切勿提交真实密钥)
+chmod 600 .env
 
-# 3. 初始化数据库结构与基础数据
-.venv/bin/python scripts/manage_database.py provision
-.venv/bin/python scripts/configure_services.py
+# 3. 如本机具备 NVIDIA GPU 且已配置 nvidia-container-toolkit，在 .env 启用：
+# COMPOSE_FILE="docker-compose.yml:docker-compose.gpu.yml"
 
-# 4. 构建前端并启动服务
-make build-web
+# 4. 构建镜像并一键拉起全栈服务（自动执行前端 build 与 Alembic 迁移）
 make start
+make status
 ```
 
 - **工作台访问入口**：`http://127.0.0.1:18080/`

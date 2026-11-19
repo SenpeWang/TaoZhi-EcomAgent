@@ -45,7 +45,7 @@ behavior 层按类别覆盖三组专项：**robust**（同一事实的五种问�
 ## 运行
 
 ```bash
-# 前置：企业服务在线（bash scripts/start_services.sh），评估跑真实生产库；
+# 前置：企业容器服务在线（make start），评估跑真实生产库；
 # 独立数据包夹具已灌库（PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed）
 make evals-quick      # 检索 + 对抗，约 5 分钟
 make evals-full       # 三层全跑（180 例逐题 judge；对比基线 + 门禁，不过则退出码 1）
