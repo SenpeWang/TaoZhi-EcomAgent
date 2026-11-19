@@ -6,10 +6,10 @@
 - 只写入**真实企业租户**（由 ECOM_TENANT_CODE 指定），不建 tenant_demo；
 - 口令为 16 位强随机（满足生产 ≥12 位且非弱口令要求）；内网快捷登录开启时由 manage_database.py quick-passwords 统一下发默认口令；
 - 账号挂载到**真实组织节点**（部门/小组），用于权限校验与资料可见性验证；
-- 凭据仅写入 ~/.local/share/ecom-agent/accounts.json（0600），便于运维快速接入。
+- 凭据写入 runtime 目录下的 `accounts.json`（0600），便于运维快速接入。
 
 用法：
-    PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python scripts/provision_accounts.py [--reset]
+    docker compose exec -T api python scripts/provision_accounts.py [--reset]
 """
 from __future__ import annotations
 
@@ -21,12 +21,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from taozhi.config import load_config  # noqa: E402
+from taozhi.config import load_config, resolve_runtime_dir  # noqa: E402
 from taozhi.knowledge.db import database_connection, fetch_one  # noqa: E402
 from taozhi.domain.passwords import hash_password  # noqa: E402
 from taozhi.infrastructure.persistence.job_repo import generate_id  # noqa: E402
-
-STATE = Path.home() / ".local/share/ecom-agent"
 
 # (用户名, 显示名, 角色, 组织类型, 系统管理员)
 BLUEPRINT = [
@@ -90,8 +88,9 @@ def main() -> int:
             result[username] = {"password": password, "display_name": display, "role": role}
             print(f"  已创建/更新账号：{username} ({display}, {role})")
 
-    STATE.mkdir(parents=True, exist_ok=True)
-    out = STATE / "accounts.json"
+    runtime_dir = resolve_runtime_dir()
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    out = runtime_dir / "accounts.json"
     merged = {}
     if out.exists():
         try:

@@ -150,7 +150,7 @@ def preflight_check(*, need_http: bool = True, need_embedding: bool = True) -> N
                 "SELECT count(*) AS n FROM worker_heartbeats WHERE updated_at > now() - interval '120 seconds'",
             )
             if not wb or int(wb["n"]) == 0:
-                raise SystemExit("未检测到近 120s 活跃的 worker-production 心跳，请确认 supervisor worker 已启动")
+                raise SystemExit("未检测到近 120s 活跃的 worker-production 心跳，请确认 worker 容器/进程已启动")
     if need_embedding:
         from taozhi.knowledge.embedding import available as embed_available
 

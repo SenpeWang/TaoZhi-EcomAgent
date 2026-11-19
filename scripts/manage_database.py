@@ -1,14 +1,16 @@
-"""仅由远端部署账号运行：私有数据库初始化、测试夹具建库与企业账号准备。"""
+"""企业数据库初始化（迁移建表）、测试夹具建库与企业账号准备。"""
 import os,sys,json,secrets,subprocess,hashlib
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
+from taozhi.config import load_config, resolve_runtime_dir
 from taozhi.knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
 from taozhi.infrastructure.persistence.job_repo import generate_id
 from taozhi.domain.passwords import hash_password
 from taozhi.knowledge.ingest import split
-RUNTIME=Path.home()/".local/share/ecom-agent/runtime"
-STATE=Path.home()/".local/share/ecom-agent"
+import psycopg
+from psycopg import sql
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 TEMPLATE=[
  ("商品产品部",["商品资料组","产品适配组"]),("电商运营部",["店铺运营组","内容营销组"]),
  ("客服售后部",["售前客服组","售后服务组"]),("采购供应链部",["采购组","仓储物流组"]),
@@ -73,43 +75,54 @@ def bootstrap_owner():
             password=secrets.token_urlsafe(20);user=generate_id("user")
             c.execute("INSERT INTO users(id,tenant_id,username,display_name,password_hash,must_change) VALUES(%s,%s,'owner','公司老板',%s,true)",(user,tenant["id"],hash_password(password,"production")))
             c.execute("INSERT INTO memberships(tenant_id,user_id,node_id,role) VALUES(%s,%s,%s,'boss')",(tenant["id"],user,node_id(tenant["id"],"公司")))
-            path=STATE/("bootstrap-owner-"+tenant["code"]+".json")
+            path=resolve_runtime_dir()/("bootstrap-owner-"+tenant["code"]+".json")
+            path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
             path.write_text(json.dumps(dict(username="owner",password=password,user_id=user,tenant_code=tenant["code"]),ensure_ascii=False));path.chmod(0o600)
             c.execute("INSERT INTO audit_events(tenant_id,actor_id,action,target_id,system) VALUES(%s,%s,'受保护工具初始化老板身份',%s,true)",(tenant["id"],user,user))
-    print("首次老板身份已初始化，凭据仅保存在部署账号私有目录")
+    print("首次老板身份已初始化，凭据已写入运行时目录")
+
+
+def _load_cfg_for_env(env_path: Path):
+    prev = os.environ.get("ECOM_ENV_FILE")
+    os.environ["ECOM_ENV_FILE"] = str(env_path)
+    try:
+        return load_config()
+    finally:
+        if prev is None:
+            os.environ.pop("ECOM_ENV_FILE", None)
+        else:
+            os.environ["ECOM_ENV_FILE"] = prev
+
+
 def provision():
-    import psycopg
-    from psycopg import sql
-    STATE.mkdir(parents=True,exist_ok=True,mode=0o700);(STATE/"socket").mkdir(exist_ok=True,mode=0o700)
-    private=STATE/"database-secrets.json"
-    if private.exists():secrets_data=json.loads(private.read_text())
-    else:
-        secrets_data={name:secrets.token_urlsafe(32) for name in ("owner","production","test")}
-        private.write_text(json.dumps(secrets_data));private.chmod(0o600)
-    if "test" not in secrets_data:
-        secrets_data["test"]=secrets.token_urlsafe(32)
-        private.write_text(json.dumps(secrets_data));private.chmod(0o600)
-    data=STATE/"postgres";bin=RUNTIME/"postgres/bin"
-    pw=STATE/"initdb-password";pw.write_text(secrets_data["owner"]);pw.chmod(0o600)
-    if not (data/"PG_VERSION").exists():
-        subprocess.run([str(bin/"initdb"),"-D",str(data),"--auth-local=peer","--auth-host=scram-sha-256","--username",os.environ.get("USER") or __import__("getpass").getuser(),"--pwfile",str(pw),"--locale=C.UTF-8"],check=True,stdout=subprocess.DEVNULL)
-        with (data/"postgresql.conf").open("a") as out:out.write("\nlisten_addresses='127.0.0.1'\nport=15432\nunix_socket_directories='"+str(STATE/"socket")+"'\n")
-    pw.unlink(missing_ok=True)
-    status=subprocess.run([str(bin/"pg_ctl"),"-D",str(data),"status"],stdout=subprocess.DEVNULL)
-    if status.returncode:
-        subprocess.run([str(bin/"pg_ctl"),"-D",str(data),"-l",str(STATE/"postgres.log"),"start","-w"],check=True,stdout=subprocess.DEVNULL)
-    with psycopg.connect(host=str(STATE/"socket"),port=15432,dbname="postgres",autocommit=True) as c:
-        for mode in ("production","test"):
-            role="ecom_"+mode;dbname="ecom_"+mode
-            if not c.execute("SELECT 1 FROM pg_roles WHERE rolname=%s",(role,)).fetchone():c.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(sql.Identifier(role),sql.Literal(secrets_data[mode])))
-            if not c.execute("SELECT 1 FROM pg_database WHERE datname=%s",(dbname,)).fetchone():c.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(dbname),sql.Identifier(role)))
-            c.execute(sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(sql.Identifier(dbname)))
-            env=ROOT/(".env."+mode)
-            if not env.exists():
-                env.write_text("ECOM_MODE="+mode+"\nECOM_DATABASE_URL=postgresql://"+role+":"+secrets_data[mode]+"@127.0.0.1:15432/"+dbname+"\nECOM_TENANT_CODE=mofa\nECOM_COOKIE_SECURE=false\n")
-                env.chmod(0o600)
-            subprocess.run([str(ROOT/".venv/bin/python"),"-m","alembic","-c","alembic.ini","upgrade","head"],cwd=ROOT,env={**os.environ,"ECOM_ENV_FILE":str(env),"PYTHONPATH":str(ROOT/"src")},check=True)
-    print("私有 PostgreSQL 正式库和独立测试库已就绪")
+    """针对已运行的 PostgreSQL（如 Docker postgres 服务）执行建库（如权限允许）与 Alembic 迁移。"""
+    env_files = [Path(os.environ["ECOM_ENV_FILE"])] if os.environ.get("ECOM_ENV_FILE") else [
+        path for path in (ROOT / ".env.production", ROOT / ".env.test") if path.is_file()
+    ]
+    if not env_files:
+        raise RuntimeError("未找到环境配置文件（请设置 ECOM_ENV_FILE 或准备 .env.production）")
+    for env_path in env_files:
+        env = {**os.environ, "ECOM_ENV_FILE": str(env_path), "PYTHONPATH": str(ROOT / "src")}
+        cfg = _load_cfg_for_env(env_path)
+        parts = conninfo_to_dict(cfg.dsn)
+        dbname = parts.get("dbname", "")
+        admin_dsn = os.environ.get("ECOM_PG_ADMIN_DSN") or make_conninfo(**{**parts, "dbname": "postgres"})
+        try:
+            with psycopg.connect(admin_dsn, autocommit=True) as admin:
+                if dbname and not admin.execute("SELECT 1 FROM pg_database WHERE datname=%s", (dbname,)).fetchone():
+                    admin.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(
+                        sql.Identifier(dbname), sql.Identifier(parts.get("user", "postgres"))
+                    ))
+                    admin.execute(sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(sql.Identifier(dbname)))
+        except psycopg.Error:
+            pass  # 目标库已由容器初始化或当前角色无建库权限时直接继续迁移
+        with psycopg.connect(cfg.dsn, autocommit=True) as target:
+            target.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=ROOT, env=env, check=True,
+        )
+    print("PostgreSQL 数据库结构与迁移已就绪")
 def quick_passwords():
     """内网快捷登录：把本企业全部在用账号口令统一设为 ECOM_QUICK_LOGIN_PASSWORD。
 

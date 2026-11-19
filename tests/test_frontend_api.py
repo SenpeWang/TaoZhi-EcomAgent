@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
 
 
+def _node() -> str:
+    return shutil.which("node") or "node"
+
+
 def test_session_csrf_and_unknown_response_contracts():
     """验证写请求、畸形身份、失效会话和网络失败的可观察行为。"""
-    runtime = Path.home() / ".local/share/ecom-agent/runtime/node/bin/node"
-    executable = str(runtime) if runtime.is_file() else "node"
+    executable = _node()
     module = (PROJECT / "web/src/api.ts").as_uri()
     source = """
 import assert from 'node:assert/strict'
@@ -71,8 +75,7 @@ assert.equal(cleared, 1)
 
 def test_markdown_report_rendering_and_xss_safety():
     """验证调研报告 Markdown 渲染器支持标题目录、表格、提示块与 XSS 防护。"""
-    runtime = Path.home() / ".local/share/ecom-agent/runtime/node/bin/node"
-    executable = str(runtime) if runtime.is_file() else "node"
+    executable = _node()
     module = (PROJECT / "web/src/markdown.ts").as_uri()
     source = """
 import assert from 'node:assert/strict'

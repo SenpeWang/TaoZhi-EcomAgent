@@ -34,11 +34,10 @@ minio>=7.2.0
 # ─── 测试 ───
 pytest>=8.0.0
 
-# 企业在线持久化、进程与浏览器验收
+# 企业在线持久化与浏览器验收
 psycopg[binary]>=3.3,<4
 psycopg-pool>=3.2,<4
 alembic>=1.20,<2
-supervisor>=4.3,<5
 langgraph-checkpoint-postgres>=3,<4
 playwright>=1.50,<2
 python-dotenv>=1,<2

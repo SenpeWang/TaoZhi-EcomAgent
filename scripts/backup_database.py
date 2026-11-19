@@ -1,13 +1,18 @@
-"""私有 PostgreSQL 备份与隔离库恢复演练；密码只经环境传入客户端。"""
-import os,sys,subprocess,json,datetime,hashlib
+"""PostgreSQL 备份与隔离库恢复演练；密码只经环境传入客户端。"""
+import os,sys,shutil,subprocess,json,datetime,hashlib
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/"src"))
-from taozhi.config import load_config
+from taozhi.config import load_config, resolve_runtime_dir
 import psycopg
 from psycopg import sql
-from psycopg.conninfo import conninfo_to_dict
-STATE=Path.home()/".local/share/ecom-agent"
-BIN=STATE/"runtime/postgres/bin"
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+def _pg_tool(name: str) -> str:
+    exe = shutil.which(name)
+    if not exe:
+        raise RuntimeError(f"缺少 {name} 工具，请在容器内执行或安装 postgresql-client")
+    return exe
+
 def client_env(database=None):
     parts=conninfo_to_dict(load_config().dsn)
     return {**os.environ,"PGHOST":parts["host"],"PGPORT":parts["port"],"PGUSER":parts["user"],"PGPASSWORD":parts["password"],"PGDATABASE":database or parts["dbname"]}
@@ -15,7 +20,7 @@ def create_database_backup():
     dest=Path(os.environ.get("ECOM_BACKUP_DIR",ROOT/"data/backups"))/(load_config().mode+"_"+datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
     dest.mkdir(parents=True,mode=0o700)
     path=dest/(load_config().mode+".dump")
-    subprocess.run([str(BIN/"pg_dump"),"-Fc","--no-owner","--no-privileges","-f",str(path)],env=client_env(),check=True)
+    subprocess.run([_pg_tool("pg_dump"),"-Fc","--no-owner","--no-privileges","-f",str(path)],env=client_env(),check=True)
     path.chmod(0o600)
     # Original attachments need an independent archive; database references are preserved.
     import tarfile
@@ -32,18 +37,22 @@ def signatures(dsn):
             result[table]=hashlib.sha256("\n".join(row[0] for row in rows).encode()).hexdigest()
     return result
 def verify_restore():
-    path=create_database_backup();parts=conninfo_to_dict(load_config().dsn)
+    path=create_database_backup();cfg=load_config();parts=conninfo_to_dict(cfg.dsn)
     target="ecom_restore_"+datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    with psycopg.connect(host=str(STATE/"socket"),port=15432,dbname="postgres",autocommit=True) as admin:
+    admin_dsn=os.environ.get("ECOM_PG_ADMIN_DSN") or make_conninfo(**{**parts,"dbname":"postgres"})
+    with psycopg.connect(admin_dsn,autocommit=True) as admin:
         admin.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(target),sql.Identifier(parts["user"])))
         admin.execute(sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(sql.Identifier(target)))
         try:
-            subprocess.run([str(BIN/"pg_restore"),"--no-owner","--no-privileges","--exit-on-error","--dbname",target,str(path)],env=client_env(target),check=True)
-            restored=load_config().dsn.rsplit("/",1)[0]+"/"+target
-            assert signatures(load_config().dsn)==signatures(restored),"恢复数据校验不一致"
+            with psycopg.connect(make_conninfo(**{**parts,"dbname":target}),autocommit=True) as tc:
+                tc.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            subprocess.run([_pg_tool("pg_restore"),"--no-owner","--no-privileges","--exit-on-error","--dbname",target,str(path)],env=client_env(target),check=True)
+            restored=cfg.dsn.rsplit("/",1)[0]+"/"+target
+            assert signatures(cfg.dsn)==signatures(restored),"恢复数据校验不一致"
             # 在独立目录恢复附件，并逐个验证字节；不覆盖正在使用的私有目录。
             import tempfile,tarfile
-            with tempfile.TemporaryDirectory(prefix="restore-files-",dir=STATE) as temporary:
+            runtime_dir=resolve_runtime_dir();runtime_dir.mkdir(parents=True,exist_ok=True,mode=0o700)
+            with tempfile.TemporaryDirectory(prefix="restore-files-",dir=runtime_dir) as temporary:
                 folder=Path(temporary);count=0
                 with tarfile.open(path.parent/"private-files.tar.gz","r:gz") as archive:
                     for item in archive:

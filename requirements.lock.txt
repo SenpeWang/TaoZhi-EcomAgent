@@ -104,7 +104,6 @@ sqlite-vec==0.1.9
 sse-starlette==3.4.11
 starlette==1.6.0
 streamlit==1.64.0
-supervisor==4.3.0
 tenacity==9.0.0
 threadpoolctl==3.6.0
 tiktoken==0.14.0

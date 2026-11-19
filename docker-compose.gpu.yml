@@ -1,0 +1,14 @@
+# GPU 直通叠加配置（需宿主机已安装 nvidia-container-toolkit）
+
+services:
+  embedding:
+    environment:
+      EMBED_DEVICE: cuda:0
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

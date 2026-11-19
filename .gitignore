@@ -36,7 +36,6 @@ __pycache__/
 venv/
 node_modules/
 web/dist/
-web/.build-*/
 
 # 编辑器与系统
 .vscode/

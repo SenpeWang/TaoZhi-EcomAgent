@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""本地语义向量服务（由 llm 环境运行，Supervisor 托管）。
+"""本地语义向量与精排服务（独立容器或虚拟环境运行）。
 
 职责：加载本地嵌入模型，对文本批次返回 L2 归一化向量；提供 /rerank 交叉编码器精排。
-- 只监听 127.0.0.1，文档内容不出本机。
-- 嵌入模型或权重缺失时启动失败退出，由 Supervisor 重启；业务侧按服务不可用自动降级为词法检索。
+- 默认监听 127.0.0.1，容器部署可通过 EMBED_HOST=0.0.0.0 暴露给内部编排网络。
+- 嵌入模型或权重缺失时启动失败退出，交由容器编排或守护进程重启；业务侧按服务不可用自动降级为词法检索。
 - 精排模型惰性加载：权重缺失或加载失败不影响嵌入功能，/rerank 返回 503 由业务侧回落融合序。
-- 只能跑在 GPU 上：指定设备不可用时启动即失败退出并给出明确原因，不做 CPU 降级
-  （降级会让时延失真、掩盖真实故障）；运行中 GPU 掉线由看门狗探测后退出，交由 Supervisor 重启。
-- 与在线 API/Worker 进程隔离：重依赖（torch/transformers）只存在于本进程。
+- 显式指定 cuda 时不做 CPU 降级（降级会让时延失真、掩盖真实故障）；运行中 GPU 掉线由看门狗探测后退出重启。
+- 与在线 API/Worker 进程隔离：重依赖（torch/transformers）只存在于本服务。
 
-运行：llm 环境 python scripts/embedding_server.py
-配置：EMBED_MODEL_PATH（默认 00_base/models/bge-small-zh-v1.5）、
-      EMBED_PORT（默认 18555）、EMBED_DEVICE（默认优先 GPU cuda:0，无可用 GPU 时才回退 cpu）、
-      RERANK_MODEL_PATH（默认 00_base/models/bge-reranker-v2-m3）。
+配置：EMBED_HOST（默认 127.0.0.1）、EMBED_PORT（默认 18555）、
+      EMBED_MODEL_PATH、RERANK_MODEL_PATH、
+      EMBED_DEVICE（默认优先 GPU cuda:0，无可用 GPU 时回退 cpu）。
 """
 import os
 import shutil
@@ -32,6 +30,7 @@ from transformers import AutoModel, AutoModelForSequenceClassification, AutoToke
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = Path(os.environ.get("EMBED_MODEL_PATH", ROOT.parent / "models/bge-small-zh-v1.5"))
 RERANK_MODEL_PATH = Path(os.environ.get("RERANK_MODEL_PATH", ROOT.parent / "models/bge-reranker-v2-m3"))
+HOST = os.environ.get("EMBED_HOST", "127.0.0.1")
 PORT = int(os.environ.get("EMBED_PORT", "18555"))
 # 全面使用 GPU：显式指定优先，否则自动优先 cuda:0，仅在无可用 GPU 时回退 cpu
 DEVICE = os.environ.get("EMBED_DEVICE") or ("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -210,4 +209,4 @@ if __name__ == "__main__":
     if DEVICE.startswith("cuda"):
         threading.Thread(target=gpu_watchdog, daemon=True).start()
         print(f"[embed] 设备 {DEVICE}，GPU 看门狗已启动（每 {GPU_WATCHDOG_INTERVAL:.0f}s 探测一次）", flush=True)
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
+    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")

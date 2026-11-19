@@ -1,9 +1,9 @@
 PYTHON := .venv/bin/python
-PHOENIX_PY := $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
+PHOENIX_PY ?= $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
 PROJECT_ROOT := $(CURDIR)
-SUPERVISOR_CONFIG := $(HOME)/.local/share/ecom-agent/supervisor.conf
+COMPOSE := docker compose
 
-.PHONY: help start stop status test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
+.PHONY: help start stop status logs test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -13,9 +13,10 @@ help:
 	@echo "make check-commits  检查指定基准到 HEAD 的新增提交"
 	@echo "make install-hooks  启用 Git 提交和推送检查"
 	@echo "make check-repository 检查已提交公开文件和目录登记"
-	@echo "make start          启动企业工作台与独立任务进程"
-	@echo "make stop           停止应用，保留数据库"
-	@echo "make status         查看服务状态"
+	@echo "make start          构建并启动全部 Docker Compose 服务（含中间件与 GPU 向量服务）"
+	@echo "make stop           停止并清理运行容器（保留持久化数据卷）"
+	@echo "make status         查看全部容器运行与健康状态"
+	@echo "make logs           实时跟踪容器日志"
 	@echo "make test           在独立测试库运行离线回归（含 evals 单元测试）"
 	@echo "make evals-tests    只跑评估代码自身的单元测试（不需要在线服务）"
 	@echo "make evals-quick    评估：检索+对抗层（需企业服务在线；对比基线并过门禁）"
@@ -26,17 +27,20 @@ help:
 	@echo "make evals-archive  把当前 baseline.json 归档成只读快照（进 Git 留档）"
 	@echo "make evals-archive-check  校验归档快照与登记一致（不符退出码 1）"
 	@echo "make check          检查 Python 语法"
-	@echo "make build-web      构建并切换前端"
+	@echo "make build-web      构建前端生产包"
 	@echo "make clean          清除项目 Python 与 pytest 缓存"
 
 start:
-	bash scripts/start_services.sh
+	$(COMPOSE) up -d --build
 
 stop:
-	bash scripts/stop_services.sh
+	$(COMPOSE) down
 
 status:
-	$(PYTHON) -m supervisor.supervisorctl -c "$(SUPERVISOR_CONFIG)" status
+	$(COMPOSE) ps
+
+logs:
+	$(COMPOSE) logs -f --tail=100
 
 test:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.test" PYTHONPATH=src $(PYTHON) -m pytest tests evals/tests -m 'not slow' -q --disable-warnings
@@ -45,7 +49,7 @@ check:
 	$(PYTHON) -m compileall -q src scripts migrations tests
 
 build-web:
-	bash scripts/build_frontend.sh
+	cd web && npm run build
 
 clean:
 	$(PYTHON) scripts/clean_cache.py

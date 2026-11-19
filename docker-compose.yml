@@ -1,0 +1,192 @@
+# 淘智工作台全官方镜像容器编排（有 NVIDIA GPU 时叠加 docker-compose.gpu.yml 启动）
+
+x-app-common: &app-common
+  image: taozhi-ecomagent/app:latest
+  build:
+    context: .
+    target: app
+  env_file:
+    - path: .env
+      required: false
+    - path: .env.production
+      required: false
+  environment: &app-env
+    ECOM_MODE: production
+    ECOM_DATABASE_URL: postgresql://${ECOM_PG_USER:-ecom_production}:${ECOM_PG_PASSWORD:?请配置 ECOM_PG_PASSWORD}@postgres:5432/${ECOM_PG_DB:-ecom_production}
+    ECOM_MINIO_ENABLED: ${ECOM_MINIO_ENABLED:-true}
+    ECOM_MINIO_ENDPOINT: minio:19000
+    ECOM_MINIO_SECURE: "false"
+    ECOM_KAFKA_ENABLED: ${ECOM_KAFKA_ENABLED:-true}
+    ECOM_KAFKA_BROKERS: kafka:9092
+    ECOM_ES_ENABLED: ${ECOM_ES_ENABLED:-true}
+    ECOM_ES_URL: http://elasticsearch:9200
+    ECOM_EMBED_SERVICE_URL: http://embedding:18555
+    ECOM_RUNTIME_DIR: /app/data/runtime
+  volumes:
+    - ./data:/app/data
+  restart: unless-stopped
+  networks:
+    - ecom-net
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: ${ECOM_PG_USER:-ecom_production}
+      POSTGRES_PASSWORD: ${ECOM_PG_PASSWORD:?请配置 ECOM_PG_PASSWORD}
+      POSTGRES_DB: ${ECOM_PG_DB:-ecom_production}
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ECOM_PG_USER:-ecom_production} -d ${ECOM_PG_DB:-ecom_production}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    networks:
+      - ecom-net
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --address ":19000" --console-address ":19001"
+    environment:
+      MINIO_ROOT_USER: ${ECOM_MINIO_ACCESS_KEY:?请配置 ECOM_MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${ECOM_MINIO_SECRET_KEY:?请配置 ECOM_MINIO_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:19000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    networks:
+      - ecom-net
+
+  kafka:
+    image: apache/kafka:4.1.2
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: ${ECOM_KAFKA_PARTITIONS:-6}
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    restart: unless-stopped
+    networks:
+      - ecom-net
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.2.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+    restart: unless-stopped
+    networks:
+      - ecom-net
+
+  embedding:
+    image: taozhi-ecomagent/embedding:latest
+    build:
+      context: .
+      target: embedding
+    environment:
+      EMBED_HOST: 0.0.0.0
+      EMBED_PORT: 18555
+      EMBED_DEVICE: ${EMBED_DEVICE:-cpu}
+      EMBED_MODEL_PATH: /models/bge-small-zh-v1.5
+      RERANK_MODEL_PATH: /models/bge-reranker-v2-m3
+    volumes:
+      - ${ECOM_MODELS_DIR:-../models}:/models:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:18555/health | grep -q '\"ok\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - ecom-net
+
+  migrate:
+    <<: *app-common
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - |
+        python -c "import os, psycopg; psycopg.connect(os.environ['ECOM_DATABASE_URL'], autocommit=True).execute('CREATE EXTENSION IF NOT EXISTS vector')" \
+        && alembic -c alembic.ini upgrade head
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app-common
+    ports:
+      - "127.0.0.1:18080:18080"
+    command: ["uvicorn", "taozhi.server.api:app", "--host", "0.0.0.0", "--port", "18080", "--no-access-log"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:18080/api/health | grep -q '\"ok\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+
+  worker:
+    <<: *app-common
+    command: ["python", "-m", "taozhi.server.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+
+volumes:
+  pg_data:
+  minio_data:
+  kafka_data:
+  es_data:
+
+networks:
+  ecom-net:
+    driver: bridge

@@ -21,14 +21,13 @@ class ToolCheckFailed(RuntimeError):
 
 
 def node_executable() -> str:
-    """使用用户安装的 Node 或 PATH；依赖不足直接报错，绝不联网安装。"""
-    local = Path.home() / ".local/share/ecom-agent/runtime/node/bin/node"
-    executable = str(local) if local.is_file() else shutil.which("node")
+    """从 PATH 定位 Node.js 24；依赖不足直接报错，绝不联网安装。"""
+    executable = shutil.which("node")
     if not executable:
-        raise RuntimeError("缺少 Node.js，请先按部署说明安装 Node 24 与前端锁定依赖")
+        raise RuntimeError("缺少 Node.js，请先安装 Node 24 与前端锁定依赖")
     version = subprocess.run([executable, "--version"], capture_output=True, text=True, check=True)
     if int(version.stdout.lstrip("v").split(".")[0]) != 24:
-        raise RuntimeError("开发检查要求 Node.js 24，请使用项目运行时或调整 PATH")
+        raise RuntimeError("开发检查要求 Node.js 24，请调整 PATH 中的 Node 版本")
     return executable
 
 
