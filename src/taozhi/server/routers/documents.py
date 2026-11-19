@@ -115,10 +115,16 @@ def request_access(doc_id: str, p=Depends(identity)):
 
 @router.get("/{doc_id}/download")
 def download(doc_id: str, p=Depends(identity)):
-    """受控下载脱敏文本或（老板视角）预签名/原生附件文件。"""
+    """受控下载脱敏文本或（老板视角）预签名/代理直出原生附件文件。"""
     spec = document_service.prepare_download(p, doc_id)
     if spec["kind"] == "redirect":
         return RedirectResponse(spec["url"], status_code=302)
+    if spec["kind"] == "blob":
+        return Response(
+            spec["data"],
+            media_type=spec["media_type"],
+            headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote(spec["filename"])},
+        )
     if spec["kind"] == "file":
         return FileResponse(spec["path"], media_type=spec["media_type"], filename=spec["filename"])
     return Response(

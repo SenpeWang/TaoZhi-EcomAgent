@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 _LOG = logging.getLogger(__name__)
@@ -342,17 +343,22 @@ def prepare_download(p: Principal, doc_id: str) -> dict[str, Any]:
         if v["blob_name"]:
             if not p.boss:
                 return {"kind": "text", "filename": f"{d['title']}.txt", "content": redact(v["body"])}
-            url = get_blob_store().presign_url(p.tenant_id, v["blob_name"])
-            if url:
-                return {"kind": "redirect", "url": url}
-            path = load_config().private_dir / p.tenant_id / v["blob_name"]
-            if not path.is_file():
-                raise Denied("附件不可用", "NOT_FOUND", 404)
+            cfg = load_config()
+            store = get_blob_store()
+            if cfg.minio_public_endpoint:
+                url = store.presign_url(p.tenant_id, v["blob_name"])
+                if url:
+                    return {"kind": "redirect", "url": url}
+            ext = Path(v["blob_name"]).suffix or f".{_MIME_EXT_MAP.get(v['mime_type'], 'bin')}"
+            try:
+                data = store.open_blob(p.tenant_id, v["blob_name"])
+            except Exception as exc:
+                raise Denied("附件不可用", "NOT_FOUND", 404) from exc
             return {
-                "kind": "file",
-                "path": path,
+                "kind": "blob",
+                "data": data,
                 "media_type": v["mime_type"],
-                "filename": d["title"] + path.suffix,
+                "filename": d["title"] + ext,
             }
         return {
             "kind": "text",

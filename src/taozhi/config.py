@@ -134,6 +134,7 @@ class Config:
     minio_secret_key: str = ""
     minio_bucket: str = "ecom-private"
     minio_secure: bool = True
+    minio_public_endpoint: str = ""
     presign_ttl: int = 600
     blob_dual_write: bool = False
     runtime_dir: Path = Path.home() / ".local" / "share" / "ecom-agent"
@@ -241,6 +242,7 @@ def load_config() -> Config:
         minio_secret_key=values.get("ECOM_MINIO_SECRET_KEY", ""),
         minio_bucket=values.get("ECOM_MINIO_BUCKET", "ecom-private"),
         minio_secure=minio_secure,
+        minio_public_endpoint=values.get("ECOM_MINIO_PUBLIC_ENDPOINT", "").strip(),
         presign_ttl=int(values.get("ECOM_PRESIGN_TTL", "600")),
         blob_dual_write=values.get("ECOM_BLOB_DUAL_WRITE", "false") == "true",
         runtime_dir=runtime_dir,
