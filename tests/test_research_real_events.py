@@ -5,6 +5,9 @@ import ast
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from langchain_core.messages import AIMessage
+
+from taozhi.ai.client import LLMClient
 from taozhi.application.research.graph import execute_autonomous_agents
 from taozhi.application.research.schemas import (
     _OrchestratorDecisionSchema,
@@ -73,7 +76,7 @@ def test_pipeline_a_events_emitted_during_research():
                     outline=["市场概况", "消费者痛点", "选品建议"],
                     subtasks=[
                         _ProposedSubtaskSchema(
-                            role="全网市场情报分析专员",
+                            role="research.market_intelligence",
                             goal="采集测试保温杯全网评价",
                             allowed_tools=["search_web"],
                             seed_queries=["测试保温杯"],
@@ -102,7 +105,11 @@ def test_pipeline_a_events_emitted_during_research():
         )
 
     mock_llm.chat_json.side_effect = fake_chat_json
-    mock_llm.chat.return_value = "# 测试保温杯市场调研报告\n\n## 1. 市场概览\n需求旺盛。"
+    report_model = MagicMock()
+    report_model.bind.return_value.invoke.return_value = AIMessage(
+        content="# 测试保温杯市场调研报告\n\n## 1. 市场概览\n需求旺盛。",
+        usage_metadata={"input_tokens": 15, "output_tokens": 4, "total_tokens": 19},
+    )
     spans = []
 
     with (
@@ -110,7 +117,7 @@ def test_pipeline_a_events_emitted_during_research():
         job_trace("tenant_test", "research_1", 1, "task.research"),
         patch("taozhi.application.research.planner.LLMClient", return_value=mock_llm),
         patch("taozhi.application.research.subagents.LLMClient", return_value=mock_llm),
-        patch("taozhi.application.research.reporter.LLMClient", return_value=mock_llm),
+        patch.object(LLMClient, "_client_for_endpoint", return_value=report_model),
     ):
         with patch("taozhi.infrastructure.mcp.server.search_web", return_value=[{"title": "保温杯测评", "snippet": "主流69元"}]):
             result = execute_autonomous_agents(
@@ -121,11 +128,21 @@ def test_pipeline_a_events_emitted_during_research():
             )
 
     completed = {s["span_id"]: s for s in spans if s["status"] == "ok"}
-    tool = next(s for s in completed.values() if s["name"] == "mcp.tool.search_web")
+    tool = next(s for s in completed.values() if s["name"] == "mcp.call_tool")
     assert tool["kind"] == "TOOL" and tool["attributes"]["tool.result_count"] == 1
     branch = completed[tool["parent_span_id"]]
     assert branch["name"] == "research.subagent_worker"
-    assert branch["attributes"]["gen_ai.agent.name"] == "research.market_intelligence"
+    assert branch["attributes"]["agent.name"] == "research.market_intelligence"
+    result_agents = {agent["role"]: agent for agent in result["subagents"]}
+    assert result_agents["research.market_intelligence"]["id"] == branch["attributes"]["subagent_id"]
+    assert tool["attributes"]["tool.name"] == "search_web"
+    assert not result_agents["research.synthesizer"]["tools"]
+    model, = [s for s in completed.values() if s["kind"] == "LLM"]
+    report_agent = completed[model["parent_span_id"]]
+    assert model["attributes"]["llm.token_count.total"] == 19
+    assert report_agent["attributes"]["agent.name"] == "research.synthesizer"
+    assert report_agent["attributes"]["subagent_id"] == result_agents["research.synthesizer"]["id"]
+    assert "需求旺盛" not in str(spans)
     assert completed[branch["parent_span_id"]]["name"] == "worker.research"
     root = next(s for s in completed.values() if s["parent_span_id"] is None)
     assert root["name"] == "task.research"

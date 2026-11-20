@@ -16,7 +16,6 @@ from taozhi.application.research.graph import build_autonomous_agent_graph, exec
 from taozhi.application.services import document_service
 from taozhi.config import get_settings, load_config
 from taozhi.core.memory.service import get_memory_store
-from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.access import can_review, can_task
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
@@ -413,7 +412,7 @@ def get_bi_dashboard(p: Principal, days: int) -> dict[str, Any]:
 
 def _try_answer_from_semantic_cache(job: dict[str, Any], cache: Any, queue_wait_ms: int) -> bool:
     """检索语义缓存并在来源权限实时有效时直接回填问答终态（同步租户跨进程代际水位）。"""
-    with database_connection() as c:
+    with node_span("knowledge.cache_lookup", "CHAIN"), database_connection() as c:
         p = load_principal(c, job["owner_id"])
         epoch = _tenant_epoch(c, job["tenant_id"])
         cached = None
@@ -435,7 +434,7 @@ def _try_answer_from_semantic_cache(job: dict[str, Any], cache: Any, queue_wait_
     if not cached:
         return False
 
-    with node_span("worker.semantic_cache_hit", {"job_id": job["id"], "run_version": job["run_version"]}), database_connection() as c:
+    with node_span("worker.semantic_cache_hit", "CHAIN"), database_connection() as c:
         row = job_repo.get_job_by_id(c, job["id"], for_update=True)
         if not row or row["state"] != "running" or row["run_version"] != job["run_version"] or row["cancel_requested"]:
             raise Denied("任务执行版本已失效", "STALE", 409)
@@ -448,7 +447,7 @@ def _try_answer_from_semantic_cache(job: dict[str, Any], cache: Any, queue_wait_
         result = dict(
             answer=cached["answer"],
             citations=cached["citations"],
-            specialists=[{"name": agent_display_name("semantic_cache"), "count": 1}],
+            specialists=[{"name": "semantic_cache", "count": 1}],
             missing=[],
             hard_block=False,
             external_blocked=False,
@@ -523,12 +522,11 @@ def _build_question_result(
     timing["queue_wait_ms"] = queue_wait_ms
     timing["e2e_ms"] = e2e_ms
     token_usage = state.get("token_usage") or empty_token_usage()
-    finding_counts = Counter(agent_display_name(finding["role"]) for finding in state["findings"])
-    selected_names = [agent_display_name(role_id) for role_id in state["selected_agents"]]
+    finding_counts = Counter(finding["role"] for finding in state["findings"])
     result = dict(
         answer=state["answer"],
         citations=citations,
-        specialists=[{"name": name, "count": finding_counts[name]} for name in selected_names],
+        specialists=[{"name": role, "count": finding_counts[role]} for role in state["selected_agents"]],
         missing=state["missing"],
         hard_block=state["hard_block"],
         external_blocked=state["external_blocked"],
@@ -563,7 +561,7 @@ def process_question_job(job: dict[str, Any]) -> None:
     with _postgres_checkpointer() as saver:
         if is_bi:
             flow = build_bi_workflow(saver)
-            with node_span("worker.bi", {"job_id": job["id"], "kind": "ask"}):
+            with node_span("worker.bi", "CHAIN"):
                 state = flow.invoke(
                     {"job_id": job["id"], "run_version": job["run_version"], "data_intent": data_intent},
                     {"configurable": {"thread_id": f"{job['id']}:{job['run_version']}"}},
@@ -571,7 +569,7 @@ def process_question_job(job: dict[str, Any]) -> None:
                 trace_id = current_trace_id()
         else:
             flow = build_rag_workflow(saver)
-            with node_span("worker.question", {"job_id": job["id"], "kind": "ask"}):
+            with node_span("worker.question", "CHAIN"):
                 state = flow.invoke(
                     {"job_id": job["id"], "run_version": job["run_version"]},
                     {"configurable": {"thread_id": f"{job['id']}:{job['run_version']}"}},

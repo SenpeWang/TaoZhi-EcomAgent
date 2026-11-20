@@ -1,6 +1,7 @@
 """内建 OpenTelemetry 采集器的隔离、失败与队列边界。"""
 import queue
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar
 from unittest.mock import Mock
 
 import pytest
@@ -17,20 +18,20 @@ def test_attempt_context_crosses_selected_threads_without_crossing_jobs(monkeypa
     monkeypatch.setenv("TAOZHI_TRACING", "1")
 
     def tool(parent_context):
-        with tracing.node_span("tool.search", {"openinference.span.kind": "TOOL"}, context=parent_context):
+        with tracing.node_span("tool.search", "TOOL", context=parent_context):
             return tracing.current_trace_id()
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         with tracing.job_trace("tenant_a", "a", 1, "task.ask"):
             first_id = tracing.current_trace_id()
-            with tracing.node_span("agent.product"):
+            with tracing.node_span("agent.product", "AGENT"):
                 assert pool.submit(tool, context.get_current()).result() == first_id
                 assert pool.submit(tracing.current_trace_id).result() == ""
         with tracing.job_trace("tenant_a", "a", 2, "task.ask"):
             retry_id = tracing.current_trace_id()
         with tracing.job_trace("tenant_b", "b", 1, "task.ask"):
             other_id = tracing.current_trace_id()
-        with tracing.node_span("standalone.eval"):
+        with tracing.node_span("standalone.eval", "CHAIN"):
             assert tracing.current_trace_id()
 
     assert len({first_id, retry_id, other_id}) == 3
@@ -43,6 +44,33 @@ def test_attempt_context_crosses_selected_threads_without_crossing_jobs(monkeypa
     assert not any(r["name"] == "standalone.eval" for r in rows)
 
 
+def test_tool_pool_propagates_only_the_trace_and_cleans_it_on_error(monkeypatch):
+    from taozhi.core.tools import outcome
+
+    transaction = ContextVar("test.transaction", default=None)
+    rows = []
+    observed = []
+    monkeypatch.setenv("TAOZHI_TRACING", "1")
+    monkeypatch.setattr(tracing, "submit_span", rows.append)
+
+    def failed_tool():
+        observed.append((tracing.current_trace_id(), transaction.get()))
+        raise ValueError("private-content")
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        monkeypatch.setattr(outcome, "_get_tool_pool", lambda: pool)
+        with tracing.job_trace("tenant", "job", 1, "task.research"):
+            job_trace_id = tracing.current_trace_id()
+            token = transaction.set("connection-on-calling-thread")
+            try:
+                result = outcome.execute_tool_with_outcome("search", failed_tool, {}, remaining_seconds=2)
+            finally:
+                transaction.reset(token)
+        assert result.status == "error"
+        assert observed == [(job_trace_id, None)]
+        assert pool.submit(tracing.current_trace_id).result() == ""
+
+
 def test_running_and_failed_snapshots_only_store_operational_attributes(monkeypatch):
     rows = []
     monkeypatch.setattr(tracing, "submit_span", rows.append)
@@ -50,14 +78,13 @@ def test_running_and_failed_snapshots_only_store_operational_attributes(monkeypa
     with pytest.raises(ValueError, match="private-content"):
         with tracing.job_trace("tenant", "job", 1, "task.research"):
             attributes = {
-                SpanAttributes.OPENINFERENCE_SPAN_KIND: "LLM",
                 SpanAttributes.LLM_MODEL_NAME: "catalog-model",
                 SpanAttributes.INPUT_VALUE: "private-content",
             }
-            with tracing.node_span("llm.chat", attributes) as span:
+            with tracing.node_span("llm.chat", "LLM", attributes) as span:
                 assert trace.get_current_span() is span
                 assert rows[-1]["kind"] == "LLM" and rows[-1]["status"] == "running"
-                assert rows[-1]["attributes"]["gen_ai.request.model"] == "catalog-model"
+                assert rows[-1]["attributes"][SpanAttributes.LLM_MODEL_NAME] == "catalog-model"
                 assert span.attributes[SpanAttributes.LLM_MODEL_NAME] == "catalog-model"
                 span.set_input("private-content")
                 span.set_output("private-content")
@@ -68,7 +95,7 @@ def test_running_and_failed_snapshots_only_store_operational_attributes(monkeypa
     llm = next(r for r in rows if r["kind"] == "LLM" and r["status"] == "error")
     assert llm["error_type"] == "ValueError" and llm["duration_ms"] >= 0
     assert llm["ended_at"] >= llm["started_at"]
-    assert llm["attributes"]["gen_ai.usage.input_tokens"] == 13
+    assert llm["attributes"][SpanAttributes.LLM_TOKEN_COUNT_PROMPT] == 13
     assert "private-content" not in str(rows)
     assert rows[-1]["status"] == "error" and tracing.current_trace_id() == ""
 
@@ -82,15 +109,50 @@ def test_workflow_agent_and_tool_names_use_inference_semantics(monkeypatch):
     monkeypatch.setenv("TAOZHI_TRACING", "1")
     monkeypatch.setattr(tracing, "submit_span", snapshots.append)
     with tracing.job_trace("tenant", "research-job", 1, "task.research"):
-        with tracing.node_span("research.market", {"openinference.span.kind": "AGENT", "gen_ai.agent.name": "market"}) as agent:
+        with tracing.node_span("research.market", "AGENT", {SpanAttributes.AGENT_NAME: "market"}) as agent:
             assert agent.attributes[SpanAttributes.AGENT_NAME] == "market"
-            with tracing.node_span("mcp.tool.search", {"openinference.span.kind": "TOOL", "tool": "search"}) as tool:
+            with tracing.node_span("mcp.call_tool", "TOOL", {SpanAttributes.TOOL_NAME: "search"}) as tool:
                 assert tool.attributes[SpanAttributes.TOOL_NAME] == "search"
 
     completed = {row["kind"]: row for row in snapshots if row["status"] == "ok"}
     assert completed["TOOL"]["parent_span_id"] == completed["AGENT"]["span_id"]
-    assert completed["AGENT"]["attributes"]["gen_ai.agent.name"] == "market"
-    assert completed["TOOL"]["attributes"]["tool"] == "search"
+    assert completed["AGENT"]["attributes"][SpanAttributes.AGENT_NAME] == "market"
+    assert completed["TOOL"]["attributes"][SpanAttributes.TOOL_NAME] == "search"
+
+
+def test_retrieval_model_spans_only_measure_real_requests(monkeypatch):
+    from types import SimpleNamespace
+
+    from taozhi.knowledge import embedding
+
+    snapshots = []
+    monkeypatch.setenv("TAOZHI_TRACING", "1")
+    monkeypatch.setattr(tracing, "submit_span", snapshots.append)
+    monkeypatch.setattr(embedding, "load_config", lambda: SimpleNamespace(embed_service_url="http://local", rerank_timeout=5))
+    monkeypatch.setattr(embedding, "model_signature", lambda: "encoder:2")
+    monkeypatch.setattr(embedding, "_query_cache", embedding.OrderedDict())
+    monkeypatch.setattr(embedding, "_query_stats", {"hits": 0, "misses": 0})
+    post = Mock(side_effect=[
+        Mock(json=lambda: {"model": "encoder", "vectors": [[0.1, 0.2]]}),
+        Mock(json=lambda: {"model": "reranker", "scores": [0.95]}),
+        TimeoutError("private-content"),
+    ])
+    monkeypatch.setattr(embedding.httpx, "post", post)
+    with tracing.job_trace("tenant", "job", 1, "task.ask"):
+        with tracing.node_span("knowledge.search", "RETRIEVER") as search:
+            embedding.encode_query("private-content")
+            embedding.encode_query("private-content")
+            assert embedding.rerank("private-content", ["private-content"]) == [0.95]
+            with pytest.raises(TimeoutError):
+                embedding.encode_passages(["private-content"])
+    children = [s for s in snapshots if s["ended_at"] and s["parent_span_id"] == trace.format_span_id(search.get_span_context().span_id)]
+    assert [(s["kind"], s["name"], s["status"]) for s in children] == [
+        ("EMBEDDING", "embedding.query", "ok"), ("RERANKER", "reranker.rerank", "ok"), ("EMBEDDING", "embedding.passages", "error"),
+    ]
+    assert children[0]["attributes"]["embedding.model_name"] == "encoder"
+    assert children[1]["attributes"]["reranker.model_name"] == "reranker"
+    assert children[2]["error_type"] == "TimeoutError"
+    assert post.call_count == 3 and "private-content" not in str(snapshots)
 
 
 def test_disabled_tracing_and_telemetry_failure_preserve_job_behavior(monkeypatch):

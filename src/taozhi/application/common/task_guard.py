@@ -91,13 +91,12 @@ def validate_task_execution(state: Mapping[str, Any], stage: str, progress: int,
         return p, job
 
 
-def traced_node(name: str, func: Callable[[Any], Any], span_prefix: str = "pipeline.", *, kind: str = "CHAIN"):
+def traced_node(name: str, func: Callable[[Any], Any], span_prefix: str = "pipeline."):
     """节点级 span 包装与单节点耗时累加。"""
 
     @functools.wraps(func)
     def wrapper(state: Mapping[str, Any]):
-        attrs = {"openinference.span.kind": kind}
-        with node_span(f"{span_prefix}{name}", attrs) as span:
+        with node_span(f"{span_prefix}{name}", "CHAIN") as span:
             t0 = time.perf_counter()
             result = func(state)
             node_ms = int((time.perf_counter() - t0) * 1000)

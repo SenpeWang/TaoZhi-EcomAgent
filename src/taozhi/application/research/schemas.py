@@ -6,16 +6,12 @@ from typing import Annotated, Any, Dict, List, Literal
 from typing_extensions import TypedDict
 from pydantic import BaseModel, Field
 
-from taozhi.domain.agent_catalog import agent_display_name
-
 
 class _ProposedSubtaskSchema(BaseModel):
-    role: str = Field(
-        description="执行调研的业务角色，例如 " + "、".join(
-            agent_display_name(role_id)
-            for role_id in ("research.market_intelligence", "research.sourcing", "research.competitive_pricing")
-        ),
-    )
+    role: Literal[
+        "research.market_intelligence", "research.sourcing",
+        "research.competitive_pricing", "research.subagent_worker",
+    ] = Field(description="执行角色编号：市场情报、采购、竞品比价或综合调研")
     goal: str = Field(description="本轮指派给该子智能体的明确调查目标")
     allowed_tools: List[str] = Field(description="授权工具名列表，只能从当前允许的白名单中选择")
     seed_queries: List[str] = Field(default_factory=list, description="建议起步检索关键词或网址列表")

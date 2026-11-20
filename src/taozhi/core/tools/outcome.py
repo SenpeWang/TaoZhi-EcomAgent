@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 import httpx
+from opentelemetry import context as otel_context
 
 from .truncate import truncate_text
 
@@ -191,7 +192,16 @@ def execute_tool_with_outcome(
     try:
         if remaining_seconds is not None:
             wait_limit = max(0.5, float(remaining_seconds))
-            fut = _get_tool_pool().submit(fn, **call_kwargs)
+            trace_context = otel_context.get_current()
+
+            def invoke_in_trace():
+                token = otel_context.attach(trace_context)
+                try:
+                    return fn(**call_kwargs)
+                finally:
+                    otel_context.detach(token)
+
+            fut = _get_tool_pool().submit(invoke_in_trace)
             try:
                 raw = fut.result(timeout=wait_limit)
             finally:

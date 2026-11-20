@@ -183,8 +183,8 @@ def rerank(req: RerankRequest):
     scores = rerank_scores(req.query, texts)
     if req.top_n is not None:
         order = np.argsort(-np.asarray(scores, dtype="float32"))[:req.top_n]
-        return {"scores": [scores[int(i)] for i in order], "indices": [int(i) for i in order]}
-    return {"scores": scores}
+        return {"model": RERANK_MODEL_PATH.name, "scores": [scores[int(i)] for i in order], "indices": [int(i) for i in order]}
+    return {"model": RERANK_MODEL_PATH.name, "scores": scores}
 
 
 @app.post("/embed")
@@ -194,7 +194,7 @@ def embed(req: EmbedRequest):
         raise HTTPException(status_code=400, detail="texts 须为 1 至 256 条")
     if any(not isinstance(t, str) or not t.strip() or len(t) > MAX_CHARS for t in texts):
         raise HTTPException(status_code=400, detail="单条文本须为非空且不超过 8000 字符")
-    return {"vectors": encode(texts, req.instruct), "dim": _dim}
+    return {"model": MODEL_PATH.name, "vectors": encode(texts, req.instruct), "dim": _dim}
 
 
 if __name__ == "__main__":

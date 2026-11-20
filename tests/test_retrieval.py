@@ -224,7 +224,16 @@ def test_search_documents_fast_path_runs_hyde_pg_ann_and_title_rerank(monkeypatc
     monkeypatch.setattr(ent_embedding, "rerank", lambda q, texts: [0.9])
 
     hyde_vec = np.full(512, 2.0, dtype="float32")
-    out = ent_retriever.search_documents(None, _P(), "120W 充电器", limit=5, hyde_vector=hyde_vec)
+    from taozhi.observability import tracing
+
+    snapshots = []
+    monkeypatch.setattr(tracing, "submit_span", snapshots.append)
+    monkeypatch.setenv("TAOZHI_TRACING", "1")
+    with tracing.job_trace("t1", "job", 1, "task.ask"):
+        out = ent_retriever.search_documents(None, _P(), "120W 充电器", limit=5, hyde_vector=hyde_vec)
+    search, = [s for s in snapshots if s["kind"] == "RETRIEVER" and s["status"] == "ok"]
+    assert search["name"] == "knowledge.search" and search["attributes"]["retrieval.result_count"] == len(out)
+    assert "120W 充电器" not in str(snapshots)
     assert len(ann_calls) == 2
     assert len(out) == 1 and out[0]["chunk_id"] == "c_hyde"
     assert out[0]["title"] == "LX-30 规格"

@@ -186,21 +186,21 @@ def authorize_subagent_tasks(
                 blocked_tools.append(tool)
 
         if blocked_tools:
-            rejected.append(f"子任务 [{task.role}] 请求的越界工具 {','.join(blocked_tools)} 已被领域守卫移除")
+            rejected.append(f"子任务 [{agent_display_name(task.role)}] 请求的越界工具 {','.join(blocked_tools)} 已被领域守卫移除")
 
         if not legal_tools:
-            rejected.append(f"子任务 [{task.role}] 无合法可用工具（当前允许: {','.join(scope.allowed_tools)}），整单驳回")
+            rejected.append(f"子任务 [{agent_display_name(task.role)}] 无合法可用工具（当前允许: {','.join(scope.allowed_tools)}），整单驳回")
             continue
 
         if len(authorized) >= max_parallel:
-            rejected.append(f"子任务 [{task.role}] 超出单轮并发上限 {max_parallel}，本轮暂不派发")
+            rejected.append(f"子任务 [{agent_display_name(task.role)}] 超出单轮并发上限 {max_parallel}，本轮暂不派发")
             continue
 
         queries = tuple(q.strip() for q in task.seed_queries if q and q.strip())
         authorized.append(
             SubagentTaskSpec(
                 task_id=tid,
-                role=agent_display_name((task.role or "").strip() or "research.subagent_worker"),
+                role=task.role,
                 goal=(task.goal or "收集与品类相关的客观市场事实").strip(),
                 allowed_tools=tuple(legal_tools),
                 seed_queries=queries,

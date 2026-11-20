@@ -1,4 +1,4 @@
-"""从已持久化的问答、调研任务和运行账本读取租户轨迹。"""
+"""从已持久化的问答、调研任务和 OpenTelemetry 节点读取租户轨迹。"""
 from __future__ import annotations
 
 import re
@@ -62,27 +62,15 @@ def list_traces(
     """按创建时间与任务编号倒序翻页，查询包含已停用提交人和历史组织的任务。"""
     scope, scope_params = _job_scope(tenant_id, owner_id)
     trace_id = query.lower() if re.fullmatch(r"[0-9a-fA-F]{32}", query) else None
-    matched = None
-    if trace_id:
-        matched = fetch_one(
-            conn,
-            "SELECT s.job_id, s.run_version FROM task_spans s JOIN jobs j "
-            f"ON (j.tenant_id,j.id)=(s.tenant_id,s.job_id) {scope} AND s.trace_id=%s LIMIT 1",
-            (*scope_params, trace_id),
-        )
-    matched_version = "%s" if matched else "NULL"
-    params: list[Any] = [matched["run_version"]] if matched else []
+    params: list[Any] = [trace_id]
     metadata_match = "TRUE"
-    if query and not matched:
+    if query and not trace_id:
         pattern = _contains(query)
         metadata_match = "j.id=%s OR u.username ILIKE %s ESCAPE '!' OR u.display_name ILIKE %s ESCAPE '!'"
         params.extend((query, pattern, pattern))
-        if trace_id:
-            metadata_match += " OR (j.state IN ('review','completed','rejected') AND j.result->>'trace_id'=%s)"
-            params.append(trace_id)
     sources = ", j.sources" if include_sources else ""
     clauses = [
-        f"SELECT * FROM (SELECT {_TRACE_COLUMNS}{sources}, {matched_version} AS matched_run_version, "
+        f"SELECT * FROM (SELECT {_TRACE_COLUMNS}{sources}, %s::text AS matched_trace_id, "
         f"({metadata_match}) AS matches_metadata {_TRACE_FROM} {scope}"
     ]
     params.extend(scope_params)
@@ -92,14 +80,15 @@ def list_traces(
     if state:
         clauses.append("AND j.state = %s")
         params.append(state)
-    if matched:
-        clauses.append("AND j.id=%s")
-        params.append(matched["job_id"])
+    if trace_id:
+        clauses.append("AND EXISTS (SELECT 1 FROM task_spans s WHERE s.tenant_id=j.tenant_id "
+                       "AND s.job_id=j.id AND s.trace_id=%s)")
+        params.append(trace_id)
     if before:
         clauses.append("AND (j.created_at, j.id) < (%s, %s)")
         params.extend(before)
     clauses.append(") AS candidates")
-    if query and not matched:
+    if query and not trace_id:
         clauses.append("WHERE matches_metadata OR question ILIKE %s ESCAPE '!'")
         params.append(_contains(query))
     clauses.append("ORDER BY created_at DESC, id DESC LIMIT %s")
@@ -108,67 +97,75 @@ def list_traces(
 
 
 def get_trace(conn: Any, tenant_id: str, task_id: str, *, owner_id: str | None) -> dict | None:
-    """读取当前执行的内建链路编号，历史任务可从原有结果中取回关联编号。"""
+    """读取提问及其归属，链路编号由实际采集的节点确定。"""
     scope, params = _job_scope(tenant_id, owner_id)
     sources = ", j.sources" if owner_id is not None else ""
-    return fetch_one(
-        conn,
-        f"SELECT {_TRACE_COLUMNS}{sources}, COALESCE(("
-        "SELECT s.trace_id FROM task_spans s WHERE s.tenant_id=j.tenant_id AND s.job_id=j.id "
-        "AND s.run_version=j.run_version ORDER BY s.id LIMIT 1), "
-        f"CASE WHEN j.state IN ('review', 'completed', 'rejected') THEN j.result->>'trace_id' END"
-        f") AS trace_id {_TRACE_FROM} {scope} AND j.id = %s",
-        (*params, task_id),
-    )
+    return fetch_one(conn, f"SELECT {_TRACE_COLUMNS}{sources} {_TRACE_FROM} {scope} AND j.id=%s", (*params, task_id))
 
 
 def get_span_job(
-    conn: Any, tenant_id: str, task_id: str, *, owner_id: str | None, run_version: int | None = None,
+    conn: Any, tenant_id: str, task_id: str, *, owner_id: str | None, trace_id: str | None = None,
 ) -> dict | None:
-    """验证任务和可选执行版本归属，并读取当前版本以识别租约接管后的未关闭节点。"""
+    """验证任务与链路归属，同时读取执行租约和节点所属版本。"""
     scope, params = _job_scope(tenant_id, owner_id)
-    sql = (
-        "SELECT j.run_version, j.state, j.lease_until, j.finished_at, clock_timestamp() AS observed_at FROM jobs j "
-        f"{scope} AND j.id=%s"
-    )
-    if run_version is None:
-        return fetch_one(conn, sql, (*params, task_id))
+    fields = "j.run_version, j.state, j.lease_until, j.finished_at, clock_timestamp() AS observed_at"
+    if trace_id is None:
+        return fetch_one(conn, f"SELECT {fields} FROM jobs j {scope} AND j.id=%s", (*params, task_id))
     return fetch_one(
-        conn, sql + " AND EXISTS (SELECT 1 FROM task_spans s WHERE s.tenant_id=j.tenant_id "
-        "AND s.job_id=j.id AND s.run_version=%s)", (*params, task_id, run_version),
+        conn, f"SELECT {fields}, s.run_version AS span_version FROM jobs j JOIN task_spans s "
+        f"ON (s.tenant_id,s.job_id)=(j.tenant_id,j.id) {scope} AND j.id=%s AND s.trace_id=%s LIMIT 1",
+        (*params, task_id, trace_id),
     )
 
 
-def list_span_runs(conn: Any, tenant_id: str, task_id: str, before_version: int | None, limit: int) -> list[dict]:
-    """按执行版本聚合 Span，根节点状态反映整体结果，包括子节点失败后恢复的执行。"""
-    boundary = "" if before_version is None else " AND run_version<%s"
-    params = (tenant_id, task_id) if before_version is None else (tenant_id, task_id, before_version)
-    return fetch_all(
-        conn,
-        "SELECT run_version, MIN(trace_id) AS trace_id, MIN(started_at) AS started_at, "
-        "MAX(ended_at) FILTER (WHERE parent_span_id IS NULL) AS ended_at, "
-        "MAX(status) FILTER (WHERE parent_span_id IS NULL) AS status, COUNT(*) AS span_count, "
-        "COUNT(*) FILTER (WHERE status='error') AS failed_count, "
-        "COALESCE(SUM(TRUNC((attributes->>'gen_ai.usage.input_tokens')::numeric)) "
-        "FILTER (WHERE kind='LLM' AND jsonb_typeof(attributes->'gen_ai.usage.input_tokens')='number'), 0) AS input_tokens, "
-        "COALESCE(SUM(TRUNC((attributes->>'gen_ai.usage.output_tokens')::numeric)) "
-        "FILTER (WHERE kind='LLM' AND jsonb_typeof(attributes->'gen_ai.usage.output_tokens')='number'), 0) AS output_tokens "
-        f"FROM task_spans WHERE tenant_id=%s AND job_id=%s{boundary} "
-        "GROUP BY run_version ORDER BY run_version DESC LIMIT %s",
-        (*params, limit),
-    )
+def list_span_runs(
+    conn: Any, tenant_id: str, task_id: str, *, before: tuple[int, str] | None, trace_id: str | None, limit: int,
+) -> list[dict]:
+    """按实际 Trace ID 分组，每条链路独立计算节点分类、根状态与模型用量。"""
+    filters = ["tenant_id=%s", "job_id=%s"]
+    params: list[Any] = [tenant_id, task_id]
+    if before:
+        filters.append("(run_version, trace_id)<(%s,%s)")
+        params.extend(before)
+    if trace_id:
+        filters.append("trace_id=%s")
+        params.append(trace_id)
+    return fetch_all(conn, f"""
+        WITH page AS (
+            SELECT tenant_id,job_id,run_version,trace_id FROM task_spans
+            WHERE {' AND '.join(filters)}
+            GROUP BY tenant_id,job_id,run_version,trace_id ORDER BY run_version DESC,trace_id DESC LIMIT %s
+        ), by_kind AS (
+            SELECT run_version,trace_id,kind, COUNT(*) AS nodes, MIN(started_at) AS started_at,
+                MAX(ended_at) FILTER (WHERE parent_span_id IS NULL) AS root_end,
+                MAX(status) FILTER (WHERE parent_span_id IS NULL) AS root_status,
+                COUNT(*) FILTER (WHERE status='error') AS errors,
+                SUM(TRUNC((attributes->>'llm.token_count.prompt')::numeric)) FILTER
+                    (WHERE kind='LLM' AND jsonb_typeof(attributes->'llm.token_count.prompt')='number') AS prompt_tokens,
+                SUM(TRUNC((attributes->>'llm.token_count.completion')::numeric)) FILTER
+                    (WHERE kind='LLM' AND jsonb_typeof(attributes->'llm.token_count.completion')='number') AS completion_tokens
+            FROM page JOIN task_spans USING (tenant_id,job_id,run_version,trace_id)
+            GROUP BY run_version,trace_id,kind
+        )
+        SELECT run_version,trace_id,MIN(started_at) AS started_at,MAX(root_end) AS ended_at,
+            MAX(root_status) AS status,SUM(nodes) AS span_count,jsonb_object_agg(kind,nodes) AS kind_counts,
+            SUM(errors) AS failed_count,COALESCE(SUM(prompt_tokens),0) AS input_tokens,
+            COALESCE(SUM(completion_tokens),0) AS output_tokens
+        FROM by_kind GROUP BY run_version,trace_id ORDER BY run_version DESC,trace_id DESC
+    """, (*params, limit))
 
 
 def list_spans(
-    conn: Any, tenant_id: str, task_id: str, run_version: int, after_id: int, limit: int,
+    conn: Any, tenant_id: str, task_id: str, trace_id: str, *, kind: str | None, after_id: int, limit: int,
 ) -> list[dict]:
-    """按创建游标获取该执行中的节点；节点结束时更新原记录，父子标识不变。"""
+    """按采集游标读取这条链路中的节点，类型筛选在分页之前执行。"""
+    kind_filter = " AND kind=%s" if kind else ""
+    params = (tenant_id, task_id, trace_id, after_id)
     return fetch_all(
-        conn,
-        "SELECT id, trace_id, span_id, parent_span_id, name, kind, started_at, ended_at, "
+        conn, "SELECT id, trace_id, span_id, parent_span_id, name, kind, started_at, ended_at, "
         "duration_ms, status, error_type, attributes FROM task_spans "
-        "WHERE tenant_id=%s AND job_id=%s AND run_version=%s AND id>%s ORDER BY id LIMIT %s",
-        (tenant_id, task_id, run_version, after_id, limit),
+        f"WHERE tenant_id=%s AND job_id=%s AND trace_id=%s AND id>%s{kind_filter} ORDER BY id LIMIT %s",
+        (*params, kind, limit) if kind else (*params, limit),
     )
 
 
@@ -179,18 +176,4 @@ def list_events(conn: Any, tenant_id: str, task_id: str, after_id: int, limit: i
         "SELECT id, run_version, stage, progress, status, created_at FROM task_events "
         "WHERE tenant_id=%s AND job_id=%s AND id>%s ORDER BY id LIMIT %s",
         (tenant_id, task_id, after_id, limit),
-    )
-
-
-def list_model_calls(
-    conn: Any, tenant_id: str, task_id: str, before_id: int | None, limit: int,
-) -> list[dict]:
-    """按调用编号向前翻页，优先读取最新调用及其当前用量。"""
-    boundary = "" if before_id is None else " AND id<%s"
-    params = (tenant_id, task_id) if before_id is None else (tenant_id, task_id, before_id)
-    return fetch_all(
-        conn,
-        "SELECT id, role, elapsed_ms, prompt_tokens, completion_tokens, outcome, created_at FROM model_calls "
-        f"WHERE tenant_id=%s AND job_id=%s{boundary} ORDER BY id DESC LIMIT %s",
-        (*params, limit),
     )

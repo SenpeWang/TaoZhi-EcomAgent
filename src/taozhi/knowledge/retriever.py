@@ -31,6 +31,7 @@ from taozhi.domain.ranking import (
     tokenize_zh,
 )
 from taozhi.infrastructure.persistence.access_repo import can_read
+from taozhi.observability.tracing import node_span
 from ..config import Config, load_config
 from ..knowledge.db import fetch_all, fetch_one
 from ..knowledge.embedding import to_vector
@@ -354,6 +355,14 @@ def search_documents(
     doc_id_prefix: Optional[str] = None,
 ):
     """授权文档集内执行混合检索（ES BM25 + PG pgvector + 词重叠 + 字符 TF-IDF + HyDE）并精排返回。"""
+    with node_span("knowledge.search", "RETRIEVER") as span:
+        documents = _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, doc_id_prefix)
+        if span is not None:
+            span.set_attribute("retrieval.result_count", len(documents))
+        return documents
+
+
+def _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, doc_id_prefix):
     t_total = time.perf_counter()
     tr: Dict[str, Any] = {
         "embed_ms": 0,

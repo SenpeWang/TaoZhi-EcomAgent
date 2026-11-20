@@ -4,7 +4,9 @@
       <div class="showcase-grid-bg" aria-hidden="true" />
       <div class="showcase-inner">
         <div class="showcase-brand">
-          <span class="brand-monogram" aria-hidden="true">淘</span>
+          <div class="showcase-logo-frame">
+            <img :src="robotUrl" alt="平台标识" class="showcase-logo-img" />
+          </div>
           <span class="showcase-brand-name">淘智企业工作台</span>
         </div>
 
@@ -144,6 +146,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import robotUrl from '../assets/robot.svg'
 import type { QuickAccount, WorkspaceInfo } from '../types'
 
 const props = defineProps<{

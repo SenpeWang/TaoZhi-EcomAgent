@@ -571,7 +571,7 @@ def present_job(
     result = job["result"] if valid and (job["state"] == "completed" or (job["state"] == "review" and can_review(p, job))) else None
     if full and result:
         result = dict(result)
-        # 历史任务保留生成时的角色记录，另行提供当前界面的角色名称。
+        # 角色编号用于关联执行记录，界面统一使用目录中的展示名。
         for group, name_field in (("specialists", "name"), ("subagents", "role")):
             if isinstance(result.get(group), list):
                 result[group] = [

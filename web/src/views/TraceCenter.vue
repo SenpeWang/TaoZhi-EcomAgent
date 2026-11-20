@@ -147,8 +147,8 @@
   <TraceInspector
     v-if="selectedTrace"
     :key="selectedTrace.id"
-    :trace-id="selectedTrace.id"
-    :initial-run-version="selectedTrace.matched_run_version"
+    :task-id="selectedTrace.id"
+    :initial-trace-id="selectedTrace.matched_trace_id"
     :api="api"
     @close="selectedTrace = null"
   />

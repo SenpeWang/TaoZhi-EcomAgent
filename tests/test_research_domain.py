@@ -46,18 +46,15 @@ def _patch_llm(mock_llm):
         yield
 
 
-def test_agent_names_resolve_historical_roles_and_preserve_custom_assignments():
-    """角色编号和历史称谓应展示同一名称，自定义派工不应成为遥测维度。"""
-    from taozhi.domain.agent_catalog import agent_display_name, research_agent_id
+def test_agent_catalog_uses_canonical_business_names():
+    """规划、遥测与界面以同一角色编号查询名称。"""
+    from taozhi.domain.agent_catalog import agent_display_name
     from taozhi.domain.rag_verification import SPECIALIST_AGENTS
 
-    for role_id, (historical_name, _) in SPECIALIST_AGENTS.items():
-        assert agent_display_name(role_id) == agent_display_name(historical_name)
-        assert agent_display_name(role_id) != role_id
-    assert agent_display_name("调研子智能体 · 1688源头工厂采购专员") == "1688 采购分析师"
-    assert research_agent_id("亚马逊竞品分析师") == "research.competitive_pricing"
-    assert agent_display_name("区域渠道分析师") == "区域渠道分析师"
-    assert research_agent_id("区域渠道分析师") == "research.subagent_worker"
+    for role_id, (title, _) in SPECIALIST_AGENTS.items():
+        assert agent_display_name(role_id) == title
+    assert agent_display_name("research.sourcing") == "1688 采购分析师"
+    assert agent_display_name("1688源头工厂采购专员") == "1688源头工厂采购专员"
 
 
 def test_research_scope_and_task_tool_guard():
@@ -189,14 +186,14 @@ def test_parallel_orchestrator_and_react_query_refinement():
                     outline=["市场需求与痛点", "供应链成本结构", "选品策略"],
                     subtasks=[
                         _ProposedSubtaskSchema(
-                            role="全网差评深挖专员",
+                            role="research.market_intelligence",
                             goal="查明便携充气泵消费者痛点与零售定价",
                             allowed_tools=["search_web", "fetch_web_page"],
                             seed_queries=["便携充气泵 极致窄词 差评"],
                             channel_hint="web",
                         ),
                         _ProposedSubtaskSchema(
-                            role="1688源头工厂采购专员",
+                            role="research.sourcing",
                             goal="核查1688便携充气泵出厂底价与MOQ",
                             allowed_tools=["search_1688_wholesale"],
                             seed_queries=["便携充气泵"],
@@ -210,7 +207,7 @@ def test_parallel_orchestrator_and_react_query_refinement():
                 outline=["市场需求与痛点", "供应链成本结构", "选品策略"],
             )
 
-        if "全网差评深挖专员" in prompt:
+        if "市场情报分析师" in prompt:
             with lock:
                 state_counters["web_steps"] += 1
                 step = state_counters["web_steps"]
@@ -266,7 +263,7 @@ def test_live_cancel_and_mid_flight_steering():
         _OrchestratorDecisionSchema(
             action="spawn_subagents",
             thought="首轮调研",
-            subtasks=[_ProposedSubtaskSchema(role="全网专员", goal="查趋势", allowed_tools=["search_web"], seed_queries=["无线耳机"])],
+            subtasks=[_ProposedSubtaskSchema(role="research.market_intelligence", goal="查趋势", allowed_tools=["search_web"], seed_queries=["无线耳机"])],
         ),
         _SubagentStepSchema(action="call_tool", thought="搜全网", tool_name="search_web", query_or_url="无线耳机"),
         _SubagentStepSchema(action="finish", thought="完成", findings_summary="全网销量高。"),
@@ -297,13 +294,13 @@ def test_live_cancel_and_mid_flight_steering():
                 return _OrchestratorDecisionSchema(
                     action="spawn_subagents",
                     thought="先查全网口碑",
-                    subtasks=[_ProposedSubtaskSchema(role="全网专员", goal="查口碑", allowed_tools=["search_web"], seed_queries=["无线鼠标"])],
+                    subtasks=[_ProposedSubtaskSchema(role="research.market_intelligence", goal="查口碑", allowed_tools=["search_web"], seed_queries=["无线鼠标"])],
                 )
-            if "1688采购专员" not in prompt:
+            if "1688 采购分析师" not in prompt:
                 return _OrchestratorDecisionSchema(
                     action="spawn_subagents",
                     thought="收到用户中途干预，增派1688采购专员核查出厂底价",
-                    subtasks=[_ProposedSubtaskSchema(role="1688采购专员", goal="查1688底价", allowed_tools=["search_1688_wholesale"], seed_queries=["无线鼠标"])],
+                    subtasks=[_ProposedSubtaskSchema(role="research.sourcing", goal="查1688底价", allowed_tools=["search_1688_wholesale"], seed_queries=["无线鼠标"])],
                 )
             return _OrchestratorDecisionSchema(action="finish", thought="证据与干预均已落地，合成研报")
 
@@ -325,7 +322,7 @@ def test_live_cancel_and_mid_flight_steering():
     assert res_steer["system_status"] == "COMPLETED"
     assert any(s.startswith("[steering]") for s, _ in events)
     roles = [s["role"] for s in res_steer["subagents"]]
-    assert "1688采购专员" in roles
+    assert "research.sourcing" in roles
 
 
 def test_checkpointer_required_for_persistent_graph():
@@ -508,7 +505,7 @@ def test_sensenova_router_failover_circuit_and_compliance():
     reg = CircuitBreakerRegistry()
     ledger = []
     hooks = _RuntimeHooks(model_call_fn=lambda role, event: ledger.append((role, event)))
-    observer = hooks.model_call_observer("调研主协调器")
+    observer = hooks.model_call_observer("research.orchestrator")
     client = LLMClient(settings=fake_settings, allow_overseas=True, registry=reg, on_attempt=observer)  # type: ignore[arg-type]
 
     called_urls = []
@@ -544,8 +541,10 @@ def test_sensenova_router_failover_circuit_and_compliance():
 
     calls = [s for s in spans if s["kind"] == "LLM" and s["ended_at"] is not None]
     assert [s["status"] for s in calls] == ["error", "error", "ok", "ok"]
-    assert calls[-1]["attributes"]["gen_ai.usage.input_tokens"] == 100
-    assert calls[-1]["attributes"]["gen_ai.usage.output_tokens"] == 50
+    assert calls[-1]["attributes"]["llm.token_count.prompt"] == 100
+    assert calls[-1]["attributes"]["llm.token_count.completion"] == 50
+    assert calls[-1]["attributes"]["llm.token_count.total"] == 150
+    assert [s["attributes"]["llm.endpoint_id"] for s in calls] == [entry[0] for entry in called_urls]
     assert "测试容灾切换" not in str(calls) and "rate_limit_error" not in str(calls)
     assert out1 == "CN_PRIMARY_FLASH_OK"
     assert out2 == "CN_PRIMARY_FLASH_OK"
@@ -557,7 +556,7 @@ def test_sensenova_router_failover_circuit_and_compliance():
     ]
     events = rec.snapshot()
     assert hooks.model_calls == 4
-    assert [role for role, _ in ledger] == ["调研主协调器"] * 4
+    assert [role for role, _ in ledger] == ["research.orchestrator"] * 4
     assert [event["outcome"] for _, event in ledger] == ["failed", "failed", "ok", "ok"]
     assert [event.get("prompt_tokens", 0) for _, event in ledger] == [0, 0, 100, 100]
     assert [event.get("completion_tokens", 0) for _, event in ledger] == [0, 0, 50, 50]
@@ -611,7 +610,7 @@ def test_checkpoint_cross_version_resume_hydrates_evidence_and_route_history():
             outline=["市场格局"],
             subtasks=[
                 _ProposedSubtaskSchema(
-                    role="全网痛点研究员",
+                    role="research.market_intelligence",
                     goal="检索消费者核心评价",
                     allowed_tools=["search_web"],
                     seed_queries=["无线充电器"],

@@ -19,7 +19,7 @@ from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace import SpanKind, StatusCode
 
-from .span_attributes import inference_attributes, safe_attributes
+from .span_attributes import safe_attributes
 from .span_writer import flush_spans, submit_span
 
 _LOG = logging.getLogger(__name__)
@@ -141,21 +141,18 @@ def _workflow_tracer() -> OITracer:
 
 
 @contextmanager
-def node_span(name: str, attrs: dict | None = None, context=None):
+def node_span(name: str, kind: str, attributes: dict | None = None, *, context=None):
     """在当前或显式父上下文中计时，保留错误类型并传播原异常。"""
     if not _enabled():
         yield None
         return
     token = otel_context.attach(context) if context is not None else None
     try:
-        attributes = inference_attributes(attrs)
-        kind = attributes.pop(SpanAttributes.OPENINFERENCE_SPAN_KIND, "INTERNAL")
-        inference_kind = None if kind == "INTERNAL" else OpenInferenceSpanKindValues(kind)
         with _workflow_tracer().start_as_current_span(
             name,
-            attributes=attributes,
-            openinference_span_kind=inference_kind,
-            kind=SpanKind.CLIENT if kind in {"LLM", "TOOL"} else SpanKind.INTERNAL,
+            attributes=safe_attributes(attributes),
+            openinference_span_kind=OpenInferenceSpanKindValues(kind),
+            kind=SpanKind.CLIENT if kind in {"LLM", "TOOL", "EMBEDDING", "RERANKER"} else SpanKind.INTERNAL,
             record_exception=False,
             set_status_on_exception=False,
         ) as span:
@@ -171,11 +168,11 @@ def node_span(name: str, attrs: dict | None = None, context=None):
 
 
 @contextmanager
-def job_trace(tenant_id: str, job_id: str, run_version: int, name: str, attrs: dict | None = None):
+def job_trace(tenant_id: str, job_id: str, run_version: int, name: str):
     """一次 Worker 执行对应一条独立根链路，跨线程时仅传递 OTel Context。"""
     scope = (tenant_id, job_id, run_version)
     root = otel_context.set_value(_JOB, scope, otel_context.Context())
-    with node_span(name, {SpanAttributes.OPENINFERENCE_SPAN_KIND: "CHAIN", **(attrs or {})}, context=root) as span:
+    with node_span(name, "CHAIN", context=root) as span:
         yield span
 
 

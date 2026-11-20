@@ -8,12 +8,79 @@ export const spanStatusLabels: Record<SpanStatus, string> = {
 }
 
 export const spanKindLabels: Record<SpanKind, string> = {
-  CHAIN: '流程',
+  LLM: '模型调用',
+  TOOL: '工具调用',
+  RETRIEVER: '知识检索',
+  EMBEDDING: '向量化',
+  RERANKER: '重排',
   AGENT: '智能体',
-  LLM: '模型',
-  TOOL: '工具',
-  RETRIEVER: '检索',
-  INTERNAL: '内部',
+  CHAIN: '流程编排',
+  INTERNAL: '内部操作',
+}
+
+const identityAttributes: Partial<Record<SpanKind, string>> = {
+  LLM: 'llm.model_name',
+  TOOL: 'tool.name',
+  AGENT: 'agent.name',
+  EMBEDDING: 'embedding.model_name',
+  RERANKER: 'reranker.model_name',
+}
+
+const kindFields: Record<SpanKind, Record<string, string>> = {
+  LLM: {
+    'llm.model_name': '模型名称',
+    'llm.endpoint_id': '调用端点',
+    'llm.token_count.prompt': '输入 Token',
+    'llm.token_count.completion': '输出 Token',
+    'llm.token_count.total': '总 Token',
+  },
+  TOOL: { 'tool.name': '工具名称', 'tool.status': '工具结果状态', 'tool.result_count': '返回条数' },
+  RETRIEVER: { 'retrieval.result_count': '检索命中数' },
+  EMBEDDING: { 'embedding.model_name': '向量模型' },
+  RERANKER: { 'reranker.model_name': '重排模型' },
+  AGENT: {},
+  CHAIN: {},
+  INTERNAL: {},
+}
+
+const executionFields: Record<string, string> = {
+  'agent.name': '智能体名称',
+  subagent_id: '子智能体执行 ID',
+  'state.selected_agents': '选中智能体',
+  'state.evidence': '证据条数',
+  'state.findings': '发现条数',
+  'state.missing': '待补充项',
+  'state.business': '业务建议数',
+  'state.answer_chars': '回答字符数',
+  'state.model_calls': '流程记录的模型调用数',
+  'state.hard_block': '触发阻断',
+  'otel.span.kind': 'OTel SpanKind',
+}
+
+/**
+ * 为节点名称补充尚未显示的模型、工具或智能体标识。
+ * @param span - 当前调用节点。
+ * @returns 与节点名称不同的已采集标识。
+ */
+export function spanSecondaryName(span: TraceSpan): string {
+  const key = identityAttributes[span.kind]
+  const value = key && span.attributes[key]
+  return typeof value === 'string' && value !== span.display_name ? value : ''
+}
+
+/**
+ * 按节点语义呈现真实采集到的属性，保留数值为零的用量与结果数。
+ * @param span - 当前选中的调用节点。
+ * @returns 以展示顺序排列的节点详情。
+ */
+export function spanFields(span: TraceSpan) {
+  const fields = []
+  for (const [key, label] of Object.entries({ ...kindFields[span.kind], ...executionFields })) {
+    if (!Object.hasOwn(span.attributes, key)) continue
+    const value = span.attributes[key]
+    fields.push({ key, label, value: typeof value === 'boolean' ? (value ? '是' : '否') : value })
+  }
+  return fields
 }
 
 /** 节点在父子树中的位置及相对于整次执行的时间区间。 */
@@ -92,6 +159,7 @@ export function formatDuration(ms: number | null): string {
  * @param spans - 该执行已加载的节点。
  * @param collapsed - 已收起的节点编号。
  * @param now - 本次刷新时刻，用于显示已观测到的运行时长。
+ * @param flat - 筛选单一类型时按时间排列，保留节点上真实的父编号。
  * @returns 树形行与横轴的时间跨度。
  */
 export function buildWaterfall(
@@ -99,14 +167,20 @@ export function buildWaterfall(
   spans: TraceSpan[],
   collapsed: Set<string>,
   now: number,
+  flat = false,
 ) {
   const start = Date.parse(run.started_at)
-  let end = run.ended_at ? Date.parse(run.ended_at) : start
+  let end = run.ended_at
+    ? Date.parse(run.ended_at)
+    : run.status === 'running'
+      ? Math.max(start, now)
+      : start
   const children = new Map<string | null, TraceSpan[]>()
   const ids = new Set<string>()
   for (const span of spans) ids.add(span.span_id)
   for (const span of spans) {
-    const parent = span.parent_span_id && ids.has(span.parent_span_id) ? span.parent_span_id : null
+    const parent =
+      !flat && span.parent_span_id && ids.has(span.parent_span_id) ? span.parent_span_id : null
     const branch = children.get(parent) ?? []
     branch.push(span)
     children.set(parent, branch)

@@ -10,6 +10,7 @@ import json
 import threading
 from typing import Any, Dict, List, Optional, Sequence
 
+from openinference.semconv.trace import SpanAttributes
 from opentelemetry.trace import StatusCode
 
 from taozhi.core.tools.outcome import (
@@ -90,7 +91,7 @@ class McpClientAdapter:
             except Exception:
                 return {"content": raw_text} if raw_text else []
 
-        with node_span(f"mcp.tool.{tool_name}", {"openinference.span.kind": "TOOL", "tool": tool_name}) as span:
+        with node_span("mcp.call_tool", "TOOL", {SpanAttributes.TOOL_NAME: tool_name}) as span:
             outcome = execute_tool_with_outcome(
                 tool_name,
                 _invoke_mcp,

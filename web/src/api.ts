@@ -10,6 +10,36 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+const spanKinds = new Set([
+  'LLM',
+  'TOOL',
+  'RETRIEVER',
+  'EMBEDDING',
+  'RERANKER',
+  'AGENT',
+  'CHAIN',
+  'INTERNAL',
+])
+
+/**
+ * 校验本条链路的节点分类计数。
+ * @param value - 服务端返回的全量分类计数。
+ * @returns 是否仅包含已知的节点类型与非负整数。
+ */
+function validKindCounts(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  for (const [kind, count] of Object.entries(value)) {
+    if (
+      !spanKinds.has(kind) ||
+      typeof count !== 'number' ||
+      !Number.isSafeInteger(count) ||
+      count < 0
+    )
+      return false
+  }
+  return true
+}
+
 /**
  * 校验集合及身份响应的基础结构，畸形响应不得被当作当前身份。
  * @param path - 同源 API 路径。
@@ -61,19 +91,23 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
     return
   }
   const runList = /^\/admin\/traces\/[^/]+\/runs$/.test(resource)
-  const spanList = /^\/admin\/traces\/[^/]+\/runs\/\d+\/spans$/.test(resource)
+  const spanList = /^\/admin\/traces\/[^/]+\/runs\/([0-9a-f]{32})\/spans$/.exec(resource)
   if (runList || spanList) {
     if (!Array.isArray(data.items)) throw new Error('调用链列表响应异常，请刷新后重试')
+    const query = new URLSearchParams(path.split('?')[1])
+    const requestedKind = query.get('kind')
     for (const item of data.items) {
       if (
         !isRecord(item) ||
         typeof item.trace_id !== 'string' ||
+        !/^[0-9a-f]{32}$/.test(item.trace_id) ||
         !['running', 'ok', 'error', 'interrupted'].includes(String(item.status)) ||
         typeof item.started_at !== 'string' ||
         !Number.isFinite(Date.parse(item.started_at)) ||
         (item.ended_at !== null && !Number.isFinite(Date.parse(String(item.ended_at)))) ||
         (runList &&
           (!Number.isInteger(item.run_version) ||
+            !validKindCounts(item.kind_counts) ||
             !Number.isInteger(item.span_count) ||
             !Number.isInteger(item.failed_count) ||
             !Number.isInteger(item.input_tokens) ||
@@ -81,7 +115,11 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
         (spanList &&
           (typeof item.span_id !== 'string' ||
             typeof item.name !== 'string' ||
+            item.trace_id !== spanList[1] ||
+            typeof item.display_name !== 'string' ||
             typeof item.kind !== 'string' ||
+            !spanKinds.has(item.kind) ||
+            (requestedKind !== null && item.kind !== requestedKind) ||
             !isRecord(item.attributes) ||
             (item.parent_span_id !== null && typeof item.parent_span_id !== 'string') ||
             (item.error_type !== null && typeof item.error_type !== 'string') ||
@@ -90,13 +128,9 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
         throw new Error('调用链节点响应异常，请刷新后重试')
     }
     if (
-      (runList &&
-        data.next_before_version !== null &&
-        !Number.isInteger(data.next_before_version)) ||
+      (data.next_cursor !== null && typeof data.next_cursor !== 'string') ||
       (spanList &&
-        ((data.next_cursor !== null && typeof data.next_cursor !== 'string') ||
-          typeof data.observed_at !== 'string' ||
-          !Number.isFinite(Date.parse(data.observed_at))))
+        (typeof data.observed_at !== 'string' || !Number.isFinite(Date.parse(data.observed_at))))
     )
       throw new Error('调用链分页响应异常，请刷新后重试')
   }
@@ -106,10 +140,7 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
       typeof data.trace.question !== 'string' ||
       !Array.isArray(data.events) ||
       !data.events.every(isRecord) ||
-      typeof data.has_more_events !== 'boolean' ||
-      typeof data.has_more_calls !== 'boolean' ||
-      !Array.isArray(data.model_calls) ||
-      !data.model_calls.every(isRecord))
+      typeof data.has_more_events !== 'boolean')
   ) {
     throw new Error('轨迹详情响应异常，请刷新后重试')
   }

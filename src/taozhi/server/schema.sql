@@ -141,5 +141,6 @@ CREATE TABLE task_spans (
  started_at timestamptz NOT NULL, ended_at timestamptz, duration_ms bigint CHECK(duration_ms >= 0),
  error_type text, attributes jsonb NOT NULL DEFAULT '{}', UNIQUE(trace_id,span_id)
 );
-CREATE INDEX idx_task_spans_run ON task_spans(tenant_id,job_id,run_version,id);
+CREATE INDEX idx_task_spans_run ON task_spans(tenant_id,job_id,run_version,trace_id);
+CREATE INDEX idx_task_spans_trace_page ON task_spans(trace_id,id);
 CREATE INDEX idx_task_spans_job ON task_spans(job_id);

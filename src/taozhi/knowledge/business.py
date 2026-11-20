@@ -10,9 +10,12 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 import httpx
+from openinference.semconv.trace import SpanAttributes
+from opentelemetry.trace import StatusCode
 
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
+from taozhi.observability.tracing import node_span
 
 _ALLOWED_FIELDS = {
     "tenant_id",
@@ -160,13 +163,21 @@ def lookup(
             "X-Org-Tag": quote(p.tenant_id, safe=""),
             "X-User-Id": p.id,
         }
-        with httpx.Client(trust_env=False, follow_redirects=False, timeout=10, transport=transport) as client:
-            resp = client.get(endpoint, headers=headers)
-        if resp.status_code != 200:
-            return {"available": False, "message": "业务服务暂时不可用或记录无访问权限"}
-        result, source = _validate_and_redact_business_payload(resp.json(), p, kind, identifier)
-        if not result:
-            return {"available": False, "message": "业务记录不存在或没有访问权限"}
-        return {"available": True, "message": "已读取实时业务数据", "record": result, "source": source}
+        with node_span("business.lookup", "TOOL", {SpanAttributes.TOOL_NAME: kind}) as span:
+            with httpx.Client(trust_env=False, follow_redirects=False, timeout=10, transport=transport) as client:
+                resp = client.get(endpoint, headers=headers)
+            if resp.status_code != 200:
+                if span is not None:
+                    span.set_attribute("error.type", "BusinessServiceError")
+                    span.set_attribute("tool.status", "error")
+                    span.set_status(StatusCode.ERROR)
+                return {"available": False, "message": "业务服务暂时不可用或记录无访问权限"}
+            result, source = _validate_and_redact_business_payload(resp.json(), p, kind, identifier)
+            if span is not None:
+                span.set_attribute("tool.result_count", int(bool(result)))
+                span.set_attribute("tool.status", "ok" if result else "empty")
+            if not result:
+                return {"available": False, "message": "业务记录不存在或没有访问权限"}
+            return {"available": True, "message": "已读取实时业务数据", "record": result, "source": source}
     except Exception:
         return {"available": False, "message": "业务响应校验失败或连接超时"}

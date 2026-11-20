@@ -152,21 +152,17 @@ function onSteer() {
             <div class="subagents-card-grid">
               <div
                 v-for="researchAgent in task.result.subagents"
-                :key="researchAgent.id || researchAgent.type_name"
+                :key="researchAgent.id"
                 class="subagent-roster-card"
               >
                 <div class="subagent-card-top">
-                  <span class="subagent-role-name">{{
-                    researchAgent.display_name || researchAgent.role
-                  }}</span>
+                  <span class="subagent-role-name">{{ researchAgent.display_name }}</span>
                   <el-tag size="small" :type="stateTag(researchAgent.status)" effect="light">
                     {{ stateText(researchAgent.status) }}
                   </el-tag>
                 </div>
                 <div class="subagent-card-bottom">
-                  <small :title="researchAgent.type_name"
-                    >任务编号 {{ researchAgent.type_name }}</small
-                  >
+                  <small :title="researchAgent.id">执行 ID {{ researchAgent.id }}</small>
                   <small v-if="researchAgent.elapsed != null">{{ researchAgent.elapsed }}s</small>
                 </div>
               </div>
@@ -216,7 +212,7 @@ function onSteer() {
               :key="specialist.name"
               effect="plain"
             >
-              {{ specialist.display_name || specialist.name }} ·
+              {{ specialist.display_name }} ·
               {{ specialist.count ? '匹配 ' + specialist.count + ' 条依据' : '暂无匹配依据' }}
             </el-tag>
           </div>

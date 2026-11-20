@@ -3,23 +3,21 @@
   <el-skeleton v-if="loading && !selectedRun" :rows="3" animated />
   <template v-if="selectedRun">
     <div class="run-toolbar">
-      <label for="inspected-run-version">执行版本</label>
+      <label for="inspected-trace-id">执行链路</label>
       <select
-        id="inspected-run-version"
-        :value="selectedRun.run_version"
+        id="inspected-trace-id"
+        :value="selectedRun.trace_id"
         :disabled="loading"
         @change="chooseRun"
       >
-        <option v-for="entry in availableRuns" :key="entry.run_version" :value="entry.run_version">
-          v{{ entry.run_version }} · {{ spanStatusLabels[entry.status] }} ·
+        <option v-for="entry in availableRuns" :key="entry.trace_id" :value="entry.trace_id">
+          v{{ entry.run_version }} · {{ entry.trace_id.slice(0, 8) }} ·
+          {{ spanStatusLabels[entry.status] }} ·
           {{ traceTime(entry.started_at) }}
         </option>
       </select>
-      <template v-if="nextRunPageVersion !== null || runPageCursors.length > 1">
-        <el-button
-          size="small"
-          :disabled="loading || nextRunPageVersion === null"
-          @click="olderRuns"
+      <template v-if="nextRunCursor !== null || runPageCursors.length > 1">
+        <el-button size="small" :disabled="loading || nextRunCursor === null" @click="olderRuns"
           >更早的执行</el-button
         >
         <el-button
@@ -56,14 +54,34 @@
     <p class="trace-id">
       Trace ID <code>{{ selectedRun.trace_id }}</code>
     </p>
+    <fieldset class="kind-filters" :disabled="loading">
+      <legend>节点类型</legend>
+      <div>
+        <button type="button" :aria-pressed="selectedKind === ''" @click="chooseKind('')">
+          全部 <span>{{ selectedRun.span_count }}</span>
+        </button>
+        <button
+          v-for="(label, kind) in spanKindLabels"
+          :key="kind"
+          type="button"
+          :aria-pressed="selectedKind === kind"
+          :disabled="!selectedRun.kind_counts[kind]"
+          @click="chooseKind(kind)"
+        >
+          {{ label }} <span>{{ selectedRun.kind_counts[kind] ?? 0 }}</span>
+        </button>
+      </div>
+    </fieldset>
     <SpanWaterfall
       v-if="spans.length"
-      :key="selectedRun.trace_id"
+      :key="selectedRun.trace_id + selectedKind"
       :run="selectedRun"
       :spans="spans"
+      :kind="selectedKind"
       :observed-at="observedAt"
     />
     <el-skeleton v-else-if="loading" :rows="3" animated />
+    <el-empty v-else-if="!error" :image-size="48" description="本条执行链路没有此类型的节点" />
     <div v-if="nextSpanCursor" class="load-nodes">
       <el-button :disabled="loading" @click="loadMoreSpans"
         >加载更多节点（已显示 {{ spans.length }}）</el-button
@@ -82,28 +100,35 @@
 <script setup lang="ts">
 import { onUnmounted, ref, shallowRef, toRef, watch } from 'vue'
 import { traceTime } from '../labels'
-import { formatDuration, runDuration, spanStatusLabels } from '../traceWaterfall'
-import type { TraceDetail, TraceRun, TraceRunPage, TraceSpan, TraceSpanPage } from '../types'
+import { formatDuration, runDuration, spanKindLabels, spanStatusLabels } from '../traceWaterfall'
+import type {
+  SpanKind,
+  TraceDetail,
+  TraceRun,
+  TraceRunPage,
+  TraceSpan,
+  TraceSpanPage,
+} from '../types'
 import SpanWaterfall from './SpanWaterfall.vue'
 
 const props = defineProps<{
   detail: TraceDetail
   visible: boolean
-  initialRunVersion?: number | null
+  initialTraceId: string | null
   api: <T>(path: string) => Promise<T>
 }>()
 const emit = defineEmits<{ (e: 'events'): void; (e: 'recording', active: boolean): void }>()
 const availableRuns = shallowRef<TraceRun[]>([])
 const selectedRun = shallowRef<TraceRun | null>(null)
-const runPageCursors = ref<(number | null)[]>(
-  props.initialRunVersion == null ? [null] : [null, props.initialRunVersion + 1],
-)
-const nextRunPageVersion = ref<number | null>(null)
+const runPageCursors = ref<(string | null)[]>([null])
+const nextRunCursor = ref<string | null>(null)
+const selectedKind = ref<SpanKind | ''>('')
 const spans = shallowRef<TraceSpan[]>([])
 const nextSpanCursor = ref<string | null>(null)
 const observedAt = ref(0)
 const loading = ref(false)
 const error = ref('')
+let pinnedTraceId = props.initialTraceId
 let loadedSpanPageCount = 1
 let requestSequence = 0
 
@@ -125,12 +150,12 @@ function clearSpans(): void {
 
 /**
  * 加载一个或多个已展开的节点页。重新取页时也更新已结束节点及并发到达的调用。
- * @param version - 执行版本。
+ * @param traceId - 完整的执行链路标识。
  * @param requestId - 本次读取的代数。
  * @param append - 是否仅追加下一页。
  * @returns 所需页读取完成的异步结果。
  */
-async function readSpans(version: number, requestId: number, append = false): Promise<void> {
+async function readSpans(traceId: string, requestId: number, append = false): Promise<void> {
   const merged = new Map<string, TraceSpan>()
   if (append) for (const span of spans.value) merged.set(span.span_id, span)
   let cursor = append ? nextSpanCursor.value : null
@@ -140,7 +165,8 @@ async function readSpans(version: number, requestId: number, append = false): Pr
   do {
     const query = new URLSearchParams({ limit: '100' })
     if (cursor) query.set('cursor', cursor)
-    const page = await props.api<TraceSpanPage>(basePath() + '/' + version + '/spans?' + query)
+    if (selectedKind.value) query.set('kind', selectedKind.value)
+    const page = await props.api<TraceSpanPage>(basePath() + '/' + traceId + '/spans?' + query)
     if (requestSequence !== requestId) return
     for (const span of page.items) merged.set(span.span_id, span)
     observedAtMs = Date.parse(page.observed_at)
@@ -154,49 +180,81 @@ async function readSpans(version: number, requestId: number, append = false): Pr
 }
 
 /**
- * 列出当前页执行，读取选定版本的节点，或在现有节点后继续翻页。
- * @param action - 刷新执行列表、切换所选执行或追加节点。
- * @param version - 切换时指定的执行版本。
- * @returns 此次读取完成的异步结果。
+ * 同步执行列表，并保留按 Trace ID 搜索或手动选中的链路，即使它位于别页。
+ * @param preferredId - 要保留的链路编号，翻页时为空。
+ * @param requestId - 本次读取的代数。
+ * @returns 当前应显示的执行记录。
  */
-async function load(action: 'refresh' | 'select' | 'append', version?: number): Promise<void> {
+async function readRuns(preferredId: string | null, requestId: number): Promise<TraceRun | null> {
+  const query = new URLSearchParams({ limit: '30' })
+  const cursor = runPageCursors.value.at(-1)
+  if (cursor) query.set('cursor', cursor)
+  const page = await props.api<TraceRunPage>(basePath() + '?' + query)
+  if (requestSequence !== requestId) return null
+  let target = page.items[0] ?? null
+  if (preferredId) {
+    const match = page.items.find((entry) => entry.trace_id === preferredId)
+    if (match) target = match
+    else {
+      const exact = await props.api<TraceRunPage>(
+        basePath() + '?trace_id=' + encodeURIComponent(preferredId),
+      )
+      if (requestSequence !== requestId) return null
+      target = exact.items[0] ?? null
+      if (!target || target.trace_id !== preferredId) throw new Error('未找到所选执行链路')
+      page.items.unshift(target)
+    }
+  }
+  availableRuns.value = page.items
+  nextRunCursor.value = page.next_cursor
+  return target
+}
+
+/**
+ * 获取当前链路与所选类型的节点，筛选切换时清除旧的分页位置。
+ * @param action - 刷新、切换链路、翻页、筛选或追加节点。
+ * @param traceId - 下拉列表中的执行链路编号。
+ * @returns 所有当前页请求完成的异步结果。
+ */
+async function load(
+  action: 'refresh' | 'page' | 'select' | 'filter' | 'append',
+  traceId?: string,
+): Promise<void> {
   const requestId = ++requestSequence
   loading.value = true
   error.value = ''
   try {
-    const followNewestRun = action === 'refresh' && selectedRun.value === availableRuns.value[0]
-    if (action === 'refresh') {
-      const query = new URLSearchParams({ limit: '30' })
-      const before = runPageCursors.value.at(-1)
-      if (before != null) query.set('before_version', String(before))
-      const page = await props.api<TraceRunPage>(basePath() + '?' + query)
-      if (requestSequence !== requestId) return
-      availableRuns.value = page.items
-      nextRunPageVersion.value = page.next_before_version
+    let target = selectedRun.value
+    if (action === 'refresh' || action === 'page') {
+      const preferredId = action === 'refresh' ? pinnedTraceId : null
+      target = await readRuns(preferredId, requestId)
+    } else if (action === 'select') {
+      target = availableRuns.value.find((entry) => entry.trace_id === traceId) ?? null
     }
-    const target = followNewestRun
-      ? availableRuns.value[0]?.run_version
-      : (version ?? selectedRun.value?.run_version)
-    let selectedVersion = availableRuns.value[0] ?? null
-    for (const entry of availableRuns.value) {
-      if (entry.run_version === target) selectedVersion = entry
-    }
-    const changed = selectedVersion?.trace_id !== selectedRun.value?.trace_id
-    if (changed) clearSpans()
-    selectedRun.value = selectedVersion
-    emit('recording', selectedVersion?.status === 'running')
-    if (selectedVersion)
-      await readSpans(selectedVersion.run_version, requestId, action === 'append')
+    if (requestSequence !== requestId) return
+    const changed = target?.trace_id !== selectedRun.value?.trace_id
+    if (action === 'page' || action === 'select') pinnedTraceId = target?.trace_id ?? null
+    if (changed) selectedKind.value = ''
+    if (changed || action === 'filter') clearSpans()
+    selectedRun.value = target
+    emit('recording', target?.status === 'running')
+    if (target) await readSpans(target.trace_id, requestId, action === 'append')
   } catch (cause) {
-    if (requestSequence === requestId) {
-      availableRuns.value = []
-      selectedRun.value = null
-      clearSpans()
+    if (requestSequence === requestId)
       error.value = cause instanceof Error ? cause.message : '读取调用链失败'
-    }
   } finally {
     if (requestSequence === requestId) loading.value = false
   }
+}
+
+/**
+ * 按真实节点类型筛选选中的执行链路。
+ * @param kind - 节点类型，空字符串表示全部。
+ */
+function chooseKind(kind: SpanKind | ''): void {
+  if (selectedKind.value === kind || loading.value) return
+  selectedKind.value = kind
+  void load('filter')
 }
 
 /** 用任务详情的最新快照同步运行，避免与翻页请求重叠。 */
@@ -209,22 +267,21 @@ function refresh(): void {
  * @param event - 版本下拉列表的选择事件。
  */
 function chooseRun(event: Event): void {
-  const version = Number((event.target as HTMLSelectElement).value)
-  void load('select', version)
+  void load('select', (event.target as HTMLSelectElement).value)
 }
 
 /** 加载更早的一页执行版本。 */
 function olderRuns(): void {
-  if (nextRunPageVersion.value === null || loading.value) return
-  runPageCursors.value.push(nextRunPageVersion.value)
-  void load('refresh')
+  if (nextRunCursor.value === null || loading.value) return
+  runPageCursors.value.push(nextRunCursor.value)
+  void load('page')
 }
 
 /** 回到较新的一页执行版本。 */
 function newerRuns(): void {
   if (runPageCursors.value.length === 1 || loading.value) return
   runPageCursors.value.pop()
-  void load('refresh')
+  void load('page')
 }
 
 /** 将下一页调用合并进当前瀑布图。 */
@@ -263,6 +320,49 @@ onUnmounted(stop)
   color: var(--tz-ink);
   font: inherit;
   font-size: 13px;
+}
+.kind-filters {
+  margin: 14px 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.kind-filters legend {
+  margin-bottom: 7px;
+  padding: 0;
+  color: var(--tz-ink-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+.kind-filters > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.kind-filters button {
+  padding: 5px 9px;
+  border: 1px solid var(--tz-border);
+  border-radius: 5px;
+  color: var(--tz-ink-secondary);
+  background: var(--tz-surface);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.kind-filters button[aria-pressed='true'] {
+  border-color: var(--tz-primary);
+  color: var(--tz-primary);
+  background: var(--tz-primary-soft);
+}
+.kind-filters button:disabled {
+  cursor: default;
+}
+.kind-filters button:disabled:not([aria-pressed='true']) {
+  color: var(--tz-ink-muted);
+}
+.kind-filters button span {
+  margin-inline-start: 3px;
+  font-variant-numeric: tabular-nums;
 }
 .execution-metrics {
   display: grid;

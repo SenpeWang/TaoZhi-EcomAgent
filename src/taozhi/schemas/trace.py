@@ -26,7 +26,7 @@ class Trace(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
-    matched_run_version: int | None = None
+    matched_trace_id: str | None = None
 
 
 class TracePage(BaseModel):
@@ -62,32 +62,16 @@ class TraceEvent(BaseModel):
     created_at: datetime
 
 
-class TraceModelCall(BaseModel):
-    """模型调用的记账信息。"""
-
-    id: int
-    role: str
-    role_label: str | None = None
-    elapsed_ms: int
-    prompt_tokens: int
-    completion_tokens: int
-    outcome: str
-    created_at: datetime
-
-
 class TraceDetail(BaseModel):
-    """任务详情、时间线及关联的模型调用。"""
+    """任务详情与持久化的状态时间线。"""
 
     trace: Trace
-    trace_id: str | None
     events: list[TraceEvent]
     has_more_events: bool
-    model_calls: list[TraceModelCall]
-    has_more_calls: bool
 
 
 SpanStatus = Literal["running", "ok", "error", "interrupted"]
-SpanKind = Literal["CHAIN", "AGENT", "LLM", "TOOL", "RETRIEVER", "INTERNAL"]
+SpanKind = Literal["CHAIN", "AGENT", "LLM", "TOOL", "RETRIEVER", "EMBEDDING", "RERANKER", "INTERNAL"]
 
 
 class TraceRun(BaseModel):
@@ -99,6 +83,7 @@ class TraceRun(BaseModel):
     ended_at: datetime | None
     status: SpanStatus
     span_count: int
+    kind_counts: dict[SpanKind, int]
     failed_count: int
     input_tokens: int
     output_tokens: int
@@ -108,7 +93,7 @@ class TraceRunPage(BaseModel):
     """按执行版本从新到旧排列的链路。"""
 
     items: list[TraceRun]
-    next_before_version: int | None
+    next_cursor: str | None
 
 
 class TraceSpan(BaseModel):
@@ -118,7 +103,7 @@ class TraceSpan(BaseModel):
     span_id: str
     parent_span_id: str | None
     name: str
-    display_name: str | None = None
+    display_name: str
     kind: SpanKind
     started_at: datetime
     ended_at: datetime | None

@@ -8,9 +8,11 @@ from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
 from langgraph.graph import END, START, StateGraph
+from openinference.semconv.trace import SpanAttributes
+from opentelemetry.trace import StatusCode
 
 from taozhi.core.agent.session import AgentSession
-from taozhi.domain.agent_catalog import agent_display_name, research_agent_id
+from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.research import StopReason
 from taozhi.observability.tracing import current_trace_id, node_span
 from .hooks import RuntimeHooks, emit_progress, normalize_steering_item, register_hooks, unregister_hooks
@@ -23,19 +25,23 @@ _LOG = logging.getLogger(__name__)
 
 
 def _traced_research_node(name: str, func: Callable) -> Callable:
-    """在并行分支记录节点耗时，用派工编号关联同一轮的子智能体。"""
+    """在并行分支记录节点耗时，按实际运行实例关联调研结果。"""
     @wraps(func)
     def run(state):
-        attrs = {"openinference.span.kind": "CHAIN" if name == "final_node" else "AGENT", "job_id": state.get("job_id", "")}
-        task = state.get("current_task") or {}
-        if name == "subagent_worker":
-            attrs["gen_ai.agent.name"] = research_agent_id(task.get("role", ""))
-        elif name in {"orchestrator", "synthesizer"}:
-            attrs["gen_ai.agent.name"] = f"research.{name}"
-        if task.get("task_id"):
-            attrs["subagent_id"] = task["task_id"]
-        with node_span(f"research.{name}", attrs):
-            return func(state)
+        operation = f"research.{name}"
+        if name == "final_node":
+            with node_span(operation, "CHAIN"):
+                return func(state)
+        role = state["current_task"]["role"] if name == "subagent_worker" else operation
+        with node_span(operation, "AGENT", {SpanAttributes.AGENT_NAME: role}) as span:
+            result = func(state)
+            transition = next(iter(result.get("audit_trail", [])), None)
+            if span is not None and transition:
+                span.set_attribute("subagent_id", transition["agent_id"])
+                if transition["state_to"] == "PARTIAL_OR_FAILED":
+                    span.set_attribute("error.type", "ResearchAgentFailure")
+                    span.set_status(StatusCode.ERROR)
+            return result
 
     return run
 
@@ -131,9 +137,7 @@ def _build_research_result_payload(
             {
                 "id": tr["agent_id"],
                 "role": tr["role"],
-                "type": tr["type_name"],
                 "type_name": tr["type_name"],
-                "state": tr["state_to"].lower(),
                 "status": tr["state_to"].lower(),
                 "decision_rationale": tr["decision_rationale"],
                 "elapsed": tr["elapsed"],
@@ -204,7 +208,7 @@ def _build_research_result_payload(
             if ev.get("status") == "ok" and ev.get("summary"):
                 session.record_fact(
                     subject=keyword,
-                    predicate=str(ev.get("role") or "调研洞察"),
+                    predicate=agent_display_name(str(ev.get("role") or "调研洞察")),
                     obj=str(ev["summary"])[:300],
                     source=str(ev.get("evidence_id") or conversation_id or "research"),
                 )
@@ -353,8 +357,7 @@ def execute_autonomous_agents(
     for list_key in list_fields:
         merged_state[list_key] = list(init_state[list_key])
 
-    attrs = {"job_id": job_id, "run_version": run_version, "openinference.span.kind": "CHAIN"}
-    with node_span("worker.research", attrs):
+    with node_span("worker.research", "CHAIN"):
         register_hooks(hook_run_id, hooks)
         try:
             for chunk in graph.stream(init_state, config=config, stream_mode="updates"):

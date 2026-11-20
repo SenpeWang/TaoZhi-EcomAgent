@@ -1,27 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { User } from '../types'
+import type { ResearchSubagent, User } from '../types'
+import robotUrl from '../assets/robot.svg'
 import MarkdownReport from './MarkdownReport.vue'
 import { openTaskEventStream, pollTaskUntilTerminal } from '../composables/useTaskStream'
-
-interface ToolCallTrace {
-  name: string
-  description: string
-  data_count?: number
-}
-
-interface SubagentState {
-  id?: string
-  role: string
-  display_name?: string
-  type: string
-  state: string
-  elapsed?: number
-  tools?: ToolCallTrace[]
-  scratch_files?: string[]
-  brief?: string
-}
 
 interface MemoryFact {
   subject: string
@@ -34,7 +17,7 @@ interface ResearchTaskResult {
   report?: string
   reply?: string
   outline?: string[]
-  subagents?: SubagentState[]
+  subagents?: ResearchSubagent[]
   turn_type?: string
   context_summary?: string
   context_tokens?: number
@@ -90,6 +73,7 @@ interface ConversationDetailResponse {
 interface FormattedThinkingStep {
   type: 'agent' | 'turn' | 'tool' | 'data' | 'security' | 'steering' | 'done' | 'thought' | 'plain'
   label: string
+  icon: string
   content: string
 }
 
@@ -125,9 +109,9 @@ const currentTurnCount = computed(() => turns.value.length)
  * @param agents - 当前轮次的角色执行记录。
  * @returns 去重后的角色名称。
  */
-function participatingRoleNames(agents: SubagentState[]): string[] {
+function participatingRoleNames(agents: ResearchSubagent[]): string[] {
   const names = new Set<string>()
-  for (const agent of agents) names.add(agent.display_name || agent.role)
+  for (const agent of agents) names.add(agent.display_name)
   return [...names]
 }
 
@@ -138,22 +122,22 @@ function participatingRoleNames(agents: SubagentState[]): string[] {
  */
 function parseStep(log: string): FormattedThinkingStep {
   if (log.startsWith('[agent_start]')) {
-    return { type: 'agent', label: '任务启动', content: log.slice(13).trim() }
+    return { type: 'agent', label: '任务启动', icon: 'STEP', content: log.slice(13).trim() }
   }
   if (log.startsWith('[agent_handoff]')) {
-    return { type: 'agent', label: '任务交接', content: log.slice(15).trim() }
+    return { type: 'agent', label: '任务交接', icon: 'FLOW', content: log.slice(15).trim() }
   }
   if (log.startsWith('[turn_start]')) {
-    return { type: 'turn', label: '调度轮次', content: log.slice(12).trim() }
+    return { type: 'turn', label: '调度轮次', icon: 'TURN', content: log.slice(12).trim() }
   }
   if (log.startsWith('[tool_execution_start]')) {
-    return { type: 'tool', label: '工具调用', content: log.slice(22).trim() }
+    return { type: 'tool', label: '工具调用', icon: 'TOOL', content: log.slice(22).trim() }
   }
   if (log.startsWith('[tool_execution_end]')) {
-    return { type: 'data', label: '采集完成', content: log.slice(20).trim() }
+    return { type: 'data', label: '采集完成', icon: 'DATA', content: log.slice(20).trim() }
   }
   if (log.startsWith('[tool_result]')) {
-    return { type: 'security', label: '合规核验', content: log.slice(13).trim() }
+    return { type: 'security', label: '合规核验', icon: 'CHECK', content: log.slice(13).trim() }
   }
   if (log.startsWith('[system]')) {
     const body = log.slice(8).trim()
@@ -161,6 +145,7 @@ function parseStep(log: string): FormattedThinkingStep {
       return {
         type: 'security',
         label: '模型容灾',
+        icon: 'ROUTE',
         content: body.replace(/^\[模型容灾\]\s*/, '').trim(),
       }
     }
@@ -168,32 +153,35 @@ function parseStep(log: string): FormattedThinkingStep {
       return {
         type: 'turn',
         label: '断点恢复',
+        icon: 'CKPT',
         content: body.replace(/^\[检查点恢复\]\s*/, '').trim(),
       }
     }
-    return { type: 'plain', label: '系统事件', content: body }
+    return { type: 'plain', label: '系统事件', icon: 'SYS', content: body }
   }
   if (log.includes('用户中途追加干预指令') || log.startsWith('[steering]')) {
     return {
       type: 'steering',
       label: '指令干预',
+      icon: 'STEER',
       content: log.replace(/^\[steering\]\s*/, '').trim(),
     }
   }
   if (log.startsWith('[agent_end]')) {
-    return { type: 'done', label: '阶段完成', content: log.slice(11).trim() }
+    return { type: 'done', label: '阶段完成', icon: 'DONE', content: log.slice(11).trim() }
   }
   if (log.startsWith('思考\n') || log.startsWith('💭 ')) {
     return {
       type: 'thought',
       label: '分析推演',
+      icon: 'THINK',
       content: log
         .replace(/^思考\n/, '')
         .replace(/^💭\s*/, '')
         .trim(),
     }
   }
-  return { type: 'plain', label: '执行状态', content: log }
+  return { type: 'plain', label: '执行状态', icon: 'INFO', content: log }
 }
 
 /**
@@ -668,6 +656,9 @@ onUnmounted(() => {
       <div ref="chatScrollRef" class="messages-scroll-area">
         <div class="messages-center-wrapper">
           <div v-if="turns.length === 0" class="chat-welcome-box">
+            <div class="welcome-robot-wrapper">
+              <img :src="robotUrl" alt="淘智机器人" class="welcome-robot-large" />
+            </div>
             <h2 class="welcome-title">选品调研</h2>
             <div class="welcome-subtitle">
               输入商品类目或选品问题，比较市场需求、供应商报价与竞品售价。
@@ -692,6 +683,7 @@ onUnmounted(() => {
             </div>
 
             <div class="assistant-response-container">
+              <img :src="robotUrl" alt="淘智机器人" class="assistant-avatar-img" />
               <div class="assistant-content-block">
                 <div
                   v-if="turn.state === 'running' || turn.state === 'queued'"
@@ -703,18 +695,16 @@ onUnmounted(() => {
                   </div>
                   <div class="live-steps-stream">
                     <div
-                      v-for="(log, idx) in turn.thinkingLogs"
+                      v-for="(step, idx) in turn.thinkingLogs.map(parseStep)"
                       :key="idx"
                       class="trace-step-entry"
-                      :class="[
-                        { current: idx === turn.thinkingLogs.length - 1 },
-                        parseStep(log).type,
-                      ]"
+                      :class="[{ current: idx === turn.thinkingLogs.length - 1 }, step.type]"
                     >
                       <div class="trace-step-header">
-                        <span class="trace-step-type">{{ parseStep(log).label }}</span>
+                        <span class="trace-step-icon" aria-hidden="true">{{ step.icon }}</span>
+                        <span class="trace-step-type">{{ step.label }}</span>
                       </div>
-                      <div class="trace-step-text">{{ parseStep(log).content }}</div>
+                      <div class="trace-step-text">{{ step.content }}</div>
                     </div>
                   </div>
                 </div>
@@ -736,14 +726,16 @@ onUnmounted(() => {
                   </button>
                   <div v-show="thinkingCollapsed[turn.id]" class="accordion-body">
                     <div
-                      v-for="(log, idx) in turn.thinkingLogs"
+                      v-for="(step, idx) in turn.thinkingLogs.map(parseStep)"
                       :key="idx"
                       class="trace-step-entry"
+                      :class="step.type"
                     >
                       <div class="trace-step-header">
-                        <span class="trace-step-type">{{ parseStep(log).label }}</span>
+                        <span class="trace-step-icon" aria-hidden="true">{{ step.icon }}</span>
+                        <span class="trace-step-type">{{ step.label }}</span>
                       </div>
-                      <div class="trace-step-text">{{ parseStep(log).content }}</div>
+                      <div class="trace-step-text">{{ step.content }}</div>
                     </div>
                   </div>
                 </div>
@@ -866,6 +858,16 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   margin-bottom: 3px;
+}
+.trace-step-icon {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #475569;
+  letter-spacing: 0.4px;
 }
 .trace-step-entry.agent .trace-step-type {
   color: #2563eb;
@@ -1047,6 +1049,22 @@ onUnmounted(() => {
   max-width: 560px;
 }
 
+.welcome-robot-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+.welcome-robot-large {
+  width: 96px;
+  height: 96px;
+  border-radius: 24px;
+  object-fit: cover;
+  box-shadow: 0 12px 28px -6px rgba(36, 90, 216, 0.28);
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.welcome-robot-large:hover {
+  transform: scale(1.08) rotate(2deg);
+}
 .welcome-title {
   font-size: 22px;
   font-weight: 600;
@@ -1108,6 +1126,19 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 14px;
+}
+.assistant-avatar-img {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  object-fit: cover;
+  flex-shrink: 0;
+  margin-top: 2px;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.12);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.assistant-avatar-img:hover {
+  transform: scale(1.08);
 }
 .assistant-content-block {
   flex: 1;

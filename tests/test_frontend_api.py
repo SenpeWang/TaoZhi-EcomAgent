@@ -69,6 +69,27 @@ for (const malformed of [
   globalThis.fetch = async () => Response.json(malformed)
   await assert.rejects(requestApi(ownerPath, 'demo', clear), /响应异常/)
 }
+const traceId = 'a'.repeat(32)
+const timestamp = '2026-01-01T08:00:00Z'
+const run = { trace_id: traceId, run_version: 1, status: 'ok', started_at: timestamp,
+  ended_at: timestamp, kind_counts: { LLM: 2 }, span_count: 2, failed_count: 0, input_tokens: 10, output_tokens: 5 }
+const runPath = '/admin/traces/task/runs?trace_id=' + traceId
+globalThis.fetch = async () => Response.json({ items: [run], next_cursor: null })
+assert.deepEqual((await requestApi(runPath, 'demo', clear)).items, [run])
+for (const kindCounts of [undefined, { UNKNOWN: 2 }, { LLM: -1 }]) {
+  globalThis.fetch = async () => Response.json({ items: [{ ...run, kind_counts: kindCounts }], next_cursor: null })
+  await assert.rejects(requestApi(runPath, 'demo', clear), /响应异常/)
+}
+const spanPath = '/admin/traces/task/runs/' + traceId + '/spans?kind=LLM'
+const span = { trace_id: traceId, span_id: '1'.repeat(16), parent_span_id: null, name: 'llm.chat',
+  display_name: '模型调用', started_at: timestamp, ended_at: timestamp, status: 'ok', kind: 'LLM',
+  duration_ms: 0, error_type: null, attributes: { 'llm.model_name': 'demo-1' } }
+globalThis.fetch = async () => Response.json({ items: [span], next_cursor: '2', observed_at: timestamp })
+assert.deepEqual((await requestApi(spanPath, 'demo', clear)).items, [span])
+for (const invalid of [{ trace_id: 'b'.repeat(32) }, { kind: 'TOOL' }, { kind: 'MODEL' }, { display_name: null }]) {
+  globalThis.fetch = async () => Response.json({ items: [{ ...span, ...invalid }], next_cursor: null, observed_at: timestamp })
+  await assert.rejects(requestApi(spanPath, 'demo', clear), /响应异常/)
+}
 for (const data of [{}, { items: [null] }, { items: [1] }, [], null]) {
   globalThis.fetch = async () => new Response(JSON.stringify(data), { status: 200 })
   await assert.rejects(requestApi('/documents', 'demo', clear), /响应异常/)
@@ -137,7 +158,7 @@ def test_trace_navigation_and_retry_analysis():
     source = """
 import assert from 'node:assert/strict'
 import { workspaceNavigation } from './web/src/workspaceNavigation.ts'
-import { analysisRows, buildWaterfall, runDuration } from './web/src/traceWaterfall.ts'
+import { analysisRows, buildWaterfall, runDuration, spanFields, spanSecondaryName } from './web/src/traceWaterfall.ts'
 
 const capabilities = { system: true, permissions: true, review: true, write: true }
 function pages(user) {
@@ -166,6 +187,24 @@ const interrupted = { ...root, span_id: 'interrupted', parent_span_id: 'root',
 const { rows } = buildWaterfall(run, [root, failed, interrupted, recovered], new Set(), Date.parse(ended))
 assert.deepEqual(analysisRows(rows, 'latency').map(row => row.span.span_id), ['recovered', 'failed'])
 assert.deepEqual(analysisRows(rows, 'issues').map(row => row.span.span_id), ['failed', 'interrupted'])
+const observed = Date.parse(ended) + 1000
+const flat = buildWaterfall({ ...run, status: 'running', ended_at: null }, [failed, recovered], new Set(), observed, true)
+assert.equal(flat.total, 2000)
+assert.ok(flat.rows.every(row => !row.hasChildren && row.depth === 0))
+assert.equal(flat.rows[0].span.parent_span_id, 'root')
+const llm = { kind: 'LLM', attributes: { 'llm.model_name': 'demo-2', 'llm.endpoint_id': 'secondary',
+  'llm.token_count.prompt': 0, 'llm.token_count.completion': 3, 'llm.token_count.total': 3 } }
+assert.equal(spanSecondaryName(llm), 'demo-2')
+assert.equal(spanSecondaryName({ ...llm, display_name: 'demo-2' }), '')
+assert.deepEqual(spanFields(llm).map(({ value }) => value), ['demo-2', 'secondary', 0, 3, 3])
+for (const [kind, key, value] of [
+  ['TOOL', 'tool.name', 'search'], ['RETRIEVER', 'retrieval.result_count', 0], ['AGENT', 'agent.name', 'research'],
+  ['EMBEDDING', 'embedding.model_name', 'embed'], ['RERANKER', 'reranker.model_name', 'rank'],
+]) {
+  const fields = spanFields({ kind, attributes: { [key]: value } })
+  assert.equal(fields.length, 1)
+  assert.equal(fields[0].value, value)
+}
 assert.equal(runDuration({ ...run, status: 'interrupted', ended_at: null }, Date.parse(ended)), null)
 """
     result = subprocess.run(

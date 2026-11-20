@@ -89,7 +89,7 @@ def test_full_multi_agent_research_flow():
                     outline=["市场概览", "竞品痛点", "选品建议"],
                     subtasks=[
                         _ProposedSubtaskSchema(
-                            role="全网市场情报专员",
+                            role="research.market_intelligence",
                             goal="采集磁吸手机壳全网口碑与价位",
                             allowed_tools=["search_web", "search_1688_wholesale"],
                             seed_queries=["磁吸手机壳"],

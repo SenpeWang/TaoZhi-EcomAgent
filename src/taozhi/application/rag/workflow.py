@@ -198,8 +198,7 @@ def build_rag_workflow(checkpointer):
         ("publication", publish_node),
     ]
     for name, func in nodes:
-        kind = "RETRIEVER" if name == "retrieval" else "CHAIN"
-        builder.add_node(name, traced_node(name, func, kind=kind))
+        builder.add_node(name, traced_node(name, func))
     builder.add_edge(START, "planning")
     builder.add_edge("planning", "retrieval")
     builder.add_edge("retrieval", "specialists")

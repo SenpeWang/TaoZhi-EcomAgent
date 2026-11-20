@@ -10,6 +10,7 @@ from typing import List
 
 _LOG = logging.getLogger(__name__)
 
+from openinference.semconv.trace import SpanAttributes
 from opentelemetry import context as otel_context
 from opentelemetry.trace import StatusCode
 from pydantic import BaseModel, Field
@@ -70,7 +71,7 @@ def domain_node(state: State) -> dict:
             return {
                 "findings": [],
                 "missing": ["缺少已授权的财务或经营分析资料，不能推测经营数据"],
-                "usage": {"role": specialist_name, "role_key": specialist_id, "elapsed_ms": 0, "outcome": "skipped"},
+                "usage": {"role": specialist_id, "elapsed_ms": 0, "outcome": "skipped"},
             }
 
         config = taozhi_config.load_config()
@@ -98,7 +99,7 @@ def domain_node(state: State) -> dict:
             if not current or current["run_version"] != state["run_version"] or current["state"] != "running" or current["cancel_requested"]:
                 raise Denied("任务执行版本已失效", "TASK_STOPPED", 409)
             if count_model_calls(c, state["job_id"]) >= config.max_model_calls:
-                return {"findings": [], "missing": ["本任务已达到模型调用预算，保留原文供核验"], "usage": {"role": specialist_name, "role_key": specialist_id, "elapsed_ms": 0, "outcome": "budget_exhausted"}}
+                return {"findings": [], "missing": ["本任务已达到模型调用预算，保留原文供核验"], "usage": {"role": specialist_id, "elapsed_ms": 0, "outcome": "budget_exhausted"}}
             call_id = insert_model_call(c, current["tenant_id"], state["job_id"], specialist_id)
 
         started = time.monotonic()
@@ -140,7 +141,7 @@ def domain_node(state: State) -> dict:
                         continue
                     if not re.search(r"[\u4e00-\u9fff]", claim):
                         continue
-                    agent_findings.append(dict(role=specialist_name, claim=claim, evidence_index=i, quote=f["quote"][:quote_cap]))
+                    agent_findings.append(dict(role=specialist_id, claim=claim, evidence_index=i, quote=f["quote"][:quote_cap]))
                 agent_missing.extend(str(x)[:160] for x in (data.get("missing") or [])[:4])
             except Exception:
                 agent_missing.append(specialist_name + "模型暂时不可用，保留原文供核验。")
@@ -160,8 +161,7 @@ def domain_node(state: State) -> dict:
             "findings": agent_findings,
             "missing": agent_missing,
             "usage": {
-                "role": specialist_name,
-                "role_key": specialist_id,
+                "role": specialist_id,
                 "elapsed_ms": elapsed,
                 "outcome": outcome,
                 "prompt_tokens": usage_totals["prompt_tokens"],
@@ -178,8 +178,8 @@ def domain_node(state: State) -> dict:
     parent_context = otel_context.get_current()
 
     def run_specialist(specialist_id: str) -> dict:
-        attrs = {"openinference.span.kind": "AGENT", "gen_ai.agent.name": specialist_id}
-        with node_span(f"rag.specialist.{specialist_id}", attrs, context=parent_context) as span:
+        attrs = {SpanAttributes.AGENT_NAME: specialist_id}
+        with node_span("rag.specialist", "AGENT", attrs, context=parent_context) as span:
             result = _run_specialist_agent(specialist_id)
             if span is not None and result["usage"]["outcome"] == "failed":
                 span.set_attribute("error.type", "SpecialistFailure")
@@ -199,7 +199,7 @@ def domain_node(state: State) -> dict:
             all_usage.append(usage_record)
             if usage_record.get("outcome") in ("ok", "failed"):
                 actual_calls += 1
-                token_usage = merge_token_usage(token_usage, usage_record.get("role_key") or usage_record.get("role", "specialist"), usage_record)
+                token_usage = merge_token_usage(token_usage, usage_record["role"], usage_record)
 
     degraded = {
         **(state.get("degraded") or {}),

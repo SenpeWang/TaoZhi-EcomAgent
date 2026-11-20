@@ -12,7 +12,9 @@
   <div v-else class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <span class="brand-monogram" aria-hidden="true">淘</span>
+        <div class="sidebar-logo-wrap">
+          <img :src="robotUrl" alt="平台标识" class="brand-logo-img" />
+        </div>
         <strong class="brand-title">淘智企业工作台</strong>
       </div>
 
@@ -46,7 +48,7 @@
               stroke-linecap="round"
               stroke-linejoin="round"
             >
-              <path v-for="path in workspacePages[item.page].iconPaths" :key="path" :d="path" />
+              <path v-for="path in item.iconPaths" :key="path" :d="path" />
             </svg>
             <span class="nav-label">{{ item.page }}</span>
             <span v-if="item.badge" class="nav-badge-count">{{ item.badge }}</span>
@@ -881,6 +883,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { requestApi } from './api'
 import { openTaskEventStream } from './composables/useTaskStream'
 import { levelText, stateTag, stateText } from './labels'
+import robotUrl from './assets/robot.svg'
 import { workspaceNavigation, workspacePages, type WorkspacePage } from './workspaceNavigation'
 import AccountCenter from './views/AccountCenter.vue'
 import BiView from './views/BiView.vue'

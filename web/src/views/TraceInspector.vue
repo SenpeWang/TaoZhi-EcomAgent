@@ -60,7 +60,7 @@
           <TraceRunInspector
             :detail="detail"
             :visible="tab === 'spans'"
-            :initial-run-version="initialRunVersion"
+            :initial-trace-id="initialTraceId"
             :api="api"
             @events="tab = 'events'"
             @recording="recording = $event"
@@ -91,34 +91,6 @@
             </el-button>
           </div>
         </el-tab-pane>
-        <el-tab-pane name="calls" label="全部模型调用">
-          <el-table :data="detail.model_calls" row-key="id" empty-text="暂无模型调用记录">
-            <el-table-column label="调用时间" min-width="155">
-              <template #default="{ row }">{{ traceTime(row.created_at) }}</template>
-            </el-table-column>
-            <el-table-column label="调用角色" min-width="110">
-              <template #default="{ row }">{{ row.role_label || row.role }}</template>
-            </el-table-column>
-            <el-table-column label="状态" width="95">
-              <template #default="{ row }">{{ outcomes[row.outcome] || row.outcome }}</template>
-            </el-table-column>
-            <el-table-column label="耗时" width="105">
-              <template #default="{ row }">
-                {{ row.outcome === 'started' ? '—' : formatDuration(row.elapsed_ms) }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="prompt_tokens" label="输入 Token" width="105" />
-            <el-table-column prop="completion_tokens" label="输出 Token" width="105" />
-          </el-table>
-          <div v-if="detail.has_more_calls || callCursors.length > 1" class="toolbar call-pages">
-            <el-button :disabled="busy || !detail.has_more_calls" @click="olderCalls">
-              更早的调用
-            </el-button>
-            <el-button :disabled="busy || callCursors.length === 1" @click="newerCalls">
-              较新的调用
-            </el-button>
-          </div>
-        </el-tab-pane>
       </el-tabs>
     </div>
     <template #footer>
@@ -132,13 +104,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { stateTag, stateText, traceKind, traceTime } from '../labels'
-import { formatDuration } from '../traceWaterfall'
 import type { TraceDetail } from '../types'
 import TraceRunInspector from './TraceRunInspector.vue'
 
 const props = defineProps<{
-  traceId: string
-  initialRunVersion?: number | null
+  taskId: string
+  initialTraceId: string | null
   api: <T>(path: string) => Promise<T>
 }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -149,7 +120,6 @@ const tab = ref('spans')
 const recording = ref(false)
 const finalRefreshes = ref(0)
 const cursors = ref([0])
-const callCursors = ref([0])
 const active = computed(
   /**
    * 检查任务是否仍在排队或执行中。
@@ -161,7 +131,6 @@ const active = computed(
     (tab.value === 'spans' && recording.value) ||
     finalRefreshes.value > 0,
 )
-const outcomes: Record<string, string> = { started: '已发起', ok: '成功', failed: '失败' }
 let timer: number | undefined
 
 /** 读取任务最新记录及当前页的阶段事件。 */
@@ -173,11 +142,9 @@ async function loadDetail(): Promise<void> {
     after_event_id: String(cursors.value.at(-1)),
     event_limit: '50',
   })
-  const beforeCall = callCursors.value.at(-1)
-  if (beforeCall) query.set('before_call_id', String(beforeCall))
   try {
     const snapshot = await props.api<TraceDetail>(
-      '/admin/traces/' + encodeURIComponent(props.traceId) + '?' + query,
+      '/admin/traces/' + encodeURIComponent(props.taskId) + '?' + query,
     )
     if (
       snapshot.trace.finished_at &&
@@ -213,22 +180,7 @@ function previousEvents(): void {
   void loadDetail()
 }
 
-/** 从最早一条可见调用向前翻页。 */
-function olderCalls(): void {
-  const firstId = detail.value?.model_calls[0]?.id
-  if (!firstId || !detail.value?.has_more_calls || busy.value) return
-  callCursors.value.push(firstId)
-  void loadDetail()
-}
-
-/** 返回较近的一页模型调用。 */
-function newerCalls(): void {
-  if (callCursors.value.length === 1 || busy.value) return
-  callCursors.value.pop()
-  void loadDetail()
-}
-
-/** 仅在管理员正在查看活跃任务时刷新。 */
+/** 仅在当前用户正在查看活跃任务时刷新。 */
 function refreshActive(): void {
   if (active.value && !document.hidden) void loadDetail()
 }
@@ -330,9 +282,6 @@ onUnmounted(stop)
 }
 .trace-timeline p {
   margin: 6px 0 0;
-}
-.call-pages {
-  margin-top: 12px;
 }
 .live-hint {
   margin-right: 12px;

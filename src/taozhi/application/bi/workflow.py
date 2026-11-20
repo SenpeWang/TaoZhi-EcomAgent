@@ -7,6 +7,7 @@ from taozhi.infrastructure.persistence.access_repo import can_read_metric
 from taozhi.infrastructure.persistence.bi_repo import get_published_metric_by_id
 from taozhi.knowledge import metrics as metrics_mod
 from taozhi.knowledge.db import database_connection
+from taozhi.observability.tracing import node_span
 from .intent import detect_data_intent
 from .state import BiState
 
@@ -40,7 +41,10 @@ def data_query_node(state: BiState) -> dict:
                 result = {"denied": True, "message": "该指标不存在，或您当前的角色与密级无权查看。"}
             else:
                 try:
-                    cols, rows, meta = metrics_mod.execute_metric(c, p, m, di.get("intent") or {})
+                    with node_span("bi.query_metric", "RETRIEVER") as span:
+                        cols, rows, meta = metrics_mod.execute_metric(c, p, m, di.get("intent") or {})
+                        if span is not None:
+                            span.set_attribute("retrieval.result_count", len(rows))
                     result = {
                         "denied": False,
                         "columns": cols,

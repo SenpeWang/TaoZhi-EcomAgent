@@ -14,7 +14,6 @@ from taozhi.infrastructure.persistence.access_repo import batch_sources_validity
 from taozhi.knowledge.db import database_connection
 from taozhi.observability.span_attributes import safe_attributes
 
-_MODEL_CALL_PAGE_SIZE = 100
 _SPAN_FLUSH_GRACE = timedelta(seconds=10)
 _TRACE_OPERATIONS = {
     "task.ask": "问答任务",
@@ -24,19 +23,20 @@ _TRACE_OPERATIONS = {
     "worker.research": "选品调研流程",
     "worker.semantic_cache_hit": "复用已核验答案",
     "pipeline.planning": "识别问题与分派角色",
-    "pipeline.retrieval": "检索授权资料",
+    "pipeline.retrieval": "资料检索流程",
+    "knowledge.search": "检索授权资料",
+    "knowledge.cache_lookup": "查询问答缓存",
     "pipeline.specialists": "专业核验",
     "pipeline.quality": "校验事实与引用",
     "pipeline.publication": "生成答复",
     "bi.bi_intent": "识别经营指标",
     "bi.data_query": "查询经营数据",
+    "bi.query_metric": "检索经营指标",
     "bi.bi_publish": "生成指标答复",
     "research.final_node": "归档调研成果",
-    "llm.chat": "模型推理",
-    "mcp.tool.search_web": "检索市场信息",
-    "mcp.tool.fetch_web_page": "读取网页正文",
-    "mcp.tool.search_1688_wholesale": "查询 1688 批发报价",
-    "mcp.tool.search_amazon": "查询亚马逊竞品",
+    "embedding.query": "生成查询向量",
+    "embedding.passages": "生成文档向量",
+    "reranker.rerank": "重排检索结果",
 }
 _TOOL_OUTCOMES = {
     "timeout": "工具调用超时",
@@ -154,17 +154,15 @@ def list_traces(
 
 
 def get_trace(
-    p: Principal, task_id: str, *, after_event_id: int, event_limit: int, before_call_id: int | None = None,
+    p: Principal, task_id: str, *, after_event_id: int, event_limit: int,
 ) -> dict:
-    """按任务读取真实事件与模型调用账本，支持运行中增量拉取。"""
+    """按任务读取状态事件，支持运行中增量拉取。"""
     with database_connection() as conn:
         row = trace_repo.get_trace(conn, p.tenant_id, task_id, owner_id=_visible_owner(p))
         if row is None:
             raise Denied("轨迹不存在", "NOT_FOUND", 404)
         question_visible = p.system_admin or (row["state"] != "legacy" and sources_valid(conn, p, row["sources"]))
         events = trace_repo.list_events(conn, p.tenant_id, task_id, after_event_id, event_limit + 1)
-        calls = trace_repo.list_model_calls(conn, p.tenant_id, task_id, before_call_id, _MODEL_CALL_PAGE_SIZE + 1)
-    trace_id = row.pop("trace_id")
     return {
         "trace": _display_trace(row, question_visible),
         "events": [
@@ -172,12 +170,6 @@ def get_trace(
             for event in events[:event_limit]
         ],
         "has_more_events": len(events) > event_limit,
-        "model_calls": [
-            {**call, "role": redact(call["role"]), "role_label": redact(agent_display_name(call["role"]))}
-            for call in reversed(calls[:_MODEL_CALL_PAGE_SIZE])
-        ],
-        "has_more_calls": len(calls) > _MODEL_CALL_PAGE_SIZE,
-        "trace_id": trace_id if trace_id and re.fullmatch(r"[0-9a-f]{32}", trace_id) else None,
     }
 
 
@@ -196,36 +188,50 @@ def _span_status(recorded: str | None, job: dict, run_version: int) -> str:
     return "interrupted"
 
 
-def list_runs(p: Principal, task_id: str, *, before_version: int | None, limit: int) -> dict:
-    """列出提问的实际采集记录，旧任务与尚未开始执行的任务均可返回空页。"""
+def list_runs(p: Principal, task_id: str, *, cursor: str | None, trace_id: str | None, limit: int) -> dict:
+    """列出每次执行的实际链路，使用执行版本与链路编号共同定位翻页边界。"""
+    before = None
+    if cursor is not None:
+        match = re.fullmatch(r"([0-9]{1,19})[|]([0-9a-f]{32})", cursor)
+        if not match or int(match[1]) > 2**63 - 1:
+            raise Denied("链路分页游标无效", "INVALID_CURSOR", 422)
+        before = int(match[1]), match[2]
     with database_connection() as conn:
         job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=_visible_owner(p))
         if job is None:
             raise Denied("轨迹不存在", "NOT_FOUND", 404)
-        rows = trace_repo.list_span_runs(conn, p.tenant_id, task_id, before_version, limit + 1)
+        rows = trace_repo.list_span_runs(conn, p.tenant_id, task_id, before=before, trace_id=trace_id, limit=limit + 1)
     page = [
         {**row, "status": _span_status(row["status"], job, row["run_version"])}
         for row in rows[:limit]
     ]
-    return {"items": page, "next_before_version": page[-1]["run_version"] if len(rows) > limit else None}
+    next_cursor = f"{page[-1]['run_version']}|{page[-1]['trace_id']}" if len(rows) > limit else None
+    return {"items": page, "next_cursor": next_cursor}
 
 
-def list_spans(p: Principal, task_id: str, run_version: int, *, after_id: int, limit: int) -> dict:
-    """读取一个执行版本的真实节点，只展示允许进入管理界面的元数据。"""
+def _span_display_name(kind: str, operation: str, attributes: dict) -> str:
+    """用本次调用实际记录的模型、工具或业务角色标识命名节点。"""
+    if kind == "LLM":
+        return attributes.get("llm.model_name", "模型推理")
+    if kind == "TOOL":
+        return attributes.get("tool.name", operation)
+    if kind == "AGENT":
+        return agent_display_name(attributes.get("agent.name", operation))
+    return _TRACE_OPERATIONS.get(operation, operation)
+
+
+def list_spans(p: Principal, task_id: str, trace_id: str, *, kind: str | None, after_id: int, limit: int) -> dict:
+    """在任务归属范围内，按精确链路编号和节点类型读取采集记录。"""
     with database_connection() as conn:
-        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=_visible_owner(p), run_version=run_version)
+        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=_visible_owner(p), trace_id=trace_id)
         if job is None:
             raise Denied("执行轨迹不存在", "NOT_FOUND", 404)
-        rows = trace_repo.list_spans(conn, p.tenant_id, task_id, run_version, after_id, limit + 1)
+        rows = trace_repo.list_spans(conn, p.tenant_id, task_id, trace_id, kind=kind, after_id=after_id, limit=limit + 1)
     next_cursor = str(rows[limit - 1]["id"]) if len(rows) > limit else None
     page = rows[:limit]
     for row in page:
         del row["id"]
-        row["status"] = _span_status(row["status"], job, run_version)
+        row["status"] = _span_status(row["status"], job, job["span_version"])
         row["attributes"] = safe_attributes(row["attributes"])
-        operation = row["name"]
-        role_id = operation.removeprefix("rag.specialist.")
-        if operation == "research.subagent_worker":
-            role_id = str(row["attributes"].get("gen_ai.agent.name", operation))
-        row["display_name"] = _TRACE_OPERATIONS.get(operation) or agent_display_name(role_id)
+        row["display_name"] = _span_display_name(row["kind"], row["name"], row["attributes"])
     return {"items": page, "next_cursor": next_cursor, "observed_at": job["observed_at"]}

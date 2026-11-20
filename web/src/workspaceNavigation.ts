@@ -9,6 +9,8 @@ interface WorkspacePageDefinition {
   access: PageAccess
 }
 
+const shieldIconPaths = ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z']
+
 const workspacePages = {
   工作概览: {
     group: '业务工作台',
@@ -19,7 +21,7 @@ const workspacePages = {
   选品调研: {
     group: '业务工作台',
     description: '对比货源报价与渠道价格，形成选品分析报告。',
-    iconPaths: ['M3 20h18M5 16l4-5 4 2 6-8', 'M15 5h4v4'],
+    iconPaths: ['M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z', 'M5 20a7 7 0 0 1 14 0'],
     access: 'member',
   },
   经营看板: {
@@ -67,7 +69,7 @@ const workspacePages = {
   权限审批: {
     group: '组织与权限',
     description: '处理文档授权、密级调整及成员权限申请。',
-    iconPaths: ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'],
+    iconPaths: shieldIconPaths,
     access: 'permissionManager',
   },
   组织与成员: {
@@ -99,7 +101,7 @@ export { workspacePages }
 
 interface NavigationGroup {
   title: string
-  items: { page: WorkspacePage; badge?: number }[]
+  items: { page: WorkspacePage; iconPaths: string[]; badge?: number }[]
 }
 
 /**
@@ -117,7 +119,9 @@ export function workspaceNavigation(
   pendingReviews: number,
 ): NavigationGroup[] {
   if (!user) return []
-  if (user.must_change) return [{ title: '账号安全', items: [{ page: '个人中心' }] }]
+  if (user.must_change) {
+    return [{ title: '账号安全', items: [{ page: '个人中心', iconPaths: shieldIconPaths }] }]
+  }
   const allowed: Record<PageAccess, boolean> = {
     member: true,
     reviewer: capabilities.review,
@@ -131,10 +135,10 @@ export function workspaceNavigation(
   }
   const groups = new Map<string, NavigationGroup>()
   for (const page of Object.keys(workspacePages) as WorkspacePage[]) {
-    const { access, group } = workspacePages[page]
+    const { access, group, iconPaths } = workspacePages[page]
     if (!allowed[access]) continue
     const section: NavigationGroup = groups.get(group) ?? { title: group, items: [] }
-    section.items.push({ page, badge: badges[page] })
+    section.items.push({ page, iconPaths, badge: badges[page] })
     groups.set(group, section)
   }
   return Array.from(groups.values())

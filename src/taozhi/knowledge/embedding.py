@@ -17,8 +17,10 @@ from typing import Optional, Tuple
 
 import httpx
 import numpy as np
+from openinference.semconv.trace import RerankerAttributes, SpanAttributes
 
 from ..config import load_config
+from ..observability.tracing import node_span
 
 _lock = threading.Lock()
 _state = {"checked_at": 0.0, "ok": False, "model": "", "dim": 0}
@@ -102,10 +104,15 @@ def to_vector(raw) -> Optional[np.ndarray]:
 
 
 def _post(texts: list[str], instruct: bool) -> np.ndarray:
-    r = httpx.post(load_config().embed_service_url.rstrip("/") + "/embed",
-                   json={"texts": texts, "instruct": instruct}, timeout=60, trust_env=False)
-    r.raise_for_status()
-    return np.asarray(r.json()["vectors"], dtype="float32")
+    operation = "embedding.query" if instruct else "embedding.passages"
+    with node_span(operation, "EMBEDDING") as span:
+        response = httpx.post(load_config().embed_service_url.rstrip("/") + "/embed",
+                              json={"texts": texts, "instruct": instruct}, timeout=60, trust_env=False)
+        response.raise_for_status()
+        payload = response.json()
+        if span is not None and payload.get("model"):
+            span.set_attribute(SpanAttributes.EMBEDDING_MODEL_NAME, payload["model"])
+        return np.asarray(payload["vectors"], dtype="float32")
 
 
 def embedding_input(title: str, text: str) -> str:
@@ -161,11 +168,15 @@ def rerank(query: str, texts: list[str]) -> list[float]:
 
     服务不可用或精排模型缺失（503）时抛异常，由调用方回落融合序。
     """
-    r = httpx.post(load_config().embed_service_url.rstrip("/") + "/rerank",
-                   json={"query": query, "texts": list(texts)},
-                   timeout=load_config().rerank_timeout, trust_env=False)
-    r.raise_for_status()
-    return [float(s) for s in r.json()["scores"]]
+    with node_span("reranker.rerank", "RERANKER") as span:
+        response = httpx.post(load_config().embed_service_url.rstrip("/") + "/rerank",
+                              json={"query": query, "texts": list(texts)},
+                              timeout=load_config().rerank_timeout, trust_env=False)
+        response.raise_for_status()
+        payload = response.json()
+        if span is not None and payload.get("model"):
+            span.set_attribute(RerankerAttributes.RERANKER_MODEL_NAME, payload["model"])
+        return [float(score) for score in payload["scores"]]
 
 
 def query_cache_stats() -> dict:

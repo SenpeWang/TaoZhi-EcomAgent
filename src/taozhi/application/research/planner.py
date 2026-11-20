@@ -50,7 +50,7 @@ def default_fallback_tasks(keyword: str, scope: ResearchScope, steering: List[st
     tasks = [
         SubagentTaskSpec(
             task_id="sub_web_init",
-            role=agent_display_name("research.market_intelligence"),
+            role="research.market_intelligence",
             goal=f"检索并提炼【{keyword}】的全网主流定价、热销卖点与消费者高频差评痛点",
             allowed_tools=tuple(t for t in WEB_TOOLS if t in scope.allowed_tools),
             seed_queries=(base_query,),
@@ -62,7 +62,7 @@ def default_fallback_tasks(keyword: str, scope: ResearchScope, steering: List[st
             tasks.append(
                 SubagentTaskSpec(
                     task_id="sub_1688_init",
-                    role=agent_display_name("research.sourcing"),
+                    role="research.sourcing",
                     goal=f"核查【{keyword}】在1688源头工厂的一手出厂价梯度、MOQ起订量与核心产区",
                     allowed_tools=("search_1688_wholesale",),
                     seed_queries=(extract_search_keyword(keyword) or keyword,),
@@ -73,7 +73,7 @@ def default_fallback_tasks(keyword: str, scope: ResearchScope, steering: List[st
             tasks.append(
                 SubagentTaskSpec(
                     task_id="sub_amz_init",
-                    role=agent_display_name("research.competitive_pricing"),
+                    role="research.competitive_pricing",
                     goal=f"核查【{keyword}】在Amazon全球站的美元定价带、星级评价与跨境机会",
                     allowed_tools=("search_amazon",),
                     seed_queries=(extract_search_keyword(keyword) or keyword,),
@@ -99,7 +99,7 @@ def deserialize_task(raw: Dict[str, Any]) -> SubagentTaskSpec:
     """将检查点中的任务字典反序列化为领域子任务规约。"""
     return SubagentTaskSpec(
         task_id=str(raw.get("task_id") or f"sub_{uuid.uuid4().hex[:6]}"),
-        role=agent_display_name(str(raw.get("role") or "research.subagent_worker")),
+        role=raw["role"],
         goal=str(raw.get("goal") or "收集客观市场事实"),
         allowed_tools=tuple(str(x) for x in (raw.get("allowed_tools") or [])),
         seed_queries=tuple(str(x) for x in (raw.get("seed_queries") or [])),
@@ -124,7 +124,7 @@ def _build_orchestrator_prompt(
     ev_digest = [
         {
             "evidence_id": ev.get("evidence_id"),
-            "role": ev.get("role"),
+            "role": agent_display_name(ev["role"]),
             "channel": ev.get("channel"),
             "status": ev.get("status"),
             "summary": sanitize(str(ev.get("summary", "")))[:500],
@@ -164,7 +164,7 @@ def _decide_orchestrator_action(
     active_ev: List[Dict[str, Any]],
 ) -> Tuple[_OrchestratorDecisionSchema, List[Dict[str, Any]], str]:
     """调用调研协调员模型获取结构化规划，解析失败时降级至安全规则决策。"""
-    llm = LLMClient(on_attempt=hooks.model_call_observer("调研主协调器"))
+    llm = LLMClient(on_attempt=hooks.model_call_observer("research.orchestrator"))
     parsed: Optional[_OrchestratorDecisionSchema] = None
     route_events: List[Dict[str, Any]] = []
     last_ep = ""
@@ -350,7 +350,7 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
         next_act = "synthesizer"
         sys_status = "REPORTING"
     else:
-        roles_str = " / ".join(t.role for t in authorized_tasks)
+        roles_str = " / ".join(agent_display_name(t.role) for t in authorized_tasks)
         bump_progress(hooks, 10, 25, f"[agent_start] 第 {turn} 轮并行调度 {len(authorized_tasks)} 项专职分析（{roles_str}）")
         next_act = "dispatch_subagents"
         sys_status = "STEERING_REDIRECTED" if newly_arrived else "COLLECTING"

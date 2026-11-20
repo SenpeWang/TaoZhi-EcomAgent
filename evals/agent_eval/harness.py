@@ -30,7 +30,7 @@ class AgentRunResult:
 
 
 class AgentEvalHarness:
-    """负责评测用例的隔离运行、Arize Phoenix Trace 注入与诊断信息收集。"""
+    """负责评测用例的隔离运行、OpenTelemetry 链路采集与诊断信息收集。"""
 
     def __init__(self, checkpointer: Optional[Any] = None) -> None:
         self.checkpointer = checkpointer
@@ -42,7 +42,7 @@ class AgentEvalHarness:
         steering = initial_steering or case.get("steering") or []
         t0 = time.perf_counter()
 
-        with node_span("eval.agent_run", {"case_id": case_id, "keyword": keyword}):
+        with node_span("eval.agent_run", "CHAIN"):
             trace_id = current_trace_id()
             try:
                 raw_res = execute_autonomous_agents(

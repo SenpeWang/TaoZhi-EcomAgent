@@ -34,7 +34,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
     evidence_payload = [
         {
             "evidence_id": ev.get("evidence_id"),
-            "role": ev.get("role"),
+            "role": agent_display_name(ev["role"]),
             "channel": ev.get("channel"),
             "status": ev.get("status"),
             "goal": ev.get("goal"),
@@ -65,8 +65,8 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
         "3. 结合用户诉求给出可落地的差异化与风险提示。"
     )
 
-    llm = LLMClient(on_attempt=hooks.model_call_observer("调研报告合成"))
-    emit_progress(hooks, "[tool_execution_start] [终审研报合成] 正在生成结构化调研报告", 90)
+    llm = LLMClient(on_attempt=hooks.model_call_observer("research.synthesizer"))
+    emit_progress(hooks, "[agent_start] 调研报告分析师开始撰写报告", 90)
     synth_route_events: List[Dict[str, Any]] = []
     synth_last_ep = ""
     with route_audit_scope(
@@ -80,7 +80,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
                 system="你是资深电商操盘负责人。输出客观、可核验的高质量 Markdown 研报，绝对禁止虚构数据。",
             )
         except Exception as exc:
-            sections = [f"### {ev.get('role')}（{ev.get('status')}）\n{ev.get('summary', '')}" for ev in active_ev]
+            sections = [f"### {agent_display_name(ev['role'])}（{ev.get('status')}）\n{ev.get('summary', '')}" for ev in active_ev]
             body = "\n\n".join(sections) if sections else "本次暂无可用实测证据。"
             final_report = (
                 f"# 【{keyword}】电商市场调研报告（降级结构化汇总）\n\n"
@@ -93,25 +93,16 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
     art_meta = ArtifactMetadata(summary=f"【{keyword}】电商多智能体调研报告", user_facing=True)
     art_file = ctx.write_artifact("market_research_report.md", final_report, metadata=art_meta)
     elapsed = round(time.perf_counter() - t0, 2)
-    emit_progress(hooks, f"[tool_execution_end] [终审研报合成] 报告生成完毕 · {len(final_report)} 字符（耗时 {elapsed}s）", 95)
+    emit_progress(hooks, f"[agent_end] 调研报告分析师完成报告 · {len(final_report)} 字符（耗时 {elapsed}s）", 95)
 
     transition: AuditableAgentTransition = {
         "agent_id": ctx.conversation_id,
-        "role": agent_display_name("research.synthesizer"),
+        "role": "research.synthesizer",
         "type_name": "synthesizer_agent",
         "state_from": "SYNTHESIZING",
         "state_to": "COMPLETED",
         "decision_rationale": state.get("current_rationale", ""),
-        "tools": [
-            {
-                "tool_name": "generate_markdown_report",
-                "parameters": {"evidence_count": len(active_ev), "outline_count": len(outline)},
-                "status": "ok",
-                "result_summary": f"基于 {len(active_ev)} 份黑板实证生成终审 Markdown 研报（{len(final_report)} 字符）。",
-                "data_count": len(active_ev),
-                "elapsed": elapsed,
-            }
-        ],
+        "tools": [],
         "elapsed": elapsed,
         "scratch_files": [],
     }

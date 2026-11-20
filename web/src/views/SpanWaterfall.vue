@@ -8,11 +8,12 @@
         :aria-pressed="view === option.value"
         @click="view = option.value"
       >
-        {{ option.label }}
+        {{ option.value === 'tree' && kind ? '调用时间线' : option.label }}
       </button>
     </div>
     <span class="coverage"
-      >已加载 {{ spans.length }} 个节点（本次执行已记录 {{ run.span_count }} 个）</span
+      >已加载 {{ spans.length }} /
+      {{ kind ? (run.kind_counts[kind] ?? 0) : run.span_count }} 个节点</span
     >
   </div>
   <p v-if="view === 'latency'" class="analysis-note">
@@ -29,7 +30,11 @@
         <span>耗时</span>
       </div>
       <div v-for="row in visibleRows" :key="row.span.span_id">
-        <div class="chart-grid span-row" :class="{ selected: selectedSpanId === row.span.span_id }">
+        <div
+          class="chart-grid span-row"
+          :data-kind="row.span.kind"
+          :class="{ selected: selectedSpanId === row.span.span_id }"
+        >
           <div
             class="node"
             :style="{ paddingLeft: view === 'tree' ? Math.min(row.depth, 6) * 9 + 'px' : 0 }"
@@ -39,8 +44,7 @@
               class="branch"
               type="button"
               :aria-label="
-                (collapsedSpanIds.has(row.span.span_id) ? '展开 ' : '折叠 ') +
-                (row.span.display_name || row.span.name)
+                (collapsedSpanIds.has(row.span.span_id) ? '展开 ' : '折叠 ') + row.span.display_name
               "
               :aria-expanded="!collapsedSpanIds.has(row.span.span_id)"
               @click="toggleBranch(row.span.span_id)"
@@ -55,17 +59,20 @@
               :aria-expanded="selectedSpanId === row.span.span_id"
               @click="inspect(row.span.span_id)"
             >
-              <strong>{{ row.span.display_name || row.span.name }}</strong>
+              <strong>{{ row.span.display_name }}</strong>
               <small :class="{ 'span-error': row.span.status === 'error' }"
-                >{{ spanKindLabels[row.span.kind] || row.span.kind }} ·
-                {{ spanStatusLabels[row.span.status] }}</small
+                ><b class="node-kind">{{ spanKindLabels[row.span.kind] }}</b> ·
+                {{ spanStatusLabels[row.span.status]
+                }}<template v-if="spanSecondaryName(row.span)">
+                  · {{ spanSecondaryName(row.span) }}</template
+                ></small
               >
             </button>
           </div>
           <button
             class="lane"
             type="button"
-            :aria-label="'查看 ' + (row.span.display_name || row.span.name) + ' 的详情'"
+            :aria-label="'查看 ' + row.span.display_name + ' 的详情'"
             :aria-expanded="selectedSpanId === row.span.span_id"
             @click="inspect(row.span.span_id)"
           >
@@ -98,11 +105,9 @@
             <dt>异常类型</dt>
             <dd class="span-error">{{ row.span.error_type }}</dd>
           </template>
-          <template v-for="(value, key) in row.span.attributes" :key="key">
-            <dt>
-              <code>{{ key }}</code>
-            </dt>
-            <dd>{{ value }}</dd>
+          <template v-for="field in spanFields(row.span)" :key="field.key">
+            <dt :title="field.key">{{ field.label }}</dt>
+            <dd>{{ field.value }}</dd>
           </template>
         </dl>
       </div>
@@ -121,13 +126,20 @@ import {
   analysisRows,
   buildWaterfall,
   formatDuration,
+  spanFields,
+  spanSecondaryName,
   spanKindLabels,
   spanStatusLabels,
   type SpanView,
 } from '../traceWaterfall'
-import type { TraceRun, TraceSpan } from '../types'
+import type { SpanKind, TraceRun, TraceSpan } from '../types'
 
-const props = defineProps<{ run: TraceRun; spans: TraceSpan[]; observedAt: number }>()
+const props = defineProps<{
+  run: TraceRun
+  spans: TraceSpan[]
+  kind: SpanKind | ''
+  observedAt: number
+}>()
 const views: { value: SpanView; label: string }[] = [
   { value: 'tree', label: '调用树' },
   { value: 'latency', label: '耗时排行' },
@@ -148,6 +160,7 @@ const waterfall = computed(
       props.spans,
       view.value === 'tree' ? collapsedSpanIds.value : noCollapsedSpans,
       props.observedAt,
+      Boolean(props.kind),
     ),
 )
 const visibleRows = computed(
@@ -272,6 +285,34 @@ function timestamp(value: string): string {
 .duration {
   text-align: right;
 }
+.span-row[data-kind='LLM'] {
+  --node-color: #6050a0;
+}
+.span-row[data-kind='TOOL'] {
+  --node-color: #a05a29;
+}
+.span-row[data-kind='RETRIEVER'] {
+  --node-color: #13756f;
+}
+.span-row[data-kind='EMBEDDING'] {
+  --node-color: #42659a;
+}
+.span-row[data-kind='RERANKER'] {
+  --node-color: #476e43;
+}
+.span-row[data-kind='AGENT'] {
+  --node-color: #285f98;
+}
+.span-row[data-kind='CHAIN'] {
+  --node-color: #516479;
+}
+.span-row[data-kind='INTERNAL'] {
+  --node-color: #73717e;
+}
+.node-kind {
+  color: var(--node-color);
+  font-weight: 600;
+}
 .span-row {
   min-height: 45px;
   border-top: 1px solid var(--tz-border-soft);
@@ -339,7 +380,7 @@ function timestamp(value: string): string {
   height: 12px;
   min-width: 2px;
   border-radius: 3px;
-  background: #187c79;
+  background: var(--node-color);
 }
 .bar-error {
   background: var(--tz-danger);

@@ -16,7 +16,7 @@ import httpx
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
-from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttributes
+from openinference.semconv.trace import SpanAttributes
 from pydantic import BaseModel
 
 from ..config import Settings, get_settings
@@ -246,11 +246,10 @@ class LLMClient:
                     attempt_started_at = time.perf_counter()
                     try:
                         model_attributes = {
-                            SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.LLM.value,
-                            "gen_ai.operation.name": "chat",
+                            "llm.endpoint_id": endpoint.endpoint_id,
                             SpanAttributes.LLM_MODEL_NAME: endpoint.model or self._model_for_tier(tier),
                         }
-                        with node_span("llm.chat", model_attributes) as span:
+                        with node_span("llm.chat", "LLM", model_attributes) as span:
                             model_client = self._client_for_endpoint(endpoint)
                             result = model_client.bind(
                                 temperature=sampling_temperature, max_tokens=output_token_limit,
@@ -259,6 +258,7 @@ class LLMClient:
                             if span is not None:
                                 span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_PROMPT, usage["prompt_tokens"])
                                 span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_COMPLETION, usage["completion_tokens"])
+                                span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_TOTAL, usage["total_tokens"])
                     except Exception as exc:
                         latency_ms = int((time.perf_counter() - attempt_started_at) * 1000)
                         reason, cooldown = self._registry.classify_error(exc, self.settings)

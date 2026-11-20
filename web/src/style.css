@@ -111,19 +111,22 @@ p {
   gap: 14px;
 }
 
-.brand-monogram {
-  display: inline-grid;
+.showcase-logo-frame {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  display: grid;
   place-items: center;
-  flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
-  background: #d7eee9;
-  color: #123c42;
-  border-radius: 5px;
-  font:
-    700 23px/1 'Songti SC',
-    'SimSun',
-    serif;
+  backdrop-filter: blur(8px);
+}
+
+.showcase-logo-img {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  object-fit: cover;
 }
 
 .showcase-brand-name {
@@ -392,6 +395,24 @@ p {
   align-items: center;
   gap: 11px;
   padding: 6px 6px 20px;
+}
+
+.sidebar-logo-wrap {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.brand-logo-img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
 }
 
 .brand-title {

@@ -1,5 +1,6 @@
 """真实 PostgreSQL、会话、接口与 LangGraph 的企业边界验收。"""
 import os,json,time
+from datetime import datetime, timezone
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
@@ -159,6 +160,12 @@ def test_cross_tenant_documents_tasks_and_tools(clients):
         c.execute("INSERT INTO memberships VALUES('foreign','foreign_user',%s,'boss',true)",(nodes["公司"],))
         setup.add_doc(c,"foreign","foreign_user","foreign_doc","其他企业机密","跨企业秘密标记",nodes["公司"],"company",3)
         p=load_principal(c,"foreign_user");job=create_job(c,p,"ask",nodes["公司"],{},"其他企业问题")
+        foreign_trace = "f" * 32
+        c.execute(
+            "INSERT INTO task_spans(tenant_id,job_id,run_version,trace_id,span_id,name,kind,status,started_at) "
+            "VALUES('foreign',%s,1,%s,%s,'task.ask','CHAIN','running',now())",
+            (job["id"], foreign_trace, "a" * 16),
+        )
     boss=clients["boss"]
     assert boss.get("/api/documents/foreign_doc").status_code==404
     assert boss.get("/api/tasks/"+job["id"]).status_code==404
@@ -166,7 +173,8 @@ def test_cross_tenant_documents_tasks_and_tools(clients):
     admin = clients["admin"]
     assert admin.get(f"/api/admin/traces/{job['id']}").status_code == 404
     assert admin.get(f"/api/admin/traces/{job['id']}/runs").status_code == 404
-    assert admin.get(f"/api/admin/traces/{job['id']}/runs/1/spans").status_code == 404
+    assert admin.get(f"/api/admin/traces/{job['id']}/runs/{foreign_trace}/spans").status_code == 404
+    assert admin.get("/api/admin/traces", params={"q": foreign_trace}).json()["items"] == []
     assert admin.get("/api/admin/traces", params={"q": "其他企业问题"}).json()["items"] == []
     assert admin.get("/api/admin/traces", params={"owner_id": "foreign_user"}).json()["items"] == []
     assert admin.get("/api/admin/traces/owners", params={"q": "其他老板"}).json()["items"] == []
@@ -232,7 +240,7 @@ def test_trace_owner_selector_search_and_paging(clients):
 
 
 def test_admin_trace_projects_question_and_execution_metadata(clients):
-    """详情增量读取持久化事件，保留历史运行版本与模型用量，限制原始业务内容。"""
+    """状态事件可以跨版本翻页，任务结果自报的 ID 与业务计量均不作为采集数据。"""
     job_id = task_id(clients["boss"], "供应商联系人13812345678", kind="research")
     path = f"/api/admin/traces/{job_id}"
     trace_id = "0123456789abcdef0123456789abcdef"
@@ -257,11 +265,12 @@ def test_admin_trace_projects_question_and_execution_metadata(clients):
     assert response.status_code == 200
     assert "保密报告正文" not in response.text and "13812345678" not in response.text
     detail = response.json()
-    assert detail["trace"]["id"] == job_id and detail["trace_id"] == trace_id
+    assert set(detail) == {"trace", "events", "has_more_events"}
+    assert detail["trace"]["id"] == job_id and detail["trace"]["matched_trace_id"] is None
     assert detail["has_more_events"]
-    call = detail["model_calls"][0]
-    assert call["role"] == "product" and call["role_label"] == "商品规格分析师"
-    assert (call["elapsed_ms"], call["prompt_tokens"], call["completion_tokens"]) == (120, 5, 7)
+    assert admin.get("/api/admin/traces", params={"q": trace_id}).json()["items"] == []
+    assert admin.get(f"{path}/runs", params={"trace_id": trace_id}).json()["items"] == []
+    assert admin.get(f"{path}/runs/{trace_id}/spans").status_code == 404
     after = detail["events"][-1]["id"]
     rest = admin.get(path, params={"after_event_id": after}).json()
     assert not rest["has_more_events"]
@@ -270,91 +279,282 @@ def test_admin_trace_projects_question_and_execution_metadata(clients):
 
 
 def test_admin_run_and_span_paging_across_retries(clients):
-    """核对执行版本隔离、未关节点的状态、并行节点分页及跨用户属性投影。"""
-    job_id = task_id(clients["staff"], "测试调研调用树", kind="research")
-    path = f"/api/admin/traces/{job_id}"
-    admin = clients["admin"]
-    assert admin.get(f"{path}/runs").json()["items"] == []
-    for role in ("leader", "boss"):
-        assert clients[role].get(f"{path}/runs").status_code == 404
-        assert clients[role].get(f"{path}/runs/2/spans").status_code == 404
-
-    root_id, model_id = "a" * 16, "b" * 16
+    """同一次重试的两条链路分别汇总，类型筛选覆盖默认页之外的真实节点。"""
+    staff, admin = clients["staff"], clients["admin"]
+    job_id = task_id(staff, "测试调研调用树", kind="research")
+    path = f"/api/admin/traces/{job_id}/runs"
+    assert admin.get(path).json()["items"] == []
+    old_trace, sibling_trace, trace_id = "1" * 32, "e" * 32, "f" * 32
+    root_id = "a" * 16
+    first_model, second_model = "b" * 16, "c" * 16
+    started = datetime.now(timezone.utc)
+    root = {
+        "tenant_id": "tenant_test", "job_id": job_id, "run_version": 2,
+        "trace_id": trace_id, "span_id": root_id, "parent_span_id": None,
+        "name": "task.research", "kind": "CHAIN", "status": "running",
+        "started_at": started, "ended_at": None, "duration_ms": None,
+        "error_type": None, "attributes": {},
+    }
+    child = {**root, "parent_span_id": root_id}
+    first_attempt = {**child, "name": "llm.chat", "kind": "INTERNAL", "span_id": first_model}
     with database_connection() as c:
-        c.execute("UPDATE jobs SET state='running',run_version=2,lease_until=now()+interval '1 minute' WHERE id=%s", (job_id,))
-        for version, span_id, parent_id, name, kind in (
-            (1, root_id, None, "worker.research", "CHAIN"),
-            (2, root_id, None, "worker.research", "CHAIN"),
-            (2, model_id, root_id, "llm.chat", "INTERNAL"),
-        ):
-            c.execute(
-                "INSERT INTO task_spans(tenant_id,job_id,run_version,trace_id,span_id,parent_span_id,"
-                "name,kind,status,started_at,attributes) "
-                "VALUES('tenant_test',%s,%s,%s,%s,%s,%s,%s,'running',now(),%s)",
-                (job_id, version, str(version) * 32, span_id, parent_id, name, kind,
-                 as_jsonb({"gen_ai.usage.input_tokens": 5, "prompt": "私密提示词"})),
-            )
-        started = fetch_one(
-            c, "SELECT * FROM task_spans WHERE job_id=%s AND span_id=%s", (job_id, model_id),
+        c.execute(
+            "UPDATE jobs SET state='running',run_version=2,lease_until=now()+interval '1 minute' WHERE id=%s",
+            (job_id,),
         )
-    # 有些第三方采集器在调用结束时才提供 AI 角色。
-    write_spans([{**started, "kind": "LLM", "status": "error", "error_type": "TimeoutError",
-                  "ended_at": started["started_at"], "duration_ms": 0}])
+    write_spans([
+        {**root, "run_version": 1, "trace_id": old_trace},
+        {**root, "trace_id": sibling_trace}, root,
+        *[{**child, "name": "tool.call", "kind": "TOOL", "span_id": f"{i:016x}"}
+          for i in range(1, 102)],
+        first_attempt,
+        {**child, "span_id": second_model, "name": "llm.chat", "kind": "LLM", "ended_at": started,
+         "duration_ms": 0, "status": "ok", "attributes": {
+             "llm.model_name": "model-b", "llm.token_count.prompt": 8, "llm.token_count.completion": 3,
+         }},
+    ])
+    # 采集器可在节点结束时补全类型，同一 span 的两次快照只计量一次。
+    write_spans([{**first_attempt, "kind": "LLM", "status": "error", "error_type": "TimeoutError",
+                  "ended_at": started, "duration_ms": 0,
+                  "attributes": {"llm.token_count.prompt": 5, "prompt": "私密提示词"}}])
 
-    first = admin.get(f"{path}/runs", params={"limit": 1}).json()
+    first = admin.get(path, params={"limit": 1}).json()
     run = first["items"][0]
-    assert (run["run_version"], run["span_count"], run["status"]) == (2, 2, "running")
-    assert (run["failed_count"], run["input_tokens"], run["output_tokens"]) == (1, 5, 0)
-    matched = admin.get("/api/admin/traces", params={"q": "1" * 32}).json()["items"]
-    assert [(row["id"], row["matched_run_version"]) for row in matched] == [(job_id, 1)]
-    assert clients["staff"].get(f"{path}/runs").json()["items"][0]["trace_id"] == "2" * 32
-    assert clients["staff"].get(f"{path}/runs/2/spans").json()["items"][1]["span_id"] == model_id
-    assert clients["staff"].get("/api/admin/traces", params={"q": "1" * 32}).json()["items"] == matched
-    assert clients["leader"].get("/api/admin/traces", params={"q": "1" * 32}).json()["items"] == []
-    assert admin.get("/api/admin/traces", params={"q": "1" * 32, "owner_id": ids()[0]["boss"]}).json()["items"] == []
-    assert admin.get(path).json()["trace_id"] == "2" * 32
-    older = admin.get(f"{path}/runs", params={"before_version": first["next_before_version"]}).json()
-    assert [(row["run_version"], row["status"]) for row in older["items"]] == [(1, "interrupted")]
-    spans = admin.get(f"{path}/runs/2/spans", params={"limit": 1}).json()
-    assert spans["items"][0]["span_id"] == root_id and spans["items"][0]["parent_span_id"] is None
-    tail = admin.get(f"{path}/runs/2/spans", params={"cursor": spans["next_cursor"]}).json()
-    node = tail["items"][0]
-    assert node["kind"] == "LLM"
-    assert node["name"] == "llm.chat" and node["display_name"] == "模型推理"
-    assert (node["parent_span_id"], node["status"], node["error_type"]) == (root_id, "error", "TimeoutError")
-    assert node["attributes"] == {"gen_ai.usage.input_tokens": 5}
+    assert (run["trace_id"], run["run_version"], run["status"]) == (trace_id, 2, "running")
+    assert run["kind_counts"] == {"CHAIN": 1, "TOOL": 101, "LLM": 2}
+    assert (run["span_count"], run["failed_count"], run["input_tokens"], run["output_tokens"]) == (104, 1, 13, 3)
+    second = admin.get(path, params={"limit": 1, "cursor": first["next_cursor"]}).json()
+    assert [(r["trace_id"], r["run_version"], r["span_count"]) for r in second["items"]] == [(sibling_trace, 2, 1)]
+    third = admin.get(path, params={"limit": 1, "cursor": second["next_cursor"]}).json()
+    assert [(r["trace_id"], r["status"]) for r in third["items"]] == [(old_trace, "interrupted")]
+    assert third["next_cursor"] is None
+    assert admin.get(path, params={"cursor": "invalid"}).status_code == 422
+
+    for client in (admin, staff):
+        for target in (old_trace, sibling_trace, trace_id):
+            rows = client.get("/api/admin/traces", params={"q": target}).json()["items"]
+            assert [(row["id"], row["matched_trace_id"]) for row in rows] == [(job_id, target)]
+            chosen = client.get(path, params={"trace_id": target}).json()
+            assert [row["trace_id"] for row in chosen["items"]] == [target]
+            assert chosen["next_cursor"] is None
+        assert client.get("/api/admin/traces", params={"q": "测试调研调用树"}).json()["items"][0]["matched_trace_id"] is None
+    for role in ("leader", "boss"):
+        member = clients[role]
+        assert member.get(path, params={"trace_id": trace_id}).status_code == 404
+        assert member.get(f"{path}/{trace_id}/spans", params={"kind": "LLM"}).status_code == 404
+        assert member.get("/api/admin/traces", params={"q": trace_id}).json()["items"] == []
+    assert admin.get("/api/admin/traces", params={"q": trace_id, "owner_id": ids()[0]["boss"]}).json()["items"] == []
+    other_job = task_id(staff, "另一个问题")
+    assert admin.get(f"/api/admin/traces/{other_job}/runs/{trace_id}/spans").status_code == 404
+
+    span_path = f"{path}/{trace_id}/spans"
+    unfiltered = admin.get(span_path).json()
+    assert unfiltered["next_cursor"] and all(span["kind"] != "LLM" for span in unfiltered["items"])
+    models = staff.get(span_path, params={"kind": "LLM", "limit": 1}).json()
+    node = models["items"][0]
+    assert (node["trace_id"], node["span_id"], node["parent_span_id"]) == (trace_id, first_model, root_id)
+    assert (node["kind"], node["display_name"], node["status"], node["error_type"]) == (
+        "LLM", "模型推理", "error", "TimeoutError",
+    )
+    assert node["attributes"] == {"llm.token_count.prompt": 5}
+    tail = staff.get(span_path, params={"kind": "LLM", "cursor": models["next_cursor"], "limit": 1}).json()
+    assert [(s["span_id"], s["display_name"]) for s in tail["items"]] == [(second_model, "model-b")]
     assert tail["next_cursor"] is None and tail["observed_at"]
-    assert admin.get(f"{path}/runs/3/spans").status_code == 404
+    assert admin.get(f"{path}/{sibling_trace}/spans", params={"kind": "LLM"}).json()["items"] == []
+    assert admin.get(span_path, params={"kind": "unknown"}).status_code == 422
+
     with database_connection() as c:
         c.execute("UPDATE jobs SET lease_until=now()-interval '1 second' WHERE id=%s", (job_id,))
-    assert admin.get(f"{path}/runs").json()["items"][0]["status"] == "interrupted"
+    assert admin.get(path).json()["items"][0]["status"] == "interrupted"
     with database_connection() as c:
         c.execute("UPDATE jobs SET state='completed',finished_at=now() WHERE id=%s", (job_id,))
-    assert admin.get(f"{path}/runs/2/spans").json()["items"][0]["status"] == "running"
+    assert admin.get(span_path, params={"kind": "CHAIN"}).json()["items"][0]["status"] == "running"
     with database_connection() as c:
         c.execute("UPDATE jobs SET finished_at=now()-interval '1 minute' WHERE id=%s", (job_id,))
-    assert admin.get(f"{path}/runs/2/spans").json()["items"][0]["status"] == "interrupted"
+    assert admin.get(span_path, params={"kind": "CHAIN"}).json()["items"][0]["status"] == "interrupted"
 
 
-def test_team_knowledge_filtered_before_model(monkeypatch,clients):
-    seen=[];fake_model(monkeypatch,seen)
+def test_span_semantics_migration_on_existing_rows():
+    """在独立事务的临时 schema 中，将真实 014 表及已有数据迁移到 015。"""
+    from uuid import uuid4
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import NullPool
+
+    revisions = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "migrations"))
+    engine = create_engine(load_config().dsn.replace("postgresql://", "postgresql+psycopg://", 1), poolclass=NullPool)
+    schema = f"span_migration_{uuid4().hex}"
+    # 搜索路径不包含 public，连接关闭时 DDL 与测试数据一并回滚。
+    with engine.connect() as conn:
+        conn.exec_driver_sql(f"CREATE SCHEMA {schema}")
+        conn.exec_driver_sql(f"SET LOCAL search_path TO {schema}")
+        conn.exec_driver_sql("CREATE TABLE jobs(id text PRIMARY KEY)")
+        conn.exec_driver_sql("INSERT INTO jobs VALUES ('task')")
+        with Operations.context(MigrationContext.configure(conn)):
+            revisions.get_revision("014_task_spans").module.upgrade()
+            previous = [
+                ("llm.chat", "LLM", {
+                    "gen_ai.request.model": "old-model", "llm.model_name": "recorded-model",
+                    "gen_ai.usage.input_tokens": 20, "llm.token_count.prompt": 13,
+                    "gen_ai.usage.output_tokens": 7, "gen_ai.operation.name": "chat",
+                }),
+                ("research.subagent_worker", "AGENT", {"gen_ai.agent.name": "supply", "subagent_id": "plan-123"}),
+                ("mcp.tool.search", "TOOL", {"tool": "search"}),
+                ("rag.specialist.product", "AGENT", {"gen_ai.agent.name": "product"}),
+                ("pipeline.retrieval", "RETRIEVER", {}),
+            ]
+            conn.execute(text("""
+                INSERT INTO task_spans(tenant_id,job_id,run_version,trace_id,span_id,name,kind,status,started_at,attributes)
+                VALUES('tenant','task',1,:trace_id,:span_id,:name,:kind,'ok',now(),CAST(:attrs AS jsonb))
+            """), [
+                {"trace_id": "a" * 32, "span_id": f"{i:016x}", "name": name, "kind": kind, "attrs": json.dumps(attrs)}
+                for i, (name, kind, attrs) in enumerate(previous, 1)
+            ])
+            revisions.get_revision("015_span_semantics").module.upgrade()
+        rows = conn.exec_driver_sql("SELECT name,kind,attributes FROM task_spans ORDER BY id").all()
+        assert [tuple(row) for row in rows] == [
+            ("llm.chat", "LLM", {"llm.model_name": "recorded-model", "llm.token_count.prompt": 13,
+                                 "llm.token_count.completion": 7}),
+            ("research.subagent_worker", "AGENT", {"agent.name": "supply"}),
+            ("mcp.call_tool", "TOOL", {"tool.name": "search"}),
+            ("rag.specialist", "AGENT", {"agent.name": "product"}),
+            ("pipeline.retrieval", "CHAIN", {}),
+        ]
+        indexes = dict(conn.exec_driver_sql(
+            "SELECT indexname,indexdef FROM pg_indexes WHERE schemaname=current_schema() AND tablename='task_spans'"
+        ).all())
+        assert indexes["idx_task_spans_run"].endswith("(tenant_id, job_id, run_version, trace_id)")
+        assert indexes["idx_task_spans_trace_page"].endswith("(trace_id, id)")
+
+
+def test_team_knowledge_filtered_before_model(monkeypatch, clients):
+    """运行完整 RAG；嵌入、精排、库存、订单与聊天的外部 HTTP 响应由测试提供。"""
+    from collections import Counter, OrderedDict
+    import httpx
+    import taozhi.config as cfg
+    from taozhi.knowledge import embedding
+    from taozhi.observability.tracing import flush_spans
+    from taozhi.orchestration.decision import get_decision_engine
+
+    seen_prompts = []
+    model_requests = Counter()
+    model = "qa-test-model"
+    users, nodes = ids()
+    settings = cfg.get_settings().model_copy(update={
+        "api_key": "offline-test-placeholder", "base_url": "https://model.invalid/v1",
+        "model": model, "sensenova_overseas_api_key": "", "dots_api_key": "", "sensenova_cn_secondary_api_key": "",
+        "business_api_url": "https://business.invalid/api", "business_api_token": "offline-business-placeholder",
+    })
+    monkeypatch.setattr(cfg, "get_settings", lambda: settings)
+    monkeypatch.setenv("ECOM_EMBED_SERVICE_URL", "http://embedding.invalid")
+    monkeypatch.setenv("ECOM_ES_ENABLED", "false")
+    monkeypatch.setenv("ECOM_HYDE_ENABLED", "false")
+    monkeypatch.setenv("ECOM_RERANK_ENABLED", "true")
+    monkeypatch.setattr(embedding, "_state", {"checked_at": 0.0, "ok": False, "model": "", "dim": 0})
+    monkeypatch.setattr(embedding, "_query_cache", OrderedDict())
+    monkeypatch.setattr(get_decision_engine(), "_vector_cache", {})
+
+    def respond(_transport, request):
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok", "model": "embed-test", "dim": 512})
+        if request.url.host == "business.invalid":
+            records = {
+                "/api/stock/SKU97": {"sku_id": "SKU97", "available": 8},
+                "/api/orders/ORDER97": {"order_id": "ORDER97", "status": "paid", "assigned_user_ids": [users["staff"]]},
+            }
+            return httpx.Response(200, json={
+                **records[request.url.path], "tenant_id": "tenant_test", "node_id": nodes["店铺运营组"],
+                "as_of": datetime.now(timezone.utc).isoformat(),
+            })
+        body = json.loads(request.content)
+        if request.url.path == "/embed":
+            model_requests["embedding.query" if body["instruct"] else "embedding.passages"] += 1
+            vector = [1.0] + [0.0] * 511
+            return httpx.Response(200, json={"model": "embed-test", "vectors": [vector for _ in body["texts"]]})
+        if request.url.path == "/rerank":
+            model_requests["reranker.rerank"] += 1
+            scores = [0.95 if "MC-500" in text else 0.25 for text in body["texts"]]
+            return httpx.Response(200, json={"model": "rerank-test", "scores": scores})
+        assert request.url.path == "/v1/chat/completions"
+        assert body["model"] == model
+        prompt = body["messages"][-1]["content"]
+        seen_prompts.append(prompt)
+        evidence = json.loads(prompt.split("\n\n", 1)[0])["授权资料"][0]
+        findings = [{"claim": evidence["quote"], "evidence_index": evidence["index"], "quote": evidence["quote"]}]
+        return httpx.Response(200, json={
+            "id": "test-completion", "object": "chat.completion", "created": 1, "model": model,
+            "choices": [{"index": 0, "finish_reason": "stop", "message": {
+                "role": "assistant", "content": json.dumps({"findings": findings, "missing": []}, ensure_ascii=False),
+            }}],
+            "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+        })
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", respond)
     with database_connection() as c:
         c.execute("UPDATE document_versions SET body=body||' 不得泄露机密标记' WHERE document_id='test_doc_boss'")
         c.execute("UPDATE chunks SET text=text||' 不得泄露机密标记' WHERE document_id='test_doc_boss'")
-    tid=task_id(clients["staff"]);assert process_next_job()
-    r=clients["staff"].get("/api/tasks/"+tid)
-    assert r.json()["state"]=="completed",r.text
-    assert seen and all("不得泄露机密标记" not in x for x in seen)
-    assert "不得泄露机密标记" not in r.text
-    from taozhi.observability.tracing import flush_spans
+    staff, admin = clients["staff"], clients["admin"]
+    tid = task_id(staff, "MC-500 的切幅是多少？发货需要多久？", sku_id="SKU97", order_id="ORDER97")
+    assert process_next_job()
+    task = staff.get(f"/api/tasks/{tid}")
+    assert task.json()["state"] == "completed", task.text
+    assert seen_prompts and all("不得泄露机密标记" not in prompt for prompt in seen_prompts)
+    assert "不得泄露机密标记" not in task.text
     assert flush_spans()
+
     path = f"/api/admin/traces/{tid}/runs"
-    run = clients["admin"].get(path).json()["items"][0]
-    assert run["trace_id"] == r.json()["result"]["trace_id"]
-    spans = clients["admin"].get(f"{path}/{run['run_version']}/spans").json()["items"]
-    assert any(s["kind"] == "RETRIEVER" and s["name"] == "pipeline.retrieval" and s["status"] == "ok" for s in spans)
-    assert next(s for s in spans if s["parent_span_id"] is None)["status"] == "ok"
-    assert "不得泄露机密标记" not in str(spans)
+    [run] = admin.get(path).json()["items"]
+    trace_id = run["trace_id"]
+    assert run["status"] == "ok"
+    assert staff.get("/api/admin/traces", params={"q": trace_id}).json()["items"][0]["matched_trace_id"] == trace_id
+    spans = admin.get(f"{path}/{trace_id}/spans", params={"limit": 500}).json()["items"]
+    assert len(spans) == run["span_count"] and all(s["trace_id"] == trace_id for s in spans)
+    assert "不得泄露机密标记" not in str(spans) and task.json()["question"] not in str(spans)
+    by_id = {s["span_id"]: s for s in spans}
+    [root] = [s for s in spans if s["parent_span_id"] is None]
+    assert (root["name"], root["kind"], root["status"]) == ("task.ask", "CHAIN", "ok")
+    assert all(s["parent_span_id"] in by_id for s in spans if s is not root)
+    retrieval = next(s for s in spans if s["name"] == "pipeline.retrieval")
+    assert retrieval["kind"] == "CHAIN"
+    tools = [s for s in spans if s["kind"] == "TOOL" and s["parent_span_id"] == retrieval["span_id"]]
+    assert {s["attributes"]["tool.name"] for s in tools} == {"stock", "orders"}
+    assert all(s["name"] == "business.lookup" and s["attributes"]["tool.status"] == "ok" for s in tools)
+    assert "SKU97" not in str(spans) and "ORDER97" not in str(spans)
+    searches = [s for s in spans if s["kind"] == "RETRIEVER"]
+    assert searches and all(s["name"] == "knowledge.search" and s["parent_span_id"] == retrieval["span_id"] for s in searches)
+    search_ids = {s["span_id"] for s in searches}
+    encoded = [s for s in spans if s["kind"] in {"EMBEDDING", "RERANKER"}]
+    assert Counter(s["name"] for s in encoded) == model_requests
+    for kind, expected_model, attribute in (
+        ("EMBEDDING", "embed-test", "embedding.model_name"),
+        ("RERANKER", "rerank-test", "reranker.model_name"),
+    ):
+        nodes_of_kind = [s for s in encoded if s["kind"] == kind]
+        assert nodes_of_kind and all(s["attributes"][attribute] == expected_model for s in nodes_of_kind)
+        assert all(s["parent_span_id"] in by_id and s["status"] == "ok" for s in nodes_of_kind)
+        if kind == "RERANKER":
+            assert all(s["parent_span_id"] in search_ids for s in nodes_of_kind)
+
+    models = admin.get(f"{path}/{trace_id}/spans", params={"kind": "LLM"}).json()["items"]
+    assert len(models) == len(seen_prompts) == run["kind_counts"]["LLM"]
+    assert run["input_tokens"] == 11 * len(models) and run["output_tokens"] == 7 * len(models)
+    specialist_roles = set()
+    for call in models:
+        specialist = by_id[call["parent_span_id"]]
+        assert specialist["kind"] == "AGENT" and specialist["name"] == "rag.specialist"
+        assert by_id[specialist["parent_span_id"]]["name"] == "pipeline.specialists"
+        specialist_roles.add(specialist["attributes"]["agent.name"])
+        assert call["display_name"] == call["attributes"]["llm.model_name"] == model
+        assert call["status"] == "ok"
+        assert call["attributes"]["llm.token_count.prompt"] == 11
+        assert call["attributes"]["llm.token_count.completion"] == 7
+    assert {"product", "supply"} <= specialist_roles
+    assert clients["leader"].get(f"{path}/{trace_id}/spans", params={"kind": "LLM"}).status_code == 404
+
+
 def test_confidential_ai_default_blocked(monkeypatch,clients):
     seen=[];fake_model(monkeypatch,seen)
     tid=task_id(clients["boss"],"老板经营决策备忘录",input_level=3,allow_external=True)
