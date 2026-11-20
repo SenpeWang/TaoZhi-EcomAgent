@@ -27,7 +27,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
     inbox = state.get("steering_inbox") or []
     active_ev = active_evidence(state)
 
-    emit_progress(hooks, "[agent_handoff] 角色交接: lead_agent ➔ 终审研报合成专家 · 整合黑板有效证据", 85)
+    emit_progress(hooks, "[agent_handoff] 整合已核验黑板证据，转入终审研报合成", 85)
     ctx = SubagentContext(conversation_id=f"rep_{state.get('job_id', 'task')}_{int(time.time())}", role="终审研报合成专家")
 
     evidence_payload = [
@@ -65,7 +65,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
     )
 
     llm = LLMClient()
-    emit_progress(hooks, "[tool_execution_start] [终审研报合成专家] 调度工具: generate_markdown_report", 90)
+    emit_progress(hooks, "[tool_execution_start] [终审研报合成] 正在生成结构化调研报告", 90)
     synth_route_events: List[Dict[str, Any]] = []
     synth_last_ep = ""
     with route_audit_scope(
@@ -92,7 +92,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
     art_meta = ArtifactMetadata(summary=f"【{keyword}】电商多智能体调研报告", user_facing=True)
     art_file = ctx.write_artifact("market_research_report.md", final_report, metadata=art_meta)
     elapsed = round(time.perf_counter() - t0, 2)
-    emit_progress(hooks, f"[tool_execution_end] [终审研报合成专家] 研报生成完毕 · {len(final_report)} 字符 (耗时 {elapsed}s)", 95)
+    emit_progress(hooks, f"[tool_execution_end] [终审研报合成] 报告生成完毕 · {len(final_report)} 字符（耗时 {elapsed}s）", 95)
 
     transition: AuditableAgentTransition = {
         "agent_id": ctx.conversation_id,

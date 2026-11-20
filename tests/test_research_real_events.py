@@ -118,7 +118,7 @@ def test_pipeline_a_events_emitted_during_research():
     assert len(captured_stages) >= 4
     agent_starts = [s for s in captured_stages if s.startswith("[agent_start]")]
     assert len(agent_starts) >= 1
-    assert "main_agent" in agent_starts[0]
+    assert "主协调器" in agent_starts[0]
     assert any(s.startswith("[agent_handoff]") for s in captured_stages)
     assert any(s.startswith("[tool_execution_start]") for s in captured_stages)
     assert any(s.startswith("[tool_execution_end]") for s in captured_stages)

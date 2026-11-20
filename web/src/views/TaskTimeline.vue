@@ -40,6 +40,17 @@ function level(l?: number): string {
 }
 
 /**
+ * 清洗阶段文本中的机器前缀，仅保留正式可读的执行轨迹说明。
+ * @param raw - 原始阶段描述。
+ * @returns 格式化后的轨迹说明。
+ */
+function formatStage(raw?: string | null): string {
+  const txt = (raw || '').trim()
+  if (!txt) return '等待处理'
+  return txt.replace(/^(\[[a-zA-Z0-9_]+\]\s*)+/, '').trim() || txt
+}
+
+/**
  * 复制当前调研研报到剪贴板。
  */
 function copyReport() {
@@ -69,7 +80,7 @@ function onSteer() {
       <h3>{{ task.question }}</h3>
       <div class="detail-meta">
         <el-tag>{{ state(task.state) }}</el-tag>
-        <span>{{ task.stage }}</span>
+        <span>{{ formatStage(task.stage) }}</span>
         <span>{{ level(task.input_level) }}</span>
       </div>
       <el-progress
@@ -79,8 +90,8 @@ function onSteer() {
 
       <div v-if="task.events?.length" class="workflow-events-box">
         <div class="events-box-header">
-          <strong>执行记录（共 {{ task.events.length }} 步）</strong>
-          <small>LangGraph 状态图驱动 · 真实 Checkpoint 审计流水</small>
+          <strong>执行轨迹（共 {{ task.events.length }} 步）</strong>
+          <small>LangGraph 状态图编排 · 持久化检查点（Checkpoint）审计流水</small>
         </div>
         <div class="events-timeline-list">
           <div
@@ -93,7 +104,7 @@ function onSteer() {
             }"
           >
             <span class="event-step-idx">{{ idx + 1 }}</span>
-            <span class="event-stage-text">{{ ev.stage }}</span>
+            <span class="event-stage-text">{{ formatStage(ev.stage) }}</span>
             <el-tag size="small" :type="ev.progress === 100 ? 'success' : 'info'" effect="plain">
               {{ ev.progress }}%
             </el-tag>
@@ -112,7 +123,7 @@ function onSteer() {
       <template v-if="task.result">
         <template v-if="task.kind === 'research'">
           <div class="research-header-row">
-            <h3>选品与市场调研报告</h3>
+            <h3>商品调研报告</h3>
             <el-button size="small" type="primary" plain @click="copyReport">
               复制报告全文
             </el-button>

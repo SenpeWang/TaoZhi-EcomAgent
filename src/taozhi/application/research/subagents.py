@@ -78,7 +78,7 @@ def _execute_guarded_mcp_tool(
     else:
         kwargs = {"query": arg_value, "limit": 12}
 
-    bump_progress(hooks, 5, 70, f"[tool_execution_start] [{task.role}] 调用 MCP {tool_name}({kwargs})")
+    bump_progress(hooks, 5, 70, f"[tool_execution_start] [{task.role}] 调用检索工具 {tool_name}")
     outcome = mcp_client.call_tool(
         tool_name,
         kwargs,
@@ -113,7 +113,7 @@ def _execute_guarded_mcp_tool(
             "elapsed": outcome.elapsed,
         }
     )
-    bump_progress(hooks, 8, 75, f"[tool_execution_end] [{task.role}] 工具 {tool_name} 完毕 · {summary_txt}")
+    bump_progress(hooks, 8, 75, f"[tool_execution_end] [{task.role}] {tool_name} 采集完成 · {summary_txt}")
     return outcome
 
 
@@ -256,7 +256,7 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
     sub_last_ep = ""
     t0 = time.perf_counter()
 
-    emit_progress(hooks, f"[agent_start] 激活专职子智能体 【{task.role}】 (目标: {task.goal})")
+    emit_progress(hooks, f"[agent_start] 启动「{task.role}」· 目标：{task.goal}")
 
     try:
         for step_idx in range(1, max_steps + 1):
@@ -338,7 +338,7 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
         has_ok = any(t["status"] == "ok" and t["data_count"] > 0 for t in tools_records)
         has_err = any(t["status"] in ("error", "timeout") for t in tools_records)
         ev_status = "ok" if has_ok else ("error" if has_err else "empty")
-        emit_progress(hooks, f"[agent_end] 【{task.role}】完成探索 · 状态: {ev_status} (耗时 {elapsed}s)")
+        emit_progress(hooks, f"[agent_end] 「{task.role}」完成阶段分析 · 状态：{ev_status}（耗时 {elapsed}s）")
 
         transition: AuditableAgentTransition = {
             "agent_id": ctx.conversation_id,

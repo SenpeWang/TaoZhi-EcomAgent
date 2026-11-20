@@ -128,22 +128,22 @@ const currentTurnCount = computed(() => turns.value.length)
  */
 function parseStep(log: string): FormattedThinkingStep {
   if (log.startsWith('[agent_start]')) {
-    return { type: 'agent', label: '开始处理', icon: '启动', content: log.slice(13).trim() }
+    return { type: 'agent', label: '任务启动', icon: 'STEP', content: log.slice(13).trim() }
   }
   if (log.startsWith('[agent_handoff]')) {
-    return { type: 'agent', label: '角色交接', icon: '交接', content: log.slice(15).trim() }
+    return { type: 'agent', label: '流程流转', icon: 'FLOW', content: log.slice(15).trim() }
   }
   if (log.startsWith('[turn_start]')) {
-    return { type: 'turn', label: '分析步骤', icon: '步骤', content: log.slice(12).trim() }
+    return { type: 'turn', label: '调度轮次', icon: 'TURN', content: log.slice(12).trim() }
   }
   if (log.startsWith('[tool_execution_start]')) {
-    return { type: 'tool', label: '检索查询', icon: '查询', content: log.slice(22).trim() }
+    return { type: 'tool', label: '工具调用', icon: 'TOOL', content: log.slice(22).trim() }
   }
   if (log.startsWith('[tool_execution_end]')) {
-    return { type: 'data', label: '获取数据', icon: '数据', content: log.slice(20).trim() }
+    return { type: 'data', label: '采集完成', icon: 'DATA', content: log.slice(20).trim() }
   }
   if (log.startsWith('[tool_result]')) {
-    return { type: 'security', label: '结果核验', icon: '核验', content: log.slice(13).trim() }
+    return { type: 'security', label: '合规核验', icon: 'CHECK', content: log.slice(13).trim() }
   }
   if (log.startsWith('[system]')) {
     const body = log.slice(8).trim()
@@ -151,43 +151,43 @@ function parseStep(log: string): FormattedThinkingStep {
       return {
         type: 'security',
         label: '模型容灾',
-        icon: '容灾',
+        icon: 'ROUTE',
         content: body.replace(/^\[模型容灾\]\s*/, '').trim(),
       }
     }
     if (body.includes('检查点')) {
       return {
         type: 'turn',
-        label: '断点续跑',
-        icon: '续跑',
+        label: '断点恢复',
+        icon: 'CKPT',
         content: body.replace(/^\[检查点恢复\]\s*/, '').trim(),
       }
     }
-    return { type: 'plain', label: '系统调度', icon: '系统', content: body }
+    return { type: 'plain', label: '系统事件', icon: 'SYS', content: body }
   }
   if (log.includes('用户中途追加干预指令') || log.startsWith('[steering]')) {
     return {
       type: 'steering',
-      label: '补充要求',
-      icon: '调整',
+      label: '指令干预',
+      icon: 'STEER',
       content: log.replace(/^\[steering\]\s*/, '').trim(),
     }
   }
   if (log.startsWith('[agent_end]')) {
-    return { type: 'done', label: '整理输出', icon: '输出', content: log.slice(11).trim() }
+    return { type: 'done', label: '阶段完成', icon: 'DONE', content: log.slice(11).trim() }
   }
   if (log.startsWith('思考\n') || log.startsWith('💭 ')) {
     return {
       type: 'thought',
-      label: '分析思路',
-      icon: '思路',
+      label: '分析推演',
+      icon: 'THINK',
       content: log
         .replace(/^思考\n/, '')
         .replace(/^💭\s*/, '')
         .trim(),
     }
   }
-  return { type: 'plain', label: '运行状态', icon: '状态', content: log }
+  return { type: 'plain', label: '执行状态', icon: 'INFO', content: log }
 }
 
 /**
@@ -707,7 +707,9 @@ onUnmounted(() => {
                 >
                   <div class="active-thinking-status">
                     <span class="thinking-spinner" />
-                    <span class="thinking-label">思考中 (已用时 {{ liveTimerSeconds }}s)...</span>
+                    <span class="thinking-label"
+                      >协同分析与轨迹执行中（已耗时 {{ liveTimerSeconds }}s）</span
+                    >
                   </div>
                   <div class="live-steps-stream">
                     <div
@@ -735,7 +737,8 @@ onUnmounted(() => {
                       thinkingCollapsed[turn.id] ? '▾' : '▸'
                     }}</span>
                     <span class="accordion-title">
-                      思考过程 (用时 {{ turn.thinkingSeconds || turn.result?.elapsed || 0 }}s)
+                      执行轨迹（共 {{ turn.thinkingLogs.length }} 步 · 耗时
+                      {{ turn.thinkingSeconds || turn.result?.elapsed || 0 }}s）
                     </span>
                   </div>
                   <div v-show="thinkingCollapsed[turn.id]" class="accordion-body">

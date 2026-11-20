@@ -184,7 +184,7 @@ def _build_research_result_payload(
                     obj=str(ev["summary"])[:300],
                     source=str(ev.get("evidence_id") or conversation_id or "research"),
                 )
-        emit_progress(hooks, f"[agent_end] 多智能体自主协同达成目标 · 终审研报交付就绪 (总耗时 {total_elapsed}s)", 100)
+        emit_progress(hooks, f"[agent_end] 协同调研已完成，终审报告已生成（总耗时 {total_elapsed}s）", 100)
 
     return {
         "report": merged_state.get("report", ""),
@@ -318,7 +318,7 @@ def execute_autonomous_agents(
 
     thread_id = f"research_{job_id}_{run_version}" if job_id else f"research_{int(time.time())}"
     config = {"configurable": {"thread_id": thread_id}}
-    emit_progress(hooks, f"[agent_start] 激活自治多智能体主协调代理 (main_agent) · 目标品类: 【{keyword}】", 5)
+    emit_progress(hooks, f"[agent_start] 启动多智能体协同调研主协调器 · 调研主题：【{keyword}】", 5)
 
     list_fields = ("steering_inbox", "steering_event_ids", "evidence_pool", "invalidated_evidence_ids", "audit_trail", "llm_route_history", "artifacts")
     merged_state: Dict[str, Any] = dict(init_state)

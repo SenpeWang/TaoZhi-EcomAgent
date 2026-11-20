@@ -227,7 +227,7 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
     processed_cnt = int(state.get("processed_steering_count", 0))
     newly_arrived = all_inbox[processed_cnt:]
     if newly_arrived:
-        emit_progress(hooks, f"[steering] 主协调代理捕获用户中途动态干预 ({len(newly_arrived)} 条)，正在动态重规划调研路线")
+        emit_progress(hooks, f"[steering] 已接收 {len(newly_arrived)} 条补充干预指令，正在动态调整调研计划")
 
     cancelled = is_cancelled(hooks, bool(state.get("cancelled", False)))
     scope = classify_research_scope(query, all_inbox)
@@ -304,7 +304,7 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
 
     remaining_valid_count = len([ev for ev in active_ev if ev.get("evidence_id") not in set(invalid_delta)])
     if parsed.action == "finish" and remaining_valid_count > 0:
-        emit_progress(hooks, f"[agent_handoff] role=main_agent 确认黑板 {remaining_valid_count} 份证据充分，交接研报合成专家", 80)
+        emit_progress(hooks, f"[agent_handoff] 已采集 {remaining_valid_count} 项有效证据，转入终审研报合成", 80)
         res = {
             "turn_count": turn,
             "outline": outline,
@@ -345,12 +345,12 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
         new_notices.append("主脑原提案均超出当前调研边界，已按允许白名单重置起步任务")
 
     if not authorized_tasks:
-        emit_progress(hooks, "[agent_handoff] main_agent 暂无更多合法增量派工，收敛现有证据撰写研报", 80)
+        emit_progress(hooks, "[agent_handoff] 无新增待派发任务，收敛现有证据并转入研报合成", 80)
         next_act = "synthesizer"
         sys_status = "REPORTING"
     else:
         roles_str = " / ".join(t.role for t in authorized_tasks)
-        bump_progress(hooks, 10, 25, f"[agent_start] main_agent 第 {turn} 轮并行派发 {len(authorized_tasks)} 位子智能体 ({roles_str})")
+        bump_progress(hooks, 10, 25, f"[agent_start] 第 {turn} 轮并行调度 {len(authorized_tasks)} 项专职分析（{roles_str}）")
         next_act = "dispatch_subagents"
         sys_status = "STEERING_REDIRECTED" if newly_arrived else "COLLECTING"
 
