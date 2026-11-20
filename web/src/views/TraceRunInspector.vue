@@ -80,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted, ref, shallowRef, watch } from 'vue'
+import { onUnmounted, ref, shallowRef, toRef, watch } from 'vue'
 import { traceTime } from '../labels'
 import { formatDuration, runDuration, spanStatusLabels } from '../traceWaterfall'
 import type { TraceDetail, TraceRun, TraceRunPage, TraceSpan, TraceSpanPage } from '../types'
@@ -238,14 +238,7 @@ function stop(): void {
   emit('recording', false)
 }
 
-watch(
-  [
-    /** 跟踪手动或自动刷新后的任务快照。 */ () => props.detail,
-    /** 切换回调用分析时刷新已选版本。 */ () => props.visible,
-  ],
-  refresh,
-  { immediate: true },
-)
+watch([toRef(props, 'detail'), toRef(props, 'visible')], refresh, { immediate: true })
 onUnmounted(stop)
 </script>
 
