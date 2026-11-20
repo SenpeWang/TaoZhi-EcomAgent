@@ -34,7 +34,7 @@ def load_principal(conn: Any, user_id: str) -> Principal:
     nodes = {n["id"]: n for n in fetch_all(conn, "SELECT * FROM org_nodes WHERE tenant_id=%s AND active", (u["tenant_id"],))}
     memberships = fetch_all(
         conn,
-        "SELECT m.node_id, m.role, n.name FROM memberships m JOIN org_nodes n ON n.id=m.node_id "
+        "SELECT m.node_id, m.role FROM memberships m JOIN org_nodes n ON n.id=m.node_id "
         "WHERE m.tenant_id=%s AND m.user_id=%s AND m.active AND n.active",
         (u["tenant_id"], user_id),
     )
