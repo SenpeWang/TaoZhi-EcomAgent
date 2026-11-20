@@ -1,16 +1,50 @@
 <template>
   <section class="panel">
     <div class="section-heading">
-      <h3>全员提问记录</h3>
+      <h3>{{ isAdmin ? '企业提问记录' : '我的提问记录' }}</h3>
       <el-button :loading="loading" @click="loadPage">刷新</el-button>
     </div>
 
     <form class="toolbar trace-filters" @submit.prevent="applyFilters">
+      <el-select
+        v-if="isAdmin"
+        :model-value="selectedOwnerId"
+        class="trace-owner"
+        aria-label="按发起人筛选"
+        placeholder="搜索姓名或账号"
+        filterable
+        remote
+        clearable
+        :remote-method="searchOwners"
+        @visible-change="openOwnerMenu"
+        @update:model-value="changeOwner"
+      >
+        <el-option label="全部用户（all）" value="all" />
+        <el-option
+          v-for="owner in owners"
+          :key="owner.id"
+          :label="
+            owner.display_name ? owner.display_name + '（' + owner.username + '）' : owner.username
+          "
+          :value="owner.id"
+        />
+        <template v-if="ownerLoading || ownerError || nextOwnerCursor || !owners.length" #footer>
+          <span v-if="ownerLoading" role="status">正在加载用户…</span>
+          <div v-else-if="ownerError" class="owner-retry">
+            <span role="alert">{{ ownerError }}</span>
+            <el-button text type="primary" @click="loadOwners">重试</el-button>
+          </div>
+          <el-button v-else-if="nextOwnerCursor" text type="primary" @click="loadOwners"
+            >加载更多用户</el-button
+          >
+          <span v-else>没有匹配的用户</span>
+        </template>
+      </el-select>
       <el-input
         v-model="keyword"
         class="trace-search"
-        aria-label="搜索提问、发起人、任务 ID 或 Trace ID"
-        placeholder="提问、发起人、任务 ID 或 Trace ID"
+        :aria-label="searchPlaceholder"
+        :placeholder="searchPlaceholder"
         maxlength="200"
         clearable
         @clear="applyFilters"
@@ -121,12 +155,15 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { stateTag, stateText, traceKind, traceTime } from '../labels'
-import type { TracePage, TraceSummary } from '../types'
+import type { TraceOwner, TraceOwnerPage, TracePage, TraceSummary } from '../types'
 import TraceInspector from './TraceInspector.vue'
 
-const props = defineProps<{ api: <T>(path: string) => Promise<T> }>()
+const props = defineProps<{ isAdmin: boolean; api: <T>(path: string) => Promise<T> }>()
+const searchPlaceholder = computed(() =>
+  props.isAdmin ? '提问、发起人、任务 ID 或 Trace ID' : '提问、任务 ID 或 Trace ID',
+)
 const states = [
   'queued',
   'running',
@@ -137,6 +174,14 @@ const states = [
   'rejected',
   'legacy',
 ]
+const selectedOwnerId = ref('all')
+const owners = ref<TraceOwner[]>([])
+const nextOwnerCursor = ref<string | null>(null)
+const ownerLoading = ref(false)
+const ownerError = ref('')
+let ownerQuery = ''
+let ownerRequestSequence = 0
+
 const keyword = ref('')
 const taskKindFilter = ref('')
 const taskStateFilter = ref('')
@@ -157,6 +202,7 @@ async function loadPage(): Promise<void> {
   const query = new URLSearchParams({ limit: '30' })
   const cursor = pageCursors.value.at(-1)
   if (cursor) query.set('cursor', cursor)
+  if (props.isAdmin) query.set('owner_id', selectedOwnerId.value)
   if (submittedKeyword) query.set('q', submittedKeyword)
   if (taskKindFilter.value) query.set('kind', taskKindFilter.value)
   if (taskStateFilter.value) query.set('state', taskStateFilter.value)
@@ -177,8 +223,62 @@ async function loadPage(): Promise<void> {
   }
 }
 
+/**
+ * 读取发起人选项的下一页，仅使用最新搜索词的结果。
+ */
+async function loadOwners(): Promise<void> {
+  if (!props.isAdmin) return
+  const requestId = ++ownerRequestSequence
+  const query = new URLSearchParams({ limit: '50' })
+  if (ownerQuery) query.set('q', ownerQuery)
+  if (nextOwnerCursor.value) query.set('cursor', nextOwnerCursor.value)
+  ownerError.value = ''
+  ownerLoading.value = true
+  try {
+    const page = await props.api<TraceOwnerPage>('/admin/traces/owners?' + query)
+    if (requestId !== ownerRequestSequence) return
+    owners.value = [...owners.value, ...page.items]
+    nextOwnerCursor.value = page.next_cursor
+  } catch (cause) {
+    if (requestId === ownerRequestSequence) {
+      ownerError.value = cause instanceof Error ? cause.message : '读取用户列表失败'
+    }
+  } finally {
+    if (requestId === ownerRequestSequence) ownerLoading.value = false
+  }
+}
+
+/**
+ * 从当前租户的成员目录按姓名或账号重新搜索。
+ * @param input - 管理员输入的姓名或账号。
+ */
+function searchOwners(input: string): void {
+  ownerQuery = input.trim().slice(0, 200)
+  owners.value = []
+  nextOwnerCursor.value = null
+  void loadOwners()
+}
+
+/**
+ * 打开选择框时显示第一页成员。
+ * @param open - 用户选择框是否展开。
+ */
+function openOwnerMenu(open: boolean): void {
+  if (open) searchOwners('')
+}
+
+/**
+ * 选择发起人，清空时恢复全部用户并从首页查询。
+ * @param ownerId - 下拉选项的用户编号或清空值。
+ */
+function changeOwner(ownerId: unknown): void {
+  selectedOwnerId.value = typeof ownerId === 'string' && ownerId ? ownerId : 'all'
+  applyFilters()
+}
+
 /** 从第一页开始按当前条件查询。 */
 function applyFilters(): void {
+  selectedTrace.value = null
   submittedKeyword = keyword.value.trim()
   pageCursors.value = ['']
   void loadPage()
@@ -214,6 +314,15 @@ onMounted(loadPage)
 }
 .trace-filters .el-select {
   width: 155px;
+}
+.trace-filters .trace-owner {
+  width: 210px;
+}
+.owner-retry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .trace-question {
   display: -webkit-box;
@@ -269,6 +378,7 @@ small {
     width: 100%;
   }
   .trace-search,
+  .trace-owner,
   .trace-filters .el-button {
     grid-column: 1 / -1;
   }

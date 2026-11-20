@@ -1,7 +1,6 @@
 import type { Capabilities, User } from './types'
 
-type PageAccess =
-  'member' | 'reviewer' | 'permissionManager' | 'systemManager' | 'auditor' | 'traceAdmin'
+type PageAccess = 'member' | 'reviewer' | 'permissionManager' | 'systemManager' | 'auditor'
 
 interface WorkspacePageDefinition {
   group: string
@@ -57,7 +56,7 @@ const workspacePages = {
     group: '运行分析',
     description: '按提问追踪知识问答和选品调研，定位耗时调用与异常节点。',
     iconPaths: ['M4 5h9M8 12h12M4 19h10', 'M4 3v4M8 10v4M4 17v4'],
-    access: 'traceAdmin',
+    access: 'member',
   },
   系统状态: {
     group: '运行分析',
@@ -125,7 +124,6 @@ export function workspaceNavigation(
     permissionManager: capabilities.permissions,
     systemManager: capabilities.system,
     auditor: capabilities.system || capabilities.permissions,
-    traceAdmin: user.system_admin,
   }
   const badges: Partial<Record<WorkspacePage, number>> = {
     权限审批: pendingApprovals,

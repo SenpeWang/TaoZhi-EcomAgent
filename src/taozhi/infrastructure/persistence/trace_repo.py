@@ -20,29 +20,72 @@ _TRACE_FROM = """
 """
 _TRACE_SCOPE = "WHERE j.tenant_id=%s AND j.kind IN ('ask','research')"
 
+def _job_scope(tenant_id: str, owner_id: str | None) -> tuple[str, tuple]:
+    """生成所有轨迹入口共用的租户及可见发起人条件。"""
+    if owner_id is None:
+        return _TRACE_SCOPE, (tenant_id,)
+    return _TRACE_SCOPE + " AND j.owner_id=%s", (tenant_id, owner_id)
+
+
+def _contains(query: str) -> str:
+    """按字面量匹配查询词，保留用户输入的百分号和下划线。"""
+    return "%" + query.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+
+
+def list_owners(conn: Any, tenant_id: str, *, query: str, after: str | None, limit: int) -> list[dict]:
+    """以租户内唯一的登录名分页，包括历史提问对应的停用账号。"""
+    clauses = ["SELECT id, username, display_name FROM users WHERE tenant_id=%s"]
+    params = [tenant_id]
+    if query:
+        pattern = _contains(query)
+        clauses.append("AND (username ILIKE %s ESCAPE '!' OR display_name ILIKE %s ESCAPE '!')")
+        params.extend((pattern, pattern))
+    if after is not None:
+        clauses.append("AND username>%s")
+        params.append(after)
+    clauses.append("ORDER BY username LIMIT %s")
+    return fetch_all(conn, " ".join(clauses), (*params, limit))
+
 
 def list_traces(
     conn: Any,
     tenant_id: str,
     *,
+    owner_id: str | None,
     kind: str | None,
     state: str | None,
     query: str,
     before: tuple[datetime, str] | None,
     limit: int,
+    include_sources: bool = False,
 ) -> list[dict]:
     """按创建时间与任务编号倒序翻页，查询包含已停用提交人和历史组织的任务。"""
+    scope, scope_params = _job_scope(tenant_id, owner_id)
     trace_id = query.lower() if re.fullmatch(r"[0-9a-fA-F]{32}", query) else None
     matched = None
     if trace_id:
         matched = fetch_one(
             conn,
-            "SELECT job_id, run_version FROM task_spans WHERE tenant_id=%s AND trace_id=%s LIMIT 1",
-            (tenant_id, trace_id),
+            "SELECT s.job_id, s.run_version FROM task_spans s JOIN jobs j "
+            f"ON (j.tenant_id,j.id)=(s.tenant_id,s.job_id) {scope} AND s.trace_id=%s LIMIT 1",
+            (*scope_params, trace_id),
         )
     matched_version = "%s" if matched else "NULL"
-    clauses = [f"SELECT {_TRACE_COLUMNS}, {matched_version} AS matched_run_version {_TRACE_FROM} {_TRACE_SCOPE}"]
-    params: list[Any] = [matched["run_version"], tenant_id] if matched else [tenant_id]
+    params: list[Any] = [matched["run_version"]] if matched else []
+    metadata_match = "TRUE"
+    if query and not matched:
+        pattern = _contains(query)
+        metadata_match = "j.id=%s OR u.username ILIKE %s ESCAPE '!' OR u.display_name ILIKE %s ESCAPE '!'"
+        params.extend((query, pattern, pattern))
+        if trace_id:
+            metadata_match += " OR (j.state IN ('review','completed','rejected') AND j.result->>'trace_id'=%s)"
+            params.append(trace_id)
+    sources = ", j.sources" if include_sources else ""
+    clauses = [
+        f"SELECT * FROM (SELECT {_TRACE_COLUMNS}{sources}, {matched_version} AS matched_run_version, "
+        f"({metadata_match}) AS matches_metadata {_TRACE_FROM} {scope}"
+    ]
+    params.extend(scope_params)
     if kind:
         clauses.append("AND j.kind = %s")
         params.append(kind)
@@ -52,50 +95,47 @@ def list_traces(
     if matched:
         clauses.append("AND j.id=%s")
         params.append(matched["job_id"])
-    elif query:
-        escaped = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-        pattern = f"%{escaped}%"
-        search = (
-            "j.id = %s OR j.question ILIKE %s ESCAPE '!' OR u.username ILIKE %s ESCAPE '!' "
-            "OR u.display_name ILIKE %s ESCAPE '!'"
-        )
-        params.extend((query, pattern, pattern, pattern))
-        if trace_id:
-            search += " OR (j.state IN ('review','completed','rejected') AND j.result->>'trace_id'=%s)"
-            params.append(trace_id)
-        clauses.append(f"AND ({search})")
     if before:
         clauses.append("AND (j.created_at, j.id) < (%s, %s)")
         params.extend(before)
-    clauses.append("ORDER BY j.created_at DESC, j.id DESC LIMIT %s")
+    clauses.append(") AS candidates")
+    if query and not matched:
+        clauses.append("WHERE matches_metadata OR question ILIKE %s ESCAPE '!'")
+        params.append(_contains(query))
+    clauses.append("ORDER BY created_at DESC, id DESC LIMIT %s")
     params.append(limit)
     return fetch_all(conn, " ".join(clauses), tuple(params))
 
 
-def get_trace(conn: Any, tenant_id: str, task_id: str) -> dict | None:
+def get_trace(conn: Any, tenant_id: str, task_id: str, *, owner_id: str | None) -> dict | None:
     """读取当前执行的内建链路编号，历史任务可从原有结果中取回关联编号。"""
+    scope, params = _job_scope(tenant_id, owner_id)
+    sources = ", j.sources" if owner_id is not None else ""
     return fetch_one(
         conn,
-        f"SELECT {_TRACE_COLUMNS}, COALESCE(("
+        f"SELECT {_TRACE_COLUMNS}{sources}, COALESCE(("
         "SELECT s.trace_id FROM task_spans s WHERE s.tenant_id=j.tenant_id AND s.job_id=j.id "
         "AND s.run_version=j.run_version ORDER BY s.id LIMIT 1), "
         f"CASE WHEN j.state IN ('review', 'completed', 'rejected') THEN j.result->>'trace_id' END"
-        f") AS trace_id {_TRACE_FROM} {_TRACE_SCOPE} AND j.id = %s",
-        (tenant_id, task_id),
+        f") AS trace_id {_TRACE_FROM} {scope} AND j.id = %s",
+        (*params, task_id),
     )
 
 
-def get_span_job(conn: Any, tenant_id: str, task_id: str, run_version: int | None = None) -> dict | None:
+def get_span_job(
+    conn: Any, tenant_id: str, task_id: str, *, owner_id: str | None, run_version: int | None = None,
+) -> dict | None:
     """验证任务和可选执行版本归属，并读取当前版本以识别租约接管后的未关闭节点。"""
+    scope, params = _job_scope(tenant_id, owner_id)
     sql = (
         "SELECT j.run_version, j.state, j.lease_until, j.finished_at, clock_timestamp() AS observed_at FROM jobs j "
-        "WHERE j.tenant_id=%s AND j.id=%s AND j.kind IN ('ask','research')"
+        f"{scope} AND j.id=%s"
     )
     if run_version is None:
-        return fetch_one(conn, sql, (tenant_id, task_id))
+        return fetch_one(conn, sql, (*params, task_id))
     return fetch_one(
         conn, sql + " AND EXISTS (SELECT 1 FROM task_spans s WHERE s.tenant_id=j.tenant_id "
-        "AND s.job_id=j.id AND s.run_version=%s)", (tenant_id, task_id, run_version),
+        "AND s.job_id=j.id AND s.run_version=%s)", (*params, task_id, run_version),
     )
 
 

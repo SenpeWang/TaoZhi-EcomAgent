@@ -168,29 +168,67 @@ def test_cross_tenant_documents_tasks_and_tools(clients):
     assert admin.get(f"/api/admin/traces/{job['id']}/runs").status_code == 404
     assert admin.get(f"/api/admin/traces/{job['id']}/runs/1/spans").status_code == 404
     assert admin.get("/api/admin/traces", params={"q": "其他企业问题"}).json()["items"] == []
+    assert admin.get("/api/admin/traces", params={"owner_id": "foreign_user"}).json()["items"] == []
+    assert admin.get("/api/admin/traces/owners", params={"q": "其他老板"}).json()["items"] == []
 
 
-def test_admin_trace_access_and_cursor_across_owners(clients):
-    """同租户跨用户检索，新增提问不干扰翻页，普通业务身份无法进入中台。"""
+def test_trace_owner_scope_and_cursor(clients):
+    """管理员可筛选任一发起人，个人列表、详情和分页受会话身份约束。"""
     path = "/api/admin/traces"
     admin = clients["admin"]
+    users, _ = ids()
     first = task_id(clients["staff"], "轨迹检查 商品说明")
     second = task_id(clients["boss"], "轨迹检查 渠道趋势", kind="research")
     assert TestClient(app).get(path).status_code == 401
-    for role in ("staff", "leader", "boss"):
-        assert clients[role].get(path).status_code == 403
-        assert clients[role].get(f"{path}/{first}").status_code == 403
+    for role, expected in (("staff", [first]), ("leader", []), ("boss", [second])):
+        member = clients[role]
+        for params in ({}, {"owner_id": users[role]}):
+            listing = member.get(path, params=params)
+            assert listing.status_code == 200
+            assert [row["id"] for row in listing.json()["items"]] == expected
+        assert member.get(path, params={"owner_id": "all"}).status_code == 403
+        assert member.get(path, params={"owner_id": users["admin"]}).status_code == 403
+        assert member.get(f"{path}/owners").status_code == 403
+        assert member.get(f"{path}/{first}").status_code == (200 if role == "staff" else 404)
+        assert member.get(f"{path}/{second}").status_code == (200 if role == "boss" else 404)
 
     page = admin.get(path, params={"q": "轨迹检查", "limit": 1}).json()
     assert [(row["id"], row["username"]) for row in page["items"]] == [(second, "boss")]
-    task_id(clients["leader"], "轨迹检查 新到的问题")
+    newest = task_id(clients["staff"], "轨迹检查 新到的问题")
     older = admin.get(path, params={"q": "轨迹检查", "limit": 1, "cursor": page["next_cursor"]}).json()
     assert [row["id"] for row in older["items"]] == [first]
     assert older["next_cursor"] is None
+    all_rows = admin.get(path, params={"owner_id": "all"}).json()["items"]
+    assert [row["id"] for row in all_rows] == [newest, second, first]
+    for client in (admin, clients["staff"]):
+        params = {"owner_id": users["staff"], "q": "轨迹检查", "limit": 1}
+        filtered = client.get(path, params=params).json()
+        assert [row["id"] for row in filtered["items"]] == [newest]
+        tail = client.get(path, params={**params, "cursor": filtered["next_cursor"]}).json()
+        assert [row["id"] for row in tail["items"]] == [first] and tail["next_cursor"] is None
 
     research = admin.get(path, params={"kind": "research", "q": "boss", "state": "queued"}).json()
     assert [row["question"] for row in research["items"]] == ["轨迹检查 渠道趋势"]
     assert admin.get(path, params={"kind": "ingest"}).status_code == 422
+
+
+def test_trace_owner_selector_search_and_paging(clients):
+    """候选包含停用账号，支持按姓名、登录名搜索及稳定分页。"""
+    path = "/api/admin/traces/owners"
+    users, _ = ids()
+    with database_connection() as conn:
+        conn.execute("UPDATE users SET active=false, display_name='历史调研员' WHERE id=%s", (users["staff"],))
+    admin = clients["admin"]
+    first = admin.get(path, params={"limit": 2}).json()
+    assert [row["username"] for row in first["items"]] == ["admin", "boss"]
+    second = admin.get(path, params={"limit": 2, "cursor": first["next_cursor"]}).json()
+    assert [row["username"] for row in second["items"]] == ["leader", "staff"]
+    assert second["next_cursor"] is None
+    for query in ("STAFF", "调研员"):
+        assert admin.get(path, params={"q": query}).json()["items"] == [
+            {"id": users["staff"], "username": "staff", "display_name": "历史调研员"}
+        ]
+    assert admin.get(path, params={"q": "%"}).json()["items"] == []
 
 
 def test_admin_trace_projects_question_and_execution_metadata(clients):
@@ -237,9 +275,9 @@ def test_admin_run_and_span_paging_across_retries(clients):
     path = f"/api/admin/traces/{job_id}"
     admin = clients["admin"]
     assert admin.get(f"{path}/runs").json()["items"] == []
-    for role in ("staff", "leader", "boss"):
-        assert clients[role].get(f"{path}/runs").status_code == 403
-        assert clients[role].get(f"{path}/runs/2/spans").status_code == 403
+    for role in ("leader", "boss"):
+        assert clients[role].get(f"{path}/runs").status_code == 404
+        assert clients[role].get(f"{path}/runs/2/spans").status_code == 404
 
     root_id, model_id = "a" * 16, "b" * 16
     with database_connection() as c:
@@ -269,6 +307,11 @@ def test_admin_run_and_span_paging_across_retries(clients):
     assert (run["failed_count"], run["input_tokens"], run["output_tokens"]) == (1, 5, 0)
     matched = admin.get("/api/admin/traces", params={"q": "1" * 32}).json()["items"]
     assert [(row["id"], row["matched_run_version"]) for row in matched] == [(job_id, 1)]
+    assert clients["staff"].get(f"{path}/runs").json()["items"][0]["trace_id"] == "2" * 32
+    assert clients["staff"].get(f"{path}/runs/2/spans").json()["items"][1]["span_id"] == model_id
+    assert clients["staff"].get("/api/admin/traces", params={"q": "1" * 32}).json()["items"] == matched
+    assert clients["leader"].get("/api/admin/traces", params={"q": "1" * 32}).json()["items"] == []
+    assert admin.get("/api/admin/traces", params={"q": "1" * 32, "owner_id": ids()[0]["boss"]}).json()["items"] == []
     assert admin.get(path).json()["trace_id"] == "2" * 32
     older = admin.get(f"{path}/runs", params={"before_version": first["next_before_version"]}).json()
     assert [(row["run_version"], row["status"]) for row in older["items"]] == [(1, "interrupted")]
@@ -329,7 +372,37 @@ def test_revoke_invalidates_answer_and_approval(monkeypatch,clients):
         row=fetch_one(c,"SELECT sources FROM jobs WHERE id=%s",(tid,));did=row["sources"][0]["document_id"]
     approve(clients["boss"],clients["boss"].post("/api/documents/"+did+"/grants",json={"user_id":u["staff"],"effect":"deny"}))
     r=clients["staff"].get("/api/tasks/"+tid).json();assert r["restricted"] and r["result"] is None
+    path = "/api/admin/traces"
+    staff = clients["staff"]
+    assert staff.get(f"{path}/{tid}").json()["trace"]["question"] == r["question"]
+    assert staff.get(path, params={"q": tid}).json()["items"][0]["question"] == r["question"]
+    assert staff.get(path, params={"q": "店铺运营组负责什么"}).json()["items"] == []
+    assert clients["admin"].get(path, params={"q": "店铺运营组负责什么"}).json()["items"][0]["id"] == tid
     assert clients["boss"].post("/api/tasks/"+tid+"/review",json={"approve":True}).status_code==409
+
+
+def test_personal_trace_search_pages_past_restricted_questions(clients):
+    """归档的原题不会命中个人正文搜索，跳过整批受限结果后仍可连续翻页。"""
+    staff = clients["staff"]
+    keyword = "历史轨迹批次"
+    first = task_id(staff, keyword + "一")
+    second = task_id(staff, keyword + "二")
+    with database_connection() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, tenant_id, owner_id, owner_version, node_id, kind, question, state, fingerprint) "
+            "SELECT 'archived_' || n, j.tenant_id, j.owner_id, j.owner_version, j.node_id, j.kind, "
+            "j.question, 'legacy', j.fingerprint FROM jobs j CROSS JOIN generate_series(1,51) AS n WHERE j.id=%s",
+            (second,),
+        )
+    path = "/api/admin/traces"
+    page = staff.get(path, params={"q": keyword, "limit": 1}).json()
+    assert [row["id"] for row in page["items"]] == [second]
+    last = staff.get(path, params={"q": keyword, "limit": 1, "cursor": page["next_cursor"]}).json()
+    assert [row["id"] for row in last["items"]] == [first] and last["next_cursor"] is None
+    archived = staff.get(path, params={"q": "archived_1"}).json()["items"]
+    assert [row["id"] for row in archived] == ["archived_1"]
+    assert archived[0]["question"] == staff.get("/api/tasks/archived_1").json()["question"]
+
 def test_review_cannot_borrow_reviewer_permissions(monkeypatch,clients):
     seen=[];fake_model(monkeypatch,seen)
     tid=task_id(clients["staff"],"商品切幅",require_review=True)

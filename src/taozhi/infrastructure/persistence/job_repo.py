@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 from taozhi.config import load_config
-from taozhi.domain.access import can_review, can_task
+from taozhi.domain.access import RESTRICTED_QUESTION, can_review, can_task
 from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
@@ -595,7 +595,7 @@ def present_job(
         ]
     return dict(
         id=job["id"],
-        question=(job["question"] if is_privileged_viewer else redact(job["question"])) if valid else "来源权限已变化，请重新查询",
+        question=(job["question"] if is_privileged_viewer else redact(job["question"])) if valid else RESTRICTED_QUESTION,
         kind=job["kind"],
         state=job["state"],
         stage=job["stage"],

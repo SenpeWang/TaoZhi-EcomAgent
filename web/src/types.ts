@@ -135,6 +135,15 @@ export interface TraceSummary {
   started_at: string | null
   finished_at: string | null
 }
+export interface TraceOwner {
+  id: string
+  username: string
+  display_name: string
+}
+export interface TraceOwnerPage {
+  items: TraceOwner[]
+  next_cursor: string | null
+}
 export interface TracePage {
   items: TraceSummary[]
   next_cursor: string | null

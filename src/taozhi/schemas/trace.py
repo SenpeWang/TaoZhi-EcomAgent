@@ -36,6 +36,21 @@ class TracePage(BaseModel):
     next_cursor: str | None
 
 
+class TraceOwner(BaseModel):
+    """筛选发起人时显示的账号标识与名称。"""
+
+    id: str
+    username: str
+    display_name: str
+
+
+class TraceOwnerPage(BaseModel):
+    """管理员当前租户的一页可选发起人。"""
+
+    items: list[TraceOwner]
+    next_cursor: str | None
+
+
 class TraceEvent(BaseModel):
     """一次状态变更或执行步骤。"""
 

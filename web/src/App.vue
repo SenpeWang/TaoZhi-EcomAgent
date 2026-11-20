@@ -162,9 +162,7 @@
               </p>
             </div>
             <div class="overview-banner-actions">
-              <el-button v-if="user.system_admin" @click="navigate('轨迹中台')"
-                >查看执行轨迹</el-button
-              >
+              <el-button @click="navigate('轨迹中台')">查看执行轨迹</el-button>
               <el-button @click="navigate('知识问答')">发起知识问答</el-button>
               <el-button type="primary" @click="navigate('选品调研')">开始选品调研</el-button>
             </div>
@@ -279,9 +277,10 @@
         <BiView v-else-if="currentPage === '经营看板'" :user="user" :api="api" />
 
         <TraceCenter
-          v-else-if="currentPage === '轨迹中台' && user.system_admin && !user.must_change"
-          :key="user.id"
+          v-else-if="currentPage === '轨迹中台' && !user.must_change"
+          :key="`${user.id}:${user.system_admin}`"
           :api="api"
+          :is-admin="user.system_admin"
         />
 
         <template v-else-if="currentPage === '知识问答'">

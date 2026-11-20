@@ -29,6 +29,7 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
       '/approvals',
       '/audit',
       '/admin/traces',
+      '/admin/traces/owners',
     ].includes(resource) ||
       /^\/documents\/[^/]+\/(versions|grants)$/.test(path))
   if (
@@ -38,11 +39,26 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
     throw new Error('资料列表响应异常，请刷新后重试')
   }
   if (
-    resource === '/admin/traces' &&
+    (resource === '/admin/traces' || resource === '/admin/traces/owners') &&
     data.next_cursor !== null &&
     typeof data.next_cursor !== 'string'
   ) {
     throw new Error('轨迹分页响应异常，请刷新后重试')
+  }
+  if (resource === '/admin/traces/owners') {
+    if (
+      !Array.isArray(data.items) ||
+      !data.items.every(
+        (owner) =>
+          isRecord(owner) &&
+          typeof owner.id === 'string' &&
+          typeof owner.username === 'string' &&
+          typeof owner.display_name === 'string',
+      )
+    ) {
+      throw new Error('用户筛选列表响应异常，请刷新后重试')
+    }
+    return
   }
   const runList = /^\/admin\/traces\/[^/]+\/runs$/.test(resource)
   const spanList = /^\/admin\/traces\/[^/]+\/runs\/\d+\/spans$/.test(resource)

@@ -57,6 +57,18 @@ for (const data of [{}, { user: null }, { user: { id: 'fake', roles: ['老板'],
   globalThis.fetch = async () => new Response(JSON.stringify(data), { status: 200 })
   await assert.rejects(requestApi('/auth/login', 'demo', clear), /登录身份响应异常/)
 }
+const ownerPath = '/admin/traces/owners?q=demo'
+const owner = { id: 'user_demo', username: 'demo', display_name: '示例用户' }
+const ownerPage = { items: [owner], next_cursor: 'user_demo' }
+globalThis.fetch = async () => Response.json(ownerPage)
+assert.deepEqual(await requestApi(ownerPath, 'demo', clear), ownerPage)
+for (const malformed of [
+  { items: [owner], next_cursor: 1 },
+  { items: [{ id: 'user_demo', display_name: '示例用户' }], next_cursor: null },
+]) {
+  globalThis.fetch = async () => Response.json(malformed)
+  await assert.rejects(requestApi(ownerPath, 'demo', clear), /响应异常/)
+}
 for (const data of [{}, { items: [null] }, { items: [1] }, [], null]) {
   globalThis.fetch = async () => new Response(JSON.stringify(data), { status: 200 })
   await assert.rejects(requestApi('/documents', 'demo', clear), /响应异常/)
@@ -121,7 +133,7 @@ assert.ok(res.html.includes('&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;')
 
 
 def test_trace_navigation_and_retry_analysis():
-    """跨用户入口只向系统管理员开放，异常子调用可在成功的执行中独立定位。"""
+    """验证成员的轨迹入口、强制改密限制及成功执行中的异常子调用定位。"""
     source = """
 import assert from 'node:assert/strict'
 import { workspaceNavigation } from './web/src/workspaceNavigation.ts'
@@ -133,7 +145,11 @@ function pages(user) {
     .flatMap(group => group.items.map(item => item.page))
 }
 assert.ok(pages({ system_admin: true }).includes('轨迹中台'))
-assert.ok(!pages({ system_admin: false, is_boss: true }).includes('轨迹中台'))
+assert.ok(pages({ system_admin: false, is_boss: true }).includes('轨迹中台'))
+const memberCapabilities = { system: false, permissions: false, review: false, write: false }
+const memberNavigation = workspaceNavigation({ system_admin: false }, memberCapabilities, 0, 0)
+assert.ok(memberNavigation.some(group => group.items.some(item => item.page === '轨迹中台')))
+assert.deepEqual(pages(null), [])
 assert.deepEqual(pages({ system_admin: true, must_change: true }), ['个人中心'])
 
 const started = '2026-01-01T08:00:00Z'

@@ -1,14 +1,16 @@
-"""系统管理员查看本租户所有提问及执行轨迹的只读用例。"""
+"""按当前成员或管理员选择的发起人查看提问及执行轨迹。"""
 from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
 
+from taozhi.domain.access import RESTRICTED_QUESTION
 from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
 from taozhi.infrastructure.persistence import trace_repo
+from taozhi.infrastructure.persistence.access_repo import batch_sources_validity, sources_valid
 from taozhi.knowledge.db import database_connection
 from taozhi.observability.span_attributes import safe_attributes
 
@@ -55,10 +57,22 @@ _KNOWN_FAILURE_STAGES = {
 }
 
 
-def _require_trace_admin(p: Principal) -> None:
-    """跨用户读取提问需要系统管理员身份，业务管理职务不授予该权限。"""
+def _visible_owner(p: Principal, requested: str | None = None) -> str | None:
+    """从会话身份确定可查发起人，管理员可以选择本租户全部账号。"""
+    if p.system_admin:
+        return None if requested in (None, "all") else requested
+    if requested is not None and requested != p.id:
+        raise Denied("只能查看本人发起的轨迹")
+    return p.id
+
+
+def list_owners(p: Principal, *, query: str, cursor: str | None, limit: int) -> dict:
+    """为管理员的发起人选择框提供分页账号目录。"""
     if not p.system_admin:
-        raise Denied("查看轨迹中台需要系统管理员身份")
+        raise Denied("选择其他发起人需要系统管理员身份")
+    with database_connection() as conn:
+        rows = trace_repo.list_owners(conn, p.tenant_id, query=query.strip(), after=cursor, limit=limit + 1)
+    return {"items": rows[:limit], "next_cursor": rows[limit - 1]["username"] if len(rows) > limit else None}
 
 
 def _decode_cursor(cursor: str | None) -> tuple[datetime, str] | None:
@@ -96,43 +110,63 @@ def _display_stage(stage: str, status: str) -> str:
     return redact(stage[:300])
 
 
-def _display_trace(row: dict) -> dict:
+def _display_trace(row: dict, question_visible: bool) -> dict:
     """按工作台脱敏规则展示原题和当前阶段。"""
-    return {**row, "question": redact(row["question"]), "stage": _display_stage(row["stage"], row["state"])}
+    trace = {key: value for key, value in row.items() if key not in {"sources", "matches_metadata"}}
+    trace["question"] = redact(row["question"]) if question_visible else RESTRICTED_QUESTION
+    trace["stage"] = _display_stage(row["stage"], row["state"])
+    return trace
 
 
 def list_traces(
     p: Principal, *, kind: str | None, state: str | None, query: str, cursor: str | None, limit: int,
+    owner_id: str | None = None,
 ) -> dict:
-    """按系统管理员的租户、检索条件及稳定游标读取跨用户提问。"""
-    _require_trace_admin(p)
+    """按可见发起人、检索条件及稳定游标读取提问。"""
+    visible_owner = _visible_owner(p, owner_id)
     before = _decode_cursor(cursor)
+    query = query.strip()
+    # 个人搜索中，一批原题匹配结果可能因文档撤权而全部不可见。
+    batch_size = max(limit + 1, 50) if query and not p.system_admin else limit + 1
+    rows = []
     with database_connection() as conn:
-        rows = trace_repo.list_traces(
-            conn, p.tenant_id, kind=kind, state=state, query=query.strip(), before=before, limit=limit + 1
-        )
+        while len(rows) <= limit:
+            batch = trace_repo.list_traces(
+                conn, p.tenant_id, owner_id=visible_owner, kind=kind, state=state, query=query,
+                before=before, limit=batch_size, include_sources=not p.system_admin,
+            )
+            validity = {} if p.system_admin else batch_sources_validity(
+                conn, p, [row for row in batch if row["state"] != "legacy"]
+            )
+            for row in batch:
+                question_visible = p.system_admin or (row["state"] != "legacy" and validity[row["id"]])
+                if question_visible or row["matches_metadata"]:
+                    rows.append(_display_trace(row, question_visible))
+            if len(batch) < batch_size:
+                break
+            before = batch[-1]["created_at"], batch[-1]["id"]
     page = rows[:limit]
     next_cursor = None
     if len(rows) > limit:
         last = page[-1]
         next_cursor = f"{last['created_at'].isoformat()}|{last['id']}"
-    return {"items": [_display_trace(row) for row in page], "next_cursor": next_cursor}
+    return {"items": page, "next_cursor": next_cursor}
 
 
 def get_trace(
     p: Principal, task_id: str, *, after_event_id: int, event_limit: int, before_call_id: int | None = None,
 ) -> dict:
     """按任务读取真实事件与模型调用账本，支持运行中增量拉取。"""
-    _require_trace_admin(p)
     with database_connection() as conn:
-        row = trace_repo.get_trace(conn, p.tenant_id, task_id)
+        row = trace_repo.get_trace(conn, p.tenant_id, task_id, owner_id=_visible_owner(p))
         if row is None:
             raise Denied("轨迹不存在", "NOT_FOUND", 404)
+        question_visible = p.system_admin or (row["state"] != "legacy" and sources_valid(conn, p, row["sources"]))
         events = trace_repo.list_events(conn, p.tenant_id, task_id, after_event_id, event_limit + 1)
         calls = trace_repo.list_model_calls(conn, p.tenant_id, task_id, before_call_id, _MODEL_CALL_PAGE_SIZE + 1)
     trace_id = row.pop("trace_id")
     return {
-        "trace": _display_trace(row),
+        "trace": _display_trace(row, question_visible),
         "events": [
             {**event, "stage": _display_stage(event["stage"], event["status"])}
             for event in events[:event_limit]
@@ -164,9 +198,8 @@ def _span_status(recorded: str | None, job: dict, run_version: int) -> str:
 
 def list_runs(p: Principal, task_id: str, *, before_version: int | None, limit: int) -> dict:
     """列出提问的实际采集记录，旧任务与尚未开始执行的任务均可返回空页。"""
-    _require_trace_admin(p)
     with database_connection() as conn:
-        job = trace_repo.get_span_job(conn, p.tenant_id, task_id)
+        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=_visible_owner(p))
         if job is None:
             raise Denied("轨迹不存在", "NOT_FOUND", 404)
         rows = trace_repo.list_span_runs(conn, p.tenant_id, task_id, before_version, limit + 1)
@@ -179,9 +212,8 @@ def list_runs(p: Principal, task_id: str, *, before_version: int | None, limit: 
 
 def list_spans(p: Principal, task_id: str, run_version: int, *, after_id: int, limit: int) -> dict:
     """读取一个执行版本的真实节点，只展示允许进入管理界面的元数据。"""
-    _require_trace_admin(p)
     with database_connection() as conn:
-        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, run_version)
+        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=_visible_owner(p), run_version=run_version)
         if job is None:
             raise Denied("执行轨迹不存在", "NOT_FOUND", 404)
         rows = trace_repo.list_spans(conn, p.tenant_id, task_id, run_version, after_id, limit + 1)

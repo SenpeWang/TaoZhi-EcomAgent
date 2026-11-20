@@ -6,6 +6,9 @@ from typing import Optional
 from .entities import Principal
 
 
+RESTRICTED_QUESTION = "来源权限已变化，请重新查询"
+
+
 def can_task(p: Principal, job: dict) -> bool:
     """判定主体是否有权查看或操作指定任务记录。
 
