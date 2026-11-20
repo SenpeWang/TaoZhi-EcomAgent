@@ -63,13 +63,14 @@ class LLMClient:
         self._clients: Dict[str, ChatOpenAI] = {}
         self._slots = threading.BoundedSemaphore(self.settings.llm_max_concurrency)
         self._client_lock = threading.Lock()
+        req_timeout = httpx.Timeout(float(self.settings.llm_timeout or 90), connect=8.0)
         self._http_by_trust_env: Dict[bool, httpx.Client] = {
-            False: httpx.Client(trust_env=False),
-            True: httpx.Client(trust_env=True),
+            False: httpx.Client(trust_env=False, timeout=req_timeout),
+            True: httpx.Client(trust_env=True, timeout=req_timeout),
         }
         self._async_http_by_trust_env: Dict[bool, httpx.AsyncClient] = {
-            False: httpx.AsyncClient(trust_env=False),
-            True: httpx.AsyncClient(trust_env=True),
+            False: httpx.AsyncClient(trust_env=False, timeout=req_timeout),
+            True: httpx.AsyncClient(trust_env=True, timeout=req_timeout),
         }
         self.last_route_events: List[Dict[str, Any]] = []
 

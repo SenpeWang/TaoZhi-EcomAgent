@@ -33,13 +33,27 @@ def get_job_by_id(conn: Any, job_id: str, *, for_update: bool = False) -> dict |
     return fetch_one(conn, f"SELECT * FROM jobs WHERE id=%s{suffix}", (job_id,))
 
 
-def list_ask_and_research_jobs(conn: Any, tenant_id: str, limit: int = 500) -> list[dict]:
-    """按时间倒序列出问答与调研任务。"""
-    return fetch_all(
+def list_ask_and_research_jobs(conn: Any, tenant_id: str, limit: int = 500, kind: str = "") -> list[dict]:
+    """按时间倒序列出问答与调研任务（分别保底拉取，防止调研任务被大量历史问答挤出）。"""
+    if kind in ("ask", "research"):
+        return fetch_all(
+            conn,
+            "SELECT * FROM jobs WHERE tenant_id=%s AND kind=%s ORDER BY created_at DESC LIMIT %s",
+            (tenant_id, kind, limit),
+        )
+    ask_rows = fetch_all(
         conn,
-        "SELECT * FROM jobs WHERE tenant_id=%s AND kind IN ('ask','research') ORDER BY created_at DESC LIMIT %s",
-        (tenant_id, limit),
+        "SELECT * FROM jobs WHERE tenant_id=%s AND kind='ask' ORDER BY created_at DESC LIMIT %s",
+        (tenant_id, max(1, limit - 100)),
     )
+    research_rows = fetch_all(
+        conn,
+        "SELECT * FROM jobs WHERE tenant_id=%s AND kind='research' ORDER BY created_at DESC LIMIT %s",
+        (tenant_id, min(200, limit)),
+    )
+    merged = ask_rows + research_rows
+    merged.sort(key=lambda r: r["created_at"], reverse=True)
+    return merged[:limit]
 
 
 def list_ask_jobs(conn: Any, tenant_id: str, limit: int = 2000) -> list[dict]:

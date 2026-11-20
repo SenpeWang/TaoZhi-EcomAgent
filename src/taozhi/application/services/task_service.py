@@ -104,10 +104,10 @@ def submit_task(
         return {"id": job["id"], "task_id": job["id"], "state": job["state"], "message": "任务已提交"}
 
 
-def list_tasks(p: Principal) -> list[dict[str, Any]]:
+def list_tasks(p: Principal, kind: str = "") -> list[dict[str, Any]]:
     """列出当前用户有权限查看的问答与调研任务（批量预检验来源以消除 N+1 查询）。"""
     with database_connection() as c:
-        rows = job_repo.list_ask_and_research_jobs(c, p.tenant_id)
+        rows = job_repo.list_ask_and_research_jobs(c, p.tenant_id, kind=kind)
         permitted = [r for r in rows if can_task(p, r)]
         validity = batch_sources_validity(c, p, permitted)
         return [
@@ -659,7 +659,7 @@ def process_research_job(job: dict[str, Any]) -> None:
             require_checkpointer=True,
             emit_event_fn=emit,
             initial_steering=initial_steering,
-            timeout_seconds=float(settings.llm_timeout or 180.0),
+            timeout_seconds=max(240.0, float(settings.llm_timeout or 90.0) * 2.5),
             max_turns=int(settings.research_max_turns),
             max_parallel_subagents=int(settings.research_max_parallel_subagents),
             max_subagent_steps=int(settings.research_max_subagent_steps),

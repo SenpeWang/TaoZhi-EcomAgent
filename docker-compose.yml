@@ -22,6 +22,11 @@ x-app-common: &app-common
     ECOM_ES_URL: http://elasticsearch:9200
     ECOM_EMBED_SERVICE_URL: http://embedding:18555
     ECOM_RUNTIME_DIR: /app/data/runtime
+    HTTP_PROXY: ${DOCKER_HTTP_PROXY:-http://host.docker.internal:7890}
+    HTTPS_PROXY: ${DOCKER_HTTPS_PROXY:-http://host.docker.internal:7890}
+    NO_PROXY: localhost,127.0.0.1,postgres,minio,kafka,elasticsearch,embedding
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   volumes:
     - ./data:/app/data
   restart: unless-stopped

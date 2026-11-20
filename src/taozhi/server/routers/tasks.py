@@ -37,9 +37,9 @@ def ask(
 
 
 @router.get("/tasks")
-def tasks(p=Depends(identity)):
+def tasks(kind: str = Query(default=""), p=Depends(identity)):
     """列出用户有权查看的问答与协同调研任务摘要。"""
-    return {"items": task_service.list_tasks(p)}
+    return {"items": task_service.list_tasks(p, kind=kind)}
 
 
 @router.get("/research/conversations")

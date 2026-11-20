@@ -437,7 +437,7 @@ def test_process_research_job_reads_budgets_from_settings():
     ):
         process_research_job(job)
 
-    assert captured["timeout_seconds"] == 95.0
+    assert captured["timeout_seconds"] == 240.0
     assert captured["max_turns"] == 4
     assert captured["max_parallel_subagents"] == 2
     assert captured["max_subagent_steps"] == 3
