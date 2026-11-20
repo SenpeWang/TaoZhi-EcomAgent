@@ -57,7 +57,7 @@ from taozhi.ai import observability as obs_metrics  # noqa: E402
 from taozhi.knowledge.db import database_connection, fetch_all, fetch_one  # noqa: E402
 from taozhi.infrastructure.persistence.access_repo import load_principal  # noqa: E402
 from evals.dataset import schema as dataset_schema  # noqa: E402
-from evals.dataset.seed import EVAL_PASSWORD  # noqa: E402  # 评测账号口令与 seed.py 同源
+from evals.dataset.seed import EVAL_PASSWORD  # noqa: E402
 
 
 def resolve_eval_node(conn):
