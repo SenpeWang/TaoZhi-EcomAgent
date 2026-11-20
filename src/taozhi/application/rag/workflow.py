@@ -1,29 +1,23 @@
-"""企业知识问答与 ChatBI 受控检索/发布工作流图组装。"""
+"""企业知识问答受控检索、多专家协同核验与发布工作流图组装。"""
 from __future__ import annotations
 
-import functools
-import json
 import re
-import time
 
+from taozhi.application.common.task_guard import empty_token_usage, merge_token_usage, traced_node, validate_task_execution
 from taozhi.config import load_config
 from taozhi.core.memory.service import get_followup_context
 from taozhi.core.tools.search_web import extract_search_keyword
-from taozhi.domain.errors import Denied
 from taozhi.domain.rag_verification import norm_text
 from taozhi.domain.text_guard import detect_injection
-from taozhi.infrastructure.persistence.access_repo import can_read_metric, sources_valid
-from taozhi.infrastructure.persistence.bi_repo import get_published_metric_by_id
+from taozhi.infrastructure.persistence.access_repo import sources_valid
 from taozhi.infrastructure.persistence.job_repo import last_conversation_question, list_recent_completed_ask
-from taozhi.knowledge import metrics as metrics_mod
 from taozhi.knowledge.business import lookup
 from taozhi.knowledge.db import database_connection
 from taozhi.knowledge.retriever import build_hyde_vector, search_documents
-from taozhi.observability.tracing import node_span
 from taozhi.orchestration.controller import DeterministicController
 from .intent import plan_node
 from .specialists import domain_node, quality_node
-from .state import State, empty_token_usage, merge_token_usage, validate_task_execution
+from .state import State
 
 
 def retrieval_node(state: State) -> dict:
@@ -133,76 +127,9 @@ def retrieval_node(state: State) -> dict:
     )
 
 
-def data_query_node(state: State) -> dict:
-    """问数节点：受控执行语义层指标，SQL 永远由白名单模板组装。"""
-    p, job = validate_task_execution(state, "执行受控指标查询（语义层）", 40)
-    di = state.get("data_intent") or {}
-    result: dict = {"denied": True, "message": di.get("reason") or "未找到可回答该问题的指标。"}
-    level = 1
-    if di.get("metric_key"):
-        with database_connection() as c:
-            m = get_published_metric_by_id(c, p.tenant_id, di["metric_id"])
-            if not m or not can_read_metric(c, p, m):
-                result = {"denied": True, "message": "该指标不存在，或您当前的角色与密级无权查看。"}
-            else:
-                try:
-                    cols, rows, meta = metrics_mod.execute_metric(c, p, m, di.get("intent") or {})
-                    result = {
-                        "denied": False,
-                        "columns": cols,
-                        "rows": metrics_mod.jsonable_rows(rows),
-                        "meta": meta,
-                        "metric_key": m["metric_key"],
-                        "metric_name": m["name"],
-                        "unit": m["unit"],
-                        "description": m["description"],
-                    }
-                    level = m["level"]
-                except Denied as e:
-                    result = {"denied": True, "message": f"指标执行被安全策略拒绝：{e}"}
-                except Exception:
-                    result = {"denied": True, "message": "指标查询暂时不可用，请稍后重试。"}
-    return dict(
-        data_result=result,
-        evidence=[],
-        findings=[],
-        missing=[],
-        sources=[],
-        business=[],
-        external_blocked=False,
-        hard_block=result.get("denied", False),
-        input_level=max(job["input_level"], level),
-    )
-
-
 def publish_node(state: State) -> dict:
     """发布前校验来源并渲染结构化结论、原文受限摘要或业务数据快照。"""
     _, job = validate_task_execution(state, "发布前校验权限与来源", 95)
-    if state.get("data_result"):
-        dr = state["data_result"]
-        if dr.get("denied"):
-            answer = dr.get("message", "该问题暂无法通过指标数据回答。") + "\n\n您也可以换个问法，或改从知识库资料中查找。"
-        else:
-            cols, rows, meta = dr["columns"], dr["rows"], dr["meta"]
-            head = "、".join(str(x) for x in cols)
-            lines = [
-                f"「{dr['metric_name']}」查询结果（{meta.get('unit','')}，共 {len(rows)} 行，耗时 {meta.get('elapsed_ms','?')}ms）：",
-                "",
-                head,
-                "─" * min(60, max(24, len(head) * 2)),
-            ]
-            lines.extend(" | ".join(str(x) for x in r) for r in rows[:15])
-            if len(rows) > 15:
-                lines.append(f"...（其余 {len(rows) - 15} 行已省略）")
-            lines.extend(
-                [
-                    "",
-                    f"口径说明：{dr['description']}",
-                    f"数据来源：企业指标语义层（{dr['metric_key']}），受控只读查询，密级 L{meta.get('level',1)}。",
-                ]
-            )
-            answer = "\n".join(lines)
-        return {"answer": answer, "input_level": max(state.get("input_level", job["input_level"]), 1), "hard_block": False, "review": False}
 
     if state["hard_block"]:
         answer = "当前没有足够的授权资料，无法给出事实结论：相关内容可能未标注、待确认，或您当前无权查看。请补充资料，或联系负责人申请访问权限。"
@@ -258,63 +185,22 @@ def publish_node(state: State) -> dict:
     return {"answer": answer, "input_level": max_level}
 
 
-def _traced(name: str, func):
-    """节点级 span 包装与单节点耗时累加。"""
-
-    @functools.wraps(func)
-    def wrapper(state: State):
-        attrs = {"job_id": str(state.get("job_id", "")), "run_version": int(state.get("run_version", 0) or 0)}
-        with node_span("pipeline." + name, attrs) as span:
-            t0 = time.perf_counter()
-            result = func(state)
-            node_ms = int((time.perf_counter() - t0) * 1000)
-            if isinstance(result, dict):
-                result["timing"] = {**(state.get("timing") or {}), **(result.get("timing") or {}), f"{name}_ms": node_ms}
-            try:
-                if span is not None:
-                    r = result or {}
-                    if r.get("selected_agents") is not None:
-                        span.set_attribute("state.selected_agents", ",".join(map(str, r["selected_agents"])))
-                    for key in ("evidence", "findings", "missing", "business"):
-                        if key in r:
-                            span.set_attribute("state." + key, len(r[key] or []))
-                    if "answer" in r:
-                        span.set_attribute("state.answer_chars", len(r.get("answer") or ""))
-                    if "model_calls" in r:
-                        span.set_attribute("state.model_calls", int(r.get("model_calls") or 0))
-                    if r.get("usage"):
-                        span.set_attribute("state.usage", json.dumps(r["usage"], ensure_ascii=False)[:600])
-                    if r.get("hard_block") is not None:
-                        span.set_attribute("state.hard_block", bool(r.get("hard_block")))
-            except Exception:
-                pass
-            return result
-
-    return wrapper
-
-
-def build_question_workflow(checkpointer):
-    """构建企业知识问答与 ChatBI 受控执行 LangGraph。"""
+def build_rag_workflow(checkpointer):
+    """构建企业知识问答受控执行 LangGraph。"""
     from langgraph.graph import END, START, StateGraph
 
     builder = StateGraph(State)
     nodes = [
         ("planning", plan_node),
         ("retrieval", retrieval_node),
-        ("data_query", data_query_node),
         ("specialists", domain_node),
         ("quality", quality_node),
         ("publication", publish_node),
     ]
     for name, func in nodes:
-        builder.add_node(name, _traced(name, func))
+        builder.add_node(name, traced_node(name, func, span_prefix="pipeline."))
     builder.add_edge(START, "planning")
-    builder.add_conditional_edges(
-        "planning",
-        lambda s: "data_query" if s.get("data_intent") else "retrieval",
-        {"data_query": "data_query", "retrieval": "retrieval"},
-    )
-    builder.add_edge("data_query", "publication")
+    builder.add_edge("planning", "retrieval")
     builder.add_edge("retrieval", "specialists")
     builder.add_edge("specialists", "quality")
     builder.add_edge("quality", "publication")

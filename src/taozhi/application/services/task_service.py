@@ -8,8 +8,9 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from taozhi.application.rag.state import empty_token_usage, validate_task_execution
-from taozhi.application.rag.workflow import build_question_workflow
+from taozhi.application.bi import build_bi_workflow, detect_data_intent
+from taozhi.application.common.task_guard import empty_token_usage, validate_task_execution
+from taozhi.application.rag.workflow import build_rag_workflow
 from taozhi.application.research.graph import build_autonomous_agent_graph, execute_autonomous_agents
 from taozhi.application.services import document_service
 from taozhi.config import get_settings, load_config
@@ -466,6 +467,39 @@ def _try_answer_from_semantic_cache(job: dict[str, Any], cache: Any, queue_wait_
         return True
 
 
+def _build_bi_result(
+    *,
+    state: dict[str, Any],
+    queue_wait_ms: int,
+    e2e_ms: int,
+    trace_id: str | None,
+) -> dict[str, Any]:
+    """将 ChatBI 问数工作流终态组装为前端可消费的结果负载。"""
+    timing = dict(state.get("timing") or {})
+    timing["queue_wait_ms"] = queue_wait_ms
+    timing["e2e_ms"] = e2e_ms
+    dr = state.get("data_result") or {}
+    result: dict[str, Any] = dict(
+        answer=state["answer"],
+        citations=[],
+        specialists=[{"name": "指标语义层（受控 SQL）", "count": 1}] if (dr and not dr.get("denied")) else [],
+        missing=[],
+        hard_block=bool(state.get("hard_block")),
+        external_blocked=False,
+        model_calls=0,
+        usage=[],
+        cache_hit=False,
+        timing=timing,
+        token_usage=state.get("token_usage") or empty_token_usage(),
+        degraded={},
+    )
+    if dr and not dr.get("denied"):
+        result["data"] = dr
+    if trace_id:
+        result["trace_id"] = trace_id
+    return result
+
+
 def _build_question_result(
     *,
     state: dict[str, Any],
@@ -474,7 +508,7 @@ def _build_question_result(
     e2e_ms: int,
     trace_id: str | None,
 ) -> dict[str, Any]:
-    """将问答工作流终态裁剪组装为前端与报告可消费的结果负载。"""
+    """将 RAG 问答工作流终态裁剪组装为前端与报告可消费的结果负载。"""
     timing = dict(state.get("timing") or {})
     timing["queue_wait_ms"] = queue_wait_ms
     timing["e2e_ms"] = e2e_ms
@@ -498,46 +532,67 @@ def _build_question_result(
     )
     if trace_id:
         result["trace_id"] = trace_id
-    dr = state.get("data_result")
-    if dr and not dr.get("denied"):
-        result["data"] = dr
-        result["specialists"] = [{"name": "指标语义层（受控 SQL）", "count": 1}]
     return result
 
 
 def process_question_job(job: dict[str, Any]) -> None:
-    """执行 RAG / ChatBI 问答流水线：语义缓存拦截、多智能体核验及安全回灌。"""
+    """按意图分发至独立工作流：ChatBI 受控问数（application/bi）或知识库 RAG（application/rag）。"""
     cache = get_semantic_cache()
     queue_wait_ms = _diff_ms(job.get("created_at"), job.get("started_at"))
     if _try_answer_from_semantic_cache(job, cache, queue_wait_ms):
         return
 
+    data_intent: dict[str, Any] | None = None
+    try:
+        with database_connection() as c:
+            p_init = load_principal(c, job["owner_id"])
+            data_intent = detect_data_intent(c, p_init, job["question"])
+    except Exception:
+        data_intent = None
+
+    is_bi = bool(data_intent)
     with _postgres_checkpointer() as saver:
-        flow = build_question_workflow(saver)
-        with node_span("worker.question", {"job_id": job["id"], "kind": "ask"}):
-            state = flow.invoke(
-                {"job_id": job["id"], "run_version": job["run_version"]},
-                {"configurable": {"thread_id": f"{job['id']}:{job['run_version']}"}},
-            )
-            trace_id = current_trace_id()
+        if is_bi:
+            flow = build_bi_workflow(saver)
+            with node_span("worker.bi", {"job_id": job["id"], "kind": "ask"}):
+                state = flow.invoke(
+                    {"job_id": job["id"], "run_version": job["run_version"], "data_intent": data_intent},
+                    {"configurable": {"thread_id": f"{job['id']}:{job['run_version']}"}},
+                )
+                trace_id = current_trace_id()
+        else:
+            flow = build_rag_workflow(saver)
+            with node_span("worker.question", {"job_id": job["id"], "kind": "ask"}):
+                state = flow.invoke(
+                    {"job_id": job["id"], "run_version": job["run_version"]},
+                    {"configurable": {"thread_id": f"{job['id']}:{job['run_version']}"}},
+                )
+                trace_id = current_trace_id()
     validate_task_execution(state, "最终权限核验", 98)
     with database_connection() as c:
         row = job_repo.get_job_by_id(c, job["id"], for_update=True)
         if not row or row["state"] != "running" or row["run_version"] != job["run_version"] or row["cancel_requested"]:
             raise Denied("任务执行版本已失效", "STALE", 409)
         p = load_principal(c, row["owner_id"])
-        if p.version != row["owner_version"] or not sources_valid(c, p, state["sources"]):
+        sources = [] if is_bi else state["sources"]
+        if p.version != row["owner_version"] or not sources_valid(c, p, sources):
             raise Denied("人员或来源权限已变化", "SOURCE_CHANGED", 409)
-        citations = [{k: e[k] for k in ("document_id", "version", "title", "quote", "page", "chunk_id")} for e in state["evidence"]]
-        result = _build_question_result(
-            state=state,
-            citations=citations,
-            queue_wait_ms=queue_wait_ms,
-            e2e_ms=_diff_ms(row.get("created_at") or job.get("created_at")),
-            trace_id=trace_id,
-        )
-        status = "review" if state["review"] else "completed"
-        stage = "等待业务负责人审核" if state["review"] else "已完成"
+        e2e_ms = _diff_ms(row.get("created_at") or job.get("created_at"))
+        if is_bi:
+            citations = []
+            result = _build_bi_result(state=state, queue_wait_ms=queue_wait_ms, e2e_ms=e2e_ms, trace_id=trace_id)
+            status, stage = "completed", "已完成"
+        else:
+            citations = [{k: e[k] for k in ("document_id", "version", "title", "quote", "page", "chunk_id")} for e in state["evidence"]]
+            result = _build_question_result(
+                state=state,
+                citations=citations,
+                queue_wait_ms=queue_wait_ms,
+                e2e_ms=e2e_ms,
+                trace_id=trace_id,
+            )
+            status = "review" if state["review"] else "completed"
+            stage = "等待业务负责人审核" if state["review"] else "已完成"
         job_repo.complete_job(
             c,
             tenant_id=p.tenant_id,
@@ -546,21 +601,21 @@ def process_question_job(job: dict[str, Any]) -> None:
             state=status,
             stage=stage,
             result=result,
-            sources=state["sources"],
+            sources=sources,
             input_level=state["input_level"],
         )
         epoch = _tenant_epoch(c, p.tenant_id)
         if status == "completed":
             job_repo.delete_checkpoint_threads(c, [f"{job['id']}:{job['run_version']}"])
 
-    if not state.get("hard_block") and not state.get("review") and state.get("answer") and not state.get("data_result"):
+    if not is_bi and not state.get("hard_block") and not state.get("review") and state.get("answer"):
         try:
             cache.put(
                 job["tenant_id"],
                 job["question"],
                 state["answer"],
                 citations,
-                state.get("sources", []),
+                sources,
                 state.get("input_level", job["input_level"]),
                 redacted=not p.boss,
                 epoch=epoch,

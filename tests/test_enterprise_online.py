@@ -9,7 +9,7 @@ from taozhi.server.api import app
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import load_principal, source_valid, can_read
 from taozhi.server.worker import process_next_job
-from taozhi.application.rag.state import validate_task_execution
+from taozhi.application.common.task_guard import validate_task_execution
 from taozhi.application.services.task_service import process_question_job
 from taozhi.infrastructure.persistence.job_repo import claim_next_job, create_job
 import importlib.util

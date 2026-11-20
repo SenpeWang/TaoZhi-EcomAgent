@@ -22,7 +22,8 @@ from taozhi.domain.rag_verification import SPECIALIST_AGENTS, numbers_supported,
 from taozhi.domain.text_guard import detect_injection
 from taozhi.infrastructure.persistence.job_repo import count_model_calls, get_job_by_id, insert_model_call, update_model_call
 from taozhi.knowledge.db import database_connection
-from .state import State, empty_token_usage, merge_token_usage, validate_task_execution
+from taozhi.application.common.task_guard import empty_token_usage, merge_token_usage, validate_task_execution
+from .state import State
 
 _FINANCE_EVIDENCE_RE = re.compile("财务|经营|成本|毛利|利润|收入|结算|分摊|账期|补贴|对账")
 

@@ -375,7 +375,7 @@ def list_knowledge_map(p: Principal) -> list[dict[str, Any]]:
 
 def process_ingestion_job(job: dict[str, Any]) -> None:
     """执行文档解析、语义切片、向量编码与发布审批流提交。"""
-    from taozhi.application.rag.state import validate_task_execution
+    from taozhi.application.common.task_guard import validate_task_execution
 
     state = {"job_id": job["id"], "run_version": job["run_version"]}
     p, _ = validate_task_execution(state, "解析资料与登记来源", 35)

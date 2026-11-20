@@ -26,7 +26,9 @@
 | `src/taozhi/core/tools/` | 原子工具集与统一结构化 ToolOutcome / 行边界截断工具 |
 | `src/taozhi/core/memory/` | 租户物理隔离长效记忆库与上下文检索服务 |
 | `src/taozhi/application/` | 应用层：业务用例服务、RAG 问答工作流与多智能体自主调研执行图 |
-| `src/taozhi/application/rag/` | 企业问答 LangGraph 状态机（意图路由、ChatBI、专职智能体与合规守卫） |
+| `src/taozhi/application/bi/` | ChatBI 受控问数 LangGraph 状态机（指标意图识别、语义层查询与结果发布） |
+| `src/taozhi/application/common/` | 应用层公共任务守卫、Token 用量聚合与 OpenTelemetry 节点埋点 |
+| `src/taozhi/application/rag/` | 企业知识问答 LangGraph 状态机（多专家意图路由、混合检索、协同核验与合规发布） |
 | `src/taozhi/application/research/` | 自治多智能体调研系统（运行时钩子、主协调器、并行子智能体与研报合成） |
 | `src/taozhi/application/services/` | 应用服务层：账号审批、文档生命周期、问答/调研调度与经营看板用例 |
 | `src/taozhi/orchestration/` | 编排辅助层：知识问答确定性控制器与离散决策引擎 |
