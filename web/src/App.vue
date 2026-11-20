@@ -356,68 +356,16 @@
         </template>
 
         <!-- ── 5. 我的任务 / 团队审核 ──────────────────────────────── -->
-        <template v-else-if="page === '我的任务' || page === '团队审核'">
-          <section class="panel">
-            <div class="section-head">
-              <div>
-                <h3>{{ page === '团队审核' ? '团队待审核任务' : '我的分析任务' }}</h3>
-                <p class="section-sub">
-                  查看任务进度、执行记录与最终结论，支持运行中补充要求或待审核结果复核。
-                </p>
-              </div>
-              <div class="section-actions">
-                <el-radio-group v-if="page === '我的任务'" v-model="taskKindFilter" size="small">
-                  <el-radio-button value="all">全部 ({{ myTasksBase.length }})</el-radio-button>
-                  <el-radio-button value="ask">
-                    知识问答 ({{ myTasksBase.filter((t) => t.kind !== 'research').length }})
-                  </el-radio-button>
-                  <el-radio-button value="research">
-                    商品调研 ({{ myTasksBase.filter((t) => t.kind === 'research').length }})
-                  </el-radio-button>
-                </el-radio-group>
-                <el-button @click="navigate('选品调研')"> 新建商品调研 </el-button>
-                <el-button type="primary" @click="navigate('知识问答')"> 新建问答任务 </el-button>
-              </div>
-            </div>
-
-            <el-table :data="visibleTasks" empty-text="暂无任务记录">
-              <el-table-column label="任务内容" min-width="280">
-                <template #default="{ row }">
-                  <el-button text type="primary" class="table-question" @click="openTask(row.id)">
-                    {{ row.question }}
-                  </el-button>
-                  <small class="cell-small">
-                    任务 ID：{{ row.id }} · 类型：{{
-                      row.kind === 'research' ? '商品调研' : '知识问答'
-                    }}
-                  </small>
-                </template>
-              </el-table-column>
-              <el-table-column label="当前阶段" width="170">
-                <template #default="{ row }">
-                  <span>{{ row.stage || '等待处理' }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="状态" width="115">
-                <template #default="{ row }">
-                  <el-tag size="small" :type="stateTag(row.state)" effect="light">
-                    {{ stateText(row.state) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="进度" width="145">
-                <template #default="{ row }">
-                  <el-progress :percentage="row.progress" :stroke-width="6" />
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="105" align="right">
-                <template #default="{ row }">
-                  <el-button size="small" plain @click="openTask(row.id)">详情</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </section>
-        </template>
+        <TaskCenter
+          v-else-if="page === '我的任务' || page === '团队审核'"
+          :tasks="visibleTasks"
+          :is-review-page="page === '团队审核'"
+          :state-text="stateText"
+          :state-tag="stateTag"
+          @open="openTask"
+          @navigate="navigate"
+          @reload="load"
+        />
 
         <!-- ── 6. 知识文档 ──────────────────────────────────────── -->
         <DocumentManager
@@ -922,6 +870,7 @@ import DocumentManager from './views/DocumentManager.vue'
 import LoginPortal from './views/LoginPortal.vue'
 import PolicyMatrix from './views/PolicyMatrix.vue'
 import ResearchChatView from './views/ResearchChatView.vue'
+import TaskCenter from './views/TaskCenter.vue'
 import TaskTimeline from './views/TaskTimeline.vue'
 import type {
   Approval,
@@ -1257,28 +1206,14 @@ const currentSubtitle = computed(
   () => SUBTITLES[page.value] || '',
 )
 
-const taskKindFilter = ref<'all' | 'ask' | 'research'>('all')
-
 /**
- * 计算当前账号名下的基础任务集（用于知识问答/商品调研分类计数）。
- * @returns 基础任务列表。
- */
-const myTasksBase = computed(() => {
-  if (page.value === '团队审核') return tasks.value
-  const uid = user.value?.id
-  return uid ? tasks.value.filter((t) => t.owner_id === uid) : tasks.value
-})
-
-/**
- * 过滤当前任务视图。
+ * 过滤当前任务视图（我的任务仅展示本人发起的任务，团队审核展示全部待审任务）。
  * @returns 当前页面可见任务列表。
  */
 function computeVisibleTasks(): Task[] {
-  if (page.value === '团队审核' || taskKindFilter.value === 'all') return myTasksBase.value
-  if (taskKindFilter.value === 'research') {
-    return myTasksBase.value.filter((t) => t.kind === 'research')
-  }
-  return myTasksBase.value.filter((t) => t.kind !== 'research')
+  if (page.value === '团队审核') return tasks.value
+  const uid = user.value?.id
+  return uid ? tasks.value.filter((t) => t.owner_id === uid) : tasks.value
 }
 const visibleTasks = computed(computeVisibleTasks)
 
