@@ -174,7 +174,7 @@ docker compose exec -T api python -m evals.dataset.seed
 
 - **工作台入口**：`http://127.0.0.1:18080/`
 - **评测演示账号**（执行 `evals.dataset.seed` 后生效，统一口令 `taozhi2026eval`）：
-  `syn_staff1` ~ `syn_staff4`（员工） · `syn_leader1`（组长） · `syn_boss`（老板） · `syn_admin`（系统管理员）
+  `staff`（员工） · `leader`（组长） · `owner`（老板） · `admin`（系统管理员）
 - **常用维护命令**：
 
 ```bash
@@ -185,6 +185,22 @@ docker compose exec -T api python scripts/manage_database.py bootstrap-owner  # 
 docker compose exec -T api python scripts/rebuild_es_index.py --drop   # 重建 ES 切片检索索引
 docker compose exec -T api python scripts/backup_database.py verify    # 备份并执行隔离库恢复演练
 ```
+
+### 日常启动（机器重启后）
+
+`make start` 用于首次部署或代码变更后的镜像重建（`up -d --build`），日常冷启动不必重建：
+
+- **WSL2 场景**：先启动发行版（如 `wsl -d <发行版名>`），`systemd` 随发行版启动，`docker` 为 enabled，长驻服务容器按 `restart: unless-stopped` 自动恢复，约 1 分钟内 `/api/health` 恢复 200。
+- **Linux 宿主**：`systemctl is-enabled docker` 为 enabled 时同理；未启用则执行 `make start`。
+- **确认就绪**：`make status` 全部 healthy，`curl -fsS http://127.0.0.1:18080/api/health` 返回 `{"status":"ok",...}`。
+- `migrate` 是一次性迁移任务，执行结束显示 `Exited (0)` 属正常状态。
+
+### 公网访问（Tailscale Funnel，可选）
+
+- 只对外暴露回环端口 `127.0.0.1:18080`，数据库与中间件仍仅绑定 `127.0.0.1`：`sudo tailscale funnel --bg 18080`。
+- 入口地址用 `sudo tailscale serve status` 查看，形如 `https://<设备名>.<tailnet 后缀>.ts.net`；设备名通过 `sudo tailscale set --hostname=<名称>` 固定，改写后无需重建隧道。
+- 隧道配置持久化在 tailscaled 状态文件中，重启后自动恢复；关闭公网入口：`sudo tailscale funnel --https=443 off`。
+- Funnel 对公网匿名开放，仅用于演示与评测；需要登录鉴权时改用仅 tailnet 内可见的 `tailscale serve`。
 
 ---
 
