@@ -189,10 +189,13 @@ export interface TraceSpan {
   error_type: string | null
   attributes: Record<string, string | number | boolean>
 }
-export interface TraceSpanPage {
-  items: TraceSpan[]
+export interface TraceSpanPage<T extends TraceSpan> {
+  items: T[]
   next_cursor: string | null
   observed_at: string
+}
+export interface TraceActivity extends TraceSpan {
+  actor: { kind: 'agent' | 'workflow'; span_id: string; display_name: string } | null
 }
 export interface Task {
   id: string

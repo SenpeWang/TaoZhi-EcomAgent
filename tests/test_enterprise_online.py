@@ -1,6 +1,7 @@
 """真实 PostgreSQL、会话、接口与 LangGraph 的企业边界验收。"""
 import os,json,time
-from datetime import datetime, timezone
+import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
@@ -174,6 +175,7 @@ def test_cross_tenant_documents_tasks_and_tools(clients):
     assert admin.get(f"/api/admin/traces/{job['id']}").status_code == 404
     assert admin.get(f"/api/admin/traces/{job['id']}/runs").status_code == 404
     assert admin.get(f"/api/admin/traces/{job['id']}/runs/{foreign_trace}/spans").status_code == 404
+    assert admin.get(f"/api/admin/traces/{job['id']}/runs/{foreign_trace}/activities").status_code == 404
     assert admin.get("/api/admin/traces", params={"q": foreign_trace}).json()["items"] == []
     assert admin.get("/api/admin/traces", params={"q": "其他企业问题"}).json()["items"] == []
     assert admin.get("/api/admin/traces", params={"owner_id": "foreign_user"}).json()["items"] == []
@@ -374,6 +376,113 @@ def test_admin_run_and_span_paging_across_retries(clients):
     assert admin.get(span_path, params={"kind": "CHAIN"}).json()["items"][0]["status"] == "interrupted"
 
 
+def test_research_activities_order_and_actor_across_pages(clients):
+    """并发调用按开始时间分页，在完整链路中归属最近 Agent，并保留实际结果。"""
+    staff, admin = clients["staff"], clients["admin"]
+    job_id = task_id(staff, "按时间查看调研活动", kind="research")
+    trace_id, sibling_trace = "a" * 32, "b" * 32
+    path = f"/api/admin/traces/{job_id}/runs/{trace_id}/activities"
+    start = datetime.now(timezone.utc)
+
+    def span(number, parent, offset_ms, kind, name, attributes=None):
+        began = start + timedelta(milliseconds=offset_ms)
+        duration_ms = 20 - offset_ms if kind in {"CHAIN", "AGENT", "INTERNAL"} else 2
+        return {
+            "tenant_id": "tenant_test", "job_id": job_id, "run_version": 1, "trace_id": trace_id,
+            "span_id": f"{number:016x}", "parent_span_id": None if parent is None else f"{parent:016x}",
+            "kind": kind, "name": name, "started_at": began, "ended_at": began + timedelta(milliseconds=duration_ms),
+            "duration_ms": duration_ms, "status": "ok", "error_type": None, "attributes": attributes or {},
+        }
+
+    root = span(1, None, 0, "CHAIN", "task.research")
+    coordinator = span(2, 1, 1, "AGENT", "research.orchestrator", {"agent.name": "research.orchestrator"})
+    agent = span(3, 2, 2, "AGENT", "research.subagent_worker", {"agent.name": "research.market_intelligence"})
+    wrapper = span(4, 3, 3, "INTERNAL", "tool.runner")
+    search = span(5, 4, 4, "TOOL", "mcp.call_tool", {
+        "tool.name": "search_web", "tool.status": "ok", "tool.result_count": 7, "private": "保密工具参数",
+    })
+    empty = span(6, 4, 4, "TOOL", "mcp.call_tool", {
+        "tool.name": "fetch_web_page", "tool.status": "empty", "tool.result_count": 0,
+    })
+    model = span(7, 3, 7, "LLM", "llm.chat", {
+        "llm.model_name": "research-model", "llm.token_count.total": 12, "prompt": "保密提示词",
+    })
+    # 其他链路有相同的父编号；断链节点只能显示自身的调用，不能借用另一条链路的角色。
+    partial_workflow = span(10, 9, 8, "CHAIN", "worker.research")
+    orphan = span(8, 10, 9, "LLM", "llm.chat", {"llm.model_name": "standalone-model"})
+    other_actor = {**span(9, None, 0, "AGENT", "research.synthesizer", {
+        "agent.name": "research.synthesizer",
+    }), "trace_id": sibling_trace}
+    # 模拟异步写入乱序，同时写入两次在同一微秒开始的工具调用。
+    write_spans([other_actor, model, search, empty, orphan, partial_workflow, wrapper, agent, coordinator, root])
+
+    page = admin.get(path, params={"limit": 2}).json()
+    activities = list(page["items"])
+    cursors = set()
+    while page["next_cursor"] is not None:
+        cursor = page["next_cursor"]
+        assert cursor not in cursors and len(cursors) < 10
+        cursors.add(cursor)
+        page = admin.get(path, params={"limit": 2, "cursor": cursor}).json()
+        activities.extend(page["items"])
+    assert page["observed_at"] and cursors
+    assert [row["span_id"] for row in activities] == [
+        s["span_id"] for s in (coordinator, agent, search, empty, model, orphan)
+    ]
+    actors = {row["span_id"]: row["actor"] for row in activities}
+    expected_agent = {"kind": "agent", "span_id": agent["span_id"], "display_name": "市场情报分析师"}
+    assert actors[coordinator["span_id"]]["span_id"] == coordinator["span_id"]
+    assert all(actors[s["span_id"]] == expected_agent for s in (agent, search, empty, model))
+    assert actors[orphan["span_id"]] is None
+    assert "保密工具参数" not in str(activities) and "保密提示词" not in str(activities)
+
+    first = staff.get(path, params={"kind": "TOOL", "limit": 1}).json()
+    assert len(first["items"]) == 1 and first["next_cursor"]
+    second = staff.get(path, params={"kind": "TOOL", "limit": 1, "cursor": first["next_cursor"]}).json()
+    assert second["next_cursor"] is None
+    for row, recorded in zip(first["items"] + second["items"], (search, empty), strict=True):
+        assert (row["kind"], row["span_id"], row["status"], row["duration_ms"]) == ("TOOL", recorded["span_id"], "ok", 2)
+        assert row["actor"] == expected_agent
+        assert row["attributes"]["tool.status"] == recorded["attributes"]["tool.status"]
+        assert row["attributes"]["tool.result_count"] == recorded["attributes"]["tool.result_count"]
+        assert row["display_name"] == recorded["attributes"]["tool.name"]
+    # 将同一接口的原始响应体交给浏览器使用的契约校验和时间线格式化函数。
+    tool_page = staff.get(path, params={"kind": "TOOL"})
+    display = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "--eval", """
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { requestApi } from './web/src/api.ts'
+import { activityAction, activityResult } from './web/src/traceActivity.ts'
+const url = process.argv[1]
+globalThis.fetch = async (requested) => {
+  assert.equal(requested, url)
+  return new Response(readFileSync(0))
+}
+const page = await requestApi(url.slice('/api'.length), 'test', assert.fail)
+console.log(JSON.stringify(page.items.map(entry => [
+  entry.actor.display_name, activityAction(entry).title, activityAction(entry).target, activityResult(entry)
+])))
+""", tool_page.request.url.raw_path.decode("ascii")],
+        cwd=Path(__file__).resolve().parents[1], input=tool_page.content, capture_output=True, check=True,
+    )
+    assert json.loads(display.stdout) == [
+        ["市场情报分析师", "搜索公开网页", "search_web", "返回 7 条"],
+        ["市场情报分析师", "读取网页正文", "fetch_web_page", "无匹配结果 · 返回 0 条"],
+    ]
+    recorded_model = next(row for row in activities if row["span_id"] == model["span_id"])
+    assert recorded_model["display_name"] == "research-model"
+    assert recorded_model["attributes"]["llm.token_count.total"] == 12
+    assert [row["span_id"] for row in admin.get(path, params={"kind": "INTERNAL"}).json()["items"]] == [wrapper["span_id"]]
+    assert staff.get(path, params={"cursor": "invalid"}).status_code == 422
+    assert admin.get(path, params={"kind": "unknown"}).status_code == 422
+    assert TestClient(app).get(path).status_code == 401
+    assert clients["boss"].get(path, params={"cursor": first["next_cursor"]}).status_code == 404
+    other_job = task_id(staff, "相同账号的另一条提问")
+    assert admin.get(f"/api/admin/traces/{other_job}/runs/{trace_id}/activities").status_code == 404
+    assert admin.get(f"/api/admin/traces/{job_id}/runs/{'f' * 32}/activities").status_code == 404
+
+
 def test_span_semantics_migration_on_existing_rows():
     """在独立事务的临时 schema 中，将真实 014 表及已有数据迁移到 015。"""
     from uuid import uuid4
@@ -552,6 +661,19 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
         assert call["attributes"]["llm.token_count.prompt"] == 11
         assert call["attributes"]["llm.token_count.completion"] == 7
     assert {"product", "supply"} <= specialist_roles
+    activity_path = f"{path}/{trace_id}/activities"
+    called_tools = staff.get(activity_path, params={"kind": "TOOL"}).json()["items"]
+    assert {row["span_id"] for row in called_tools} == {tool["span_id"] for tool in tools}
+    assert all(row["actor"] == {
+        "kind": "workflow", "span_id": retrieval["span_id"], "display_name": retrieval["display_name"],
+    } for row in called_tools)
+    called_models = admin.get(activity_path, params={"kind": "LLM"}).json()["items"]
+    assert {row["span_id"] for row in called_models} == {call["span_id"] for call in models}
+    for row in called_models:
+        specialist = by_id[row["parent_span_id"]]
+        assert row["actor"] == {
+            "kind": "agent", "span_id": specialist["span_id"], "display_name": specialist["display_name"],
+        }
     assert clients["leader"].get(f"{path}/{trace_id}/spans", params={"kind": "LLM"}).status_code == 404
 
 

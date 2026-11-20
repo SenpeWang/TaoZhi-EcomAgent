@@ -2,16 +2,18 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { Task } from '../types'
-import { levelText, stateTag, stateText } from '../labels'
+import { formatStage, levelText, stateTag, stateText } from '../labels'
 import MarkdownReport from './MarkdownReport.vue'
 
 const props = defineProps<{
   modelValue: boolean
   task: Task | null
+  canInspect: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
+  (e: 'inspect', taskId: string): void
   (e: 'steer', taskId: string, message: string): void
   (e: 'retry', taskId: string): void
   (e: 'cancel', taskId: string): void
@@ -37,17 +39,6 @@ function state(s?: string): string {
  */
 function level(l?: number): string {
   return levelText(l)
-}
-
-/**
- * 清洗阶段文本中的机器前缀，仅保留正式可读的执行轨迹说明。
- * @param raw - 原始阶段描述。
- * @returns 格式化后的轨迹说明。
- */
-function formatStage(raw?: string | null): string {
-  const txt = (raw || '').trim()
-  if (!txt) return '等待处理'
-  return txt.replace(/^(\[[a-zA-Z0-9_]+\]\s*)+/, '').trim() || txt
 }
 
 /**
@@ -82,6 +73,9 @@ function onSteer() {
         <el-tag>{{ state(task.state) }}</el-tag>
         <span>{{ formatStage(task.stage) }}</span>
         <span>{{ level(task.input_level) }}</span>
+        <el-button v-if="canInspect" link type="primary" @click="emit('inspect', task.id)"
+          >查看执行轨迹</el-button
+        >
       </div>
       <el-progress
         :percentage="task.progress"
@@ -90,7 +84,7 @@ function onSteer() {
 
       <div v-if="task.events?.length" class="workflow-events-box">
         <div class="events-box-header">
-          <strong>执行轨迹（共 {{ task.events.length }} 步）</strong>
+          <strong>任务阶段（{{ task.events.length }} 条）</strong>
           <small>按发生时间排列</small>
         </div>
         <div class="events-timeline-list">

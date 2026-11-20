@@ -128,6 +128,13 @@ def test_pipeline_a_events_emitted_during_research():
             )
 
     completed = {s["span_id"]: s for s in spans if s["status"] == "ok"}
+    coordinators = sorted(
+        (s for s in completed.values() if s["name"] == "research.orchestrator"),
+        key=lambda s: s["started_at"],
+    )
+    assert [s["attributes"]["research.next_action"] for s in coordinators] == ["dispatch_subagents", "synthesizer"]
+    assert coordinators[0]["attributes"]["research.dispatched_count"] == 1
+    assert "research.dispatched_count" not in coordinators[1]["attributes"]
     tool = next(s for s in completed.values() if s["name"] == "mcp.call_tool")
     assert tool["kind"] == "TOOL" and tool["attributes"]["tool.result_count"] == 1
     branch = completed[tool["parent_span_id"]]

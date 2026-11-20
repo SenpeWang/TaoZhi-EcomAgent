@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     :model-value="true"
-    title="提问轨迹分析"
+    title="执行轨迹"
     width="min(1060px, 95vw)"
     align-center
     @close="emit('close')"
@@ -16,57 +16,62 @@
         </el-tag>
       </div>
       <h3 class="full-question">{{ detail.trace.question || '未记录提问正文' }}</h3>
-      <dl class="trace-metadata">
-        <div>
-          <dt>发起人</dt>
-          <dd>{{ detail.trace.display_name || detail.trace.username || detail.trace.owner_id }}</dd>
-        </div>
-        <div>
-          <dt>组织范围</dt>
-          <dd>{{ detail.trace.node_name || '—' }}</dd>
-        </div>
-        <div>
-          <dt>执行次数</dt>
-          <dd>{{ detail.trace.attempts }}</dd>
-        </div>
-        <div>
-          <dt>发起时间</dt>
-          <dd>{{ traceTime(detail.trace.created_at) }}</dd>
-        </div>
-        <div>
-          <dt>开始时间</dt>
-          <dd>{{ traceTime(detail.trace.started_at) }}</dd>
-        </div>
-        <div>
-          <dt>结束时间</dt>
-          <dd>{{ traceTime(detail.trace.finished_at) }}</dd>
-        </div>
-        <div class="trace-identifier">
-          <dt>任务 ID</dt>
-          <dd>
-            <code>{{ detail.trace.id }}</code>
-          </dd>
-        </div>
-      </dl>
-
-      <div class="current-stage">
-        <strong>当前阶段</strong>
-        <span>{{ detail.trace.stage }}</span>
-        <el-progress :percentage="detail.trace.progress" :stroke-width="6" />
-      </div>
+      <details class="task-info">
+        <summary>任务信息</summary>
+        <dl class="trace-metadata">
+          <div>
+            <dt>发起人</dt>
+            <dd>
+              {{ detail.trace.display_name || detail.trace.username || detail.trace.owner_id }}
+            </dd>
+          </div>
+          <div>
+            <dt>组织范围</dt>
+            <dd>{{ detail.trace.node_name || '—' }}</dd>
+          </div>
+          <div>
+            <dt>执行次数</dt>
+            <dd>{{ detail.trace.attempts }}</dd>
+          </div>
+          <div>
+            <dt>发起时间</dt>
+            <dd>{{ traceTime(detail.trace.created_at) }}</dd>
+          </div>
+          <div>
+            <dt>开始时间</dt>
+            <dd>{{ traceTime(detail.trace.started_at) }}</dd>
+          </div>
+          <div>
+            <dt>结束时间</dt>
+            <dd>{{ traceTime(detail.trace.finished_at) }}</dd>
+          </div>
+          <div class="trace-identifier">
+            <dt>任务 ID</dt>
+            <dd>
+              <code>{{ detail.trace.id }}</code>
+            </dd>
+          </div>
+        </dl>
+      </details>
 
       <el-tabs v-model="tab">
-        <el-tab-pane name="spans" label="调用分析">
+        <el-tab-pane name="run" label="执行记录">
           <TraceRunInspector
             :detail="detail"
-            :visible="tab === 'spans'"
+            :visible="tab === 'run'"
             :initial-trace-id="initialTraceId"
             :api="api"
             @events="tab = 'events'"
             @recording="recording = $event"
           />
         </el-tab-pane>
-        <el-tab-pane name="events" label="全部阶段事件">
+        <el-tab-pane name="events" label="任务阶段">
+          <div class="current-stage">
+            <strong>当前阶段</strong>
+            <span>{{ formatStage(detail.trace.stage) }}</span>
+            <el-progress :percentage="detail.trace.progress" :stroke-width="6" />
+          </div>
+
           <ol v-if="detail.events.length" class="trace-timeline">
             <li v-for="event in detail.events" :key="event.id">
               <div class="event-meta">
@@ -77,7 +82,7 @@
                 </el-tag>
                 <span>{{ event.progress }}%</span>
               </div>
-              <p>{{ event.stage }}</p>
+              <p>{{ formatStage(event.stage) }}</p>
             </li>
           </ol>
           <el-empty v-else description="暂无阶段事件" :image-size="48" />
@@ -103,7 +108,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { stateTag, stateText, traceKind, traceTime } from '../labels'
+import { formatStage, stateTag, stateText, traceKind, traceTime } from '../labels'
 import type { TraceDetail } from '../types'
 import TraceRunInspector from './TraceRunInspector.vue'
 
@@ -116,7 +121,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const detail = ref<TraceDetail | null>(null)
 const busy = ref(false)
 const error = ref('')
-const tab = ref('spans')
+const tab = ref('run')
 const recording = ref(false)
 const finalRefreshes = ref(0)
 const cursors = ref([0])
@@ -128,7 +133,7 @@ const active = computed(
   () =>
     detail.value?.trace.state === 'queued' ||
     detail.value?.trace.state === 'running' ||
-    (tab.value === 'spans' && recording.value) ||
+    (tab.value === 'run' && recording.value) ||
     finalRefreshes.value > 0,
 )
 let timer: number | undefined
@@ -225,6 +230,15 @@ onUnmounted(stop)
   color: var(--tz-ink);
   font-size: clamp(18px, 2.4vw, 25px);
   line-height: 1.55;
+  max-height: 5em;
+  overflow: auto;
+}
+.task-info summary {
+  cursor: pointer;
+  color: var(--tz-ink-secondary);
+  font-size: 13px;
+  width: fit-content;
+  margin-bottom: 10px;
 }
 .trace-metadata {
   display: grid;

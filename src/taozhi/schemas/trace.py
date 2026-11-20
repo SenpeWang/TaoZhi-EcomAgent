@@ -119,3 +119,25 @@ class TraceSpanPage(BaseModel):
     items: list[TraceSpan]
     next_cursor: str | None
     observed_at: datetime
+
+
+class TraceActor(BaseModel):
+    """该次执行的 Agent 或工作流节点。"""
+
+    kind: Literal["agent", "workflow"]
+    span_id: str
+    display_name: str
+
+
+class TraceActivity(TraceSpan):
+    """按发生时间阅读的一次实际操作及其可核实的执行者。"""
+
+    actor: TraceActor | None
+
+
+class TraceActivityPage(BaseModel):
+    """按照开始时间和采集主键稳定排序的一页执行活动。"""
+
+    items: list[TraceActivity]
+    next_cursor: str | None
+    observed_at: datetime

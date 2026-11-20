@@ -82,7 +82,11 @@
       >
         <el-table-column label="提问" min-width="250">
           <template #default="{ row }">
-            <button class="trace-question" type="button" @click="selectedTrace = row">
+            <button
+              class="trace-question"
+              type="button"
+              @click="emit('inspect', row.id, row.matched_trace_id)"
+            >
               {{ row.question || row.id }}
             </button>
             <small
@@ -100,7 +104,9 @@
             }}</small>
           </template>
         </el-table-column>
-        <el-table-column label="当前阶段" min-width="185" prop="stage" show-overflow-tooltip />
+        <el-table-column label="当前阶段" min-width="185" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatStage(row.stage) }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="88">
           <template #default="{ row }">
             <el-tag size="small" :type="stateTag(row.state)">{{ stateText(row.state) }}</el-tag>
@@ -119,7 +125,11 @@
                 stateText(trace.state)
               }}</el-tag>
             </div>
-            <button class="trace-question" type="button" @click="selectedTrace = trace">
+            <button
+              class="trace-question"
+              type="button"
+              @click="emit('inspect', trace.id, trace.matched_trace_id)"
+            >
               {{ trace.question || trace.id }}
             </button>
             <small
@@ -144,22 +154,14 @@
       <el-button :disabled="loading || !nextCursor" @click="nextPage">下一页</el-button>
     </nav>
   </section>
-  <TraceInspector
-    v-if="selectedTrace"
-    :key="selectedTrace.id"
-    :task-id="selectedTrace.id"
-    :initial-trace-id="selectedTrace.matched_trace_id"
-    :api="api"
-    @close="selectedTrace = null"
-  />
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { stateTag, stateText, traceKind, traceTime } from '../labels'
+import { formatStage, stateTag, stateText, traceKind, traceTime } from '../labels'
 import type { TraceOwner, TraceOwnerPage, TracePage, TraceSummary } from '../types'
-import TraceInspector from './TraceInspector.vue'
 
+const emit = defineEmits<{ (e: 'inspect', taskId: string, traceId: string | null): void }>()
 const props = defineProps<{ isAdmin: boolean; api: <T>(path: string) => Promise<T> }>()
 const searchPlaceholder = computed(() =>
   props.isAdmin ? '提问、发起人、任务 ID 或 Trace ID' : '提问、任务 ID 或 Trace ID',
@@ -185,7 +187,6 @@ let ownerRequestSequence = 0
 const keyword = ref('')
 const taskKindFilter = ref('')
 const taskStateFilter = ref('')
-const selectedTrace = ref<TraceSummary | null>(null)
 const traceRows = ref<TraceSummary[]>([])
 const pageCursors = ref([''])
 const nextCursor = ref<string | null>(null)
@@ -278,7 +279,6 @@ function changeOwner(ownerId: unknown): void {
 
 /** 从第一页开始按当前条件查询。 */
 function applyFilters(): void {
-  selectedTrace.value = null
   submittedKeyword = keyword.value.trim()
   pageCursors.value = ['']
   void loadPage()

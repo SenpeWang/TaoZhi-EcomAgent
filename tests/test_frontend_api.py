@@ -90,6 +90,21 @@ for (const invalid of [{ trace_id: 'b'.repeat(32) }, { kind: 'TOOL' }, { kind: '
   globalThis.fetch = async () => Response.json({ items: [{ ...span, ...invalid }], next_cursor: null, observed_at: timestamp })
   await assert.rejects(requestApi(spanPath, 'demo', clear), /响应异常/)
 }
+const activityPath = '/admin/traces/task/runs/' + traceId + '/activities?kind=LLM'
+const actor = { kind: 'agent', span_id: '2'.repeat(16), display_name: '采购分析师' }
+for (const source of [actor, { ...actor, kind: 'workflow' }, null]) {
+  const item = { ...span, actor: source }
+  globalThis.fetch = async (url) => {
+    assert.equal(url, '/api' + activityPath)
+    return Response.json({ items: [item], next_cursor: 'cursor', observed_at: timestamp })
+  }
+  assert.deepEqual((await requestApi(activityPath, 'demo', clear)).items, [item])
+}
+for (const invalid of [{ actor: undefined }, { actor: { ...actor, span_id: 'broken' } },
+                       { actor: { ...actor, kind: 'machine' } }, { kind: 'TOOL' }, { trace_id: 'b'.repeat(32) }]) {
+  globalThis.fetch = async () => Response.json({ items: [{ ...span, actor, ...invalid }], next_cursor: null, observed_at: timestamp })
+  await assert.rejects(requestApi(activityPath, 'demo', clear), /响应异常/)
+}
 for (const data of [{}, { items: [null] }, { items: [1] }, [], null]) {
   globalThis.fetch = async () => new Response(JSON.stringify(data), { status: 200 })
   await assert.rejects(requestApi('/documents', 'demo', clear), /响应异常/)

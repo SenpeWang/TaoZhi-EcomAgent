@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { reactive, ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ResearchSubagent, User } from '../types'
 import robotUrl from '../assets/robot.svg'
@@ -77,6 +77,7 @@ interface FormattedThinkingStep {
   content: string
 }
 
+const emit = defineEmits<{ (e: 'inspect', taskId: string): void }>()
 const props = defineProps<{
   user?: User | null
   api: <T>(path: string, method?: string, payload?: unknown) => Promise<T>
@@ -507,7 +508,7 @@ async function handleSend(): Promise<void> {
     })
   }
 
-  const tempTurn: ResearchTurn = {
+  const tempTurn = reactive<ResearchTurn>({
     id: 'tmp_' + Date.now().toString(),
     question: prompt,
     created_at: new Date().toISOString(),
@@ -515,7 +516,7 @@ async function handleSend(): Promise<void> {
     stage: '正在准备调研任务…',
     progress: 5,
     thinkingLogs: [],
-  }
+  })
   turns.value.push(tempTurn)
   inputPrompt.value = ''
   submitting.value = true
@@ -685,6 +686,13 @@ onUnmounted(() => {
             <div class="assistant-response-container">
               <img :src="robotUrl" alt="淘智机器人" class="assistant-avatar-img" />
               <div class="assistant-content-block">
+                <el-button
+                  v-if="!turn.id.startsWith('tmp_')"
+                  link
+                  type="primary"
+                  @click="emit('inspect', turn.id)"
+                  >查看执行轨迹</el-button
+                >
                 <div
                   v-if="turn.state === 'running' || turn.state === 'queued'"
                   class="active-thinking-block"
@@ -720,7 +728,7 @@ onUnmounted(() => {
                       thinkingCollapsed[turn.id] ? '▾' : '▸'
                     }}</span>
                     <span class="accordion-title">
-                      执行轨迹（共 {{ turn.thinkingLogs.length }} 步 · 耗时
+                      任务阶段（{{ turn.thinkingLogs.length }} 条 · 耗时
                       {{ turn.thinkingSeconds || turn.result?.elapsed || 0 }}s）
                     </span>
                   </button>

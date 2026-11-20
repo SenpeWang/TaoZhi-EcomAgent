@@ -21,7 +21,7 @@ _NUMERIC = {
     SpanAttributes.LLM_TOKEN_COUNT_PROMPT, SpanAttributes.LLM_TOKEN_COUNT_COMPLETION,
     SpanAttributes.LLM_TOKEN_COUNT_TOTAL, "retrieval.result_count", "tool.result_count",
     "state.evidence", "state.findings", "state.missing", "state.business",
-    "state.answer_chars", "state.model_calls",
+    "state.answer_chars", "state.model_calls", "research.dispatched_count",
 }
 
 
@@ -34,6 +34,8 @@ def safe_attributes(attrs: Mapping | None) -> dict:
         elif key in _NUMERIC and type(value) in (int, float) and 0 <= value <= 2**63 - 1 and math.isfinite(value):
             clean[key] = value
         elif key == "state.hard_block" and isinstance(value, bool):
+            clean[key] = value
+        elif key == "research.next_action" and value in ("dispatch_subagents", "synthesizer", "final_node"):
             clean[key] = value
         elif key == SpanAttributes.OPENINFERENCE_SPAN_KIND and isinstance(value, str) and value in SPAN_KINDS:
             clean[key] = value

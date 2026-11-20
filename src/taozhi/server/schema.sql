@@ -143,4 +143,5 @@ CREATE TABLE task_spans (
 );
 CREATE INDEX idx_task_spans_run ON task_spans(tenant_id,job_id,run_version,trace_id);
 CREATE INDEX idx_task_spans_trace_page ON task_spans(trace_id,id);
+CREATE INDEX idx_task_spans_activity_time ON task_spans(trace_id,started_at,id);
 CREATE INDEX idx_task_spans_job ON task_spans(job_id);

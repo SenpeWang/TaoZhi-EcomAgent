@@ -73,3 +73,14 @@ export function traceTime(value?: string | null): string {
 export function traceKind(kind: string): string {
   return kind === 'research' ? '选品调研' : '知识与经营问答'
 }
+
+/**
+ * 清洗阶段文本中的机器前缀，仅保留正式可读的执行轨迹说明。
+ * @param raw - 原始阶段描述。
+ * @returns 格式化后的轨迹说明。
+ */
+export function formatStage(raw?: string | null): string {
+  const txt = (raw || '').trim()
+  if (!txt) return '等待处理'
+  return txt.replace(/^(\[[a-zA-Z0-9_]+\]\s*)+/, '').trim() || txt
+}

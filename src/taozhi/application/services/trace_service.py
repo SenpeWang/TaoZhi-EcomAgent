@@ -38,6 +38,11 @@ _TRACE_OPERATIONS = {
     "embedding.passages": "生成文档向量",
     "reranker.rerank": "重排检索结果",
 }
+# 在直接调用之外，默认保留能够解释执行走向或最终交付的业务步骤。
+_KEY_ACTIVITY_STEPS = (
+    "worker.semantic_cache_hit", "pipeline.planning", "pipeline.quality", "pipeline.publication",
+    "bi.bi_intent", "bi.bi_publish", "research.final_node",
+)
 _TOOL_OUTCOMES = {
     "timeout": "工具调用超时",
     "empty": "未找到匹配结果",
@@ -76,7 +81,7 @@ def list_owners(p: Principal, *, query: str, cursor: str | None, limit: int) -> 
 
 
 def _decode_cursor(cursor: str | None) -> tuple[datetime, str] | None:
-    """将分页边界还原为带时区的时间戳和任务编号。"""
+    """将分页边界还原为带时区的时间戳与唯一键。"""
     if cursor is None:
         return None
     timestamp, _, task_id = cursor.partition("|")
@@ -220,6 +225,18 @@ def _span_display_name(kind: str, operation: str, attributes: dict) -> str:
     return _TRACE_OPERATIONS.get(operation, operation)
 
 
+def _display_span(row: dict, job: dict) -> dict:
+    """为节点详情和活动记录提供一致的状态、名称与可展示属性。"""
+    attributes = safe_attributes(row["attributes"])
+    fields = ("trace_id", "span_id", "parent_span_id", "name", "kind", "started_at", "ended_at", "duration_ms", "error_type")
+    return {
+        **{key: row[key] for key in fields},
+        "status": _span_status(row["status"], job, job["span_version"]),
+        "attributes": attributes,
+        "display_name": _span_display_name(row["kind"], row["name"], attributes),
+    }
+
+
 def list_spans(p: Principal, task_id: str, trace_id: str, *, kind: str | None, after_id: int, limit: int) -> dict:
     """在任务归属范围内，按精确链路编号和节点类型读取采集记录。"""
     with database_connection() as conn:
@@ -228,10 +245,54 @@ def list_spans(p: Principal, task_id: str, trace_id: str, *, kind: str | None, a
             raise Denied("执行轨迹不存在", "NOT_FOUND", 404)
         rows = trace_repo.list_spans(conn, p.tenant_id, task_id, trace_id, kind=kind, after_id=after_id, limit=limit + 1)
     next_cursor = str(rows[limit - 1]["id"]) if len(rows) > limit else None
+    return {
+        "items": [_display_span(row, job) for row in rows[:limit]],
+        "next_cursor": next_cursor,
+        "observed_at": job["observed_at"],
+    }
+
+
+def _activity_cursor(cursor: str | None) -> tuple[datetime, int] | None:
+    """校验活动游标中的数据库主键，拒绝超出 bigint 范围的边界。"""
+    boundary = _decode_cursor(cursor)
+    if boundary is None:
+        return None
+    started_at, row_id = boundary
+    if not re.fullmatch(r"[1-9][0-9]{0,18}", row_id) or int(row_id) > 2**63 - 1:
+        raise Denied("活动分页游标无效", "INVALID_CURSOR", 422)
+    return started_at, int(row_id)
+
+
+def _activity_actor(row: dict) -> dict | None:
+    """使用已验证的祖先节点命名执行者，缺少父链时保留为空。"""
+    if row["actor_span_id"] is None:
+        return None
+    kind = row["actor_kind"]
+    attributes = safe_attributes({"agent.name": row["actor_role"]})
+    return {
+        "kind": "agent" if kind == "AGENT" else "workflow",
+        "span_id": row["actor_span_id"],
+        "display_name": _span_display_name(kind, row["actor_operation"], attributes),
+    }
+
+
+def list_activities(
+    p: Principal, task_id: str, trace_id: str, *, kind: str | None, cursor: str | None, limit: int,
+) -> dict:
+    """按精确的链路与执行版本展示实际操作，并在筛选后保留跨页执行者。"""
+    after = _activity_cursor(cursor)
+    with database_connection() as conn:
+        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=_visible_owner(p), trace_id=trace_id)
+        if job is None:
+            raise Denied("执行轨迹不存在", "NOT_FOUND", 404)
+        rows = trace_repo.list_activities(
+            conn, p.tenant_id, task_id, trace_id, job["span_version"], kind=kind,
+            key_steps=_KEY_ACTIVITY_STEPS, after=after, limit=limit + 1,
+        )
     page = rows[:limit]
-    for row in page:
-        del row["id"]
-        row["status"] = _span_status(row["status"], job, job["span_version"])
-        row["attributes"] = safe_attributes(row["attributes"])
-        row["display_name"] = _span_display_name(row["kind"], row["name"], row["attributes"])
-    return {"items": page, "next_cursor": next_cursor, "observed_at": job["observed_at"]}
+    next_cursor = f"{page[-1]['started_at'].isoformat()}|{page[-1]['id']}" if len(rows) > limit else None
+    return {
+        "items": [{**_display_span(row, job), "actor": _activity_actor(row)} for row in page],
+        "next_cursor": next_cursor,
+        "observed_at": job["observed_at"],
+    }

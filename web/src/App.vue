@@ -274,7 +274,12 @@
           </section>
         </template>
 
-        <ResearchChatView v-else-if="currentPage === '选品调研'" :user="user" :api="api" />
+        <ResearchChatView
+          v-else-if="currentPage === '选品调研'"
+          :user="user"
+          :api="api"
+          @inspect="openTrace"
+        />
 
         <BiView v-else-if="currentPage === '经营看板'" :user="user" :api="api" />
 
@@ -283,6 +288,7 @@
           :key="`${user.id}:${user.system_admin}`"
           :api="api"
           :is-admin="user.system_admin"
+          @inspect="openTrace"
         />
 
         <template v-else-if="currentPage === '知识问答'">
@@ -523,11 +529,30 @@
   <TaskTimeline
     v-model="taskOpen"
     :task="activeTask"
+    :can-inspect="
+      Boolean(
+        user &&
+        !user.must_change &&
+        activeTask &&
+        ['ask', 'research'].includes(activeTask.kind) &&
+        (user.system_admin || activeTask.owner_id === user.id),
+      )
+    "
+    @inspect="openTrace"
     @open-doc="openDoc"
     @review="reviewTask"
     @cancel="cancelTask"
     @retry="retryTask"
     @steer="steerTask"
+  />
+
+  <TraceInspector
+    v-if="inspectedTrace && user && !user.must_change"
+    :key="inspectedTrace.taskId"
+    :task-id="inspectedTrace.taskId"
+    :initial-trace-id="inspectedTrace.traceId"
+    :api="api"
+    @close="inspectedTrace = null"
   />
 
   <el-dialog v-model="docOpen" :title="detail?.title || '文档详情'" width="760px">
@@ -894,6 +919,7 @@ import ResearchChatView from './views/ResearchChatView.vue'
 import TaskCenter from './views/TaskCenter.vue'
 import TaskTimeline from './views/TaskTimeline.vue'
 import TraceCenter from './views/TraceCenter.vue'
+import TraceInspector from './views/TraceInspector.vue'
 import type {
   Approval,
   AuditEvent,
@@ -985,6 +1011,7 @@ const accessId = ref('')
 const permissionIdOpen = ref(false)
 const permissionId = ref('')
 
+const inspectedTrace = ref<{ taskId: string; traceId: string | null } | null>(null)
 const taskOpen = ref(false)
 const activeTask = ref<Task | null>(null)
 
@@ -1190,6 +1217,7 @@ function displayRoles(row: User): string {
  */
 function clearSession(): void {
   user.value = null
+  inspectedTrace.value = null
   organizations.value = []
   documents.value = []
   tasks.value = []
@@ -1415,6 +1443,15 @@ function streamTask(id: string): void {
       closeTaskStream = null
     },
   })
+}
+
+/**
+ * 从任务或调研对话打开该任务的执行轨迹。按 Trace ID 搜索时保留命中的执行。
+ * @param taskId - 已持久化的任务编号。
+ * @param traceId - 可选的精确链路编号。
+ */
+function openTrace(taskId: string, traceId: string | null = null): void {
+  inspectedTrace.value = { taskId, traceId }
 }
 
 /**

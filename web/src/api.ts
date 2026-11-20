@@ -41,6 +41,23 @@ function validKindCounts(value: unknown): boolean {
 }
 
 /**
+ * 校验活动记录中的执行者，允许链路缺少父节点时返回空值。
+ * @param actor - 服务端依据本条链路的父子关系找到的执行者。
+ * @returns 是否可以在执行时间线上展示此归属。
+ */
+function validActivityActor(actor: unknown): boolean {
+  return (
+    actor === null ||
+    (isRecord(actor) &&
+      (actor.kind === 'agent' || actor.kind === 'workflow') &&
+      typeof actor.span_id === 'string' &&
+      /^[0-9a-f]{16}$/.test(actor.span_id) &&
+      typeof actor.display_name === 'string' &&
+      actor.display_name.length > 0)
+  )
+}
+
+/**
  * 校验集合及身份响应的基础结构，畸形响应不得被当作当前身份。
  * @param path - 同源 API 路径。
  * @param data - 未知 JSON 对象；不会用于决定后端授权。
@@ -91,11 +108,14 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
     return
   }
   const runList = /^\/admin\/traces\/[^/]+\/runs$/.test(resource)
-  const spanList = /^\/admin\/traces\/[^/]+\/runs\/([0-9a-f]{32})\/spans$/.exec(resource)
-  if (runList || spanList) {
+  const nodePage = /^\/admin\/traces\/[^/]+\/runs\/([0-9a-f]{32})\/(spans|activities)$/.exec(
+    resource,
+  )
+  if (runList || nodePage) {
     if (!Array.isArray(data.items)) throw new Error('调用链列表响应异常，请刷新后重试')
     const query = new URLSearchParams(path.split('?')[1])
     const requestedKind = query.get('kind')
+    const requestedTraceId = query.get('trace_id')
     for (const item of data.items) {
       if (
         !isRecord(item) ||
@@ -106,16 +126,18 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
         !Number.isFinite(Date.parse(item.started_at)) ||
         (item.ended_at !== null && !Number.isFinite(Date.parse(String(item.ended_at)))) ||
         (runList &&
-          (!Number.isInteger(item.run_version) ||
+          ((requestedTraceId !== null && item.trace_id !== requestedTraceId) ||
+            !Number.isInteger(item.run_version) ||
             !validKindCounts(item.kind_counts) ||
             !Number.isInteger(item.span_count) ||
             !Number.isInteger(item.failed_count) ||
             !Number.isInteger(item.input_tokens) ||
             !Number.isInteger(item.output_tokens))) ||
-        (spanList &&
+        (nodePage &&
           (typeof item.span_id !== 'string' ||
             typeof item.name !== 'string' ||
-            item.trace_id !== spanList[1] ||
+            item.trace_id !== nodePage[1] ||
+            (nodePage[2] === 'activities' && !validActivityActor(item.actor)) ||
             typeof item.display_name !== 'string' ||
             typeof item.kind !== 'string' ||
             !spanKinds.has(item.kind) ||
@@ -129,7 +151,7 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
     }
     if (
       (data.next_cursor !== null && typeof data.next_cursor !== 'string') ||
-      (spanList &&
+      (nodePage &&
         (typeof data.observed_at !== 'string' || !Number.isFinite(Date.parse(data.observed_at))))
     )
       throw new Error('调用链分页响应异常，请刷新后重试')
@@ -137,6 +159,8 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
   if (
     /^\/admin\/traces\/[^/]+$/.test(resource) &&
     (!isRecord(data.trace) ||
+      typeof data.trace.id !== 'string' ||
+      resource !== '/admin/traces/' + encodeURIComponent(data.trace.id) ||
       typeof data.trace.question !== 'string' ||
       !Array.isArray(data.events) ||
       !data.events.every(isRecord) ||

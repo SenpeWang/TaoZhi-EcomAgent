@@ -56,7 +56,7 @@ const workspacePages = {
   },
   轨迹中台: {
     group: '运行分析',
-    description: '按提问追踪知识问答和选品调研，定位耗时调用与异常节点。',
+    description: '按提问查看每次执行中智能体的行动、工具调用和模型用量。',
     iconPaths: ['M4 5h9M8 12h12M4 19h10', 'M4 3v4M8 10v4M4 17v4'],
     access: 'member',
   },

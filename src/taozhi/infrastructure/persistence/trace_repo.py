@@ -169,6 +169,56 @@ def list_spans(
     )
 
 
+def list_activities(
+    conn: Any, tenant_id: str, task_id: str, trace_id: str, run_version: int, *,
+    kind: str | None, key_steps: tuple[str, ...], after: tuple[datetime, int] | None, limit: int,
+) -> list[dict]:
+    """按实际开始时刻取一页，并在同一快照中从完整父链解析每条活动的执行者。"""
+    filters = ["tenant_id=%s", "job_id=%s", "trace_id=%s", "run_version=%s"]
+    params: list[Any] = [tenant_id, task_id, trace_id, run_version]
+    if kind:
+        filters.append("kind=%s")
+        params.append(kind)
+    else:
+        filters.append("(kind IN ('AGENT','TOOL','LLM','RETRIEVER','EMBEDDING','RERANKER') "
+                       "OR (kind='CHAIN' AND name=ANY(%s)))")
+        params.append(list(key_steps))
+    if after:
+        filters.append("(started_at,id)>(%s,%s)")
+        params.extend(after)
+
+    # 按页找起点后才展开祖先。找到 Agent 即停止；没有 Agent 时必须到达根才可确认工作流归属。
+    # visited 同时提供深度与环检测，损坏或尚未补齐的父链不会误指另一个并行 Agent。
+    return fetch_all(conn, f"""
+        WITH page AS (
+            SELECT * FROM task_spans WHERE {' AND '.join(filters)}
+            ORDER BY started_at,id LIMIT %s
+        )
+        SELECT page.id,page.trace_id,page.span_id,page.parent_span_id,page.name,page.kind,
+            page.started_at,page.ended_at,page.duration_ms,page.status,page.error_type,page.attributes,
+            actor.span_id AS actor_span_id,actor.kind AS actor_kind,actor.name AS actor_operation,
+            actor.role AS actor_role
+        FROM page LEFT JOIN LATERAL (
+            WITH RECURSIVE lineage AS (
+                SELECT page.span_id,page.parent_span_id,page.kind,page.name,
+                    page.attributes->>'agent.name' AS role,ARRAY[page.id] AS visited
+                UNION ALL
+                SELECT parent.span_id,parent.parent_span_id,parent.kind,parent.name,
+                    parent.attributes->>'agent.name',array_append(child.visited,parent.id)
+                FROM lineage child JOIN task_spans parent ON parent.span_id=child.parent_span_id
+                WHERE child.kind<>'AGENT' AND NOT (parent.id=ANY(child.visited))
+                  AND (parent.tenant_id,parent.job_id,parent.trace_id,parent.run_version)
+                    =(page.tenant_id,page.job_id,page.trace_id,page.run_version)
+            )
+            SELECT span_id,kind,name,role FROM lineage
+            WHERE kind='AGENT' OR (kind='CHAIN' AND EXISTS (SELECT 1 FROM lineage WHERE parent_span_id IS NULL))
+            ORDER BY (kind='AGENT') DESC, (span_id=page.span_id), cardinality(visited)
+            LIMIT 1
+        ) actor ON TRUE
+        ORDER BY page.started_at,page.id
+    """, (*params, limit))
+
+
 def list_events(conn: Any, tenant_id: str, task_id: str, after_id: int, limit: int) -> list[dict]:
     """按稳定事件编号读取一页时间线，保留执行代际以区分重试。"""
     return fetch_all(

@@ -35,6 +35,13 @@ def _traced_research_node(name: str, func: Callable) -> Callable:
         role = state["current_task"]["role"] if name == "subagent_worker" else operation
         with node_span(operation, "AGENT", {SpanAttributes.AGENT_NAME: role}) as span:
             result = func(state)
+            if span is not None and name == "orchestrator":
+                next_action = result.get("next_action")
+                if next_action is not None:
+                    span.set_attribute("research.next_action", next_action)
+                tasks = result.get("pending_tasks")
+                if next_action == "dispatch_subagents" and isinstance(tasks, list):
+                    span.set_attribute("research.dispatched_count", len(tasks))
             transition = next(iter(result.get("audit_trail", [])), None)
             if span is not None and transition:
                 span.set_attribute("subagent_id", transition["agent_id"])

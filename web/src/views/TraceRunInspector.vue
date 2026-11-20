@@ -28,7 +28,15 @@
         >
       </template>
     </div>
-    <dl class="execution-metrics" aria-label="本次执行指标">
+    <div class="run-views" role="group" aria-label="轨迹视图">
+      <button type="button" :aria-pressed="view === 'activities'" @click="chooseView('activities')">
+        行动记录
+      </button>
+      <button type="button" :aria-pressed="view === 'spans'" @click="chooseView('spans')">
+        调用分析
+      </button>
+    </div>
+    <dl v-if="view === 'spans'" class="execution-metrics" aria-label="本次执行指标">
       <div>
         <dt>{{ selectedRun.status === 'running' ? '已运行时间' : '执行耗时' }}</dt>
         <dd>{{ formatDuration(runDuration(selectedRun, observedAt)) }}</dd>
@@ -51,10 +59,24 @@
         </dd>
       </div>
     </dl>
-    <p class="trace-id">
+    <p v-if="view === 'spans'" class="trace-id">
       Trace ID <code>{{ selectedRun.trace_id }}</code>
     </p>
-    <fieldset class="kind-filters" :disabled="loading">
+    <div v-if="view === 'activities'" class="activity-toolbar">
+      <label for="inspected-activity-kind">查看行动</label>
+      <select id="inspected-activity-kind" :value="selectedKind" @change="changeActivityKind">
+        <option value="">关键行动</option>
+        <option
+          v-for="(label, kind) in spanKindLabels"
+          :key="kind"
+          :value="kind"
+          :disabled="!selectedRun.kind_counts[kind]"
+        >
+          {{ label }}（{{ selectedRun.kind_counts[kind] ?? 0 }}）
+        </option>
+      </select>
+    </div>
+    <fieldset v-else class="kind-filters" :disabled="loading">
       <legend>节点类型</legend>
       <div>
         <button type="button" :aria-pressed="selectedKind === ''" @click="chooseKind('')">
@@ -72,8 +94,13 @@
         </button>
       </div>
     </fieldset>
+    <TraceActivityTimeline
+      v-if="view === 'activities' && activities.length"
+      :activities="activities"
+      :observed-at="observedAt"
+    />
     <SpanWaterfall
-      v-if="spans.length"
+      v-else-if="view === 'spans' && spans.length"
       :key="selectedRun.trace_id + selectedKind"
       :run="selectedRun"
       :spans="spans"
@@ -81,11 +108,18 @@
       :observed-at="observedAt"
     />
     <el-skeleton v-else-if="loading" :rows="3" animated />
-    <el-empty v-else-if="!error" :image-size="48" description="本条执行链路没有此类型的节点" />
-    <div v-if="nextSpanCursor" class="load-nodes">
-      <el-button :disabled="loading" @click="loadMoreSpans"
-        >加载更多节点（已显示 {{ spans.length }}）</el-button
-      >
+    <el-empty
+      v-else-if="!error"
+      :image-size="48"
+      :description="
+        view === 'activities' ? '本次执行尚无此类行动记录' : '本条执行链路没有此类型的节点'
+      "
+    />
+    <div v-if="nextCursor" class="load-nodes">
+      <el-button :disabled="loading" @click="loadMore">
+        {{ view === 'activities' ? '加载更多行动' : '加载更多节点' }}（已显示
+        {{ view === 'activities' ? activities.length : spans.length }}）
+      </el-button>
     </div>
   </template>
   <el-empty
@@ -103,6 +137,7 @@ import { traceTime } from '../labels'
 import { formatDuration, runDuration, spanKindLabels, spanStatusLabels } from '../traceWaterfall'
 import type {
   SpanKind,
+  TraceActivity,
   TraceDetail,
   TraceRun,
   TraceRunPage,
@@ -110,6 +145,9 @@ import type {
   TraceSpanPage,
 } from '../types'
 import SpanWaterfall from './SpanWaterfall.vue'
+import TraceActivityTimeline from './TraceActivityTimeline.vue'
+
+type RunView = 'activities' | 'spans'
 
 const props = defineProps<{
   detail: TraceDetail
@@ -123,13 +161,15 @@ const selectedRun = shallowRef<TraceRun | null>(null)
 const runPageCursors = ref<(string | null)[]>([null])
 const nextRunCursor = ref<string | null>(null)
 const selectedKind = ref<SpanKind | ''>('')
+const view = ref<RunView>('activities')
+const activities = shallowRef<TraceActivity[]>([])
 const spans = shallowRef<TraceSpan[]>([])
-const nextSpanCursor = ref<string | null>(null)
+const nextCursor = ref<string | null>(null)
 const observedAt = ref(0)
 const loading = ref(false)
 const error = ref('')
 let pinnedTraceId = props.initialTraceId
-let loadedSpanPageCount = 1
+let loadedPageCount = 1
 let requestSequence = 0
 
 /**
@@ -141,42 +181,49 @@ function basePath(): string {
 }
 
 /** 清空切换前的节点及分页位置。 */
-function clearSpans(): void {
+function clearEntries(): void {
+  activities.value = []
   spans.value = []
   observedAt.value = 0
-  nextSpanCursor.value = null
-  loadedSpanPageCount = 1
+  nextCursor.value = null
+  loadedPageCount = 1
 }
 
 /**
  * 加载一个或多个已展开的节点页。重新取页时也更新已结束节点及并发到达的调用。
- * @param traceId - 完整的执行链路标识。
+ * @param endpoint - 所选链路对应的行动或节点接口。
+ * @param previous - 追加前已显示的行动或节点。
  * @param requestId - 本次读取的代数。
  * @param append - 是否仅追加下一页。
- * @returns 所需页读取完成的异步结果。
+ * @returns 服务端顺序排列的记录，过期请求返回空值。
  */
-async function readSpans(traceId: string, requestId: number, append = false): Promise<void> {
-  const merged = new Map<string, TraceSpan>()
-  if (append) for (const span of spans.value) merged.set(span.span_id, span)
-  let cursor = append ? nextSpanCursor.value : null
-  const count = append ? 1 : loadedSpanPageCount
+async function readEntries<T extends TraceSpan>(
+  endpoint: string,
+  previous: T[],
+  requestId: number,
+  append: boolean,
+): Promise<T[] | null> {
+  const merged = new Map<string, T>()
+  if (append) for (const item of previous) merged.set(item.span_id, item)
+  let cursor = append ? nextCursor.value : null
+  const count = append ? 1 : loadedPageCount
   let pages = 0
   let observedAtMs = observedAt.value
   do {
     const query = new URLSearchParams({ limit: '100' })
     if (cursor) query.set('cursor', cursor)
     if (selectedKind.value) query.set('kind', selectedKind.value)
-    const page = await props.api<TraceSpanPage>(basePath() + '/' + traceId + '/spans?' + query)
-    if (requestSequence !== requestId) return
+    const page = await props.api<TraceSpanPage<T>>(endpoint + '?' + query)
+    if (requestSequence !== requestId) return null
     for (const span of page.items) merged.set(span.span_id, span)
     observedAtMs = Date.parse(page.observed_at)
     cursor = page.next_cursor
     pages += 1
   } while (cursor && pages < count)
-  spans.value = [...merged.values()]
   observedAt.value = observedAtMs
-  loadedSpanPageCount = append ? loadedSpanPageCount + pages : pages
-  nextSpanCursor.value = cursor
+  loadedPageCount = append ? loadedPageCount + pages : pages
+  nextCursor.value = cursor
+  return [...merged.values()]
 }
 
 /**
@@ -235,10 +282,18 @@ async function load(
     const changed = target?.trace_id !== selectedRun.value?.trace_id
     if (action === 'page' || action === 'select') pinnedTraceId = target?.trace_id ?? null
     if (changed) selectedKind.value = ''
-    if (changed || action === 'filter') clearSpans()
+    if (changed || action === 'filter') clearEntries()
     selectedRun.value = target
     emit('recording', target?.status === 'running')
-    if (target) await readSpans(target.trace_id, requestId, action === 'append')
+    if (!target) return
+    const endpoint = basePath() + '/' + target.trace_id + '/' + view.value
+    if (view.value === 'activities') {
+      const items = await readEntries(endpoint, activities.value, requestId, action === 'append')
+      if (items && requestId === requestSequence) activities.value = items
+    } else {
+      const items = await readEntries(endpoint, spans.value, requestId, action === 'append')
+      if (items && requestId === requestSequence) spans.value = items
+    }
   } catch (cause) {
     if (requestSequence === requestId)
       error.value = cause instanceof Error ? cause.message : '读取调用链失败'
@@ -252,9 +307,28 @@ async function load(
  * @param kind - 节点类型，空字符串表示全部。
  */
 function chooseKind(kind: SpanKind | ''): void {
-  if (selectedKind.value === kind || loading.value) return
+  if (selectedKind.value === kind) return
   selectedKind.value = kind
   void load('filter')
+}
+
+/**
+ * 切换行动时间线与节点分析，分别使用各自接口的默认范围和游标。
+ * @param mode - 想要查看的轨迹视图。
+ */
+function chooseView(mode: RunView): void {
+  if (view.value === mode) return
+  view.value = mode
+  selectedKind.value = ''
+  void load('filter')
+}
+
+/**
+ * 使用行动筛选框选中的节点类型。
+ * @param event - 筛选框的选择事件。
+ */
+function changeActivityKind(event: Event): void {
+  chooseKind((event.target as HTMLSelectElement).value as SpanKind | '')
 }
 
 /** 用任务详情的最新快照同步运行，避免与翻页请求重叠。 */
@@ -284,9 +358,9 @@ function newerRuns(): void {
   void load('page')
 }
 
-/** 将下一页调用合并进当前瀑布图。 */
-function loadMoreSpans(): void {
-  if (nextSpanCursor.value && !loading.value) void load('append')
+/** 将下一页记录追加到当前轨迹视图。 */
+function loadMore(): void {
+  if (nextCursor.value && !loading.value) void load('append')
 }
 
 /** 退出时丢弃尚未返回的读取。 */
@@ -300,18 +374,21 @@ onUnmounted(stop)
 </script>
 
 <style scoped>
-.run-toolbar {
+.run-toolbar,
+.activity-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin: 4px 0 10px;
 }
-.run-toolbar label {
+.run-toolbar label,
+.activity-toolbar label {
   font-size: 13px;
   font-weight: 600;
 }
-.run-toolbar select {
+.run-toolbar select,
+.activity-toolbar select {
   max-width: 100%;
   border: 1px solid var(--tz-border);
   border-radius: 5px;
@@ -320,6 +397,26 @@ onUnmounted(stop)
   color: var(--tz-ink);
   font: inherit;
   font-size: 13px;
+}
+.run-views {
+  display: flex;
+  gap: 16px;
+  margin: 10px 0 14px;
+  border-bottom: 1px solid var(--tz-border);
+}
+.run-views button {
+  padding: 8px 2px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--tz-ink-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.run-views button[aria-pressed='true'] {
+  border-bottom-color: var(--tz-primary);
+  color: var(--tz-primary);
 }
 .kind-filters {
   margin: 14px 0;
