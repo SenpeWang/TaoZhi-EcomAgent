@@ -34,15 +34,15 @@ def find_tenant_by_code(conn: Any, tenant_code: str) -> dict | None:
 
 
 def list_quick_login_rows(conn: Any, tenant_id: str) -> list[dict]:
-    """查询用于快捷体验账号展示的在职账号清单。"""
+    """查询用于快捷体验账号展示的正式在职账号清单（排除 syn_* 测评账号）。"""
     return fetch_all(
         conn,
         "SELECT u.username,u.display_name,u.system_admin,"
         "coalesce(string_agg(m.role,','),'') AS roles "
         "FROM users u LEFT JOIN memberships m ON m.user_id=u.id AND m.tenant_id=u.tenant_id "
-        "WHERE u.tenant_id=%s AND u.active "
+        "WHERE u.tenant_id=%s AND u.active AND u.username NOT LIKE %s ESCAPE '\\' "
         "GROUP BY u.id,u.username,u.display_name,u.system_admin ORDER BY u.username",
-        (tenant_id,),
+        (tenant_id, "syn\\_%"),
     )
 
 

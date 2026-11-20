@@ -59,9 +59,7 @@ def get_portal_info() -> dict[str, Any]:
                     display_name=r["display_name"],
                     role="admin" if r["system_admin"] else (r["roles"] or "-"),
                 )
-                if r["username"].startswith("syn_") and cfg.quick_eval_password:
-                    item["password"] = cfg.quick_eval_password
-                elif default:
+                if default:
                     item["password"] = default
                 elif creds:
                     item["password"] = creds.get(r["username"], {}).get("password", "")

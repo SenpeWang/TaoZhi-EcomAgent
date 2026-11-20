@@ -194,8 +194,6 @@ class Config:
     quick_login_passwords: bool = False
     # 快捷登录统一下发的默认口令（弱口令，仅内网自用；未配置时回落到运维凭据文件）
     quick_login_password: str = ""
-    # 合成测评账号在快捷登录中展示时的口令（从 ECOM_QUICK_EVAL_PASSWORD 注入）
-    quick_eval_password: str = ""
 
 
 def resolve_runtime_dir(env_values: dict[str, str | None] | None = None) -> Path:
@@ -288,5 +286,4 @@ def load_config() -> Config:
         quick_login=values.get("ECOM_QUICK_LOGIN", "false") == "true",
         quick_login_passwords=values.get("ECOM_QUICK_LOGIN_PASSWORDS", "false") == "true",
         quick_login_password=values.get("ECOM_QUICK_LOGIN_PASSWORD", ""),
-        quick_eval_password=values.get("ECOM_QUICK_EVAL_PASSWORD", ""),
     )
