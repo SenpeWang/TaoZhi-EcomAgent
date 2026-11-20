@@ -52,7 +52,6 @@ function renderInline(rawLine: string, allowTableBr = false): string {
   const codeTokens: string[] = []
   const rawCodeTokens: string[] = []
 
-  // 先提取行内代码，避免内部星号或 URL 被二次解析
   let work = escaped.replace(/`([^`\n]+)`/g, (_match, code: string) => {
     const idx = codeTokens.length
     rawCodeTokens.push(code)
@@ -72,7 +71,6 @@ function renderInline(rawLine: string, allowTableBr = false): string {
   const unwrapCodePlaceholders = (text: string): string =>
     text.replace(/\uE000CODE(\d+)\uE001/g, (_m, idx: string) => rawCodeTokens[Number(idx)] ?? '')
 
-  // 解析 [文本](url) 链接并占位保护，防止外层再次匹配裸 URL
   const linkTokens: string[] = []
   work = work.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label: string, url: string) => {
     const safeUrl = sanitizeHref(unwrapCodePlaceholders(url))
@@ -87,7 +85,6 @@ function renderInline(rawLine: string, allowTableBr = false): string {
     return `\uE000LINK${idx}\uE001`
   })
 
-  // 自动识别裸露的 http/https 链接，剥离尾部常见中英文标点
   work = work.replace(
     /(https?:\/\/[^\s<>"'\u3002\uff0c\uff1b\uff1a\u3001\uff09\u3011\uff1e]+)/g,
     (fullUrl: string) => {
@@ -105,13 +102,11 @@ function renderInline(rawLine: string, allowTableBr = false): string {
     },
   )
 
-  // 加粗、删除线与斜体
   work = work.replace(/\*\*([^*\n]+(?:\*[^*\n]+)*)\*\*/g, '<strong>$1</strong>')
   work = work.replace(/__([^_\n]+(?:_[^_\n]+)*)__/g, '<strong>$1</strong>')
   work = work.replace(/~~([^~\n]+)~~/g, '<del>$1</del>')
   work = work.replace(/(^|[\s(>：:])\*([^*\n]+)\*(?=$|[\s).,;!?，。；：、）])/g, '$1<em>$2</em>')
 
-  // 还原链接与代码占位符
   work = work.replace(/\uE000LINK(\d+)\uE001/g, (_m, idx: string) => linkTokens[Number(idx)] ?? '')
   work = work.replace(/\uE000CODE(\d+)\uE001/g, (_m, idx: string) => codeTokens[Number(idx)] ?? '')
   return work
@@ -290,7 +285,6 @@ function renderListBlock(lines: string[]): string {
       out.push('</li>')
     }
 
-    // 支持任务复选框 [ ] / [x]
     let bodyHtml = ''
     const todoMatch = item.text.match(/^\[([ xX])\]\s+(.*)$/)
     if (todoMatch) {
@@ -345,7 +339,6 @@ export function renderMarkdownReport(source: string, idPrefix = 'md-sec'): Rende
       continue
     }
 
-    // 1. 围栏代码块 ```
     const fenceMatch = trimmed.match(/^```([A-Za-z0-9_-]*)\s*$/)
     if (fenceMatch) {
       const lang = fenceMatch[1]
@@ -365,14 +358,12 @@ export function renderMarkdownReport(source: string, idPrefix = 'md-sec'): Rende
       continue
     }
 
-    // 2. 分割线
     if (isHorizontalRule(line)) {
       blocks.push('<hr class="md-divider" />')
       i += 1
       continue
     }
 
-    // 3. 标题 # ~ ######
     const headingMatch = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/)
     if (headingMatch) {
       const rawLevel = headingMatch[1].length
@@ -391,7 +382,6 @@ export function renderMarkdownReport(source: string, idPrefix = 'md-sec'): Rende
       continue
     }
 
-    // 4. GFM 表格（表头行 + 分隔行）
     if (i + 1 < lines.length && line.includes('|')) {
       const aligns = parseTableAlignments(lines[i + 1])
       if (aligns) {
@@ -428,7 +418,6 @@ export function renderMarkdownReport(source: string, idPrefix = 'md-sec'): Rende
       }
     }
 
-    // 5. 引用 / 提示块 >
     if (/^\s*>\s?/.test(line)) {
       const quoteLines: string[] = []
       while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
@@ -445,7 +434,6 @@ export function renderMarkdownReport(source: string, idPrefix = 'md-sec'): Rende
       continue
     }
 
-    // 6. 有序 / 无序列表
     if (matchListItem(line)) {
       const listLines: string[] = []
       while (i < lines.length) {
@@ -454,7 +442,6 @@ export function renderMarkdownReport(source: string, idPrefix = 'md-sec'): Rende
           listLines.push(cur)
           i += 1
         } else if (!cur.trim() && i + 1 < lines.length && matchListItem(lines[i + 1])) {
-          // 列表项之间允许单个空行继续同一列表
           i += 1
         } else {
           break
@@ -464,7 +451,6 @@ export function renderMarkdownReport(source: string, idPrefix = 'md-sec'): Rende
       continue
     }
 
-    // 7. 普通段落（遇到下一块级语法起始行时中止合并）
     const paraLines: string[] = []
     while (i < lines.length) {
       const cur = lines[i]

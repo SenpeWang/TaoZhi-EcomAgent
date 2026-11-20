@@ -144,7 +144,6 @@
           title="安全提醒：当前账号使用初始密码或重置后的临时密码登录，请先在个人中心修改登录密码。"
         />
 
-        <!-- ── 1. 工作概览 ───────────────────────────────────────── -->
         <template v-if="page === '工作概览'">
           <section class="overview-banner">
             <div class="overview-banner-meta">
@@ -264,13 +263,10 @@
           </section>
         </template>
 
-        <!-- ── 2. 选品调研 ───────────────────────────────────────── -->
         <ResearchChatView v-else-if="page === '选品调研'" :user="user" :api="api" />
 
-        <!-- ── 3. 经营看板 ───────────────────────────────────────── -->
         <BiView v-else-if="page === '经营看板'" :user="user" :api="api" />
 
-        <!-- ── 4. 知识问答 ───────────────────────────────────────── -->
         <template v-else-if="page === '知识问答'">
           <section class="question-grid">
             <div class="panel">
@@ -355,7 +351,6 @@
           </section>
         </template>
 
-        <!-- ── 5. 我的任务 / 团队审核 ──────────────────────────────── -->
         <TaskCenter
           v-else-if="page === '我的任务' || page === '团队审核'"
           :tasks="visibleTasks"
@@ -367,7 +362,6 @@
           @reload="load"
         />
 
-        <!-- ── 6. 知识文档 ──────────────────────────────────────── -->
         <DocumentManager
           v-else-if="page === '知识文档'"
           v-model:search="search"
@@ -383,7 +377,6 @@
           @open-doc="openDoc"
         />
 
-        <!-- ── 7. 权限审批 ──────────────────────────────────────── -->
         <PolicyMatrix
           v-else-if="page === '权限审批'"
           mode="approvals"
@@ -393,7 +386,6 @@
           @decide="decideRequest"
         />
 
-        <!-- ── 8. 组织与成员 ────────────────────────────────────── -->
         <PolicyMatrix
           v-else-if="page === '组织与成员'"
           mode="org"
@@ -408,7 +400,6 @@
           @disable-user="disableUser"
         />
 
-        <!-- ── 9. 操作日志 ──────────────────────────────────────── -->
         <template v-else-if="page === '操作日志'">
           <section class="panel">
             <div class="section-head">
@@ -437,7 +428,6 @@
           </section>
         </template>
 
-        <!-- ── 10. 系统状态 ─────────────────────────────────────── -->
         <template v-else-if="page === '系统状态'">
           <section class="runtime-grid">
             <div class="panel">
@@ -494,7 +484,6 @@
           </section>
         </template>
 
-        <!-- ── 11. 个人中心 ─────────────────────────────────────── -->
         <AccountCenter
           v-else-if="page === '个人中心'"
           :user="user"
@@ -508,7 +497,6 @@
     </div>
   </div>
 
-  <!-- ── 任务详情与进度弹窗 ───────────────────────────────────────── -->
   <TaskTimeline
     v-model="taskOpen"
     :task="activeTask"
@@ -519,7 +507,6 @@
     @steer="steerTask"
   />
 
-  <!-- ── 文档详情弹窗 ────────────────────────────────────────────── -->
   <el-dialog v-model="docOpen" :title="detail?.title || '文档详情'" width="760px">
     <template v-if="detail">
       <div class="detail-meta">
@@ -556,7 +543,6 @@
     </template>
   </el-dialog>
 
-  <!-- ── 上传 / 编辑文档弹窗 ─────────────────────────────────────── -->
   <el-dialog v-model="docEdit" :title="docForm.id ? '编辑文档' : '上传 / 新建文档'" width="680px">
     <div class="dialog-lead">
       新增或修改文档后将进入审核流程，审核通过后可供相应权限成员检索查阅。
@@ -605,7 +591,6 @@
     </template>
   </el-dialog>
 
-  <!-- ── 文档权限与密级弹窗 ───────────────────────────────────────── -->
   <el-dialog v-model="policyOpen" title="修改文档权限与密级" width="540px">
     <div class="dialog-lead">
       修改文档密级、可见部门范围或 AI 使用授权需提交企业负责人审批通过后生效。
@@ -640,7 +625,6 @@
     </template>
   </el-dialog>
 
-  <!-- ── 单文档人员授权弹窗 ───────────────────────────────────────── -->
   <el-dialog v-model="grantOpen" title="文档人员授权管理" width="600px">
     <div v-if="currentGrants.length" class="subagents-roster-box" style="margin-top: 0">
       <div class="roster-header">
@@ -691,7 +675,6 @@
     </template>
   </el-dialog>
 
-  <!-- ── 文档历史版本弹窗 ─────────────────────────────────────────── -->
   <el-dialog v-model="historyOpen" title="历史版本记录" width="660px">
     <el-collapse>
       <el-collapse-item
@@ -704,7 +687,6 @@
     </el-collapse>
   </el-dialog>
 
-  <!-- ── 按编号申请访问 ───────────────────────────────────────────── -->
   <el-dialog v-model="accessOpen" title="申请文档阅读权限" width="440px">
     <div class="dialog-lead">
       输入管理员或同事提供的文档 ID 后可直接发起阅读授权申请，申请将流转至对应负责人审批。
@@ -720,7 +702,6 @@
     </template>
   </el-dialog>
 
-  <!-- ── 按编号管理文档权限 ───────────────────────────────────────── -->
   <el-dialog v-model="permissionIdOpen" title="按文档 ID 管理权限" width="440px">
     <el-form label-position="top">
       <el-form-item label="文档 ID">
@@ -733,7 +714,6 @@
     </template>
   </el-dialog>
 
-  <!-- ── 新建成员账号弹窗 ─────────────────────────────────────────── -->
   <el-dialog v-model="accountOpen" title="新建成员账号" width="540px">
     <div class="dialog-lead">创建成员账号后，系统将同步提交初始部门分配或管理员角色审批申请。</div>
     <el-form label-position="top">
@@ -778,7 +758,6 @@
     </template>
   </el-dialog>
 
-  <!-- ── 调整部门与岗位弹窗 ───────────────────────────────────────── -->
   <el-dialog v-model="memberOpen" title="调整成员所属部门" width="480px">
     <div class="dialog-lead">
       成员所属部门及岗位角色变更后，其数据访问范围将随之调整（提交后需审批生效）。
@@ -804,7 +783,6 @@
     </template>
   </el-dialog>
 
-  <!-- ── 重置登录密码弹窗 ─────────────────────────────────────────── -->
   <el-dialog v-model="resetOpen" title="重置成员登录密码" width="460px">
     <div class="dialog-lead">
       正在为 <strong>{{ resetForm.display_name }}</strong
@@ -826,7 +804,6 @@
     </template>
   </el-dialog>
 
-  <!-- ── 新建 / 编辑部门弹窗 ──────────────────────────────────────── -->
   <el-dialog v-model="orgOpen" :title="orgForm.id ? '编辑部门' : '新建部门'" width="460px">
     <el-form label-position="top">
       <el-form-item label="部门名称">

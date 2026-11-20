@@ -1,6 +1,5 @@
 <template>
   <div class="bi-shell">
-    <!-- ── 顶部工作台导航栏 ────────────────────────────────────── -->
     <header class="bi-toolbar">
       <div class="bi-tabs" role="tablist" aria-label="经营分析视图切换">
         <button
@@ -55,7 +54,6 @@
       </div>
     </header>
 
-    <!-- ── 经营总览看板 ─────────────────────────────────────────── -->
     <div v-show="tab === 'board'" v-loading="boardLoading" class="bi-board">
       <template v-if="board">
         <section class="kpi-grid" aria-label="核心经营指标">
@@ -222,7 +220,6 @@
       <el-empty v-else-if="!boardLoading" description="经营看板数据暂不可用" />
     </div>
 
-    <!-- ── 指标智能问数 ─────────────────────────────────────────── -->
     <div v-show="tab === 'chat'" class="chat">
       <div ref="chatList" class="chat-list">
         <div v-if="!messages.length" class="chat-welcome">

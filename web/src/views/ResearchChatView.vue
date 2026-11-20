@@ -617,7 +617,6 @@ onUnmounted(() => {
 
 <template>
   <div class="chat-container-layout">
-    <!-- ── 左侧极简会话历史列表 ─────────────────────────────────── -->
     <aside class="chat-history-sidebar">
       <div class="sidebar-top">
         <button class="new-conversation-btn" @click="startNewConversation()">
@@ -650,9 +649,7 @@ onUnmounted(() => {
       </div>
     </aside>
 
-    <!-- ── 中间标准自然聊天窗口 ────────────────────────────────── -->
     <main class="chat-conversation-stage">
-      <!-- 顶部简明标题条 -->
       <header class="conversation-header-bar">
         <div class="header-info">
           <span class="current-topic-name">{{ currentKeyword || '智能调研' }}</span>
@@ -662,10 +659,8 @@ onUnmounted(() => {
         </div>
       </header>
 
-      <!-- 消息流滚动区 -->
       <div ref="chatScrollRef" class="messages-scroll-area">
         <div class="messages-center-wrapper">
-          <!-- 空白状态欢迎 (居中高清淘智机器人大图标) -->
           <div v-if="turns.length === 0" class="chat-welcome-box">
             <div class="welcome-robot-wrapper">
               <img :src="robotUrl" alt="淘智机器人" class="welcome-robot-large" />
@@ -687,20 +682,16 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 问答流 -->
           <div v-for="turn in turns" :key="turn.id" class="message-turn-group">
-            <!-- 用户问题 (靠右) -->
             <div class="user-query-container">
               <div class="user-query-bubble">
                 {{ turn.question }}
               </div>
             </div>
 
-            <!-- 助手回答 (靠左，标准排版) -->
             <div class="assistant-response-container">
               <img :src="robotUrl" alt="淘智机器人" class="assistant-avatar-img" />
               <div class="assistant-content-block">
-                <!-- 1. 运行中流式思考过程提示 -->
                 <div
                   v-if="turn.state === 'running' || turn.state === 'queued'"
                   class="active-thinking-block"
@@ -730,7 +721,6 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <!-- 2. 完成后思考过程折叠栏 -->
                 <div v-else-if="turn.thinkingLogs?.length" class="completed-thinking-accordion">
                   <div class="accordion-header" @click="toggleThinking(turn.id)">
                     <span class="accordion-arrow">{{
@@ -756,7 +746,6 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <!-- 3. 回答正文 (Markdown 结构化富文本渲染) -->
                 <div
                   v-if="turn.result?.report || turn.result?.reply"
                   class="response-markdown-body"
@@ -767,7 +756,6 @@ onUnmounted(() => {
                   />
                 </div>
 
-                <!-- 4. 底部操作栏 -->
                 <div v-if="turn.result?.report || turn.result?.reply" class="response-actions-row">
                   <button
                     class="action-btn"
@@ -788,7 +776,6 @@ onUnmounted(() => {
                   </button>
                 </div>
 
-                <!-- 5. 失败提示 -->
                 <div v-if="turn.state === 'failed'" class="error-hint-row">
                   {{ turn.stage || '抱歉，当前调研任务出现异常，请稍后重试。' }}
                 </div>
@@ -798,7 +785,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 底部标准居中输入栏 -->
       <footer class="conversation-input-footer">
         <div class="input-center-container">
           <div class="normal-chat-input-box">
