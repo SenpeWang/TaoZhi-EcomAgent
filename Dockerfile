@@ -26,7 +26,7 @@ RUN apt-get update \
     && useradd -m -u "${APP_UID}" -g "${APP_GID}" appuser
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir ${PIP_INDEX_URL:+--index-url "$PIP_INDEX_URL"} -r requirements.txt
+RUN pip install --no-cache-dir --timeout 60 --retries 10 ${PIP_INDEX_URL:+--index-url "$PIP_INDEX_URL"} -r requirements.txt
 
 COPY alembic.ini .env.example ./
 COPY migrations ./migrations
