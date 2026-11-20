@@ -473,6 +473,10 @@ def test_sensenova_router_failover_circuit_and_compliance():
         sensenova_overseas_api_key="test-overseas-credential",
         sensenova_overseas_model="sensenova-6.8-flash",
         sensenova_overseas_direct_connection=False,
+        dots_base_url="https://note3-prev-api.askdiandian.com/v1",
+        dots_api_key="test-dots-credential",
+        dots_model="dots3-note-prev",
+        dots_direct_connection=True,
         llm_circuit_cooldown_rate_limit=45,
         llm_circuit_cooldown_transient=25,
         llm_circuit_cooldown_auth=600,
@@ -480,11 +484,17 @@ def test_sensenova_router_failover_circuit_and_compliance():
 
     eps = build_sensenova_endpoints(fake_settings)  # type: ignore[arg-type]
     assert [e.endpoint_id for e in eps] == [
+        "sensenova_overseas",
+        "dots",
         "sensenova_cn_primary",
         "sensenova_cn_secondary",
-        "sensenova_overseas",
     ]
-    assert all(e.model == "sensenova-6.8-flash" for e in eps)
+    assert [e.model for e in eps] == [
+        "sensenova-6.8-flash",
+        "dots3-note-prev",
+        "sensenova-6.8-flash",
+        "sensenova-6.8-flash",
+    ]
 
     reg = CircuitBreakerRegistry()
     client = LLMClient(settings=fake_settings, allow_overseas=True, registry=reg)  # type: ignore[arg-type]
@@ -496,12 +506,12 @@ def test_sensenova_router_failover_circuit_and_compliance():
 
         def _invoke(_msgs):
             called_urls.append((ep.endpoint_id, ep.base_url, ep.model))
-            if ep.endpoint_id == "sensenova_cn_primary":
+            if ep.endpoint_id == "sensenova_overseas":
                 raise RuntimeError("Error code: 429 - {'error': {'type': 'rate_limit_error'}}")
-            if ep.endpoint_id == "sensenova_cn_secondary":
+            if ep.endpoint_id == "dots":
                 raise TimeoutError("ConnectTimeout: The handshake operation timed out")
             return AIMessage(
-                content="OVERSEAS_FLASH_OK",
+                content="CN_PRIMARY_FLASH_OK",
                 response_metadata={"token_usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}},
             )
 
@@ -515,18 +525,18 @@ def test_sensenova_router_failover_circuit_and_compliance():
             out1 = client.chat("测试容灾切换")
             out2 = client.chat("第二次请求应跳过已熔断节点")
 
-    assert out1 == "OVERSEAS_FLASH_OK"
-    assert out2 == "OVERSEAS_FLASH_OK"
-    # 第一次依次尝试 cn_primary -> cn_secondary -> overseas；第二次熔断已打开，直达 overseas
+    assert out1 == "CN_PRIMARY_FLASH_OK"
+    assert out2 == "CN_PRIMARY_FLASH_OK"
+    # 第一次依次尝试 overseas -> dots -> cn_primary；第二次熔断已打开，直达 cn_primary
     assert [c[0] for c in called_urls] == [
+        "sensenova_overseas",
+        "dots",
         "sensenova_cn_primary",
-        "sensenova_cn_secondary",
-        "sensenova_overseas",
-        "sensenova_overseas",
+        "sensenova_cn_primary",
     ]
     events = rec.snapshot()
-    assert any(e["endpoint_id"] == "sensenova_cn_primary" and e["reason"] == "rate_limit" for e in events)
-    assert any(e["endpoint_id"] == "sensenova_overseas" and e["outcome"] == "ok" and e["failover"] is True for e in events)
+    assert any(e["endpoint_id"] == "sensenova_overseas" and e["reason"] == "rate_limit" for e in events)
+    assert any(e["endpoint_id"] == "sensenova_cn_primary" and e["outcome"] == "ok" and e["failover"] is True for e in events)
 
     # 合规边界验证：allow_overseas=False 时严禁故障转移到海外节点
     strict_client = LLMClient(settings=fake_settings, allow_overseas=False, registry=reg)  # type: ignore[arg-type]

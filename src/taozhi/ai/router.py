@@ -262,7 +262,7 @@ def _infer_region(base_url: str) -> RegionType:
 
 
 def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
-    """根据运行配置构建仅面向商汤 sensenova-6.8-flash 的国内/海外候选通道池。"""
+    """根据运行配置构建候选通道池：商汤海外版 -> Dots -> 商汤国内 Key 2（及可选国内备用）。"""
     target_model = settings.model or "sensenova-6.8-flash"
     endpoints: List[SensenovaEndpoint] = []
     seen_pairs = set()
@@ -298,30 +298,7 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
             )
         )
 
-    # 1. 国内主通道（.cn 主 Key）
-    _add(
-        "sensenova_cn_primary",
-        "商汤国内版（主通道）",
-        _infer_region(settings.base_url),
-        settings.base_url,
-        settings.api_key,
-        target_model,
-        settings.llm_direct_connection,
-    )
-
-    # 2. 国内备用 Key（.cn 第二 Key）
-    secondary_cn_key = getattr(settings, "sensenova_cn_secondary_api_key", "")
-    _add(
-        "sensenova_cn_secondary",
-        "商汤国内版（备选通道）",
-        _infer_region(settings.base_url),
-        settings.base_url,
-        secondary_cn_key,
-        target_model,
-        settings.llm_direct_connection,
-    )
-
-    # 3. 商汤海外版容灾通道（token.sensenova.ai + sensenova-6.8-flash，默认可走代理）
+    # 1. 商汤海外版（token.sensenova.ai + sensenova-6.8-flash，优先使用）
     overseas_key = getattr(settings, "sensenova_overseas_api_key", "")
     overseas_url = getattr(settings, "sensenova_overseas_base_url", "https://token.sensenova.ai/v1")
     overseas_model = getattr(settings, "sensenova_overseas_model", "") or target_model
@@ -334,6 +311,44 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
         overseas_key,
         overseas_model,
         overseas_direct,
+    )
+
+    # 2. Dots（小红书点点，国内可用节点）
+    dots_key = getattr(settings, "dots_api_key", "")
+    dots_url = getattr(settings, "dots_base_url", "https://note3-prev-api.askdiandian.com/v1")
+    dots_model = getattr(settings, "dots_model", "") or "dots3-note-prev"
+    dots_direct = bool(getattr(settings, "dots_direct_connection", True))
+    _add(
+        "dots",
+        "Dots（小红书点点）",
+        "domestic",
+        dots_url,
+        dots_key,
+        dots_model,
+        dots_direct,
+    )
+
+    # 3. 国内主通道（.cn Key 2）
+    _add(
+        "sensenova_cn_primary",
+        "商汤国内版（Key 2）",
+        _infer_region(settings.base_url),
+        settings.base_url,
+        settings.api_key,
+        target_model,
+        settings.llm_direct_connection,
+    )
+
+    # 4. 国内备用 Key（可选兜底）
+    secondary_cn_key = getattr(settings, "sensenova_cn_secondary_api_key", "")
+    _add(
+        "sensenova_cn_secondary",
+        "商汤国内版（备选通道）",
+        _infer_region(settings.base_url),
+        settings.base_url,
+        secondary_cn_key,
+        target_model,
+        settings.llm_direct_connection,
     )
 
     return endpoints

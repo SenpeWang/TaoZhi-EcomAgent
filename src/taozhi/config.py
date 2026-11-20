@@ -59,12 +59,16 @@ class Settings(BaseSettings):
     llm_max_concurrency: int = 6
     llm_direct_connection: bool = True
 
-    # 国内第二 Key + 商汤海外容灾端点（全线仅限 sensenova-6.8-flash 体系，不含第三方云）
+    # 国内第二 Key + 商汤海外容灾端点 + Dots 备选通道
     sensenova_cn_secondary_api_key: str = Field(default="", alias="SENSENOVA_CN_SECONDARY_API_KEY")
     sensenova_overseas_base_url: str = Field(default="https://token.sensenova.ai/v1", alias="SENSENOVA_OVERSEAS_BASE_URL")
     sensenova_overseas_api_key: str = Field(default="", alias="SENSENOVA_OVERSEAS_API_KEY")
     sensenova_overseas_model: str = Field(default="sensenova-6.8-flash", alias="SENSENOVA_OVERSEAS_MODEL")
     sensenova_overseas_direct_connection: bool = Field(default=False, alias="SENSENOVA_OVERSEAS_DIRECT_CONNECTION")
+    dots_base_url: str = Field(default="https://note3-prev-api.askdiandian.com/v1", alias="DOTS_BASE_URL")
+    dots_api_key: str = Field(default="", alias="DOTS_API_KEY")
+    dots_model: str = Field(default="dots3-note-prev", alias="DOTS_MODEL")
+    dots_direct_connection: bool = Field(default=True, alias="DOTS_DIRECT_CONNECTION")
 
     # 容灾熔断中间件冷却参数（秒）
     llm_circuit_cooldown_rate_limit: int = Field(default=45, ge=5, le=600, alias="LLM_CIRCUIT_COOLDOWN_RATE_LIMIT")
@@ -94,6 +98,7 @@ class Settings(BaseSettings):
             self.api_key
             or self.sensenova_cn_secondary_api_key
             or self.sensenova_overseas_api_key
+            or self.dots_api_key
         )
 
 
