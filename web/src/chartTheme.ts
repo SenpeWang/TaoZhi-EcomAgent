@@ -1,22 +1,23 @@
 /** 经营看板和问答图表共用的坐标轴、业务序列与异常状态颜色。 */
 export const chartColors = {
-  primary: '#145b76',
-  secondary: '#188577',
-  primaryArea: 'rgba(20, 91, 118, 0.14)',
-  label: '#546b79',
-  border: '#dce3e8',
-  grid: '#eaf0f3',
-  warning: '#a56019',
-  danger: '#ad4149',
+  primary: '#2563eb',
+  secondary: '#0891b2',
+  success: '#059669',
+  primaryArea: 'rgba(37, 99, 235, 0.12)',
+  label: '#64748b',
+  border: '#e2e8f0',
+  grid: '#f1f5f9',
+  warning: '#d97706',
+  danger: '#dc2626',
 }
 
 export const chartSeriesColors = [
   chartColors.primary,
   chartColors.secondary,
-  '#726499',
-  '#a07129',
-  '#4d789c',
-  '#a75570',
+  chartColors.success,
+  chartColors.warning,
+  chartColors.danger,
+  '#7c3aed',
 ]
 
 export const chartAxisStyle = {

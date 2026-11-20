@@ -764,8 +764,8 @@ function renderCharts(): void {
               x2: 0,
               y2: 1,
               colorStops: [
-                { offset: 0, color: chartColors.primaryArea },
-                { offset: 1, color: 'transparent' },
+                { offset: 0, color: 'rgba(37, 99, 235, 0.20)' },
+                { offset: 1, color: 'rgba(37, 99, 235, 0.01)' },
               ],
             },
           },
@@ -845,7 +845,7 @@ function renderCharts(): void {
                 ? chartColors.danger
                 : p.value >= averageRefundRate * 0.7
                   ? chartColors.warning
-                  : chartColors.secondary,
+                  : chartColors.success,
           },
           markLine: {
             symbol: 'none',

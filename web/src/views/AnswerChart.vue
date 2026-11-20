@@ -49,7 +49,6 @@ function render() {
           {
             type: 'line',
             data: rows.map((r) => r[1]),
-            itemStyle: { color: chartColors.primary },
             lineStyle: { width: 2.5, color: chartColors.primary },
             areaStyle: { color: chartColors.primaryArea },
           },

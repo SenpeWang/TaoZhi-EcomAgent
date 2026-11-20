@@ -240,7 +240,7 @@ function timestamp(value: string): string {
 }
 .view-switch [aria-pressed='true'] {
   background: var(--tz-primary);
-  color: white;
+  color: var(--tz-surface);
 }
 .coverage,
 .analysis-note,
@@ -286,28 +286,28 @@ function timestamp(value: string): string {
   text-align: right;
 }
 .span-row[data-kind='LLM'] {
-  --node-color: #6050a0;
+  --node-color: #1e3a8a;
 }
 .span-row[data-kind='TOOL'] {
-  --node-color: #a05a29;
+  --node-color: #7c3aed;
 }
 .span-row[data-kind='RETRIEVER'] {
-  --node-color: #13756f;
+  --node-color: #047857;
 }
 .span-row[data-kind='EMBEDDING'] {
-  --node-color: #42659a;
+  --node-color: #0284c7;
 }
 .span-row[data-kind='RERANKER'] {
-  --node-color: #476e43;
+  --node-color: #b45309;
 }
 .span-row[data-kind='AGENT'] {
-  --node-color: #285f98;
+  --node-color: var(--tz-primary);
 }
 .span-row[data-kind='CHAIN'] {
-  --node-color: #516479;
+  --node-color: var(--tz-ink-secondary);
 }
 .span-row[data-kind='INTERNAL'] {
-  --node-color: #73717e;
+  --node-color: var(--tz-ink-muted);
 }
 .node-kind {
   color: var(--node-color);
@@ -389,7 +389,7 @@ function timestamp(value: string): string {
   background: var(--tz-ink-muted);
 }
 .bar-running {
-  background: repeating-linear-gradient(135deg, #bfdbfe 0 4px, #60a5fa 4px 8px);
+  background: repeating-linear-gradient(135deg, #bfdbfe 0 4px, var(--tz-primary) 4px 8px);
 }
 .duration {
   font-size: 12px;

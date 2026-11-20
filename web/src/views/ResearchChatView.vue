@@ -1219,7 +1219,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  color: var(--tz-ink-muted, #475569);
+  color: var(--tz-ink-subtle);
   cursor: pointer;
   user-select: none;
   padding: 3px 6px;
@@ -1256,8 +1256,8 @@ onUnmounted(() => {
 .research-roles li {
   padding: 3px 8px;
   border-radius: 4px;
-  background: var(--tz-surface-muted, #f1f5f9);
-  color: var(--tz-ink-secondary, #334155);
+  background: var(--tz-surface-muted);
+  color: var(--tz-ink-secondary);
   font-size: 12px;
 }
 .response-markdown-body {
