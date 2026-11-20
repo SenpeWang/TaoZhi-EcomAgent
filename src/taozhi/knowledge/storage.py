@@ -32,9 +32,12 @@ class LocalBlobStore:
             raise FileNotFoundError(name)
         return path.read_bytes()
     def presign_url(self, tenant_id, name, ttl=None):
-        return None  # 本地盘无直链语义，下载端回退 FileResponse
+        """本地磁盘存储不提供直链，返回 None 由下载接口回退文件流。"""
+        return None
+
 
 class MinioBlobStore:
+    """基于 MinIO 对象存储的租户隔离附件存储实现。"""
     def __init__(self, cfg):
         from minio import Minio
         from minio.versioningconfig import ENABLED, VersioningConfig

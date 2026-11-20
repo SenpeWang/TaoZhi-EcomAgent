@@ -87,7 +87,7 @@ export function openTaskEventStream(taskId: string, handlers: TaskStreamHandlers
       const row = JSON.parse(String(ev.data)) as TaskStreamEventRow
       handlers.onMessage(row)
     } catch {
-      // 忽略心跳或非 JSON 片段
+      return
     }
   }
 

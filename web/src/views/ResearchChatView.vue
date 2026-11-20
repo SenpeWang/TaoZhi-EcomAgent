@@ -110,7 +110,6 @@ const submitting = ref<boolean>(false)
 const activeRunningTaskId = ref<string>('')
 const thinkingCollapsed = ref<Record<string, boolean>>({})
 
-// 实时计时器
 const liveTimerSeconds = ref<number>(0)
 let timerHandle: number | null = null
 let closeActiveStream: (() => void) | null = null
@@ -248,7 +247,7 @@ async function loadConversations(): Promise<void> {
       startNewConversation()
     }
   } catch {
-    // 首次无数据时静默忽略
+    startNewConversation()
   }
 }
 
@@ -327,7 +326,7 @@ async function deleteConversation(convId: string, e: MouseEvent): Promise<void> 
       }
     }
   } catch {
-    // 取消删除
+    return
   }
 }
 
@@ -503,7 +502,6 @@ async function handleSend(): Promise<void> {
   const kw = isFirstTurn ? currentKeyword.value || prompt : currentKeyword.value
   currentKeyword.value = kw
 
-  // 乐观在左侧历史列表中显示当前会话
   if (isFirstTurn && !conversations.value.some((c) => c.conversation_id === activeConvId.value)) {
     conversations.value.unshift({
       conversation_id: activeConvId.value,

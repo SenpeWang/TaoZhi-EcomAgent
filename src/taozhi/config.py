@@ -120,6 +120,8 @@ from dotenv import dotenv_values
 ROOT = PROJECT_ROOT
 @dataclass(frozen=True)
 class Config:
+    """企业服务端、知识检索、中间件与任务租约运行时配置快照。"""
+
     dsn: str
     mode: str
     private_dir: Path

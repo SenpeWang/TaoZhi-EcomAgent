@@ -58,16 +58,17 @@ def _client():
     return es,cfg.es_index
 
 def available() -> bool:
+    """检查 Elasticsearch 检索服务是否已启用且可连通。"""
     if not load_config().es_enabled:return False
     try:
         _client();return True
     except Exception:return False
 
 def ensure_index() -> None:
+    """确保目标切片索引存在并等待主分片就绪。"""
     es,index=_client()
     if not es.indices.exists(index=index):
         es.indices.create(index=index,**index_mapping(es))
-        # 建索引后分片尚未分配完成时写入会报 NoShardAvailableActionException。
         es.cluster.health(index=index,wait_for_status="yellow",timeout="30s")
 
 def index_chunks(rows) -> int:
@@ -75,15 +76,16 @@ def index_chunks(rows) -> int:
     if not rows:return 0
     from elasticsearch.helpers import bulk
     es,index=_client();ensure_index()
-    def gen():
+    def _gen():
         for r in rows:
             yield {"_index":index,"_id":r["id"],"_source":{
                 "tenant_id":r["tenant_id"],"document_id":r["document_id"],"version":r["version"],
                 "ordinal":r["ordinal"],"page":r["page"],"title":r.get("title") or "","text":r["text"]}}
-    ok,_=bulk(es,gen(),raise_on_error=False,refresh=False)
+    ok,_=bulk(es,_gen(),raise_on_error=False,refresh=False)
     return ok
 
 def delete_chunks(document_id: str, version=None) -> None:
+    """按文档标识及可选版本号从 ES 索引中删除对应切片。"""
     es,index=_client()
     if version is None:
         es.delete_by_query(index=index,query={"term":{"document_id":document_id}},refresh=True)

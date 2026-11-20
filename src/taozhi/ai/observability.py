@@ -58,6 +58,7 @@ class UsageAccumulator:
         *,
         failover: bool = False,
     ) -> None:
+        """累计单次大模型调用的 Token 消耗、估算成本与故障转移次数。"""
         pt = max(0, int(prompt_tokens or 0))
         ct = max(0, int(completion_tokens or 0))
         tot = pt + ct
@@ -76,14 +77,17 @@ class UsageAccumulator:
         bucket["cost_usd"] += cost
 
     def add_error(self) -> None:
+        """累计一次大模型调用失败计数。"""
         self.llm_errors += 1
 
     def add_json_attempt(self, *, is_retry: bool = False) -> None:
+        """累计结构化 JSON 解析尝试及重试次数。"""
         self.json_parse_attempts += 1
         if is_retry:
             self.json_retries += 1
 
     def to_dict(self) -> Dict[str, Any]:
+        """导出可序列化的 Token 与重试统计字典。"""
         return {
             "prompt_tokens": int(self.prompt_tokens),
             "completion_tokens": int(self.completion_tokens),
@@ -117,11 +121,13 @@ def get_active_usage() -> Optional[UsageAccumulator]:
 
 
 def inc(name: str, value: float = 1.0) -> None:
+    """按指标名线程安全递增计数器。"""
     with _lock:
         _counters[name] = _counters.get(name, 0.0) + value
 
 
 def observe(name: str, seconds: float) -> None:
+    """记录耗时观测样本（保留最近 2000 条）。"""
     with _lock:
         values = _timers.setdefault(name, [])
         values.append(seconds)
@@ -137,6 +143,7 @@ def record_llm_call(
     *,
     failover: bool = False,
 ) -> None:
+    """记录一次大模型调用的延迟、Token 消耗与容灾切换指标。"""
     inc(f"llm.calls.{tier}")
     inc("llm.calls.total")
     inc(f"llm.tokens.prompt.{tier}", prompt_tokens)
@@ -150,6 +157,7 @@ def record_llm_call(
 
 
 def record_llm_error(tier: str) -> None:
+    """记录一次大模型调用异常计数。"""
     inc(f"llm.errors.{tier}")
     inc("llm.errors.total")
     acc = _ACTIVE_USAGE.get()
@@ -158,6 +166,7 @@ def record_llm_error(tier: str) -> None:
 
 
 def percentile(name: str, p: float = 0.95) -> float:
+    """计算指定耗时指标的分位数（默认 P95）。"""
     with _lock:
         values = sorted(_timers.get(name, []))
     if not values:
@@ -167,6 +176,7 @@ def percentile(name: str, p: float = 0.95) -> float:
 
 
 def rag_hit_rate(channel: str = "") -> float:
+    """计算指定检索通道或全局的 RAG 命中率。"""
     with _lock:
         if channel:
             calls = _counters.get(f"rag.calls.{channel}", 0.0)
@@ -178,6 +188,7 @@ def rag_hit_rate(channel: str = "") -> float:
 
 
 def snapshot() -> Dict[str, float]:
+    """返回当前进程级计数器与汇总衍生指标快照。"""
     with _lock:
         out = dict(_counters)
     out["llm.error_rate"] = out.get("llm.errors.total", 0.0) / max(1.0, out.get("llm.calls.total", 1.0))
@@ -205,6 +216,7 @@ def token_usage() -> Dict[str, float]:
 
 
 def reset() -> None:
+    """清空进程级计数器与耗时样本（仅供测试隔离使用）。"""
     with _lock:
         _counters.clear()
         _timers.clear()
