@@ -628,9 +628,10 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
     assert all(s["parent_span_id"] in by_id for s in spans if s is not root)
     retrieval = next(s for s in spans if s["name"] == "pipeline.retrieval")
     assert retrieval["kind"] == "CHAIN"
-    tools = [s for s in spans if s["kind"] == "TOOL" and s["parent_span_id"] == retrieval["span_id"]]
-    assert {s["attributes"]["tool.name"] for s in tools} == {"stock", "orders"}
-    assert all(s["name"] == "business.lookup" and s["attributes"]["tool.status"] == "ok" for s in tools)
+    tools = [s for s in spans if s["kind"] == "TOOL"]
+    retrieval_tools = [s for s in tools if s["parent_span_id"] == retrieval["span_id"]]
+    assert {s["attributes"]["tool.name"] for s in retrieval_tools} == {"stock", "orders"}
+    assert all(s["name"] == "business.lookup" and s["attributes"]["tool.status"] == "ok" for s in retrieval_tools)
     assert "SKU97" not in str(spans) and "ORDER97" not in str(spans)
     searches = [s for s in spans if s["kind"] == "RETRIEVER"]
     assert searches and all(s["name"] == "knowledge.search" and s["parent_span_id"] == retrieval["span_id"] for s in searches)
@@ -664,9 +665,19 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
     activity_path = f"{path}/{trace_id}/activities"
     called_tools = staff.get(activity_path, params={"kind": "TOOL"}).json()["items"]
     assert {row["span_id"] for row in called_tools} == {tool["span_id"] for tool in tools}
-    assert all(row["actor"] == {
-        "kind": "workflow", "span_id": retrieval["span_id"], "display_name": retrieval["display_name"],
-    } for row in called_tools)
+    for row in called_tools:
+        # 来源复核也会独立调用业务工具，同名工具应归属各自实际的调用方。
+        ancestors = []
+        parent_id = row["parent_span_id"]
+        while parent_id is not None:
+            parent = by_id[parent_id]
+            ancestors.append(parent)
+            parent_id = parent["parent_span_id"]
+        agent = next((s for s in ancestors if s["kind"] == "AGENT"), None)
+        actor = agent or next(s for s in ancestors if s["kind"] == "CHAIN")
+        assert row["actor"] == {
+            "kind": "agent" if agent else "workflow", "span_id": actor["span_id"], "display_name": actor["display_name"],
+        }
     called_models = admin.get(activity_path, params={"kind": "LLM"}).json()["items"]
     assert {row["span_id"] for row in called_models} == {call["span_id"] for call in models}
     for row in called_models:
