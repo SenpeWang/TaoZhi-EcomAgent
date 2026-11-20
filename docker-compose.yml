@@ -5,6 +5,10 @@ x-app-common: &app-common
   build:
     context: .
     target: app
+    args:
+      NPM_REGISTRY: ${NPM_REGISTRY:-}
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+    network: host
   env_file:
     - path: .env
       required: false

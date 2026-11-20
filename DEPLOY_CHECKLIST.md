@@ -71,8 +71,8 @@ server {
 ## 五、启动与部署后验收
 
 ```bash
-# 1. 构建并后台启动全栈服务
-docker compose up -d --build
+# 1. 首次部署：构建镜像并后台启动全栈服务（日常重启用 make start，不重建）
+make rebuild
 
 # 2. 检查容器健康状态（migrate 须为 Exited (0)，其余均为 healthy/running）
 docker compose ps

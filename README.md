@@ -148,6 +148,7 @@ flowchart LR
 - **可选 GPU 加速**：若宿主机具备 NVIDIA GPU，安装配置 `nvidia-container-toolkit` 即可通过叠加文件启用 `cuda:0`。
 - **本地嵌入模型（可选）**：如需启用语义向量与精排，将 `bge-small-zh-v1.5` 与 `bge-reranker-v2-m3` 置于宿主机模型目录并在 `.env` 中通过 `ECOM_MODELS_DIR` 指定（缺失时检索自动降级为词法链路）。
 
+- **构建期镜像源（可选）**：`NPM_REGISTRY` 与 `PIP_INDEX_URL` 可在 `.env` 指向国内镜像站，避免容器内 `npm ci` / `pip install` 拉取超时；留空则使用官方源。
 ### 一键启动
 
 ```bash
@@ -162,8 +163,8 @@ chmod 600 .env
 # 3. 若宿主机已配置 NVIDIA GPU 容器运行时，在 .env 中启用 GPU 叠层：
 # COMPOSE_FILE="docker-compose.yml:docker-compose.gpu.yml"
 
-# 4. 构建镜像并一键拉起全部服务（自动完成前端编译与数据库迁移）
-make start
+# 4. 首次构建镜像并拉起全部服务（自动完成前端编译与数据库迁移）
+make rebuild
 make status
 
 # 5. 按需初始化评测演示账号与业务夹具数据（首次空库执行）
@@ -188,7 +189,7 @@ docker compose exec -T api python scripts/backup_database.py verify    # 备份�
 
 ### 日常启动（机器重启后）
 
-`make start` 用于首次部署或代码变更后的镜像重建（`up -d --build`），日常冷启动不必重建：
+`make rebuild` 用于首次部署或代码变更后的镜像重建（`up -d --build`）；日常冷启动用 `make start`（`up -d`，不重建）：
 
 - **WSL2 场景**：先启动发行版（如 `wsl -d <发行版名>`），`systemd` 随发行版启动，`docker` 为 enabled，长驻服务容器按 `restart: unless-stopped` 自动恢复，约 1 分钟内 `/api/health` 恢复 200。
 - **Linux 宿主**：`systemctl is-enabled docker` 为 enabled 时同理；未启用则执行 `make start`。

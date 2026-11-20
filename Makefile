@@ -31,6 +31,9 @@ help:
 	@echo "make clean          清除项目 Python 与 pytest 缓存"
 
 start:
+	$(COMPOSE) up -d
+
+rebuild:
 	$(COMPOSE) up -d --build
 
 stop:
