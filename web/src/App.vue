@@ -461,7 +461,11 @@
               <el-table-column prop="created_at" label="时间" width="195" />
               <el-table-column prop="action" label="操作行为" min-width="200" />
               <el-table-column prop="actor_id" label="操作账号" min-width="150" />
-              <el-table-column prop="node_id" label="关联部门" min-width="140" />
+              <el-table-column label="关联部门" min-width="140">
+                <template #default="{ row }">
+                  {{ orgName(row.node_id) }}
+                </template>
+              </el-table-column>
               <el-table-column label="密级" width="110">
                 <template #default="{ row }">
                   <span class="level-pill" :class="`level-${row.level}`">
@@ -1284,9 +1288,19 @@ const userToneClass = computed(computeUserTone)
  */
 function computePrimaryOrg(): string {
   const m = user.value?.memberships?.[0]
-  return m?.name || m?.node_id || '暂未分配部门'
+  return m?.name || orgName(m?.node_id) || '暂未分配部门'
 }
 const primaryOrgName = computed(computePrimaryOrg)
+
+/**
+ * 将组织节点编号解析为可读部门名称。
+ * @param nodeId 组织节点编号。
+ * @returns 部门名称，未命中时回退编号或占位符。
+ */
+function orgName(nodeId?: string | null): string {
+  if (!nodeId) return '—'
+  return orgs.value.find((o) => o.id === nodeId)?.name || nodeId
+}
 
 /**
  * 推导当前账户的数据访问密级数值（L1/L2/L3）。

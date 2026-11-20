@@ -97,10 +97,12 @@ def list_users_in_tenant(conn: Any, tenant_id: str) -> list[dict]:
 
 
 def list_user_memberships(conn: Any, tenant_id: str, user_id: str) -> list[dict]:
-    """读取用户当前生效的组织隶属关系。"""
+    """读取用户当前生效的组织隶属关系（含部门名称）。"""
     return fetch_all(
         conn,
-        "SELECT node_id,role FROM memberships WHERE tenant_id=%s AND user_id=%s AND active",
+        "SELECT m.node_id, m.role, n.name FROM memberships m "
+        "LEFT JOIN org_nodes n ON n.tenant_id=m.tenant_id AND n.id=m.node_id "
+        "WHERE m.tenant_id=%s AND m.user_id=%s AND m.active",
         (tenant_id, user_id),
     )
 
