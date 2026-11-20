@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from .roles import ROLE_LEVEL_ADMIN
 
 
 @dataclass
@@ -12,7 +13,7 @@ class Principal:
     tenant_id: str
     username: str
     display_name: str
-    system_admin: bool
+    role_level: int
     version: int
     must_change: bool
     memberships: list
@@ -44,6 +45,11 @@ class Principal:
     def leader(self) -> bool:
         """是否担任任意部门或小组负责人角色。"""
         return any(m["role"] == "leader" for m in self.memberships)
+
+    @property
+    def system_admin(self) -> bool:
+        """是否系统管理员（由角色层级派生，等级达到管理员即为真）。"""
+        return self.role_level >= ROLE_LEVEL_ADMIN
 
     @property
     def root(self) -> str:
@@ -84,6 +90,7 @@ class Principal:
             username=self.username,
             display_name=self.display_name,
             system_admin=self.system_admin,
+            role_level=self.role_level,
             is_boss=self.boss,
             is_leader=self.leader,
             roles=labels,

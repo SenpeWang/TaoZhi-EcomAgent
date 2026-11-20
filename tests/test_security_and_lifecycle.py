@@ -121,7 +121,6 @@ def test_queue_relay_loop_respects_external_stop_event():
     """传递外部 STOP 信号后，queue.relay_loop 应立即安全退出。"""
     stop = threading.Event()
     stop.set()
-    # 若未响应外部 STOP 将死循环卡死
     queue.relay_loop(stop_event=stop)
 
 
@@ -135,7 +134,7 @@ def test_batch_sources_validity_matches_single_checks():
         tenant_id="t1",
         username="staff1",
         display_name="员工",
-        system_admin=False,
+        role_level=1,
         version=1,
         must_change=False,
         memberships=[{"node_id": "n1", "role": "employee"}],

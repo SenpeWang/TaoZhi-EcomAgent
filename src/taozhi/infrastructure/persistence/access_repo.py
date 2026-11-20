@@ -12,6 +12,7 @@ from taozhi.domain.access import (
 )
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
+from taozhi.domain.roles import derive_role_level
 from taozhi.knowledge.db import as_jsonb, fetch_all, fetch_one
 
 
@@ -38,7 +39,17 @@ def load_principal(conn: Any, user_id: str) -> Principal:
         "WHERE m.tenant_id=%s AND m.user_id=%s AND m.active AND n.active",
         (u["tenant_id"], user_id),
     )
-    return Principal(u["id"], u["tenant_id"], u["username"], u["display_name"], u["system_admin"], u["version"], u["must_change"], memberships, nodes)
+    return Principal(
+        u["id"],
+        u["tenant_id"],
+        u["username"],
+        u["display_name"],
+        derive_role_level(bool(u["system_admin"]), memberships),
+        u["version"],
+        u["must_change"],
+        memberships,
+        nodes,
+    )
 
 
 def require_system(p: Principal) -> None:
