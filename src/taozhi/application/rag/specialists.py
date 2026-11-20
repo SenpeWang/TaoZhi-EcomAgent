@@ -6,7 +6,7 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, List
+from typing import List
 
 _LOG = logging.getLogger(__name__)
 
