@@ -43,7 +43,7 @@ def _lookup(conn, tenant_id: str, tag: str, digests: Sequence[str],
     if not digests:
         return {}
     try:
-        with conn.transaction():   # 外层已在事务中 → 这里是 SAVEPOINT
+        with conn.transaction():
             rows = fetch_all(conn, "SELECT digest, embedding FROM embedding_cache "
                                    "WHERE tenant_id=%s AND model_tag=%s AND digest=ANY(%s)",
                              (tenant_id, tag, list(digests)))
@@ -61,7 +61,7 @@ def _lookup(conn, tenant_id: str, tag: str, digests: Sequence[str],
 def _store(conn, tenant_id: str, tag: str, dim: int, items) -> None:
     """写回本次新算出的向量；写失败只丢缓存，不影响已算出的结果。"""
     try:
-        with conn.transaction():   # 同上：失败只回滚这一段
+        with conn.transaction():
             for d, v in items:
                 conn.execute(
                     "INSERT INTO embedding_cache(tenant_id,model_tag,digest,dim,embedding) "

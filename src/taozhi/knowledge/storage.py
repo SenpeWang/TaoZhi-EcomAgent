@@ -103,7 +103,7 @@ def get_blob_store():
     if cfg.minio_enabled:
         try:
             store = MinioBlobStore(cfg)
-            store.client.bucket_exists(cfg.minio_bucket)  # 连通性探测
+            store.client.bucket_exists(cfg.minio_bucket)
             if cfg.blob_dual_write:
                 return DualBlobStore(store, LocalBlobStore(cfg))
             return store

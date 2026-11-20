@@ -16,10 +16,8 @@ def test_kafka_topic_and_outbox_relay():
     except Exception:
         pytest.skip("Kafka Broker 未启动或不可达，跳过集成测试")
 
-    # 1. 确保主题存在
     ensure_topic()
 
-    # 2. 从库中拉取真实的合法用户与组织节点外键
     test_job_id = "job_test_kafka_relay_worker"
     with database_connection() as c:
         user = fetch_one(c, "SELECT id, tenant_id FROM users LIMIT 1")
@@ -37,16 +35,13 @@ def test_kafka_topic_and_outbox_relay():
         c.execute("DELETE FROM task_outbox WHERE job_id=%s", (test_job_id,))
         c.execute("INSERT INTO task_outbox (job_id) VALUES (%s)", (test_job_id,))
 
-    # 3. 触发 Outbox 投递至 Kafka
     relayed_count = publish_pending()
     assert relayed_count >= 1
 
-    # 4. 验证 outbox 行已清空（代表成功投递至 Kafka）
     with database_connection() as c:
         row = fetch_one(c, "SELECT id FROM task_outbox WHERE job_id=%s", (test_job_id,))
         assert row is None
 
-    # 5. 测试认领机制：测试库模式下直接验证 claim_job_by_id；生产模式下验证后台 Worker 消费
     if cfg.mode == "test":
         claimed = claim_job_by_id(test_job_id)
         assert claimed is not None
@@ -63,7 +58,6 @@ def test_kafka_topic_and_outbox_relay():
                     break
         assert completed, f"后台 Worker 应从 Kafka 消费并完成任务，实际状态：{job}"
 
-    # 清理测试数据
     with database_connection() as c:
         c.execute("DELETE FROM model_calls WHERE job_id=%s", (test_job_id,))
         c.execute("DELETE FROM task_events WHERE job_id=%s", (test_job_id,))

@@ -12,7 +12,7 @@ class JudgeVerdict:
     """单个判定器的评审结论。"""
     judge_name: str
     passed: bool
-    score: float  # 0.0 ~ 1.0
+    score: float
     reason: str
     details: Dict[str, Any] = field(default_factory=dict)
 
@@ -34,17 +34,14 @@ class ToolExecutionJudge:
         called_tools = [t["tool_name"] for t in result.tool_calls]
         reasons = []
 
-        # 1. 检查禁止调用的工具（越界检查，如 web_agent 严禁调 search_amazon）
         for ft in self.forbidden_tools:
             if ft in called_tools:
                 reasons.append(f"违规触发了受限工具: '{ft}'")
 
-        # 2. 检查必须调用的工具（覆盖检查，如比价必须调 1688 和 Amazon）
         missing_tools = [rt for rt in self.required_tools if rt not in called_tools]
         if missing_tools:
             reasons.append(f"缺少必须调用的工具: {', '.join(missing_tools)}")
 
-        # 3. 检查数据返回条数
         total_data = sum(t.get("data_count", 0) for t in result.tool_calls)
         if total_data < self.min_data_count and not reasons:
             reasons.append(f"工具有效数据条数不足 (期望 >= {self.min_data_count}, 实际 {total_data})")

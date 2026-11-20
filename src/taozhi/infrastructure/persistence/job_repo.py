@@ -435,7 +435,6 @@ def delete_research_conversation_records(conn: Any, tenant_id: str, owner_id: st
     conn.execute("DELETE FROM task_events WHERE tenant_id=%s AND job_id = ANY(%s)", (tenant_id, job_ids))
     conn.execute("DELETE FROM jobs WHERE tenant_id=%s AND id = ANY(%s)", (tenant_id, job_ids))
 
-    # 同步清理 LangGraph PostgresSaver 遗留检查点，防止长期增长
     delete_checkpoint_threads(conn, [f"research_{jid}_%" for jid in job_ids])
 
 

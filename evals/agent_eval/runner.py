@@ -58,37 +58,30 @@ def run_agent_evaluations(
         case_name = case["name"]
         print(f"[{idx}/{len(cases)}] 正在评测: [{case_id}] {case_name} ...")
 
-        # 1. 执行 Harness 沙箱运行
         run_res: AgentRunResult = harness.run(case)
         latencies.append(run_res.elapsed)
 
-        # 2. 执行声明式判定器套件
         verdicts: List[JudgeVerdict] = []
 
-        # 工具调用评测
         tool_judge = ToolExecutionJudge(
             required_tools=case.get("required_tools"),
             forbidden_tools=case.get("forbidden_tools"),
         )
         verdicts.append(tool_judge.evaluate(run_res))
 
-        # 交付工件评测
         deliv_judge = DeliverableJudge(
             required_sections=case.get("required_sections"),
             min_chars=case.get("min_chars", 80),
         )
         verdicts.append(deliv_judge.evaluate(run_res))
 
-        # 真实性与零虚假评测
         anti_fake_judge = AntiHallucinationJudge()
         verdicts.append(anti_fake_judge.evaluate(run_res))
 
-        # 动态 Steering 评测
         if case.get("steering_keyword"):
             steer_judge = SteeringJudge(steering_keyword=case["steering_keyword"])
             verdicts.append(steer_judge.evaluate(run_res))
 
-        # 3. 统计判定结论
         all_passed = all(v.passed for v in verdicts)
         avg_score = round(sum(v.score for v in verdicts) / max(1, len(verdicts)), 2)
         if all_passed:
@@ -102,7 +95,6 @@ def run_agent_evaluations(
             v_mark = "✓" if v.passed else "✗"
             print(f"      {v_mark} [{v.judge_name}]: {v.reason}")
 
-        # 记录遥测观察流
         obs = {
             "case_id": case_id,
             "category": case.get("category"),
@@ -147,7 +139,6 @@ def run_agent_evaluations(
         "case_results": case_results,
     }
 
-    # 落盘写报告与遥测流
     obs_file = REPORTS_DIR / f"agent_observations_{timestamp}.jsonl"
     with open(obs_file, "w", encoding="utf-8") as f:
         for o in observations:
@@ -164,7 +155,6 @@ def run_agent_evaluations(
     print(f"📁 遥测日志：{obs_file.relative_to(ROOT)}")
     print("=" * 80)
 
-    # 联动 Phoenix
     if sync_phoenix:
         try:
             from taozhi.config import resolve_runtime_dir
@@ -195,7 +185,6 @@ def main():
             print(f"错误：未找到 ID 为 '{args.case}' 的测试用例", file=sys.stderr)
             sys.exit(1)
 
-    # 默认自动同步至 Phoenix
     res = run_agent_evaluations(selected, sync_phoenix=not args.no_sync)
     if res["pass_rate"] < 0.75:
         sys.exit(1)

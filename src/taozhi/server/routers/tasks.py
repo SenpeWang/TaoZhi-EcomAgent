@@ -114,7 +114,6 @@ async def events(task_id: str, request: Request, after: int = Query(0, ge=0), p=
                     cursor = row["id"]
                     yield f"id: {cursor}\ndata: {json.dumps(row, ensure_ascii=False)}\n\n"
                 if terminal is not None:
-                    # 终态回执前强制复核当前会话与权限代际，防止最后 5 秒窗口内发生撤权
                     current = await asyncio.to_thread(identity, request)
                     allowed, _, _ = await asyncio.to_thread(task_service.poll_task_events, current, task_id, cursor)
                     if not allowed:

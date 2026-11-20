@@ -120,7 +120,7 @@ def test_query_embedding_cache_hits(monkeypatch):
     assert np.allclose(first, second)
     assert not np.allclose(first, other)
     assert len(calls) == 2
-    assert all(instruct for _, instruct in calls)      # 查询必须走 instruct 前缀
+    assert all(instruct for _, instruct in calls)
     assert embedding.query_cache_stats()["hits"] == 1
 
 
@@ -132,7 +132,7 @@ def test_query_embedding_cache_evicts_oldest(monkeypatch):
     monkeypatch.setattr(embedding, "QUERY_CACHE_MAX", 3)
     for i in range(5):
         embedding.encode_query(f"问题{i}")
-    embedding.encode_query("问题0")      # 把 0 提到最新
-    embedding.encode_query("问题5")      # 被淘汰的应是 1
+    embedding.encode_query("问题0")
+    embedding.encode_query("问题5")
     assert embedding.query_cache_stats()["size"] == 3
     assert embedding.digest("问题1") not in " ".join(embedding._query_cache)

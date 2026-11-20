@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from contextlib import nullcontext
 
-_READY = None  # None=未探测；True/False=探测结果
+_READY = None
 _TRACER = None
 
 
@@ -51,8 +51,6 @@ def setup_tracing(service_name: str = "taozhi-worker") -> bool:
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
         endpoint = os.environ.get("TAOZHI_OTLP_ENDPOINT", "http://127.0.0.1:6006/v1/traces")
-        # Phoenix 按 resource 属性 openinference.project.name 路由项目
-        # （utilities/project.py: get_project_name 只读 resource，不读 span 属性）。
         provider = TracerProvider(resource=Resource.create({
             "service.name": service_name,
             "openinference.project.name": service_name,

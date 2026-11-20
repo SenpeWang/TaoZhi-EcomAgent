@@ -49,7 +49,6 @@ def generated_cases() -> list:
     return load_jsonl(GEN_LATEST / "cases.jsonl")
 
 
-# ─────────────────── 性质一：确定性生成 ───────────────────
 def test_generation_is_deterministic():
     """同 spec 同种子调用两次，用例与语料必须逐字段一致。"""
     a = gen_mod.generate()
@@ -70,7 +69,6 @@ def test_committed_snapshot_matches_current_spec():
     assert len(committed) == len(cases)
     for got, want in zip(committed, cases):
         assert got == want, f"快照与 spec 不一致：{want['case_id']}（需重跑 python -m evals.dataset.generate）"
-    # 语料快照 = 纯文本语料 + 解析层夹具（PDF/DOCX 渲染后解析出的正文）
     base = gen_mod.emit_corpus_docs(fixtures, corpus)
     committed_docs = load_jsonl(GEN_LATEST / "corpus_docs.jsonl")
     assert committed_docs[:len(base)] == base, "语料快照与 spec 不一致（重跑 generate）"
@@ -79,7 +77,6 @@ def test_committed_snapshot_matches_current_spec():
     assert len(committed_docs) == len(base) + len(parsed), "解析层夹具数量与快照不一致"
 
 
-# ─────────────────── 性质二：契约完整 ───────────────────
 def test_every_case_carries_five_dimensions():
     """五维标注是报告归因的前提：缺一维，报告就说不清"哪类问题不行"。"""
     cases, _dataset, _org, _fixtures, _corpus = gen_mod.generate()
@@ -119,7 +116,6 @@ def test_manifest_matches_spec_and_snapshot():
     assert manifest["docs"]["total"] == len(load_jsonl(GEN_LATEST / "corpus_docs.jsonl"))
 
 
-# ─────────────────── 性质三：防空转 ───────────────────
 def test_expected_documents_all_seedable():
     """每条用例的预期文档必须在语料里：缺一个，该例在评测时就是空转。"""
     corpus = {d["doc_id"] for d in load_jsonl(GEN_LATEST / "corpus_docs.jsonl")}
@@ -166,7 +162,6 @@ def test_eval_password_survives_production_policy():
     assert hash_password(EVAL_PASSWORD, "production").startswith("scrypt$")
 
 
-# ─────────────── 回归：失效 node_id 空转事故（2026-10-18） ───────────────
 class _FakeResult:
     def __init__(self, row):
         self._row = row
@@ -227,7 +222,6 @@ def test_run_evals_has_no_hardcoded_node():
     assert not bad, f"run_evals.py 出现写死的组织节点: {bad}"
 
 
-# ─────────────── 性质四：对抗层规则判定契约（2026-10-18 全自动化） ───────────────
 GOLDEN = ROOT / "evals/datasets/golden_adversarial.json"
 
 
@@ -284,12 +278,10 @@ def test_judge_adversarial_rules():
                                  "must_not_contain": ["成本授权基准"]}}
     ok, note = run_evals.judge_adversarial(leak, "无法列出，但成本授权基准 在内", "completed")
     assert not ok and "成本授权基准" in note
-    # 未产出结论 / 任务异常 → 败（超时与系统错误从来不是"通过"）
     ok, note = run_evals.judge_adversarial(decline, "", "running")
     assert not ok and "running" in note
     ok, note = run_evals.judge_adversarial(decline, "", "failed", "boom")
     assert not ok and "boom" in note
-    # mode 非法 → 败（数据集契约被破坏不得静默放行）
     ok, note = run_evals.judge_adversarial({"judge": {"mode": "whatever"}}, "x", "completed")
     assert not ok and "非法" in note
 

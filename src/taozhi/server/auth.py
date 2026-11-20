@@ -68,7 +68,6 @@ def login(username: str, password: str, ip: str, tenant_code: str):
         if fresh["password_hash"] != row["password_hash"] or fresh["version"] != p.version:
             raise Denied("账号状态已变化，请重试", "LOGIN_FAILED", 401)
         cfg = load_config()
-        # 内网快捷登录开启时放行体验默认口令；其余生产部署继续拒绝常见弱口令。
         if (
             cfg.mode == "production"
             and not (cfg.quick_login and cfg.quick_login_password)

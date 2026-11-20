@@ -24,14 +24,14 @@ sys.path.insert(0, str(ROOT / "src"))
 from taozhi.knowledge.db import database_connection, fetch_one  # noqa: E402
 
 SEED = 20261015
-DAYS_BACK = 183          # 滚动近 183 天
-BASE_DAILY = 52          # 工作日基础单量
+DAYS_BACK = 183
+BASE_DAILY = 52
 
-CHANNELS = [  # (code, name, 权重)
+CHANNELS = [
     ("tmall", "天猫", 0.35), ("jd", "京东", 0.25), ("pdd", "拼多多", 0.20),
     ("douyin", "抖音", 0.15), ("wxapp", "微信小程序", 0.05),
 ]
-PRODUCTS = [  # (spu_code, name, category, cost分, spec→[(规格, 售价分)])
+PRODUCTS = [
     ("SPU-MEM-IP15", "iPhone 15 系列高清钢化膜", "钢化膜", 850,
      [("黑边全覆盖", 3990), ("高清裸边", 3690)]),
     ("SPU-MEM-IP15PM", "iPhone 15 Pro Max 防窥膜", "钢化膜", 1200, [("防窥版", 4990)]),
@@ -45,14 +45,14 @@ PRODUCTS = [  # (spu_code, name, category, cost分, spec→[(规格, 售价分)]
 ]
 STATUS_W = [("pending", .02), ("paid", .04), ("shipped", .05), ("delivered", .07),
             ("completed", .78), ("cancelled", .04)]
-REFUND_BASE = 0.055                       # 全局退款改写率
+REFUND_BASE = 0.055
 ANOMALY = dict(channel="pdd", spu="SPU-MEM-IP15", days=25, rate=0.30)
 AS_REASONS = ["质量问题", "尺寸不符", "物流破损", "七天无理由", "描述不符"]
-AS_REASONS_ANOMALY = ["质量问题", "质量问题", "质量问题", "物流破损", "七天无理由"]  # 异常期偏置
+AS_REASONS_ANOMALY = ["质量问题", "质量问题", "质量问题", "物流破损", "七天无理由"]
 AS_TYPE_BY = {"质量问题": ("return", "refund"), "尺寸不符": ("exchange", "refund"),
               "物流破损": ("refund", "return"), "七天无理由": ("refund", "return"),
               "描述不符": ("refund", "exchange")}
-LOW_STOCK = {  # sku_code → (warehouse, qty, safety_qty) 低库存预警演示
+LOW_STOCK = {
     "SPU-CHG-65W/双口": ("华东仓", 120, 300),
     "SPU-CBL-C240/1 米": ("华南仓", 80, 250),
     "SPU-MEM-IP15PM/防窥版": ("华东仓", 45, 200),
@@ -72,13 +72,13 @@ def bulk(c, sql: str, rows: list, batch: int = 500) -> None:
 def _promo_factor(day: datetime) -> float:
     md = (day.month, day.day)
     if (6, 12) <= md <= (6, 18):
-        return 2.6          # 618
+        return 2.6
     if (10, 1) <= md <= (10, 6):
-        return 1.7          # 国庆
+        return 1.7
     if (11, 1) <= md <= (11, 11):
-        return 2.2          # 双十一
+        return 2.2
     if (8, 25) <= md <= (9, 5):
-        return 1.35         # 开学季
+        return 1.35
     return 1.25 if day.weekday() >= 5 else 1.0
 
 
@@ -113,13 +113,11 @@ def main(argv: list[str] | None = None) -> int:
             print("缺用户/组织节点，请先初始化组织架构")
             return 1
 
-        # 幂等：只清合成表（FK 依赖序）
         for stmt in ("DELETE FROM after_sales WHERE tenant_id=%s", "DELETE FROM orders WHERE tenant_id=%s",
                      "DELETE FROM stock WHERE tenant_id=%s", "DELETE FROM skus WHERE tenant_id=%s",
                      "DELETE FROM products WHERE tenant_id=%s", "DELETE FROM channels WHERE tenant_id=%s"):
             c.execute(stmt, (tid,))
 
-        # 渠道 / SPU / SKU
         ch_rows, sku_index = [], {}
         for i, (code, name, _) in enumerate(CHANNELS):
             ch_rows.append((_id("ch", i), tid, code, name))
@@ -140,7 +138,6 @@ def main(argv: list[str] | None = None) -> int:
         bulk(c, "INSERT INTO skus(id,tenant_id,spu_id,sku_code,spec,price_minor,cost_minor) "
                 "VALUES(%s,%s,%s,%s,%s,%s,%s)", sku_rows)
 
-        # 订单流水（以 end_day 为终点向前 DAYS_BACK 天，保证今日订单不超越当前时间）
         start = end_day - timedelta(days=DAYS_BACK - 1)
         codes, weights = [x[0] for x in CHANNELS], [x[2] for x in CHANNELS]
         o_rows, as_rows, seq, order_no_n = [], [], 0, 0
@@ -157,7 +154,6 @@ def main(argv: list[str] | None = None) -> int:
                                  second=rng.randint(0, 59), microsecond=0)
                 if ts > now_utc and d == DAYS_BACK - 1:
                     ts = now_utc - timedelta(minutes=rng.randint(1, 180))
-                # 异常钩子：近 25 天拼多多钢化膜退款率飙升（批次质量）
                 is_anom = (ch == ANOMALY["channel"] and sku["spu"] == ANOMALY["spu"]
                            and ts >= anomaly_since)
                 if st in ("shipped", "delivered", "completed") and (
@@ -184,7 +180,6 @@ def main(argv: list[str] | None = None) -> int:
         bulk(c, """INSERT INTO after_sales(id,tenant_id,order_id,type,reason,amount_minor,
               status,created_at,resolved_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""", as_rows)
 
-        # 库存快照
         st_rows = []
         for code, sku in sku_index.items():
             for wh in ("华东仓", "华南仓"):
@@ -196,7 +191,6 @@ def main(argv: list[str] | None = None) -> int:
              st_rows)
         c.execute("ANALYZE orders, after_sales, stock")
 
-        # 统计输出
         gmv = sum(r["amount_minor"] for r in c.execute(
             "SELECT amount_minor FROM orders WHERE tenant_id=%s AND status<>'cancelled'", (tid,)).fetchall())
         n_orders = c.execute("SELECT count(*) AS n FROM orders WHERE tenant_id=%s", (tid,)).fetchone()["n"]

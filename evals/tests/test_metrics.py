@@ -31,7 +31,7 @@ def test_hit_at_k_counts_only_relevant_hits():
     ranked = ["无关A", "相关X", "无关B"]
     assert hit_at_k(ranked, {"相关X"}, 1) == 0.0
     assert hit_at_k(ranked, {"相关X"}, 3) == 1.0
-    assert hit_at_k(ranked, set(), 3) == 0.0  # 无预期项不算命中
+    assert hit_at_k(ranked, set(), 3) == 0.0
 
 
 def test_precision_and_recall_are_not_the_same_number():
@@ -62,7 +62,7 @@ def test_ndcg_full_recall_but_wrong_order_is_penalised():
     perfect = ndcg_at_k(["相关X", "相关Y"], relevant, 2)
     swapped = ndcg_at_k(["相关Y", "相关X"], relevant, 2)
     assert perfect == pytest.approx(1.0)
-    assert swapped == pytest.approx(1.0)  # 二值相关性下同权，交换无差别
+    assert swapped == pytest.approx(1.0)
     interleaved = ndcg_at_k(["相关X", "无关", "相关Y"], relevant, 3)
     assert interleaved < perfect
 
@@ -87,9 +87,9 @@ def test_summarize_ci_brackets_mean_and_shrinks_with_sample_size():
 
 def test_retrieval_report_aggregates_all_ks():
     cases = [
-        (["相关X", "无关"], {"相关X"}),          # 完美
-        (["无关", "相关Y"], {"相关Y"}),          # 第 2 位命中
-        (["无关", "无关2"], {"相关Z"}),          # 全丢
+        (["相关X", "无关"], {"相关X"}),
+        (["无关", "相关Y"], {"相关Y"}),
+        (["无关", "无关2"], {"相关Z"}),
     ]
     report = retrieval_report(cases, max_k=8, ks=(1, 3), bootstrap=200)
     assert report["n"] == 3
@@ -109,7 +109,6 @@ def test_retrieval_report_handles_empty_input():
 
 
 
-# ─────────── 运行间比较与 judge 校准（2026-10-21 新增） ───────────
 
 from metrics import accuracy_report, cohen_kappa, paired_delta  # noqa: E402
 
@@ -127,7 +126,7 @@ def test_paired_delta_flags_uniform_drop():
 def test_paired_delta_ignores_small_fluctuation():
     """小幅抖动不能让门禁飘红——这是把符号判定换成配对检验的全部理由。"""
     base = [1.0, 0.0] * 25
-    cur = [0.0, 1.0] * 25          # 均值相同，只是逐例对调
+    cur = [0.0, 1.0] * 25
     res = paired_delta(base, cur)
     assert res["delta"] == pytest.approx(0.0)
     assert res["verdict"] == "stable"
@@ -157,8 +156,8 @@ def test_cohen_kappa_perfect_agreement():
 
 def test_cohen_kappa_penalises_chance_agreement():
     """judge 全判通过时原始一致率有 0.25，kappa 必须把这份蒙对扣成 0。"""
-    human = [True] * 5 + [False] * 15      # 25% 通过
-    judge = [True] * 20                     # 全判通过
+    human = [True] * 5 + [False] * 15
+    judge = [True] * 20
     res = cohen_kappa(human, judge)
     assert res["agreement"] == pytest.approx(0.25)
     assert res["kappa"] == pytest.approx(0.0, abs=1e-9)
@@ -207,9 +206,9 @@ def test_context_relevancy_and_fact_recall_and_citations():
 
 def test_refusal_breakdown_and_answer_correctness():
     cases = [
-        {"answerability": "answerable", "abstain": True, "pass": False},   # 误拒
+        {"answerability": "answerable", "abstain": True, "pass": False},
         {"answerability": "answerable", "abstain": False, "pass": True},
-        {"answerability": "unanswerable", "abstain": True, "pass": True}, # 真拒
+        {"answerability": "unanswerable", "abstain": True, "pass": True},
         {"answerability": "unanswerable", "abstain": False, "pass": False},
     ]
     rb = refusal_breakdown(cases)

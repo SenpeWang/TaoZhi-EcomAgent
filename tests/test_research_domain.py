@@ -59,7 +59,6 @@ def test_research_scope_and_task_tool_guard():
     assert exc_scope.value.status == 403
     assert exc_scope.value.code == "TOOL_OUT_OF_SCOPE"
 
-    # 即使全局放行，若未授予当前角色也必须拦截
     scope_sourcing = classify_research_scope("对比【磁吸手机壳】1688 出厂底价与亚马逊售价")
     with pytest.raises(Denied) as exc_role:
         enforce_tool_allowed("search_amazon", scope_sourcing, task_tools=("search_1688_wholesale",))
@@ -157,7 +156,6 @@ def test_parallel_orchestrator_and_react_query_refinement():
 
     def fake_search_web(query: str, limit: int = 15, timeout: float = 12.0):
         web_queries_seen.append(query)
-        # 第一次窄词返回空，检验 ReAct 子智能体自己观察到 empty 后自主换词再搜
         if len(web_queries_seen) == 1:
             return []
         return [{"title": "便携充气泵实测", "snippet": "散热噪音是主要差评点，主流零售 129 元"}]
@@ -198,7 +196,6 @@ def test_parallel_orchestrator_and_react_query_refinement():
                 outline=["市场需求与痛点", "供应链成本结构", "选品策略"],
             )
 
-        # Subagent ReAct 步骤模拟
         if "全网差评深挖专员" in prompt:
             with lock:
                 state_counters["web_steps"] += 1
@@ -240,17 +237,16 @@ def test_parallel_orchestrator_and_react_query_refinement():
                 )
 
     assert res["system_status"] == "COMPLETED"
-    assert len(web_queries_seen) == 2  # 验证 Subagent 观察到 empty 后自主换词重查
+    assert len(web_queries_seen) == 2
     assert len(res["evidence_pool"]) == 2
     assert len(res["platforms"]) == 2
     pcts = [pct for _, pct in events]
-    assert pcts == sorted(pcts)  # 进度必须严格单调不回退
+    assert pcts == sorted(pcts)
     assert pcts[-1] == 100
 
 
 def test_live_cancel_and_mid_flight_steering():
     """测试运行中取消熔断，以及中途动态 Steering 回调驱动主脑增量补采。"""
-    # A. 实时取消
     mock_llm_cancel = MagicMock()
     mock_llm_cancel.chat_json.side_effect = [
         _OrchestratorDecisionSchema(
@@ -272,7 +268,6 @@ def test_live_cancel_and_mid_flight_steering():
     assert res_cancel["stop_reason"] == StopReason.CANCELLED.value
     assert res_cancel["report"] == ""
 
-    # B. 中途动态 Steering 触发补派
     steer_calls = {"n": 0}
 
     def fetch_steering():
@@ -332,8 +327,8 @@ def test_idempotent_steering_deduplicates_by_event_id():
     hooks = _RuntimeHooks(
         fetch_steering_fn=lambda: [
             {"id": "req_1", "text": "核查1688底价"},
-            {"id": "req_1", "text": "核查1688底价"},  # 重复同一请求 ID，必须拦截
-            {"id": "req_2", "text": "核查1688底价"},  # 同文案不同请求 ID，允许保留
+            {"id": "req_1", "text": "核查1688底价"},
+            {"id": "req_2", "text": "核查1688底价"},
         ]
     )
     state = {
@@ -345,7 +340,6 @@ def test_idempotent_steering_deduplicates_by_event_id():
     assert delta_texts == ["核查1688底价", "核查1688底价"]
     assert all_inbox == ["初始指令", "核查1688底价", "核查1688底价"]
 
-    # 再次按同一 state 合并后重放 req_1 / req_2，增量必须为空
     state["steering_inbox"].extend(delta_texts)
     state["steering_event_ids"].extend(delta_ids)
     delta_texts_2, delta_ids_2, _ = _collect_new_steering(state, hooks)  # type: ignore[arg-type]
@@ -361,7 +355,7 @@ def test_wall_clock_started_at_triggers_timeout_across_processes():
         "turn_count": 0,
         "max_turns": 5,
         "timeout_seconds": 60.0,
-        "started_at": time.time() - 120.0,  # 模拟 120s 前另一进程写入检查点的起点
+        "started_at": time.time() - 120.0,
         "evidence_pool": [],
         "steering_inbox": [],
         "steering_event_ids": [],
@@ -527,7 +521,6 @@ def test_sensenova_router_failover_circuit_and_compliance():
 
     assert out1 == "CN_PRIMARY_FLASH_OK"
     assert out2 == "CN_PRIMARY_FLASH_OK"
-    # 第一次依次尝试 overseas -> dots -> cn_primary；第二次熔断已打开，直达 cn_primary
     assert [c[0] for c in called_urls] == [
         "sensenova_overseas",
         "dots",
@@ -538,7 +531,6 @@ def test_sensenova_router_failover_circuit_and_compliance():
     assert any(e["endpoint_id"] == "sensenova_overseas" and e["reason"] == "rate_limit" for e in events)
     assert any(e["endpoint_id"] == "sensenova_cn_primary" and e["outcome"] == "ok" and e["failover"] is True for e in events)
 
-    # 合规边界验证：allow_overseas=False 时严禁故障转移到海外节点
     strict_client = LLMClient(settings=fake_settings, allow_overseas=False, registry=reg)  # type: ignore[arg-type]
     strict_calls = []
 
@@ -584,7 +576,6 @@ def test_checkpoint_cross_version_resume_hydrates_evidence_and_route_history():
         ),
         _SubagentStepSchema(action="call_tool", thought="搜索全网", tool_name="search_web", query_or_url="无线充电器"),
         _SubagentStepSchema(action="finish", thought="完成采集", findings_summary="磁吸快充散热需求高。"),
-        # 模拟第 2 轮主脑正常收敛时也经历单轮结束
         _OrchestratorDecisionSchema(action="finish", thought="证据充分，直接生成报告", outline=["市场格局", "竞品建议"]),
     ]
     mock_llm_v1.chat.return_value = "# V1 调研报告"
@@ -600,7 +591,6 @@ def test_checkpoint_cross_version_resume_hydrates_evidence_and_route_history():
             )
     assert len(res_v1["evidence_pool"]) == 1
 
-    # 模拟 run_version=2 断点续跑：验证触发 checkpoint_resume 事件并继承历史证据
     resume_events = []
     mock_llm_v2 = MagicMock()
     mock_llm_v2.chat_json.return_value = _OrchestratorDecisionSchema(
@@ -645,7 +635,6 @@ def test_usage_scope_isolates_concurrent_threads_and_tracks_json_retries():
     assert r1["prompt_tokens"] == 60 and r1["completion_tokens"] == 20 and r1["failover_count"] == 0
     assert r2["prompt_tokens"] == 140 and r2["completion_tokens"] == 40 and r2["failover_count"] == 1
 
-    # chat_json 第 1 次返回坏 JSON，第 2 次返回合法 JSON，应记录 json_retries == 1
     c = LLMClient()
     with patch.object(c, "chat", side_effect=["not json", '{"ok": true}']):
         with obs.usage_scope() as ju:

@@ -17,8 +17,6 @@ from ..knowledge.db import fetch_all
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import can_read_metric
 
-# 内置企业电商核心业务指标目录（供初始化脚本与评测夹具共用单一事实来源）
-# tuple 结构：(metric_key, 名称, 别名, SQL模板, 维度白名单, 主表, 单位, 格式, 密级, scope, 归属节点名, 说明)
 BUILTIN_BUSINESS_METRICS: tuple[tuple, ...] = (
     (
         "biz.gsv",
@@ -222,13 +220,11 @@ BUILTIN_BUSINESS_METRICS: tuple[tuple, ...] = (
     ),
 )
 
-# 指标 SQL 只允许访问的表（企业工作台自身表 + 业务系统表，接入时在此登记）
 ALLOWED_METRIC_TABLES = frozenset({
     "tenants", "users", "memberships", "org_nodes", "sessions", "login_attempts",
     "documents", "document_versions", "chunks", "knowledge_mentions", "document_grants",
     "jobs", "task_events", "task_reviews", "task_outbox", "approvals",
     "model_calls", "audit_events", "worker_heartbeats", "metrics", "metric_grants",
-    # 业务数据表（合成学习数据，真实业务系统接入时同构对接）
     "products", "skus", "channels", "orders", "after_sales", "stock",
 })
 MAX_ROWS = 200
@@ -280,7 +276,6 @@ def execute_metric(conn, p, m, intent, max_rows: int = MAX_ROWS):
     sql = m["sql_template"].replace("%(filters)s", frag)
     params = dict(fparams)
     params["tenant_id"] = p.tenant_id
-    # 时间范围：模板引用 %(since)s/%(until)s 时由意图提供，缺省近 30 天
     tr = intent.get("time_range") or {}
     days = tr.get("days") if isinstance(tr, dict) else None
     if "%(since)s" in sql:
@@ -290,7 +285,7 @@ def execute_metric(conn, p, m, intent, max_rows: int = MAX_ROWS):
     sql = f"SELECT * FROM ({sql}) metric_result LIMIT {min(int(max_rows), MAX_ROWS)}"
     started = time.monotonic()
     import psycopg
-    with psycopg.connect(load_config().dsn, connect_timeout=8) as ro:  # 独立连接，只读事务
+    with psycopg.connect(load_config().dsn, connect_timeout=8) as ro:
         with ro.transaction():
             ro.execute("SET TRANSACTION READ ONLY")
             ro.execute(f"SET LOCAL statement_timeout={STATEMENT_TIMEOUT_MS}")
@@ -327,7 +322,7 @@ def _iso(value, default_days):
         except ValueError:
             raise Denied("时间格式无效", "METRIC_INTENT", 400)
     if default_days is None:
-        return None  # until 场景：无显式终点时由调用方回退到 now
+        return None
     return datetime.now(timezone.utc) - timedelta(days=int(default_days))
 
 

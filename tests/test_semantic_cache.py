@@ -85,7 +85,6 @@ def test_level_gate_still_blocks_upward(cache):
 def test_boss_skips_redacted_without_occluding_boss_entry(monkeypatch):
     """staff 已脱敏条目的相似度更高时，boss 应跳过它并命中同问题未脱敏的 boss 条目。"""
     monkeypatch.setattr(sc, "embedding_available", lambda: True)
-    # 先放入一条相似度更高的 staff 脱敏条目，再放一条相似度略低但未脱敏的 boss 条目
     v_high = np.zeros(512, dtype="float32")
     v_high[0] = 1.0
     v_mid = np.zeros(512, dtype="float32")

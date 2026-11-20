@@ -41,7 +41,6 @@ def workspace(tmp_path, monkeypatch):
     git("config", "core.hooksPath", "/dev/null")
     git("add", "web/src/App.vue", "web/package.json", "web/eslint.config.js",
         "web/.prettierrc.json", "web/.prettierignore", "web/commitlint.config.cjs", "STRUCTURE.md")
-    # 工具配置来自项目；其格式也先真实校验，不能让 fixture 躲过门禁。
     return root, git
 
 

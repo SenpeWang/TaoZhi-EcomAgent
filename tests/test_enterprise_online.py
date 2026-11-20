@@ -21,7 +21,6 @@ def reset(monkeypatch):
     with database_connection() as c:c.execute("TRUNCATE tenants CASCADE");c.execute("TRUNCATE login_attempts")
     from taozhi.knowledge.semantic_cache import get_semantic_cache
     get_semantic_cache().clear()
-    # 固定的合成测试事实，与部署 data/ 及真实产品文档无关。
     monkeypatch.setattr(setup,"corpus",lambda:{"synthetic_product":[{
         "doc_id":"synthetic_product","doc_name":"合成商品测试说明",
         "text":"【仅供自动化测试】MC-500 膜切机的切幅为 120mm，支持测试用防窥膜。"
@@ -335,7 +334,6 @@ def test_production_forbids_demo_password(monkeypatch,clients):
     r=clients["staff"].post("/api/auth/login",json={"username":"staff","password":"123456"})
     assert r.status_code==403 and "演示口令" in r.text
 def test_canonical_api_cannot_use_legacy_identity(monkeypatch,clients):
-    # 旧 api 包（含 legacy_main 与路由）已下线，生产 app 就是 enterprise.api
     from taozhi.server.api import app as canonical_app
     assert canonical_app.title=="企业智能协作工作台"
     c=TestClient(canonical_app)
@@ -434,9 +432,8 @@ def test_semantic_retrieval_backfills_and_scores(monkeypatch,clients):
         rows=search_documents(c,p,"MC-500 膜切机",hyde_vector=None)
     assert rows and all(rows[i]["score"]>=rows[i+1]["score"] for i in range(len(rows)-1))
     with database_connection() as c:
-        # 命中的切片必须已完成向量补算；无权文档不参与检索，不在此断言范围
         hit=fetch_one(c,"SELECT embedding FROM chunks WHERE id=%s",(rows[0]["chunk_id"],))["embedding"]
-    assert hit is not None and hit.dimensions()==512  # pgvector vector(512)：读回为 Vector 对象
+    assert hit is not None and hit.dimensions()==512
 
 def test_ann_distance_gate_blocks_irrelevant():
     """ANN 距离闸门单元行为：超距剔除、无向量豁免、无查询向量不生效、阈值全放过。"""
@@ -444,13 +441,12 @@ def test_ann_distance_gate_blocks_irrelevant():
     from taozhi.knowledge.retriever import _ann_gate
     chunks=[{"id":"close"},{"id":"far"},{"id":"novector"}]
     vecs=[np.ones(512,dtype="float32"),np.zeros(512,dtype="float32"),None]
-    qv=np.ones(512,dtype="float32")  # close 距离 0，far 距离 1
+    qv=np.ones(512,dtype="float32")
     kept,kvecs=_ann_gate(chunks,vecs,qv,0.45)
     assert [c["id"] for c in kept]==["close","novector"] and kvecs[1] is None
-    assert _ann_gate(chunks,vecs,None,0.45)==(chunks,vecs)      # 无查询向量：闸门不生效
-    assert _ann_gate(chunks,vecs,qv,1.01)==(chunks,vecs)        # 阈值放到 1.01：全放过
-    assert _ann_gate(chunks,vecs,qv,0.45)==(_ann_gate(chunks,vecs,qv,0.45))  # 幂等
-    # 全剔除时返回空（调用方按资料不足处理）
+    assert _ann_gate(chunks,vecs,None,0.45)==(chunks,vecs)
+    assert _ann_gate(chunks,vecs,qv,1.01)==(chunks,vecs)
+    assert _ann_gate(chunks,vecs,qv,0.45)==(_ann_gate(chunks,vecs,qv,0.45))
     empty,_=_ann_gate([chunks[1]],[vecs[1]],qv,0.45)
     assert empty==[]
 
@@ -535,7 +531,6 @@ def test_semantic_cache_invalidated_on_delete_and_stale_worker_check(monkeypatch
     assert clients["boss"].delete("/api/documents/test_doc_company").status_code == 200
     assert cache.get("tenant_test", "公司切幅是多少", input_level=1, boss=False) is None
 
-    # 模拟跨进程遗留的失效版本缓存条目：worker 检查 sources_valid 失败后主动驱逐并回落正常流水线
     cache.put(
         "tenant_test",
         "团队文档写什么",
@@ -571,6 +566,5 @@ def test_pipeline_quote_and_arithmetic_derivation_guards():
     assert _numbers_supported("应退金额 = 299 - 39 - 12 = 248 元，扣除 39 元与 12 元。", policy_doc, question=question)
     assert _numbers_supported("跨店满减按 3:7 分摊，商家承担 7 成即 70%。", policy_doc, question=question)
     assert _numbers_supported("旧 5V2A 充电头功率仅 5 * 2 = 10W。", "不能用普通 5V2A 旧头", question="")
-    # 无依据编造数字（如凭空写 45W 或虚假退款额 199）必须被拦截
     assert not _numbers_supported("iPhone 16 支持 45W 快充。", policy_doc, question=question)
     assert not _numbers_supported("应退金额 = 299 - 39 - 12 = 199 元。", policy_doc, question=question)

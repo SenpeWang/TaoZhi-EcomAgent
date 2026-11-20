@@ -50,22 +50,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CASES_PATH = REPO_ROOT / "evals/datasets/generated/latest/cases.jsonl"
 REPORTS_DIR = REPO_ROOT / "evals/reports"
-# evals/rag_eval/run.py 逐例追加的实时进度文件（跑完才有的 reports/*.json 不能用于实时观看）
 LIVE_PATH = REPORTS_DIR / "live.jsonl"
 
 DEFAULT_URL = os.environ.get("ECOM_PHOENIX_URL", "http://127.0.0.1:6006")
 DEFAULT_DATASET = os.environ.get("ECOM_PHOENIX_DATASET", "taozhi-eval-generated-v2")
 
-# 单条 answer 入库上限：报告里已截断过，这里再兜一层，避免 payload 撑爆
 ANSWER_CHARS = 2000
-# 引用正文上限：报告侧已截到 400 字（400），这里略放宽
 EVIDENCE_CHARS = 500
-# 单次请求超时。一次同步要发上千次串行调用（107 例 × 多条 evaluation），
-# 服务端卡住时不能无限等——客户端各方法都支持 timeout，统一从这里取。
 HTTP_TIMEOUT = 60
 
 
-# ─────────────────────── 读取本地产物 ───────────────────────
 
 def load_cases() -> list:
     if not CASES_PATH.is_file():
@@ -117,7 +111,6 @@ def case_to_example(c: dict) -> dict:
     }
 
 
-# ─────────────────────── 报告 → 逐例结果 ───────────────────────
 
 def slot(results: dict, cid: str) -> dict:
     return results.setdefault(cid, {"output": {}, "evaluations": []})
@@ -135,8 +128,6 @@ def apply_behavior(results: dict, d: dict) -> None:
         "verdict": verdict,
         "claims": d.get("claims"),
         "supported": d.get("supported"),
-        # quote 必须带上：界面上判断"这句话有没有依据"靠的就是引用原文。
-        # 只留标题只能看到"引了哪篇"，看不到"引了哪段"，归因会退回重跑。
         "citations": [{"title": c.get("title"), "chunk_id": c.get("chunk_id"),
                        "document_id": c.get("document_id"),
                        "quote": (c.get("quote") or "")[:EVIDENCE_CHARS]}
@@ -199,14 +190,9 @@ def collect_results(report: dict) -> dict:
     for c in (report.get("retrieval") or {}).get("per_case") or []:
         apply_retrieval(out, c)
 
-    # 对抗层刻意不在此同步：它跑的是 evals/datasets/golden_adversarial.json，
-    # id 形如 Z1/N1/C1，与评估集 case_id（GEN-T-*）实测零交集（18/18 全不匹配）。
-    # 拍平进来只会全部落进"未匹配"，看起来同步了其实一条都没写进去。
-    # 要让它可见，得单独建一个对抗数据集，那是另一件事。
     return out
 
 
-# ─────────────────────── Phoenix 同步 ───────────────────────
 
 def _attr(obj, key, default=None):
     """客户端里 Dataset 是对象、list() 元素是 dict，两种都得能取。"""
@@ -339,8 +325,6 @@ def sync_report(client, report_path: Path, report: dict, name: str,
     try:
         ds = client.datasets.get_dataset(dataset=name, timeout=HTTP_TIMEOUT)
     except ValueError:
-        # --report 单独跑时数据集可能还没建。这里不能抛栈：观测是旁路，
-        # 缺前提只该给出下一步怎么做。
         print(f"[report] Phoenix 里没有数据集 {name}，先跑一次 `--dataset` 再同步报告")
         return
     by_case = {}
@@ -361,7 +345,6 @@ def sync_report(client, report_path: Path, report: dict, name: str,
     try:
         start = datetime.strptime(at, "%Y-%m-%d %H:%M:%S")
     except ValueError:
-        # 老报告没有可解析的 at：退回文件时间，并把它写回 at 供命名使用
         start = datetime.fromtimestamp(report_path.stat().st_mtime)
         at = f"{start:%Y-%m-%d %H:%M:%S}"
     end = datetime.fromtimestamp(report_path.stat().st_mtime)
@@ -375,7 +358,6 @@ def sync_report(client, report_path: Path, report: dict, name: str,
         if not force:
             print(f"[experiment] {exp_name} 已存在，跳过（--force 可另建一份）")
             return
-        # 用序号而不是往名字后面累加：连按三次 --force 会得到 -r2-r2-r2
         seq += 1
         exp_name = f"{base}-r{seq}"
     print(f"[experiment] 新建 {exp_name}（{len(matched)} 条 run）")
@@ -406,7 +388,6 @@ def sync_report(client, report_path: Path, report: dict, name: str,
     print(f"[url] {url}/datasets/{_attr(ds, 'id')}/experiments")
 
 
-# ─────────────────────── 实时跟随 ───────────────────────
 
 def _dataset_index(client, name: str):
     """(dataset 对象, {case_id: node_id})；数据集不存在返回 (None, {})。"""
@@ -457,8 +438,6 @@ def follow_live(client, live_path: Path, name: str, url: str,
             return
         time.sleep(max(poll, 5))
 
-    # 按字节读：UTF-8 多字节序列里不会出现 0x0A，行边界可靠；
-    # 写入方一行一次 write + flush，读到半行说明还没写完，退回去等下一轮。
     with live_path.open("rb") as f:
         while True:
             raw = f.readline()
@@ -478,7 +457,7 @@ def follow_live(client, live_path: Path, name: str, url: str,
             try:
                 rec = json.loads(raw)
             except json.JSONDecodeError:
-                continue          # 半行/坏行：跳过，下一轮会读到完整行
+                continue
             kind = rec.get("type")
             if kind == "header":
                 meta.update(at=rec.get("at") or "", git=rec.get("git") or "")
@@ -521,7 +500,6 @@ def follow_live(client, live_path: Path, name: str, url: str,
                 if not node:
                     print(f"[follow] 跳过 {cid}：评估集里没有这个 case_id")
                     continue
-                # logged 存的是 dataset_example_id（Phoenix 的 run 主键），不是 case_id
                 if node in logged:
                     continue
                 if dry_run:
@@ -547,7 +525,6 @@ def follow_live(client, live_path: Path, name: str, url: str,
         print(f"[follow] 结束：共推送 {done} 例 → {url}/datasets/{dataset_id}/experiments")
 
 
-# ─────────────────────── 入口 ───────────────────────
 
 
 
@@ -712,7 +689,7 @@ def main() -> int:
         ap.print_help()
         return 0
 
-    os.environ.setdefault("NO_PROXY", "*")   # WSL 里有 127.0.0.1:7890 代理，别让它拦本机请求
+    os.environ.setdefault("NO_PROXY", "*")
     os.environ.setdefault("no_proxy", "*")
 
     try:
@@ -723,7 +700,6 @@ def main() -> int:
               file=sys.stderr)
         return 1 if args.strict else 0
 
-    # Client 不接受全局 timeout，改在各调用点显式传 HTTP_TIMEOUT
     client = Client(base_url=args.url)
     try:
         client.datasets.list(timeout=HTTP_TIMEOUT)
@@ -750,8 +726,6 @@ def main() -> int:
         if args.agent or args.all:
             sync_agent_eval(client, args.url, args.force, args.dry_run)
     except Exception as exc:
-        # 中途断网/服务重启会从这里出去。打一行摘要而不是整页栈：观测失败时
-        # 读者最需要知道的是"评估没坏"，栈只会让人以为评估炸了。
         print(f"⚠ 同步中断：{type(exc).__name__}: {exc}", file=sys.stderr)
         print("  评估报告本身不受影响，修好 Phoenix 后重跑本命令即可（幂等）。",
               file=sys.stderr)

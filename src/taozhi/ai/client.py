@@ -212,7 +212,6 @@ class LLMClient:
             preferred_endpoint_id=preferred,
         )
 
-        # 若测试桩仅模拟了默认通道或未配置 api_key，保留基础 _client 兜底路径
         if not candidates:
             fallback_ep = SensenovaEndpoint(
                 endpoint_id="sensenova_default",
@@ -266,7 +265,6 @@ class LLMClient:
                         had_failover = True
                         continue
 
-                    # 仅剩最后一条通道且属瞬时抖动/限流时，额外退避重试一次
                     if len(candidates) == 1 and reason in ("rate_limit", "network_timeout", "upstream_error"):
                         time.sleep(0.5)
                         try:

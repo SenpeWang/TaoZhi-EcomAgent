@@ -38,10 +38,8 @@ def test_case_to_example_splits_three_parts():
     ex = case_to_example(case)
     assert sorted(ex) == ["input", "metadata", "output"]
     assert ex["input"]["question"] == "LX-21 功率？"
-    # 金标准必须在 output：否则界面上没法判断答案错在哪
     assert ex["output"]["expected_documents"] == ["SYN_CORPUS_LX21"]
     assert ex["output"]["expected_facts"] == ["140W"]
-    # case_id 必须进 metadata：同步与去重全靠它
     assert ex["metadata"]["case_id"] == "GEN-X-001"
     assert ex["metadata"]["category"] == "product"
 
@@ -64,14 +62,11 @@ def test_collect_results_merges_behavior_and_retrieval():
     ev = {e["name"]: e for e in res["C1"]["evaluations"]}
     assert ev["answer_pass"]["score"] == 1.0
     assert ev["answer_pass"]["label"] == "PASS"
-    # 声明级忠实度是比率，不是布尔——这是与 answer_pass 的关键区别
     assert ev["faithfulness_decl"]["score"] == 0.75
     assert "3/4" in ev["faithfulness_decl"]["explanation"]
-    # 检索指标按 retrieval.<metric> 命名，与行为层分数并列不冲突
     assert ev["retrieval.hit@8"]["score"] == 1.0
     assert ev["retrieval.hit@8"]["kind"] == "CODE"
     assert "retrieval" in res["C1"]["output"]
-    # 引用正文必须进 output：只剩标题就没法在界面上判断"这句话有没有依据"
     assert res["C1"]["output"]["citations"][0]["quote"] == "x"
 
 
@@ -85,7 +80,6 @@ def test_collect_results_failure_labels():
     assert ev["answer_pass"]["label"] == "FAIL"
     assert ev["answer_relevant"]["label"] == "NO"
     assert ev["abstain"]["label"] == "ABSTAIN"
-    # claims=0 时不能算出 0/0，必须直接不出这个维度
     assert "faithfulness_decl" not in ev
 
 
@@ -126,9 +120,6 @@ def test_apply_behavior_and_retrieval_share_one_slot():
     assert ev["faithfulness_decl"]["score"] == 1.0
     assert res["C9"]["output"]["answer"] == "140W"
     assert res["C9"]["output"]["retrieval"]["mrr"] == 0.5
-    # 与同一份内容走报告口径的结果逐项相等。比分数映射而不是比列表：
-    # 实时路径先拿到检索记录、事后路径先读行为记录，evaluation 的先后本就不同，
-    # Phoenix 按 (run,name) 存也无所谓顺序。
     report = {"behavior": {"detail": [{"id": "C9", "pass": True, "why": "有据",
                                        "verdict": {"relevant": True, "abstain": False},
                                        "claims": 2, "supported": 2, "answer": "140W"}]},
@@ -153,7 +144,6 @@ def test_experiment_name_matches_report_and_live_header():
     对不上就会写两份：一份跑的过程中逐例推，一份跑完再整份推。
     """
     assert experiment_name("2026-10-21 18:30:05", "abcdef1234") == "eval-20261021-183005-abcdef1"
-    # git 缺失也要能出名字，不能抛
     assert experiment_name("2026-10-21 18:30:05", "") == "eval-20261021-183005-nogit"
 
 

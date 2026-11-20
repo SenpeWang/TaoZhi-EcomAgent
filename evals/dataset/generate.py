@@ -86,11 +86,8 @@ def build_context(org, fixtures, corpus):
     for d in corpus.get("guides", []):
         raw[d["doc_id"]] = dict(d, kind="guide", scope="company", level=1,
                                 state="published", node="SYN_NODE_OP", ai_allowed=True)
-    docs = _wrap(raw)   # 外层也必须是 A：模板里 docs.SYN_XXX 靠属性访问取值
+    docs = _wrap(raw)
     products = _wrap({p["key"]: p for p in corpus.get("products", [])})
-    # 键只允许字母数字下划线：模板里 compatibilities.LX21_MacBook_Pro_16 是
-    # 属性访问，空格是非法 Python，连字符会被解析成减号（LX21-MacBook 变成
-    # LX21 减 MacBook，报的错还是 KeyError 'LX21'，极难定位）
     compatibilities = _wrap({
         re.sub(r"[^0-9A-Za-z]+", "_", f"{c.get('charger') or c.get('membrane')}_{c['device']}"): c
         for c in corpus.get("compatibilities", [])})
@@ -201,7 +198,6 @@ def generate():
                 "forbidden_disclosure": [render(w, local) for w in tpl.get("forbidden", [])],
                 "pass_criteria": tpl.get("pass_criteria", ""),
                 "evidence_location": render(tpl.get("evidence", ""), local),
-                # 五维标注写进用例本体：维度不能只活在文档里，报告要按维度聚合
                 "answerability": tpl["answerability"],
                 "qtype": tpl["qtype"],
                 "difficulty": tpl["difficulty"],
@@ -308,8 +304,6 @@ def main() -> int:
         "".join(json.dumps(d, ensure_ascii=False) + "\n" for d in corpus_docs), encoding="utf-8")
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 唯一一份产物直接写入 out（默认 generated/latest/）；版本追溯由 Git 承担，
-    # 不维护 v1 快照 + latest 指针的双份结构（2026-10-19 单口径统一）。
 
     print(f"生成 {len(cases)} 条用例 / {len(corpus_docs)} 篇语料文档 → {out}")
     print("类别分布:", dict(sorted(by_cat.items())))

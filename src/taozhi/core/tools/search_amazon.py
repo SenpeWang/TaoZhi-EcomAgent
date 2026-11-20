@@ -44,7 +44,6 @@ def search_amazon(
     if not clean_query:
         return []
 
-    # Tier 1: 自建稳定 API 网关（可选配置）
     custom_url = os.environ.get("ECOM_AMAZON_SEARCH_URL", "").strip()
     if custom_url:
         try:
@@ -61,7 +60,6 @@ def search_amazon(
         except Exception as exc:
             _LOG.warning("Amazon 自定义网关失败，切换直抓链路: %s", exc)
 
-    # Tier 2: 直抓 Amazon.com 搜索页 DOM
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -134,7 +132,6 @@ def search_amazon(
     except Exception as exc:
         _LOG.warning("Amazon 直抓异常，降级 DuckDuckGo 定向搜索: %s", exc)
 
-    # Tier 3: 复用 DuckDuckGo site:amazon.com 定向检索真实网页（缺失字段留空，绝不造假）
     if not results:
         results = _fallback_duckduckgo_amazon_search(clean_query, limit=limit, timeout=timeout)
 

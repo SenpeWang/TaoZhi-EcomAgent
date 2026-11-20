@@ -127,14 +127,12 @@ class DecisionEngine:
                 latency_ms=elapsed,
             )
 
-        # 优先走本地语义向量点积余弦近邻快道
         if not force_llm and embedding_available():
             try:
                 keys, opt_vecs = self._get_option_vectors(options)
                 q_vec = encode_query(context)[0]
                 sims = np.dot(opt_vecs, q_vec)
 
-                # Softmax 温度标定
                 shifted_sims = (sims - np.max(sims)) / self.temperature
                 exp_sims = np.exp(shifted_sims)
                 probs = exp_sims / np.sum(exp_sims)
@@ -160,7 +158,6 @@ class DecisionEngine:
                         latency_ms=round(elapsed, 2),
                     )
 
-                # 若 Top-1 置信度明确且区分度显著，直接在快路径返回
                 if not multi_select and top_prob >= self.semantic_threshold and margin >= self.margin_threshold:
                     elapsed = (time.monotonic() - start_time) * 1000
                     return ChoiceResult(
@@ -174,11 +171,9 @@ class DecisionEngine:
             except Exception as e:
                 logger.warning("语义向量快道匹配异常: %s", e)
 
-        # 若不允许调用外部 LLM，安全降级至本地模式规则匹配
         if not allow_llm:
             return self._heuristic_choice(context, options, multi_select, top_k, start_time)
 
-        # 允许调用模型时走受控 LLM 结构化选择
         return self._llm_choice(context, options, multi_select, top_k, start_time)
 
     def _heuristic_choice(
@@ -281,7 +276,6 @@ class DecisionEngine:
         )
 
 
-# 单例全局引擎实例
 _global_decision_engine: Optional[DecisionEngine] = None
 _engine_lock = threading.Lock()
 

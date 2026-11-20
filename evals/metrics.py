@@ -152,7 +152,6 @@ def accuracy_report(verdicts: Sequence[dict]) -> dict:
     grounded = sum(1 for v in verdicts if v.get("faithful")) / n
     relevant = sum(1 for v in verdicts if v.get("relevant")) / n
     abstain = sum(1 for v in verdicts if v.get("abstain")) / n
-    # 置信区间：judge 是抽样判定，点估计单独看会把噪声当趋势
     return {"n": n, "accuracy": acc, "grounded_rate": grounded,
             "relevant_rate": relevant, "abstain_rate": abstain,
             "ci95": {
@@ -431,7 +430,6 @@ def faithfulness_report(cases: Sequence[dict]) -> dict:
             "claims": int(sum_c), "supported": int(sum_s)}
 
 
-# ─────────────── 运行间比较：配对 bootstrap ───────────────
 
 def _ci(values: Sequence[float], bootstrap: int = DEFAULT_BOOTSTRAP):
     """把 summarize 的置信区间压成 [low, high]；样本不足时返回 None，不编造。"""
@@ -475,7 +473,6 @@ def paired_delta(baseline: Sequence[float], current: Sequence[float],
             "verdict": "regression" if worse else ("improved" if better else "stable")}
 
 
-# ─────────────── judge 校准：Cohen's kappa ───────────────
 
 KAPPA_GUIDE = ((0.8, "强"), (0.6, "可用"), (0.4, "勉强"), (float("-inf"), "不可用"))
 
@@ -517,7 +514,6 @@ def cohen_kappa(human: Sequence, judge: Sequence,
         vals = [_kappa(idx)[0] for idx in samples]
         lo, hi_ = float(np.percentile(vals, 2.5)), float(np.percentile(vals, 97.5))
     verdict = next(t for cut, t in KAPPA_GUIDE if kappa >= cut)
-    # 混淆矩阵：行=人工，列=judge
     mat = np.zeros((k, k), dtype="int64")
     np.add.at(mat, (hi, ji), 1)
     return {"n": n, "kappa": float(kappa), "agreement": po, "ci95_low": lo,

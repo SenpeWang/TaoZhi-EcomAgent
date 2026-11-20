@@ -40,7 +40,6 @@ RRF_K = 60
 RRF_FLOOR = 0.0022
 BACKFILL_LIMIT = 256
 SEMANTIC_DIM = 512
-# 距离闸门通过存在性判定后的相对保留带宽：只截掉明显偏离的尾部，不按绝对阈值逐条硬筛
 GATE_MARGIN = 0.06
 
 _HYDE_SYSTEM = (

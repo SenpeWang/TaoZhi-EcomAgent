@@ -8,7 +8,6 @@ from taozhi.orchestration.decision import (
     get_decision_engine,
 )
 
-# 仅在非 test 离线环境下允许从 .env 读取外部凭证
 _is_test_env = os.environ.get("ECOM_MODE") == "test" or os.environ.get("ECOM_ENV_FILE", "").endswith(".env.test")
 _env_path = Path(__file__).resolve().parents[1] / ".env"
 if not _is_test_env and _env_path.exists():
@@ -37,10 +36,8 @@ def test_decision_choice_semantic_fast_path():
         pytest.skip("本地向量嵌入服务未运行，跳过语义快道测试")
     engine = get_decision_engine()
 
-    # 预热选项向量缓存（纯本地向量化，禁止调用外部 LLM）
     engine.choice("预热初始化", SPECIALIST_OPTIONS, multi_select=False, allow_llm=False)
 
-    # 明确的售后退换问题
     res = engine.choice("用了一周边缘起泡开胶了，给换新吗？", SPECIALIST_OPTIONS, multi_select=False)
     assert res.selected == ["after_sales"]
     assert res.confidence >= 0.4

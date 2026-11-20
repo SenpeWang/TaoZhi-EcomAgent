@@ -115,7 +115,7 @@ def provision():
                     ))
                     admin.execute(sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(sql.Identifier(dbname)))
         except psycopg.Error:
-            pass  # 目标库已由容器初始化或当前角色无建库权限时直接继续迁移
+            pass
         with psycopg.connect(cfg.dsn, autocommit=True) as target:
             target.execute("CREATE EXTENSION IF NOT EXISTS vector")
         subprocess.run(

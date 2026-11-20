@@ -25,8 +25,6 @@ _state = {"checked_at": 0.0, "ok": False, "model": "", "dim": 0}
 OK_TTL = 10.0
 FAIL_TTL = 10.0
 
-# 查询向量缓存：进程内 LRU。查询文本无界，刻意不落库——落库会让缓存表随用户
-# 提问无限膨胀，而它省下的只是一次 ~19ms 的网络往返。
 QUERY_CACHE_MAX = 2048
 _query_cache: OrderedDict = OrderedDict()
 _query_stats = {"hits": 0, "misses": 0}

@@ -48,13 +48,12 @@ def main() -> int:
     if args.dry_run or total == 0:
         return 0
 
-    # 缓存键按租户隔离，所以按租户分批，避免跨租户混批
     by_tenant = defaultdict(list)
     for r in rows:
         by_tenant[r["tenant_id"]].append(r)
 
     done = 0
-    with database_connection() as conn:  # 单事务：中途失败整体回滚，重跑即可
+    with database_connection() as conn:
         for tenant_id, items in by_tenant.items():
             for start in range(0, len(items), args.batch):
                 batch = items[start:start + args.batch]

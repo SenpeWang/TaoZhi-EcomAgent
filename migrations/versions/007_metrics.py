@@ -26,7 +26,6 @@ def upgrade():
  FOREIGN KEY(tenant_id,node_id) REFERENCES org_nodes(tenant_id,id),
  FOREIGN KEY(tenant_id,owner_id) REFERENCES users(tenant_id,id))""")
     op.execute("CREATE INDEX idx_metrics_tenant ON metrics(tenant_id,state)")
-    # 例外授予：与 document_grants 同构（allow/deny 可覆盖密级默认）
     op.execute("""CREATE TABLE metric_grants(
  tenant_id text NOT NULL, metric_id text NOT NULL, user_id text NOT NULL,
  effect text NOT NULL CHECK(effect IN ('allow','deny')), granted_by text NOT NULL,

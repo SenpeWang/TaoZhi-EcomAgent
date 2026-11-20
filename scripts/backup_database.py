@@ -22,7 +22,6 @@ def create_database_backup():
     path=dest/(load_config().mode+".dump")
     subprocess.run([_pg_tool("pg_dump"),"-Fc","--no-owner","--no-privileges","-f",str(path)],env=client_env(),check=True)
     path.chmod(0o600)
-    # Original attachments need an independent archive; database references are preserved.
     import tarfile
     with tarfile.open(dest/"private-files.tar.gz","w:gz") as archive:archive.add(load_config().private_dir,arcname="private")
     (dest/"private-files.tar.gz").chmod(0o600)
@@ -49,7 +48,6 @@ def verify_restore():
             subprocess.run([_pg_tool("pg_restore"),"--no-owner","--no-privileges","--exit-on-error","--dbname",target,str(path)],env=client_env(target),check=True)
             restored=cfg.dsn.rsplit("/",1)[0]+"/"+target
             assert signatures(cfg.dsn)==signatures(restored),"恢复数据校验不一致"
-            # 在独立目录恢复附件，并逐个验证字节；不覆盖正在使用的私有目录。
             import tempfile,tarfile
             runtime_dir=resolve_runtime_dir();runtime_dir.mkdir(parents=True,exist_ok=True,mode=0o700)
             with tempfile.TemporaryDirectory(prefix="restore-files-",dir=runtime_dir) as temporary:

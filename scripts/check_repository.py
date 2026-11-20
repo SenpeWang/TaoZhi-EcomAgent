@@ -11,8 +11,6 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[1]
 MAX_FILE_BYTES = 1024 * 1024
 LOCAL_AGENT_POLICY_REASON = "本机维护约束文件"
-# 这两个提交在 AGENTS.md 改为本机文件之前已经发布；仅兼容其旧路径。
-# 新暂存、新提交始终拒绝；历史内容仍执行秘密、资料和目录检查。
 PRE_LOCAL_AGENT_POLICY_COMMITS = frozenset({
     "5018289c07b4a086f5470442d878fcc8eaca784a",
     "2b071e5b087099cd0a4683c4394a4b972282b652",
@@ -72,7 +70,6 @@ def inspect_blob(path: str, content: bytes) -> list[str]:
         problems.append("二进制文件需明确公开用途")
     for label, pattern in SECRET_PATTERNS:
         for match in pattern.finditer(content):
-            # 允许显式占位符，不允许源码内嵌真实数据库密码。
             if label == "内嵌数据库密码" and (
                 match.group(1).startswith(bytes([36, 123])) or match.group(1) in {b"PASSWORD", b"<password>"}
             ):

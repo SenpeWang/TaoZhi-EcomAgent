@@ -26,7 +26,6 @@ from taozhi.knowledge.db import database_connection, fetch_one  # noqa: E402
 from taozhi.domain.passwords import hash_password  # noqa: E402
 from taozhi.infrastructure.persistence.job_repo import generate_id  # noqa: E402
 
-# (用户名, 显示名, 角色, 组织类型, 系统管理员)
 BLUEPRINT = [
     ("admin", "系统管理员", "admin", "company", True),
     ("leader", "运营组长", "leader", "team", False),

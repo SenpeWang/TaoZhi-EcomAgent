@@ -1,6 +1,5 @@
 import pytest
 
-# ── 企业在线链路 Rerank 精排（enterprise/retriever._rerank_order） ──
 
 import numpy as np
 
@@ -24,14 +23,13 @@ class _Cfg:
 
 def _fused_chunks(n=5):
     chunks = [{"id": f"k{i}", "text": f"切片{i} 膜切机参数"} for i in range(n)]
-    fused = np.linspace(0.01, 0.03, n)  # 融合分按索引递增：i 越大融合分越高
+    fused = np.linspace(0.01, 0.03, n)
     return chunks, fused
 
 
 def test_enterprise_rerank_reorders_candidates(monkeypatch):
     chunks, fused = _fused_chunks()
     monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg())
-    # 客户端打分恰好把融合序反转，验证精排生效
     monkeypatch.setattr(ent_embedding, "rerank",
                         lambda q, texts: [float(len(texts) - j) for j in range(len(texts))])
     ranked = ent_retriever._rerank_order("膜切机", chunks, fused)
@@ -39,7 +37,7 @@ def test_enterprise_rerank_reorders_candidates(monkeypatch):
     scores = [s for _, s in ranked]
     assert order[0] == 4 and order[-1] == 0
     assert sorted(order) == list(range(5))
-    assert scores == sorted(scores, reverse=True)  # 精排分随顺序单调不增
+    assert scores == sorted(scores, reverse=True)
 
 
 def test_enterprise_rerank_failure_falls_back_to_fused(monkeypatch):
@@ -51,8 +49,8 @@ def test_enterprise_rerank_failure_falls_back_to_fused(monkeypatch):
 
     monkeypatch.setattr(ent_embedding, "rerank", _boom)
     ranked = ent_retriever._rerank_order("膜切机", chunks, fused)
-    assert [i for i, _ in ranked] == [4, 3, 2, 1, 0]  # 融合分降序
-    assert all(s is None for _, s in ranked)  # 无精排分 → 调用方跳过分数过滤
+    assert [i for i, _ in ranked] == [4, 3, 2, 1, 0]
+    assert all(s is None for _, s in ranked)
 
 
 def test_enterprise_rerank_disabled_keeps_fused_order(monkeypatch):
@@ -69,7 +67,6 @@ def test_enterprise_rerank_disabled_keeps_fused_order(monkeypatch):
 
 def test_enterprise_rerank_floor_and_candidates(monkeypatch):
     chunks, fused = _fused_chunks()
-    # 候选数上限 2：只有融合分最高的 2 条进入精排
     monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg(candidates=2))
     seen = {}
 
@@ -81,14 +78,11 @@ def test_enterprise_rerank_floor_and_candidates(monkeypatch):
     ranked = ent_retriever._rerank_order("膜切机", chunks, fused)
     assert [i for i, _ in ranked] == [4, 3]
     assert len(seen["texts"]) == 2
-    # 融合分全部低于 RRF_FLOOR 时不能清空结果（地板是削长尾，不是判空）：
-    # 回落自然序并标记无精排分，由后续过滤与闸门决定去留。
     low = np.array([0.0001] * 5)
     ranked = ent_retriever._rerank_order("膜切机", chunks, low)
-    assert [i for i, _ in ranked] == [0, 1]  # 回落自然序后仍受候选数上限约束，但不为空
+    assert [i for i, _ in ranked] == [0, 1]
 
 
-# ── 候选装配：低分过滤、同源限流、超长截断、文本去重 ──
 
 class _P:
     def __init__(self, boss=True):
@@ -121,7 +115,7 @@ def test_enterprise_finalize_caps_chunks_per_document(monkeypatch):
     """同一文档最多 3 条：避免 top-k 被单篇文档占满，保证证据多样性。"""
     specs = [(f"切片{i}", "d1") for i in range(6)] + [("切片X", "d2")]
     chunks = _mk_chunks(specs)
-    fused = np.linspace(0.02, 0.01, len(chunks))  # 靠前的融合分更高
+    fused = np.linspace(0.02, 0.01, len(chunks))
     monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg(max_chunks_per_doc=3))
     monkeypatch.setattr(ent_embedding, "rerank", lambda q, texts: [0.5] * len(texts))
     out = ent_retriever._finalize("膜切机", chunks, fused, 10, _mk_allowed(["d1", "d2"]), _P())
@@ -178,15 +172,12 @@ def test_recency_tiebreak_and_entity_diversity(monkeypatch):
         "d_v2": {"id": "d_v2", "acl_version": 1, "title": chunks[1]["doc_title"], "level": 1, "node_id": "n1", "ai_allowed": True},
     }
     monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg())
-    # V1.0 精排分略高但属于旧版本，当前问句应将 V2.0 提到首位
     monkeypatch.setattr(ent_embedding, "rerank", lambda q, texts: [0.88, 0.85])
     out_cur = ent_retriever._finalize("整机保修期现在是多久？", chunks, np.array([0.03, 0.03]), 5, allowed, _P())
     assert out_cur[0]["document_id"] == "d_v2"
-    # 历史差异问句不做旧版降权
     out_hist = ent_retriever._finalize("保修政策什么时候改的？", chunks, np.array([0.03, 0.03]), 5, allowed, _P())
     assert out_hist[0]["document_id"] == "d_v1"
 
-    # 多实体对比保底：前 2 条同一款产品文档时，第 3 条的另一型号文档应被提上 top-2
     cmp_chunks = [
         {"id": "c0", "text": "LX-21 第一段 140W", "doc_title": "LX-21 手册", "document_id": "d21", "version": 1, "page": 1},
         {"id": "c1", "text": "LX-21 第二段 三C口", "doc_title": "LX-21 手册", "document_id": "d21", "version": 1, "page": 2},
@@ -234,7 +225,7 @@ def test_search_documents_fast_path_runs_hyde_pg_ann_and_title_rerank(monkeypatc
 
     hyde_vec = np.full(512, 2.0, dtype="float32")
     out = ent_retriever.search_documents(None, _P(), "120W 充电器", limit=5, hyde_vector=hyde_vec)
-    assert len(ann_calls) == 2  # query ANN + hyde ANN
+    assert len(ann_calls) == 2
     assert len(out) == 1 and out[0]["chunk_id"] == "c_hyde"
     assert out[0]["title"] == "LX-30 规格"
 

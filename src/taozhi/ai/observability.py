@@ -13,7 +13,6 @@ _lock = threading.RLock()
 _counters: Dict[str, float] = {}
 _timers: Dict[str, List[float]] = {}
 
-# 每 1K token 的估算单价（美元），支持 ECOM_LLM_PRICE_{FAST|STRONG|VISION}_1K 覆盖
 _PRICE_PER_1K = {"fast": 0.0004, "strong": 0.006, "vision": 0.003}
 
 

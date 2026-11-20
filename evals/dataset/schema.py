@@ -14,41 +14,30 @@ from pathlib import Path
 
 SPEC = Path(__file__).resolve().parent / "spec"
 
-# 检索类：必须有可判定锚点与预期文档（否则"答没答对"无法机器判断）
 RETRIEVAL_CATEGORIES = ("product", "compat", "aftersale", "multi_doc", "insufficient", "conflict",
                         "robust", "troubleshoot", "edge", "timeliness", "citation", "long_context",
                         "operations", "supply", "coach", "finance", "calculation", "exclusion")
-# 模糊/歧义类：不能有单点答案，判定靠 pass_criteria（是否澄清/分情况），不强制锚点事实
 AMBIGUOUS_CATEGORIES = ("ambiguous",)
-# 权限类：判定口径必须写死（pass_criteria），不允许 judge 自由发挥
 PERMISSION_CATEGORIES = ("role", "grant", "revocation", "injection", "leakage")
-# 多轮类：必须有前置轮，判定只针对最后一轮；预期锚点靠 expected_facts 或 pass_criteria
 MULTI_TURN_CATEGORIES = ("multi_turn",)
-# 解析层：必须有预期文档与可判定事实，否则测不出"读进来还在不在"
 PARSING_CATEGORIES = ("parsing",)
-# 问数层（ChatBI）：走指标语义层受控 SQL，不强制 expected_documents，但必须给 expected_facts 与 pass_criteria
 CHATBI_CATEGORIES = ("chatbi",)
 KNOWN_CATEGORIES = (RETRIEVAL_CATEGORIES + PERMISSION_CATEGORIES
                     + MULTI_TURN_CATEGORIES + PARSING_CATEGORIES
                     + AMBIGUOUS_CATEGORIES + CHATBI_CATEGORIES)
 
-# 五维标注：任何一条用例都必须带齐，否则报告无法按维度归因
 DIM_VALUES = {
     "answerability": ("answerable", "partial", "unanswerable"),
     "qtype": ("fact", "process", "multihop", "compare", "troubleshoot",
               "edge", "ambiguous", "security"),
     "difficulty": ("easy", "medium", "hard"),
-    # real = 线上/真实口语噪声采样
     "source": ("synthetic", "badcase", "adversarial", "real"),
     "risk": ("high", "medium", "low"),
 }
 
-# 领域路由标签：对齐运行期 SPECIALIST_AGENTS + 问数/安全，防数据集只在 product/after_sales 打转
 DOMAIN_ROLES = ("product", "compatibility", "after_sales", "coach", "operations", "supply", "finance", "data", "security")
 ROLE_TYPES_MIN = {"employee": 100, "leader": 6, "boss": 6}
 
-# 覆盖下限：维度矩阵不能只写进文档，数量不够就拒绝生成——
-# 否则"覆盖 5 个维度"会退化成一句无法验证的话。
 COVERAGE_MIN = {
     "answerability": {"answerable": 72, "partial": 8, "unanswerable": 22},
     "qtype": {"fact": 45, "process": 3, "multihop": 6, "compare": 9,
@@ -142,7 +131,6 @@ def validate_case(case: dict, doc_ids: set, identities: set, canaries: set,
     if ident.get("logical_id") and ident["logical_id"] not in identities:
         errs.append(f"{cid}: 身份 {ident['logical_id']} 不在 org.yaml")
     q = (case.get("question") or "").strip()
-    # 多轮的追问天然是短句（"那重量呢？"），按单轮标准判会把真实问法判成脏数据
     min_len = 4 if case.get("category") in MULTI_TURN_CATEGORIES else 8
     if len(q) < min_len:
         errs.append(f"{cid}: 问题过短（{len(q)} 字符），不像真实问法")
@@ -180,7 +168,6 @@ def validate_case(case: dict, doc_ids: set, identities: set, canaries: set,
                 errs.append(f"{cid}: 前置轮过短，无法建立上下文")
         if not (case.get("expected_facts") or (case.get("pass_criteria") or "").strip()):
             errs.append(f"{cid}: 多轮用例必须给 expected_facts 或 pass_criteria")
-    # 禁区里的金丝雀必须真实存在：写错的标记名等于没有红线
     for w in case.get("forbidden_disclosure") or []:
         if w.startswith("SYN-CANARY-") and w not in canaries:
             errs.append(f"{cid}: 禁区标记 {w} 不在 fixtures.canaries（拼写错误即红线失效）")

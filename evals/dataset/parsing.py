@@ -14,7 +14,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-CJK = "china-s"   # PyMuPDF 内置简体中文字体，无需外部 TTF
+CJK = "china-s"
 
 
 def render_pdf(path: Path, title: str, rows, header: str = "", footer: str = "",

@@ -102,7 +102,6 @@ class SubagentContext:
         self.artifacts_dir = self.base_dir / "artifacts"
         self.logs_dir = self.base_dir / ".system_generated" / "logs"
 
-        # 分支工作区（仅在 BRANCH 模式下建立独立目录）
         self.workspace_dir: Optional[Path] = None
         if self.workspace_mode == WorkspaceMode.BRANCH:
             self.workspace_dir = self.base_dir / "workspace"
@@ -189,7 +188,6 @@ class SubagentContext:
         if self.workspace_dir and self.workspace_dir.exists():
             shutil.rmtree(self.workspace_dir, ignore_errors=True)
 
-    # ---------------- 产物 Markdown 格式化规范辅助器 ----------------
 
     @staticmethod
     def build_alert(alert_type: str, content: str) -> str:

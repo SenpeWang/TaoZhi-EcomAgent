@@ -78,7 +78,6 @@ def test_mcp_server_call_tool_and_alias():
     assert len(parsed) == 1
     assert parsed[0]["source"] == "amazon"
 
-    # 直接通过规范工具名 search_1688_wholesale 调用，并确认废弃别名 search_1688 不再放行
     with patch(
         "taozhi.infrastructure.mcp.server.search_1688_wholesale",
         return_value=[{"title": "东莞源头厂保温杯", "price": 18.5}],
@@ -99,13 +98,11 @@ def test_mcp_client_adapter_integration():
     server = EcommerceMcpServer()
     adapter = McpClientAdapter(server=server)
 
-    # 1. 受限 tools/list 过滤
     specs = adapter.list_tool_specs(["search_web", "fetch_web_page"])
     spec_names = [s["name"] for s in specs]
     assert spec_names == ["search_web", "fetch_web_page"]
     assert "inputSchema" in specs[0]
 
-    # 2. 通过 MCP tools/call 执行并返回结构化 ToolOutcome
     with patch(
         "taozhi.infrastructure.mcp.server.search_amazon",
         return_value=[{"title": "AMZ Mug", "price": "$19.99", "asin": "B001", "source": "amazon"}],
@@ -115,13 +112,11 @@ def test_mcp_client_adapter_integration():
     assert outcome.data_count == 1
     assert outcome.items[0]["asin"] == "B001"
 
-    # 3. 任务取消事件拦截
     cancel_evt = threading.Event()
     cancel_evt.set()
     cancelled = adapter.call_tool("search_amazon", {"query": "test"}, cancel_event=cancel_evt)
     assert cancelled.status == "cancelled"
 
-    # 4. 未注册工具映射为错误态 ToolOutcome
     unknown = adapter.call_tool("non_existent_tool", {})
     assert unknown.status == "error"
 

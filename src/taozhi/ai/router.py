@@ -189,7 +189,6 @@ class CircuitBreakerRegistry:
         else:
             healthy.sort(key=lambda e: e.priority)
 
-        # 若全部通道都在冷却中，仍按最早解封顺序保留探活兜底，避免彻底死锁
         cooling.sort(key=lambda item: (item[0], item[1]))
         return healthy + [item[2] for item in cooling]
 
@@ -298,7 +297,6 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
             )
         )
 
-    # 1. 商汤海外版（token.sensenova.ai + sensenova-6.8-flash，优先使用）
     overseas_key = getattr(settings, "sensenova_overseas_api_key", "")
     overseas_url = getattr(settings, "sensenova_overseas_base_url", "https://token.sensenova.ai/v1")
     overseas_model = getattr(settings, "sensenova_overseas_model", "") or target_model
@@ -313,7 +311,6 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
         overseas_direct,
     )
 
-    # 2. Dots（小红书点点，国内可用节点）
     dots_key = getattr(settings, "dots_api_key", "")
     dots_url = getattr(settings, "dots_base_url", "https://note3-prev-api.askdiandian.com/v1")
     dots_model = getattr(settings, "dots_model", "") or "dots3-note-prev"
@@ -328,7 +325,6 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
         dots_direct,
     )
 
-    # 3. 国内主通道（.cn Key 2）
     _add(
         "sensenova_cn_primary",
         "商汤国内版（Key 2）",
@@ -339,7 +335,6 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
         settings.llm_direct_connection,
     )
 
-    # 4. 国内备用 Key（可选兜底）
     secondary_cn_key = getattr(settings, "sensenova_cn_secondary_api_key", "")
     _add(
         "sensenova_cn_secondary",

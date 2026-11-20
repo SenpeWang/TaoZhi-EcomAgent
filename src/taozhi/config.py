@@ -15,11 +15,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# <...>/TaoZhi-EcomAgent
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 
-# 只读仓库内的 .env，缺了就当没有：不回落到上级目录那种仓库外、非版本控制
-# 的文件——读到一个来路不明的 .env 比读不到更难排查。
 _ENV_FILES = [str(PROJECT_ROOT / ".env")] if (PROJECT_ROOT / ".env").exists() else []
 _ecom_env_file = os.getenv("ECOM_ENV_FILE")
 if _ecom_env_file:
@@ -37,20 +34,16 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # ───────────────────────── 基本 ─────────────────────────
     log_level: str = "INFO"
 
-    # ───────────────────── LLM 服务层（商汤 sensenova-6.8-flash 国内/海外容灾池） ─────────────────────
     base_url: str = Field(default="https://token.sensenova.cn/v1", alias="BASE_URL")
     api_key: str = Field(default="", alias="API_KEY")
     model: str = Field(default="sensenova-6.8-flash", alias="MODEL")
 
-    # 统一模型路由（默认全量采用 sensenova-6.8-flash）
     llm_fast_model: str = ""
     llm_strong_model: str = ""
     llm_vision_model: str = ""
     llm_temperature: float = 0.2
-    # 推理型模型会把预算消耗在思维链上，默认预算需留足余量
     llm_max_tokens: int = 8192
     llm_timeout: int = 180
     llm_max_retries: int = 1
@@ -59,7 +52,6 @@ class Settings(BaseSettings):
     llm_max_concurrency: int = 6
     llm_direct_connection: bool = True
 
-    # 国内第二 Key + 商汤海外容灾端点 + Dots 备选通道
     sensenova_cn_secondary_api_key: str = Field(default="", alias="SENSENOVA_CN_SECONDARY_API_KEY")
     sensenova_overseas_base_url: str = Field(default="https://token.sensenova.ai/v1", alias="SENSENOVA_OVERSEAS_BASE_URL")
     sensenova_overseas_api_key: str = Field(default="", alias="SENSENOVA_OVERSEAS_API_KEY")
@@ -70,17 +62,14 @@ class Settings(BaseSettings):
     dots_model: str = Field(default="dots3-note-prev", alias="DOTS_MODEL")
     dots_direct_connection: bool = Field(default=True, alias="DOTS_DIRECT_CONNECTION")
 
-    # 容灾熔断中间件冷却参数（秒）
     llm_circuit_cooldown_rate_limit: int = Field(default=45, ge=5, le=600, alias="LLM_CIRCUIT_COOLDOWN_RATE_LIMIT")
     llm_circuit_cooldown_transient: int = Field(default=25, ge=5, le=600, alias="LLM_CIRCUIT_COOLDOWN_TRANSIENT")
     llm_circuit_cooldown_auth: int = Field(default=600, ge=30, le=3600, alias="LLM_CIRCUIT_COOLDOWN_AUTH")
 
-    # ───────────────────── 调研多智能体预算（可环境变量覆盖） ─────────────────────
     research_max_turns: int = Field(default=5, ge=1, le=20)
     research_max_parallel_subagents: int = Field(default=4, ge=1, le=8)
     research_max_subagent_steps: int = Field(default=3, ge=1, le=8)
 
-    # ───────────────────── 业务系统对接 ─────────────────────
     business_api_url: str = ""
     business_api_token: str = ""
 
@@ -111,9 +100,6 @@ def get_settings() -> Settings:
 settings: Settings = get_settings()
 
 
-# ---------------------------------------------------------------------------
-# 企业服务运行时配置（数据层与中间件）
-# ---------------------------------------------------------------------------
 from dataclasses import dataclass
 from dotenv import dotenv_values
 
@@ -154,23 +140,15 @@ class Config:
     es_index: str = "chunks"
     es_analyzer: str = "ik_max_word"
     es_search_analyzer: str = "ik_smart"
-    # ANN 相关性闸门：top-k 中无任何切片余弦距离 ≤ 该值即判资料不足（bge-small-zh 实测相关≈0.35-0.47 / 无关≈0.46-0.56）
     ann_max_distance: float = 0.45
-    # RRF 融合后用本地交叉编码器（bge-reranker-v2-m3，挂嵌入服务 /rerank）对候选精排；失败自动回落融合序
     rerank_enabled: bool = True
     rerank_candidates: int = 30
-    # 精排请求超时（秒）。精排是增强项：超时即回落融合序，绝不能拖慢问答主链路。
     rerank_timeout: float = 20.0
-    # 检索结果单条正文字符上限（入库已按 850 窗口切分，这里是对外部写入/未来 chunker 的兜底闸门）
     quote_max_chars: int = 1200
-    # 送交叉编码器的单条文本字符预算（模型本身截断 512 token，全量长文只是白烧算力）
     rerank_chars: int = 1000
-    # 同一文档最多进入结果的切片数：避免 top-k 被单篇文档占满，证据多样性优先
     max_chunks_per_doc: int = 3
-    # 精排分数过滤：绝对阈值挡无关噪音，相对阈值挡远落后于首条的陪跑候选
     rerank_min_score: float = 0.05
     rerank_relative: float = 0.15
-    # 切片与检索调优参数（均可通过 ECOM_* 环境变量覆盖）
     chunk_size: int = 850
     chunk_overlap: int = 200
     adaptive_hyde: bool = True
@@ -180,21 +158,15 @@ class Config:
     recency_boost: float = 0.08
     entity_quota: int = 2
     tfidf_max_features: int = 24000
-    # 语义缓存参数（均可通过 ECOM_SEMANTIC_CACHE_* 覆盖）
     semantic_cache_threshold: float = 0.96
     semantic_cache_ttl: int = 3600
     semantic_cache_max_entries: int = 10000
-    # 专家智能体推理参数（均可通过 ECOM_SPECIALIST_* 覆盖）
     specialist_timeout: int = 45
     specialist_max_tokens: int = 4096
     specialist_concurrency: int = 2
-    # API 基址（供评测或客户端动态解析，不写死）
     api_base_url: str = "http://127.0.0.1:18080"
-    # 运维便利：登录页展示真实账号快速切换（默认关闭）
     quick_login: bool = False
-    # 仅在 quick_login 打开且显式开启时，才把口令一并返回（仅限内网自用，禁止公网生产开启）
     quick_login_passwords: bool = False
-    # 快捷登录统一下发的默认口令（弱口令，仅内网自用；未配置时回落到运维凭据文件）
     quick_login_password: str = ""
 
 

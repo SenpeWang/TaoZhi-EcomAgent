@@ -15,7 +15,6 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from taozhi.knowledge.db import database_connection, fetch_one, as_jsonb  # noqa: E402
 
-# (key, 名称, 别名, 口径模板, 维度, 主表, 单位, 格式, 密级, scope, 说明)
 METRICS = [
     ("ops.docs_published_total", "已发布文档总数",
      ["文档总数", "发布文档数", "资料库总量", "有多少文档", "知识库规模"],

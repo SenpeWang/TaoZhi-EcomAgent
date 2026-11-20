@@ -91,15 +91,12 @@ def cmd_archive(report_name: str = "") -> int:
     name = f"{snapshot_key(report)}.json"
     target = ARCHIVE_DIR / name
     if target.exists():
-        # 归档的意义就是不可变。重跑同一时刻还想覆盖，等于把"当时跑出来是什么"抹掉。
         sys.exit(f"快照已存在，拒绝覆盖：{target}\n"
                  "确认这是新的一次跑批再归档；否则请手动删除旧快照。")
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-    # 用 copyfile 而不是重新 dump：保证与 baseline.json 逐字节一致，
-        # 这样 md5 才能作为"是否被改动"的判据，不受 JSON 序列化差异干扰。
     shutil.copyfile(BASELINE, target)
     digest = md5_of(target)
-    target.chmod(0o444)          # 只读：防止手误改写历史基线
+    target.chmod(0o444)
 
     fresh = not REGISTER.exists()
     src = report_name or "—"

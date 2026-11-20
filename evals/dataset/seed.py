@@ -39,8 +39,8 @@ from taozhi.knowledge.metrics import BUILTIN_BUSINESS_METRICS  # noqa: E402
 
 SPEC = Path(__file__).resolve().parent / "spec"
 GEN = ROOT / "evals/datasets/generated/latest"
-EVAL_PASSWORD = "taozhi2026eval"   # 评测环境专用口令：14 位纯小写字母+数字（≥12 位且非弱口令），免特殊字符输错
-SYN_PREFIX = "SYN_"               # 夹具/语料/身份统一前缀，--clean 按它清除
+EVAL_PASSWORD = "taozhi2026eval"
+SYN_PREFIX = "SYN_"
 
 
 def load_spec():
@@ -168,7 +168,7 @@ def seed_documents(conn, tenant_id, creator_id, docs, force: bool = False):
         old_v = fetch_one(conn, "SELECT content_hash FROM document_versions WHERE document_id=%s AND version=1", (d["doc_id"],))
         if not force and old and old_v and old_v["content_hash"] == content_hash:
             stats["updated"] += 1
-            continue  # 内容未变：不重建切片（幂等且不浪费嵌入算力）
+            continue
         conn.execute("DELETE FROM knowledge_mentions WHERE document_id=%s", (d["doc_id"],))
         conn.execute("DELETE FROM chunks WHERE document_id=%s", (d["doc_id"],))
         conn.execute("DELETE FROM document_versions WHERE document_id=%s", (d["doc_id"],))
@@ -242,8 +242,6 @@ def seed_grants(conn, tenant_id, fixtures, user_ids):
     return n
 
 
-# --verify 的权限预期矩阵：用 can_read 实测，而不是"字段看起来对"。
-# 每一行是 (身份, 文档, 期望可读, 说明)。改 spec 必须同步改这里。
 VERIFY_MATRIX = [
     ("SYN_A_STAFF002", "SYN_DOC_A_OP01", False, "员工无授权，组长级文档不可读"),
     ("SYN_A_LDR001", "SYN_DOC_A_OP01", True, "组长 grade=2 达到 level=2"),
@@ -265,7 +263,6 @@ VERIFY_MATRIX = [
 
 def verify(conn, tenant_id, org, fixtures, user_ids):
     problems = []
-    # 1. 文档存在性与字段
     for d in load_corpus_docs():
         row = fetch_one(conn, "SELECT scope,level,state,ai_allowed FROM documents WHERE tenant_id=%s AND id=%s", (tenant_id, d["doc_id"]))
         if not row:
@@ -277,21 +274,18 @@ def verify(conn, tenant_id, org, fixtures, user_ids):
         n = fetch_one(conn, "SELECT count(*) AS n FROM chunks WHERE document_id=%s AND embedding IS NOT NULL", (d["doc_id"],))["n"]
         if n == 0:
             problems.append(f"{d['doc_id']} 无带向量的切片")
-    # 2. 金丝雀在正文里
     for d in load_corpus_docs():
         for canary in fixtures["canaries"]:
             if canary in d["body"]:
                 row = fetch_one(conn, "SELECT body FROM document_versions WHERE document_id=%s AND version=1", (d["doc_id"],))
                 if not row or canary not in row["body"]:
                     problems.append(f"{d['doc_id']} 正文缺少金丝雀 {canary}")
-    # 3. 口令可登录
     for i in org["identities"]:
         row = fetch_one(conn, "SELECT password_hash FROM users WHERE tenant_id=%s AND username=%s", (tenant_id, i["username"]))
         if not row:
             problems.append(f"账号缺失 {i['username']}")
         elif not verify_password(EVAL_PASSWORD, row["password_hash"]):
             problems.append(f"账号 {i['username']} 口令与 EVAL_PASSWORD 不符")
-    # 4. 权限语义实测
     for logical, doc_id, expect, why in VERIFY_MATRIX:
         p = load_principal(conn, user_ids[logical])
         d = fetch_one(conn, "SELECT * FROM documents WHERE tenant_id=%s AND id=%s", (tenant_id, doc_id))
@@ -301,7 +295,6 @@ def verify(conn, tenant_id, org, fixtures, user_ids):
         got = can_read(conn, p, d)
         if got != expect:
             problems.append(f"权限语义不符：{logical} 读 {doc_id} 实际 {got} 期望 {expect}（{why}）")
-    # 5. ChatBI 指标语义与权限矩阵校验
     staff1 = load_principal(conn, user_ids["SYN_A_STAFF001"])
     leader1 = load_principal(conn, user_ids["SYN_A_LDR001"])
     boss1 = load_principal(conn, user_ids["SYN_A_BOSS001"])
@@ -372,7 +365,7 @@ def main() -> int:
             print(f"灌库完成：节点 {len(org['nodes'])}、账号 {len(org['identities'])}、"
                   f"文档 新增 {st['inserted']}/未变 {st['updated']}（切片 {st['chunks']}）、"
                   f"授权 {n_grants}、补齐指标 {n_met}")
-        if True:  # 灌完必校验：夹具写坏比不写更危险（白检的安全感）
+        if True:
             if not user_ids:
                 user_ids = resolve_user_ids(conn, tenant["id"], org)
             problems = verify(conn, tenant["id"], org, fixtures, user_ids)

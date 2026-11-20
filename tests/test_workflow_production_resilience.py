@@ -60,7 +60,6 @@ def test_task_cancellation_and_retry_flow(monkeypatch):
     orig_state = job["state"]
     orig_version = job.get("run_version") or 1
 
-    # 1. 非 Kafka 模式下重排不堆积孤立 task_outbox 行
     with database_connection() as c:
         c.execute("UPDATE jobs SET state='cancelled' WHERE id=%s", (job_id,))
 
@@ -80,7 +79,6 @@ def test_task_cancellation_and_retry_flow(monkeypatch):
         else:
             assert outbox_row is None
 
-    # 2. 开启 Kafka 时重试应写入 task_outbox
     monkeypatch.setattr(job_repo, "load_config", lambda: replace(load_config(), kafka_enabled=True))
     retry_kafka = client.post(f"/api/tasks/{job_id}/retry")
     assert retry_kafka.status_code == 200

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 DEFAULT_MAX_LINES = 2000
-DEFAULT_MAX_BYTES = 50 * 1024  # 50KB
+DEFAULT_MAX_BYTES = 50 * 1024
 
 
 @dataclass
@@ -19,7 +19,7 @@ class TruncationResult:
     """截断结果数据结构。"""
     content: str
     truncated: bool
-    truncated_by: Optional[str]  # "lines" | "bytes" | None
+    truncated_by: Optional[str]
     total_lines: int
     total_bytes: int
     output_lines: int

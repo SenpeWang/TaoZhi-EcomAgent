@@ -32,11 +32,7 @@ MODEL_PATH = Path(os.environ.get("EMBED_MODEL_PATH", ROOT.parent / "models/bge-s
 RERANK_MODEL_PATH = Path(os.environ.get("RERANK_MODEL_PATH", ROOT.parent / "models/bge-reranker-v2-m3"))
 HOST = os.environ.get("EMBED_HOST", "127.0.0.1")
 PORT = int(os.environ.get("EMBED_PORT", "18555"))
-# 全面使用 GPU：显式指定优先，否则自动优先 cuda:0，仅在无可用 GPU 时回退 cpu
 DEVICE = os.environ.get("EMBED_DEVICE") or ("cuda:0" if torch.cuda.is_available() else "cpu")
-# 指定 GPU 却拿不到 → 直接失败退出，不做 CPU 降级：
-# 降级会让链路"看起来正常"但时延与吞吐完全失真（精排从百毫秒掉到数十秒），
-# 掩盖真实故障。宁可让 Supervisor 报错重启，由运维看到并修驱动/直通。
 if DEVICE.startswith("cuda") and not torch.cuda.is_available():
     raise RuntimeError(
         f"指定推理设备 {DEVICE} 不可用：当前无可用 CUDA GPU"
@@ -148,8 +144,6 @@ def load_reranker():
         if not (RERANK_MODEL_PATH / "config.json").is_file():
             raise RuntimeError(f"精排模型权重不存在：{RERANK_MODEL_PATH}")
         _rerank_tokenizer = AutoTokenizer.from_pretrained(str(RERANK_MODEL_PATH))
-        # 同样不做 CPU 降级：设备不可用时置失败标记，/rerank 返回 503，
-        # 由检索侧回落融合序（精排是增强项，不拖垮主链路）。
         _rerank_model = AutoModelForSequenceClassification.from_pretrained(str(RERANK_MODEL_PATH)).to(DEVICE).eval()
     except Exception as exc:
         print(f"[embed] 精排模型不可用（{type(exc).__name__}: {exc}）", flush=True)
@@ -205,7 +199,7 @@ def embed(req: EmbedRequest):
 
 if __name__ == "__main__":
     load_model()
-    load_reranker()  # 启动即预热：精排懒加载会让首个 /rerank 请求冷启动 30s+，超过检索侧客户端超时
+    load_reranker()
     if DEVICE.startswith("cuda"):
         threading.Thread(target=gpu_watchdog, daemon=True).start()
         print(f"[embed] 设备 {DEVICE}，GPU 看门狗已启动（每 {GPU_WATCHDOG_INTERVAL:.0f}s 探测一次）", flush=True)

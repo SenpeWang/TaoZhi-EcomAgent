@@ -20,7 +20,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1] / "src" / "taozhi"
 
-# 层级权重：数值越大，层级越高
 LAYER_ORDER = {
     "interface": 3,
     "application": 2,
@@ -52,13 +51,11 @@ LAYER_MAP = {
     ],
 }
 
-# 纯包标记文件（无实际执行逻辑）
 PACKAGE_MARKERS = {
     "__init__.py",
     "core/__init__.py",
 }
 
-# 领域层严禁引入的第三方框架与外部技术依赖
 FORBIDDEN_IN_DOMAIN = {
     "fastapi",
     "starlette",
@@ -140,7 +137,6 @@ def test_no_low_layer_depends_on_high_layer():
             continue
         tree = ast.parse(p.read_text(encoding="utf-8"))
         for target_submod, lineno in _iter_all_imports(rel, tree):
-            # 将目标模块解析为文件或目录路径
             target_path_str = target_submod.replace(".", "/")
             target_file = ROOT / target_path_str
             target_py = ROOT / f"{target_path_str}.py"
@@ -150,7 +146,6 @@ def test_no_low_layer_depends_on_high_layer():
             elif target_file.exists():
                 target_layer = get_layer(target_file / "__init__.py")
             else:
-                # 尝试逐级前缀匹配
                 parts = target_submod.split(".")
                 for i in range(len(parts), 0, -1):
                     prefix_path = ROOT / "/".join(parts[:i])

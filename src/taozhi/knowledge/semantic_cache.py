@@ -37,15 +37,13 @@ class CacheEntry:
     id: str
     tenant_id: str
     query: str
-    embedding: np.ndarray  # shape: (512,)
+    embedding: np.ndarray
     answer: str
     citations: List[Dict[str, Any]]
     sources: List[Dict[str, Any]]
     input_level: int
     created_at: float
     hits: int = 0
-    # 存进去的 answer / citations 是否已脱敏。False 表示当初是 boss 问的、
-    # 内容是未脱敏原文；命中者不是 boss 时必须重新脱敏后再返回。
     redacted: bool = False
     entities: Tuple[str, ...] = field(default_factory=tuple)
 
@@ -83,14 +81,10 @@ class SemanticCache:
         )
 
         self._lock = threading.Lock()
-        # {tenant_id: [CacheEntry, ...]}
         self._entries: Dict[str, List[CacheEntry]] = {}
-        # {tenant_id: np.ndarray(N, 512)}
         self._matrices: Dict[str, np.ndarray] = {}
-        # {tenant_id: int} 跨进程租户权限/资料代际水位（对齐 tenants.epoch）
         self._tenant_epochs: Dict[str, int] = {}
 
-        # 监控统计
         self._hits = 0
         self._misses = 0
 
@@ -140,7 +134,7 @@ class SemanticCache:
 
         t0 = time.monotonic()
         try:
-            q_vec = encode_query(query)[0]  # shape: (512,)
+            q_vec = encode_query(query)[0]
         except Exception as e:
             logger.warning("语义缓存向量化失败: %s", e)
             with self._lock:
@@ -157,7 +151,6 @@ class SemanticCache:
 
             now = time.monotonic()
             q_entities = _norm_entities(query)
-            # 批量余弦相似度计算（向量均已 L2 归一化，点积即余弦相似度）
             sims = np.dot(matrix, q_vec)
             candidates = [int(i) for i in np.argsort(-sims) if float(sims[i]) >= self.similarity_threshold]
 
@@ -172,7 +165,6 @@ class SemanticCache:
                     continue
                 if entry.entities != q_entities:
                     continue
-                # 脱敏对齐：boss 命中 staff 已脱敏残缺条目时继续查找更合适候选或回落完整链路
                 if boss and entry.redacted:
                     continue
                 answer = entry.answer
@@ -244,7 +236,6 @@ class SemanticCache:
             self._sync_epoch_unlocked(tenant_id, epoch)
             entries = self._entries.setdefault(tenant_id, [])
             if len(entries) >= self.max_entries_per_tenant:
-                # LRU / 最少命中淘汰
                 entries.sort(key=lambda x: (x.hits, x.created_at))
                 entries.pop(0)
 

@@ -10,7 +10,6 @@ from taozhi.domain.errors import Denied
 
 _SLOTS = threading.BoundedSemaphore(4)
 
-# 设定侧封禁与登录侧拦截必须共用同一份弱口令黑名单。
 WEAK_PASSWORDS = ("123456", "123456789012", "password123456", "admin12345678")
 
 

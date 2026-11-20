@@ -39,7 +39,6 @@ def test_tool_execution_judge_success():
 
 def test_tool_execution_judge_forbidden_and_missing():
     judge = ToolExecutionJudge(required_tools=["search_1688_wholesale"], forbidden_tools=["search_amazon"])
-    # 违规调用了 search_amazon
     bad_result = AgentRunResult(
         case_id="C02",
         task_prompt="test",
@@ -64,7 +63,6 @@ def test_tool_execution_judge_forbidden_and_missing():
 def test_deliverable_judge():
     judge = DeliverableJudge(required_sections=["市场", "供应链", "建议"], min_chars=50)
 
-    # 合规报告
     good_report = "# 市场全景调研\n## 1. 市场概况\n需求旺盛...\n## 2. 供应链出厂价\n底价8元...\n## 3. 操盘建议\n打造差异化差异点。"
     res_good = AgentRunResult(
         case_id="C03",
@@ -81,7 +79,6 @@ def test_deliverable_judge():
     )
     assert judge.evaluate(res_good).passed is True
 
-    # 缺失供应链小节
     short_report = "# 市场概述\n内容太短"
     res_bad = AgentRunResult(
         case_id="C04",
@@ -104,7 +101,6 @@ def test_deliverable_judge():
 def test_anti_hallucination_judge():
     judge = AntiHallucinationJudge()
 
-    # 包含假日志模板 ➔ 判定失败
     fake_res = AgentRunResult(
         case_id="C05",
         task_prompt="test",
@@ -121,7 +117,6 @@ def test_anti_hallucination_judge():
     assert judge.evaluate(fake_res).passed is False
     assert "虚假思考文案" in judge.evaluate(fake_res).reason
 
-    # 干净报告 ➔ 判定通过
     clean_res = AgentRunResult(
         case_id="C06",
         task_prompt="test",
@@ -141,7 +136,6 @@ def test_anti_hallucination_judge():
 def test_steering_judge():
     judge = SteeringJudge(steering_keyword="义乌")
 
-    # 遵循干预
     res_steered = AgentRunResult(
         case_id="C07",
         task_prompt="test",
@@ -158,7 +152,6 @@ def test_steering_judge():
     )
     assert judge.evaluate(res_steered).passed is True
 
-    # 遗漏干预
     res_missed = AgentRunResult(
         case_id="C08",
         task_prompt="test",
@@ -205,7 +198,6 @@ def test_error_recovery_case():
     assert "search_web" in err_case["required_tools"]
     judge = DeliverableJudge(required_sections=err_case["required_sections"], min_chars=err_case["min_chars"])
 
-    # 模拟降级保底报告（满足 min_chars 60 与关键大纲要求）
     fallback_report = (
         "# 市场概况与供应链异常降级分析报告\n"
         "经多方信源探查，该特种高精密陶瓷轴承在公开批发市场货源极度稀缺。\n"

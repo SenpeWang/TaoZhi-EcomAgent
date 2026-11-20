@@ -55,7 +55,6 @@ class AgentEvalHarness:
                 )
                 elapsed = round(time.perf_counter() - t0, 2)
 
-                # 提取扁平化的工具调用明细
                 tool_calls = []
                 for sub in raw_res.get("subagents", []):
                     for t in sub.get("tools", []):
