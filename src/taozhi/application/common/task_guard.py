@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import functools
-import json
 import time
 from typing import Any, Callable, Mapping, Tuple
 
@@ -92,12 +91,12 @@ def validate_task_execution(state: Mapping[str, Any], stage: str, progress: int,
         return p, job
 
 
-def traced_node(name: str, func: Callable[[Any], Any], span_prefix: str = "pipeline."):
+def traced_node(name: str, func: Callable[[Any], Any], span_prefix: str = "pipeline.", *, kind: str = "CHAIN"):
     """节点级 span 包装与单节点耗时累加。"""
 
     @functools.wraps(func)
     def wrapper(state: Mapping[str, Any]):
-        attrs = {"job_id": str(state.get("job_id", "")), "run_version": int(state.get("run_version", 0) or 0)}
+        attrs = {"openinference.span.kind": kind}
         with node_span(f"{span_prefix}{name}", attrs) as span:
             t0 = time.perf_counter()
             result = func(state)
@@ -116,8 +115,6 @@ def traced_node(name: str, func: Callable[[Any], Any], span_prefix: str = "pipel
                         span.set_attribute("state.answer_chars", len(r.get("answer") or ""))
                     if "model_calls" in r:
                         span.set_attribute("state.model_calls", int(r.get("model_calls") or 0))
-                    if r.get("usage"):
-                        span.set_attribute("state.usage", json.dumps(r["usage"], ensure_ascii=False)[:600])
                     if r.get("hard_block") is not None:
                         span.set_attribute("state.hard_block", bool(r.get("hard_block")))
             except Exception:

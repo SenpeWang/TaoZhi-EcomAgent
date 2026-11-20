@@ -6,9 +6,16 @@ from typing import Annotated, Any, Dict, List, Literal
 from typing_extensions import TypedDict
 from pydantic import BaseModel, Field
 
+from taozhi.domain.agent_catalog import agent_display_name
+
 
 class _ProposedSubtaskSchema(BaseModel):
-    role: str = Field(description="子智能体角色名称，例如 全网痛点研究员 / 1688货源采购专员 / Amazon对标专员")
+    role: str = Field(
+        description="执行调研的业务角色，例如 " + "、".join(
+            agent_display_name(role_id)
+            for role_id in ("research.market_intelligence", "research.sourcing", "research.competitive_pricing")
+        ),
+    )
     goal: str = Field(description="本轮指派给该子智能体的明确调查目标")
     allowed_tools: List[str] = Field(description="授权工具名列表，只能从当前允许的白名单中选择")
     seed_queries: List[str] = Field(default_factory=list, description="建议起步检索关键词或网址列表")
@@ -17,7 +24,7 @@ class _ProposedSubtaskSchema(BaseModel):
 
 class _OrchestratorDecisionSchema(BaseModel):
     action: Literal["spawn_subagents", "finish"] = Field(description="spawn_subagents 派发子智能体；finish 证据充分直接收敛写研报")
-    thought: str = Field(description="主脑基于当前黑板证据、缺口与纠偏指令做出的决策理由")
+    thought: str = Field(description="根据已有证据、信息缺口与更新要求做出的调度理由")
     outline: List[str] = Field(default_factory=list, description="3-4个核心研报章节维度")
     invalidate_evidence_ids: List[str] = Field(default_factory=list, description="需要作废的既有证据 ID（如被中途 Steering 推翻）")
     subtasks: List[_ProposedSubtaskSchema] = Field(default_factory=list, description="当 action=spawn_subagents 时动态派发的并行子任务列表")

@@ -11,6 +11,7 @@ from taozhi.application.research.schemas import (
     _ProposedSubtaskSchema,
     _SubagentStepSchema,
 )
+from taozhi.observability.tracing import job_trace
 
 
 def test_zero_fake_copy_in_research_workflow():
@@ -102,23 +103,37 @@ def test_pipeline_a_events_emitted_during_research():
 
     mock_llm.chat_json.side_effect = fake_chat_json
     mock_llm.chat.return_value = "# 测试保温杯市场调研报告\n\n## 1. 市场概览\n需求旺盛。"
+    spans = []
 
     with (
+        patch("taozhi.observability.tracing.submit_span", side_effect=spans.append),
+        job_trace("tenant_test", "research_1", 1, "task.research"),
         patch("taozhi.application.research.planner.LLMClient", return_value=mock_llm),
         patch("taozhi.application.research.subagents.LLMClient", return_value=mock_llm),
         patch("taozhi.application.research.reporter.LLMClient", return_value=mock_llm),
     ):
         with patch("taozhi.infrastructure.mcp.server.search_web", return_value=[{"title": "保温杯测评", "snippet": "主流69元"}]):
-            execute_autonomous_agents(
+            result = execute_autonomous_agents(
                 keyword="测试保温杯",
+                job_id="research_1",
                 emit_event_fn=mock_emit,
                 conversation_id="test_conv_events",
             )
 
+    completed = {s["span_id"]: s for s in spans if s["status"] == "ok"}
+    tool = next(s for s in completed.values() if s["name"] == "mcp.tool.search_web")
+    assert tool["kind"] == "TOOL" and tool["attributes"]["tool.result_count"] == 1
+    branch = completed[tool["parent_span_id"]]
+    assert branch["name"] == "research.subagent_worker"
+    assert branch["attributes"]["gen_ai.agent.name"] == "research.market_intelligence"
+    assert completed[branch["parent_span_id"]]["name"] == "worker.research"
+    root = next(s for s in completed.values() if s["parent_span_id"] is None)
+    assert root["name"] == "task.research"
+    assert {s["trace_id"] for s in spans} == {result["trace_id"]}
     assert len(captured_stages) >= 4
     agent_starts = [s for s in captured_stages if s.startswith("[agent_start]")]
     assert len(agent_starts) >= 1
-    assert "主协调器" in agent_starts[0]
+    assert "调研协调员" in agent_starts[0]
     assert any(s.startswith("[agent_handoff]") for s in captured_stages)
     assert any(s.startswith("[tool_execution_start]") for s in captured_stages)
     assert any(s.startswith("[tool_execution_end]") for s in captured_stages)

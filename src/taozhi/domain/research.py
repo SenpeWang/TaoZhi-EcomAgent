@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional, Sequence, Tuple
 
+from .agent_catalog import agent_display_name
 from .errors import Denied
 
 WEB_TOOLS: Tuple[str, ...] = ("search_web", "fetch_web_page")
@@ -199,7 +200,7 @@ def authorize_subagent_tasks(
         authorized.append(
             SubagentTaskSpec(
                 task_id=tid,
-                role=(task.role or "市场调研专员").strip(),
+                role=agent_display_name((task.role or "").strip() or "research.subagent_worker"),
                 goal=(task.goal or "收集与品类相关的客观市场事实").strip(),
                 allowed_tools=tuple(legal_tools),
                 seed_queries=queries,

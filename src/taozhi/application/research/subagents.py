@@ -244,7 +244,7 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
     )
     ctx = session.open_subagent_sandbox(role=task.role)
 
-    llm = LLMClient()
+    llm = LLMClient(on_attempt=hooks.model_call_observer(f"调研子智能体 · {task.role}"))
     react_observations: List[Dict[str, Any]] = []
     tools_records: List[Dict[str, Any]] = []
     scratch_files: List[str] = []

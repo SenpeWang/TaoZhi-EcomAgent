@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { User } from '../types'
-import robotUrl from '../assets/robot.svg'
 import MarkdownReport from './MarkdownReport.vue'
 import { openTaskEventStream, pollTaskUntilTerminal } from '../composables/useTaskStream'
 
@@ -15,6 +14,7 @@ interface ToolCallTrace {
 interface SubagentState {
   id?: string
   role: string
+  display_name?: string
   type: string
   state: string
   elapsed?: number
@@ -90,7 +90,6 @@ interface ConversationDetailResponse {
 interface FormattedThinkingStep {
   type: 'agent' | 'turn' | 'tool' | 'data' | 'security' | 'steering' | 'done' | 'thought' | 'plain'
   label: string
-  icon: string
   content: string
 }
 
@@ -122,28 +121,39 @@ const presetKeywords = ['智能保温杯', '磁吸支架手机壳', '便携式�
 const currentTurnCount = computed(() => turns.value.length)
 
 /**
+ * 汇总本轮实际参与调研的业务角色，按照首次出现的顺序展示。
+ * @param agents - 当前轮次的角色执行记录。
+ * @returns 去重后的角色名称。
+ */
+function participatingRoleNames(agents: SubagentState[]): string[] {
+  const names = new Set<string>()
+  for (const agent of agents) names.add(agent.display_name || agent.role)
+  return [...names]
+}
+
+/**
  * 将原始步骤日志解析为结构化标签与内容。
  * @param log - 原始日志字符串
  * @returns 格式化后的步骤对象
  */
 function parseStep(log: string): FormattedThinkingStep {
   if (log.startsWith('[agent_start]')) {
-    return { type: 'agent', label: '任务启动', icon: 'STEP', content: log.slice(13).trim() }
+    return { type: 'agent', label: '任务启动', content: log.slice(13).trim() }
   }
   if (log.startsWith('[agent_handoff]')) {
-    return { type: 'agent', label: '流程流转', icon: 'FLOW', content: log.slice(15).trim() }
+    return { type: 'agent', label: '任务交接', content: log.slice(15).trim() }
   }
   if (log.startsWith('[turn_start]')) {
-    return { type: 'turn', label: '调度轮次', icon: 'TURN', content: log.slice(12).trim() }
+    return { type: 'turn', label: '调度轮次', content: log.slice(12).trim() }
   }
   if (log.startsWith('[tool_execution_start]')) {
-    return { type: 'tool', label: '工具调用', icon: 'TOOL', content: log.slice(22).trim() }
+    return { type: 'tool', label: '工具调用', content: log.slice(22).trim() }
   }
   if (log.startsWith('[tool_execution_end]')) {
-    return { type: 'data', label: '采集完成', icon: 'DATA', content: log.slice(20).trim() }
+    return { type: 'data', label: '采集完成', content: log.slice(20).trim() }
   }
   if (log.startsWith('[tool_result]')) {
-    return { type: 'security', label: '合规核验', icon: 'CHECK', content: log.slice(13).trim() }
+    return { type: 'security', label: '合规核验', content: log.slice(13).trim() }
   }
   if (log.startsWith('[system]')) {
     const body = log.slice(8).trim()
@@ -151,7 +161,6 @@ function parseStep(log: string): FormattedThinkingStep {
       return {
         type: 'security',
         label: '模型容灾',
-        icon: 'ROUTE',
         content: body.replace(/^\[模型容灾\]\s*/, '').trim(),
       }
     }
@@ -159,35 +168,32 @@ function parseStep(log: string): FormattedThinkingStep {
       return {
         type: 'turn',
         label: '断点恢复',
-        icon: 'CKPT',
         content: body.replace(/^\[检查点恢复\]\s*/, '').trim(),
       }
     }
-    return { type: 'plain', label: '系统事件', icon: 'SYS', content: body }
+    return { type: 'plain', label: '系统事件', content: body }
   }
   if (log.includes('用户中途追加干预指令') || log.startsWith('[steering]')) {
     return {
       type: 'steering',
       label: '指令干预',
-      icon: 'STEER',
       content: log.replace(/^\[steering\]\s*/, '').trim(),
     }
   }
   if (log.startsWith('[agent_end]')) {
-    return { type: 'done', label: '阶段完成', icon: 'DONE', content: log.slice(11).trim() }
+    return { type: 'done', label: '阶段完成', content: log.slice(11).trim() }
   }
   if (log.startsWith('思考\n') || log.startsWith('💭 ')) {
     return {
       type: 'thought',
       label: '分析推演',
-      icon: 'THINK',
       content: log
         .replace(/^思考\n/, '')
         .replace(/^💭\s*/, '')
         .trim(),
     }
   }
-  return { type: 'plain', label: '执行状态', icon: 'INFO', content: log }
+  return { type: 'plain', label: '执行状态', content: log }
 }
 
 /**
@@ -474,7 +480,7 @@ async function handleSteer(): Promise<void> {
     if (lastTurn) {
       lastTurn.thinkingLogs.push(`【用户中途追加干预指令】：${steerText}`)
     }
-    ElMessage.success('中途干预指令已发送，正在指引智能体实时转向！')
+    ElMessage.success('已将补充要求发送给调研团队')
     inputPrompt.value = ''
     scrollToBottom()
   } catch (err: unknown) {
@@ -518,7 +524,7 @@ async function handleSend(): Promise<void> {
     question: prompt,
     created_at: new Date().toISOString(),
     state: 'running',
-    stage: '正在启动调研协同...',
+    stage: '正在准备调研任务…',
     progress: 5,
     thinkingLogs: [],
   }
@@ -652,7 +658,7 @@ onUnmounted(() => {
     <main class="chat-conversation-stage">
       <header class="conversation-header-bar">
         <div class="header-info">
-          <span class="current-topic-name">{{ currentKeyword || '智能调研' }}</span>
+          <span class="current-topic-name">{{ currentKeyword || '选品调研' }}</span>
           <span v-if="currentTurnCount > 0" class="turn-count-badge"
             >共 {{ currentTurnCount }} 轮问答</span
           >
@@ -662,13 +668,9 @@ onUnmounted(() => {
       <div ref="chatScrollRef" class="messages-scroll-area">
         <div class="messages-center-wrapper">
           <div v-if="turns.length === 0" class="chat-welcome-box">
-            <div class="welcome-robot-wrapper">
-              <img :src="robotUrl" alt="淘智机器人" class="welcome-robot-large" />
-            </div>
-            <div class="welcome-title">电商选品与市场调研</div>
+            <h2 class="welcome-title">选品调研</h2>
             <div class="welcome-subtitle">
-              输入商品类目或选品问题，自动对比 1688
-              源头供货行情与主流电商零售价带并生成选品分析报告。
+              输入商品类目或选品问题，比较市场需求、供应商报价与竞品售价。
             </div>
             <div class="preset-suggestions">
               <button
@@ -690,7 +692,6 @@ onUnmounted(() => {
             </div>
 
             <div class="assistant-response-container">
-              <img :src="robotUrl" alt="淘智机器人" class="assistant-avatar-img" />
               <div class="assistant-content-block">
                 <div
                   v-if="turn.state === 'running' || turn.state === 'queued'"
@@ -698,9 +699,7 @@ onUnmounted(() => {
                 >
                   <div class="active-thinking-status">
                     <span class="thinking-spinner" />
-                    <span class="thinking-label"
-                      >协同分析与轨迹执行中（已耗时 {{ liveTimerSeconds }}s）</span
-                    >
+                    <span class="thinking-label">正在调研 · 已用时 {{ liveTimerSeconds }}s</span>
                   </div>
                   <div class="live-steps-stream">
                     <div
@@ -713,7 +712,6 @@ onUnmounted(() => {
                       ]"
                     >
                       <div class="trace-step-header">
-                        <span class="trace-step-icon">{{ parseStep(log).icon }}</span>
                         <span class="trace-step-type">{{ parseStep(log).label }}</span>
                       </div>
                       <div class="trace-step-text">{{ parseStep(log).content }}</div>
@@ -722,7 +720,12 @@ onUnmounted(() => {
                 </div>
 
                 <div v-else-if="turn.thinkingLogs?.length" class="completed-thinking-accordion">
-                  <div class="accordion-header" @click="toggleThinking(turn.id)">
+                  <button
+                    class="accordion-header"
+                    type="button"
+                    :aria-expanded="Boolean(thinkingCollapsed[turn.id])"
+                    @click="toggleThinking(turn.id)"
+                  >
                     <span class="accordion-arrow">{{
                       thinkingCollapsed[turn.id] ? '▾' : '▸'
                     }}</span>
@@ -730,7 +733,7 @@ onUnmounted(() => {
                       执行轨迹（共 {{ turn.thinkingLogs.length }} 步 · 耗时
                       {{ turn.thinkingSeconds || turn.result?.elapsed || 0 }}s）
                     </span>
-                  </div>
+                  </button>
                   <div v-show="thinkingCollapsed[turn.id]" class="accordion-body">
                     <div
                       v-for="(log, idx) in turn.thinkingLogs"
@@ -738,7 +741,6 @@ onUnmounted(() => {
                       class="trace-step-entry"
                     >
                       <div class="trace-step-header">
-                        <span class="trace-step-icon">{{ parseStep(log).icon }}</span>
                         <span class="trace-step-type">{{ parseStep(log).label }}</span>
                       </div>
                       <div class="trace-step-text">{{ parseStep(log).content }}</div>
@@ -750,6 +752,15 @@ onUnmounted(() => {
                   v-if="turn.result?.report || turn.result?.reply"
                   class="response-markdown-body"
                 >
+                  <ul
+                    v-if="turn.result?.subagents?.length"
+                    class="research-roles"
+                    aria-label="参与调研的角色"
+                  >
+                    <li v-for="role in participatingRoleNames(turn.result.subagents)" :key="role">
+                      {{ role }}
+                    </li>
+                  </ul>
                   <MarkdownReport
                     :content="turn.result?.report || turn.result?.reply || ''"
                     :id-prefix="'rep-' + turn.id"
@@ -777,7 +788,7 @@ onUnmounted(() => {
                 </div>
 
                 <div v-if="turn.state === 'failed'" class="error-hint-row">
-                  {{ turn.stage || '抱歉，当前调研任务出现异常，请稍后重试。' }}
+                  {{ turn.stage || '调研未完成，请稍后重试。' }}
                 </div>
               </div>
             </div>
@@ -795,17 +806,17 @@ onUnmounted(() => {
               :rows="2"
               :placeholder="
                 submitting
-                  ? '调研正在进行中，可输入中途干预指令（例如：只看1688源头厂、重点对比亚马逊）按 Enter 追加...'
+                  ? '补充调研要求，例如优先比较 1688 供货报价'
                   : turns.length === 0
-                    ? '输入要调研的商品类目或问题...'
-                    : '继续针对上述内容追问...'
+                    ? '输入商品类目或调研问题…'
+                    : '继续追问本次调研…'
               "
               @keydown="handleKeydown"
             />
             <button
               :class="['send-circle-btn', { 'steer-mode': submitting }]"
               :disabled="!inputPrompt.trim()"
-              :title="submitting ? '追加中途干预指令 (Steering)' : '发送消息'"
+              :title="submitting ? '发送补充要求' : '发送消息'"
               @click="handleSend"
             >
               <svg v-if="!submitting" viewBox="0 0 24 24" class="send-svg-icon">
@@ -855,16 +866,6 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   margin-bottom: 3px;
-}
-.trace-step-icon {
-  font-size: 10px;
-  font-weight: 700;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: #f1f5f9;
-  color: #475569;
-  letter-spacing: 0.4px;
 }
 .trace-step-entry.agent .trace-step-type {
   color: #2563eb;
@@ -1045,22 +1046,6 @@ onUnmounted(() => {
   text-align: center;
   max-width: 560px;
 }
-.welcome-robot-wrapper {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 16px;
-}
-.welcome-robot-large {
-  width: 96px;
-  height: 96px;
-  border-radius: 24px;
-  object-fit: cover;
-  box-shadow: 0 12px 28px -6px rgba(36, 90, 216, 0.28);
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.welcome-robot-large:hover {
-  transform: scale(1.08) rotate(2deg);
-}
 
 .welcome-title {
   font-size: 22px;
@@ -1118,24 +1103,11 @@ onUnmounted(() => {
   word-break: break-word;
 }
 
-/* 助手回答 (靠左，带放大头像) */
+/* 调研团队答复 */
 .assistant-response-container {
   display: flex;
   align-items: flex-start;
   gap: 14px;
-}
-.assistant-avatar-img {
-  width: 44px;
-  height: 44px;
-  border-radius: 13px;
-  object-fit: cover;
-  flex-shrink: 0;
-  margin-top: 2px;
-  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.12);
-  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.assistant-avatar-img:hover {
-  transform: scale(1.08);
 }
 .assistant-content-block {
   flex: 1;
@@ -1210,11 +1182,13 @@ onUnmounted(() => {
   margin-bottom: 14px;
 }
 .accordion-header {
+  background: transparent;
+  border: 0;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--tz-ink-muted, #475569);
   cursor: pointer;
   user-select: none;
   padding: 3px 6px;
@@ -1240,6 +1214,21 @@ onUnmounted(() => {
 }
 
 /* Markdown 回答正文容器 */
+.research-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  margin: 0 0 14px;
+  list-style: none;
+}
+.research-roles li {
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--tz-surface-muted, #f1f5f9);
+  color: var(--tz-ink-secondary, #334155);
+  font-size: 12px;
+}
 .response-markdown-body {
   margin-top: 8px;
   padding: 16px 18px;

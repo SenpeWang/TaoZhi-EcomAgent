@@ -58,6 +58,11 @@ neo4j==6.3.1
 networkx==3.4.2
 numpy==2.2.6
 openai==3.19.0
+openinference-instrumentation==0.1.61
+openinference-semantic-conventions==0.1.35
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-semantic-conventions==0.65b0
 orjson==3.11.9
 ormsgpack==1.12.2
 packaging==26.3
@@ -120,5 +125,6 @@ uvloop==0.22.1
 watchdog==6.0.0
 watchfiles==1.2.0
 websockets==16.1.1
+wrapt==2.4.0
 xxhash==4.0.1
 zstandard==0.25.0

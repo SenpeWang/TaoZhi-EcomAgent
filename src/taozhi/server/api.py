@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from taozhi.config import ROOT
 from taozhi.domain.errors import Denied
-from taozhi.server.routers import admin, auth, documents, system, tasks
+from taozhi.server.routers import admin, auth, documents, system, tasks, traces
 
 if not logging.getLogger().handlers:
     logging.basicConfig(
@@ -75,6 +75,7 @@ app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(documents.router)
 app.include_router(tasks.router)
+app.include_router(traces.router)
 
 dist = ROOT / "web/dist"
 if (dist / "assets").exists():

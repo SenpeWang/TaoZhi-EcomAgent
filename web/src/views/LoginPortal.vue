@@ -4,33 +4,26 @@
       <div class="showcase-grid-bg" aria-hidden="true" />
       <div class="showcase-inner">
         <div class="showcase-brand">
-          <div class="showcase-logo-frame">
-            <img :src="robotUrl" alt="平台标识" class="showcase-logo-img" />
-          </div>
-          <div class="showcase-brand-text">
-            <span class="showcase-brand-name">淘智企业工作台</span>
-            <span class="showcase-brand-sub">TAOZHI ENTERPRISE PLATFORM</span>
-          </div>
+          <span class="brand-monogram" aria-hidden="true">淘</span>
+          <span class="showcase-brand-name">淘智企业工作台</span>
         </div>
 
         <div class="showcase-main-copy">
-          <h1 class="showcase-title">企业经营分析与智能协同平台</h1>
-          <p class="showcase-desc">
-            面向电商运营与管理团队，提供组织级权限管控、经营指标分析、知识库合规问答与全网供应链调研能力。
-          </p>
+          <h1 class="showcase-title">企业经营分析与选品决策</h1>
+          <p class="showcase-desc">在同一个工作台查阅经营指标、检索企业知识、追踪选品调研。</p>
 
           <ul class="showcase-feature-list">
             <li>
               <span class="feature-check" aria-hidden="true">✓</span>
-              <span>企业组织架构隔离与三级数据密级（公开 / 内部 / 机密）管控</span>
+              <span>按部门和密级访问企业资料</span>
             </li>
             <li>
               <span class="feature-check" aria-hidden="true">✓</span>
-              <span>知识文档版本化留痕，检索结论严格绑定已授权原文来源</span>
+              <span>从知识问答返回引用的文档版本</span>
             </li>
             <li>
               <span class="feature-check" aria-hidden="true">✓</span>
-              <span>全流程任务审核与操作审计，保障关键经营数据合规流转</span>
+              <span>回看调研执行过程与审核记录</span>
             </li>
           </ul>
         </div>
@@ -87,7 +80,6 @@
               placeholder="请输入密码"
               autocomplete="current-password"
               @update:model-value="onPasswordChange"
-              @keyup.enter="emit('signIn')"
             >
               <template #prefix>
                 <svg
@@ -153,7 +145,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import type { QuickAccount, WorkspaceInfo } from '../types'
-import robotUrl from '../assets/robot.svg'
 
 const props = defineProps<{
   info: WorkspaceInfo

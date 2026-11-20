@@ -18,15 +18,84 @@ function isRecord(value: unknown): value is JsonRecord {
  * @throws 响应缺少集合或身份字段时抛出中文异常。
  */
 function validateResponse(path: string, data: JsonRecord, method: string): void {
+  const resource = path.split('?', 1)[0]
   const collection =
     method === 'GET' &&
-    (['/organizations', '/documents', '/tasks', '/users', '/approvals', '/audit'].includes(path) ||
+    ([
+      '/organizations',
+      '/documents',
+      '/tasks',
+      '/users',
+      '/approvals',
+      '/audit',
+      '/admin/traces',
+    ].includes(resource) ||
       /^\/documents\/[^/]+\/(versions|grants)$/.test(path))
   if (
     (collection || 'items' in data) &&
     (!Array.isArray(data.items) || !data.items.every(isRecord))
   ) {
     throw new Error('资料列表响应异常，请刷新后重试')
+  }
+  if (
+    resource === '/admin/traces' &&
+    data.next_cursor !== null &&
+    typeof data.next_cursor !== 'string'
+  ) {
+    throw new Error('轨迹分页响应异常，请刷新后重试')
+  }
+  const runList = /^\/admin\/traces\/[^/]+\/runs$/.test(resource)
+  const spanList = /^\/admin\/traces\/[^/]+\/runs\/\d+\/spans$/.test(resource)
+  if (runList || spanList) {
+    if (!Array.isArray(data.items)) throw new Error('调用链列表响应异常，请刷新后重试')
+    for (const item of data.items) {
+      if (
+        !isRecord(item) ||
+        typeof item.trace_id !== 'string' ||
+        !['running', 'ok', 'error', 'interrupted'].includes(String(item.status)) ||
+        typeof item.started_at !== 'string' ||
+        !Number.isFinite(Date.parse(item.started_at)) ||
+        (item.ended_at !== null && !Number.isFinite(Date.parse(String(item.ended_at)))) ||
+        (runList &&
+          (!Number.isInteger(item.run_version) ||
+            !Number.isInteger(item.span_count) ||
+            !Number.isInteger(item.failed_count) ||
+            !Number.isInteger(item.input_tokens) ||
+            !Number.isInteger(item.output_tokens))) ||
+        (spanList &&
+          (typeof item.span_id !== 'string' ||
+            typeof item.name !== 'string' ||
+            typeof item.kind !== 'string' ||
+            !isRecord(item.attributes) ||
+            (item.parent_span_id !== null && typeof item.parent_span_id !== 'string') ||
+            (item.error_type !== null && typeof item.error_type !== 'string') ||
+            (item.duration_ms !== null && typeof item.duration_ms !== 'number')))
+      )
+        throw new Error('调用链节点响应异常，请刷新后重试')
+    }
+    if (
+      (runList &&
+        data.next_before_version !== null &&
+        !Number.isInteger(data.next_before_version)) ||
+      (spanList &&
+        ((data.next_cursor !== null && typeof data.next_cursor !== 'string') ||
+          typeof data.observed_at !== 'string' ||
+          !Number.isFinite(Date.parse(data.observed_at))))
+    )
+      throw new Error('调用链分页响应异常，请刷新后重试')
+  }
+  if (
+    /^\/admin\/traces\/[^/]+$/.test(resource) &&
+    (!isRecord(data.trace) ||
+      typeof data.trace.question !== 'string' ||
+      !Array.isArray(data.events) ||
+      !data.events.every(isRecord) ||
+      typeof data.has_more_events !== 'boolean' ||
+      typeof data.has_more_calls !== 'boolean' ||
+      !Array.isArray(data.model_calls) ||
+      !data.model_calls.every(isRecord))
+  ) {
+    throw new Error('轨迹详情响应异常，请刷新后重试')
   }
   const identity = path === '/auth/login' ? data.user : path === '/auth/me' ? data : null
   if (path === '/auth/login' || path === '/auth/me') {

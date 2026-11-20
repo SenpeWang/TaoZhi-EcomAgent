@@ -133,3 +133,13 @@ CREATE INDEX idx_sessions_user ON sessions(tenant_id,user_id);
 CREATE INDEX idx_sessions_expires ON sessions(expires_at);
 CREATE INDEX idx_task_events_job_cursor ON task_events(tenant_id,job_id,id);
 CREATE INDEX idx_model_calls_job ON model_calls(job_id);
+
+CREATE TABLE task_spans (
+ id bigserial PRIMARY KEY, tenant_id text NOT NULL, job_id text NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+ run_version bigint NOT NULL, trace_id varchar(32) NOT NULL, span_id varchar(16) NOT NULL, parent_span_id varchar(16),
+ name text NOT NULL, kind text NOT NULL, status text NOT NULL CHECK(status IN ('running','ok','error')),
+ started_at timestamptz NOT NULL, ended_at timestamptz, duration_ms bigint CHECK(duration_ms >= 0),
+ error_type text, attributes jsonb NOT NULL DEFAULT '{}', UNIQUE(trace_id,span_id)
+);
+CREATE INDEX idx_task_spans_run ON task_spans(tenant_id,job_id,run_version,id);
+CREATE INDEX idx_task_spans_job ON task_spans(job_id);

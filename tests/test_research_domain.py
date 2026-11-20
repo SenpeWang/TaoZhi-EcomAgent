@@ -46,6 +46,20 @@ def _patch_llm(mock_llm):
         yield
 
 
+def test_agent_names_resolve_historical_roles_and_preserve_custom_assignments():
+    """角色编号和历史称谓应展示同一名称，自定义派工不应成为遥测维度。"""
+    from taozhi.domain.agent_catalog import agent_display_name, research_agent_id
+    from taozhi.domain.rag_verification import SPECIALIST_AGENTS
+
+    for role_id, (historical_name, _) in SPECIALIST_AGENTS.items():
+        assert agent_display_name(role_id) == agent_display_name(historical_name)
+        assert agent_display_name(role_id) != role_id
+    assert agent_display_name("调研子智能体 · 1688源头工厂采购专员") == "1688 采购分析师"
+    assert research_agent_id("亚马逊竞品分析师") == "research.competitive_pricing"
+    assert agent_display_name("区域渠道分析师") == "区域渠道分析师"
+    assert research_agent_id("区域渠道分析师") == "research.subagent_worker"
+
+
 def test_research_scope_and_task_tool_guard():
     """纯全网口碑调研封禁 1688/Amazon；且子智能体不得调用未被授权的工具。"""
     scope_web_only = classify_research_scope("检索全网关于【骨传导运动耳机】的最新行业趋势与买家差评")
@@ -445,6 +459,7 @@ def test_sensenova_router_failover_circuit_and_compliance():
     from taozhi.ai import observability as obs
     from taozhi.ai.client import LLMClient
     from taozhi.ai.router import CircuitBreakerRegistry, build_sensenova_endpoints, route_audit_scope
+    from taozhi.observability.tracing import job_trace
     obs.reset()
 
     fake_settings = SimpleNamespace(
@@ -491,7 +506,10 @@ def test_sensenova_router_failover_circuit_and_compliance():
     ]
 
     reg = CircuitBreakerRegistry()
-    client = LLMClient(settings=fake_settings, allow_overseas=True, registry=reg)  # type: ignore[arg-type]
+    ledger = []
+    hooks = _RuntimeHooks(model_call_fn=lambda role, event: ledger.append((role, event)))
+    observer = hooks.model_call_observer("调研主协调器")
+    client = LLMClient(settings=fake_settings, allow_overseas=True, registry=reg, on_attempt=observer)  # type: ignore[arg-type]
 
     called_urls = []
 
@@ -514,11 +532,21 @@ def test_sensenova_router_failover_circuit_and_compliance():
         raw.bind.return_value = bound
         return raw
 
-    with patch.object(client, "_client_for_endpoint", side_effect=_make_fake_chat_openai):
-        with route_audit_scope() as rec:
-            out1 = client.chat("测试容灾切换")
-            out2 = client.chat("第二次请求应跳过已熔断节点")
+    spans = []
+    with (
+        patch.object(client, "_client_for_endpoint", side_effect=_make_fake_chat_openai),
+        patch("taozhi.observability.tracing.submit_span", side_effect=spans.append),
+        job_trace("test_tenant", "test_job", 1, "task.ask"),
+        route_audit_scope() as rec,
+    ):
+        out1 = client.chat("测试容灾切换")
+        out2 = client.chat("第二次请求应跳过已熔断节点")
 
+    calls = [s for s in spans if s["kind"] == "LLM" and s["ended_at"] is not None]
+    assert [s["status"] for s in calls] == ["error", "error", "ok", "ok"]
+    assert calls[-1]["attributes"]["gen_ai.usage.input_tokens"] == 100
+    assert calls[-1]["attributes"]["gen_ai.usage.output_tokens"] == 50
+    assert "测试容灾切换" not in str(calls) and "rate_limit_error" not in str(calls)
     assert out1 == "CN_PRIMARY_FLASH_OK"
     assert out2 == "CN_PRIMARY_FLASH_OK"
     assert [c[0] for c in called_urls] == [
@@ -528,6 +556,11 @@ def test_sensenova_router_failover_circuit_and_compliance():
         "sensenova_cn_primary",
     ]
     events = rec.snapshot()
+    assert hooks.model_calls == 4
+    assert [role for role, _ in ledger] == ["调研主协调器"] * 4
+    assert [event["outcome"] for _, event in ledger] == ["failed", "failed", "ok", "ok"]
+    assert [event.get("prompt_tokens", 0) for _, event in ledger] == [0, 0, 100, 100]
+    assert [event.get("completion_tokens", 0) for _, event in ledger] == [0, 0, 50, 50]
     assert any(e["endpoint_id"] == "sensenova_overseas" and e["reason"] == "rate_limit" for e in events)
     assert any(e["endpoint_id"] == "sensenova_cn_primary" and e["outcome"] == "ok" and e["failover"] is True for e in events)
 
@@ -552,6 +585,17 @@ def test_sensenova_router_failover_circuit_and_compliance():
     assert "sensenova_overseas" not in strict_calls
     assert obs.token_usage()["total_tokens"] == 300.0
     assert obs.snapshot()["llm.errors.total"] == 1.0
+
+    ledger.clear()
+    with (
+        patch("taozhi.ai.client.build_sensenova_endpoints", return_value=[eps[-1]]),
+        patch("taozhi.ai.client.time.sleep"),
+        patch.object(client, "_client_for_endpoint", side_effect=_make_failing_domestic),
+        pytest.raises(RuntimeError, match="429"),
+    ):
+        client.chat("单端点重试")
+    assert [event["outcome"] for _, event in ledger] == ["failed", "failed"]
+    assert hooks.model_calls == 6
 
 
 def test_checkpoint_cross_version_resume_hydrates_evidence_and_route_history():

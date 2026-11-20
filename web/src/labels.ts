@@ -28,8 +28,10 @@ export function stateText(state?: string): string {
     failed: '失败',
     cancelled: '已取消',
     rejected: '已驳回',
+    legacy: '历史归档',
     approved: '已通过',
     pending: '待审批',
+    partial_or_failed: '执行异常',
   }
   return labels[state] || state
 }
@@ -42,6 +44,32 @@ export function stateText(state?: string): string {
 export function stateTag(state: string): 'primary' | 'success' | 'warning' | 'danger' | 'info' {
   if (['published', 'completed', 'approved'].includes(state)) return 'success'
   if (['review', 'pending', 'running'].includes(state)) return 'warning'
-  if (['failed', 'rejected'].includes(state)) return 'danger'
+  if (['failed', 'rejected', 'partial_or_failed'].includes(state)) return 'danger'
   return 'info'
+}
+
+const traceClock = new Intl.DateTimeFormat('zh-CN', {
+  dateStyle: 'short',
+  timeStyle: 'medium',
+  hour12: false,
+})
+
+/**
+ * 将执行记录的时间戳显示为浏览器本地时间。
+ * @param value - 服务端时间戳。
+ * @returns 时间文本或空值占位。
+ */
+export function traceTime(value?: string | null): string {
+  if (!value) return '—'
+  const time = new Date(value)
+  return Number.isNaN(time.getTime()) ? '—' : traceClock.format(time)
+}
+
+/**
+ * 根据任务类别显示入口名称，问答流程同时承载知识与经营提问。
+ * @param kind - 任务类别。
+ * @returns 入口中文名称。
+ */
+export function traceKind(kind: string): string {
+  return kind === 'research' ? '选品调研' : '知识与经营问答'
 }

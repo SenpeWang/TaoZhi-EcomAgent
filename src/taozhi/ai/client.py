@@ -6,18 +6,21 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from enum import Enum
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 import httpx
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
+from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttributes
 from pydantic import BaseModel
 
 from ..config import Settings, get_settings
+from ..observability.tracing import node_span
 from .observability import get_active_usage, record_llm_call, record_llm_error
 from .parsers import _JSON_RULES, clean_model_output, get_pydantic_parser
 from .router import (
@@ -31,6 +34,7 @@ from .router import (
 from .usage import extract_usage
 
 Message = Union[str, BaseMessage, Dict[str, str]]
+_LOG = logging.getLogger(__name__)
 
 
 class ModelTier(str, Enum):
@@ -49,6 +53,7 @@ class LLMClient:
         settings: Optional[Settings] = None,
         allow_overseas: bool = True,
         registry: Optional[CircuitBreakerRegistry] = None,
+        on_attempt: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         """初始化客户端。
 
@@ -56,10 +61,12 @@ class LLMClient:
             settings: 全局运行时配置，默认从环境获取。
             allow_overseas: 是否允许在主通道失效时自动故障转移到商汤海外端点（企业涉密资料应设为 False）。
             registry: 可选自定义熔断注册表（默认使用全局共享注册表）。
+            on_attempt: 收到单次端点调用结果后的计量回调，仅传递路由元数据。
         """
         self.settings = settings or get_settings()
         self.allow_overseas = allow_overseas
         self._registry = registry or get_circuit_registry()
+        self._on_attempt = on_attempt
         self._clients: Dict[str, ChatOpenAI] = {}
         self._slots = threading.BoundedSemaphore(self.settings.llm_max_concurrency)
         self._client_lock = threading.Lock()
@@ -129,25 +136,30 @@ class LLMClient:
         return msgs
 
     def _record_route(self, event: Dict[str, Any]) -> None:
+        event["started_at"] = time.time() - event["latency_ms"] / 1000
         self.last_route_events.append(event)
         if len(self.last_route_events) > 20:
             self.last_route_events = self.last_route_events[-20:]
         recorder = get_active_route_recorder()
         if recorder is not None:
             recorder.record(event)
+        if self._on_attempt is not None:
+            try:
+                self._on_attempt(event)
+            except Exception as exc:
+                _LOG.warning("模型调用计量写入失败 (%s)", type(exc).__name__)
 
     def _on_invoke_success(
         self,
         ep: SensenovaEndpoint,
         tier: ModelTier,
-        result: AIMessage,
+        usage: Dict[str, int],
         elapsed_s: float,
         *,
         failover: bool,
         reason: str,
     ) -> None:
         latency_ms = int(elapsed_s * 1000)
-        usage = extract_usage(result)
         record_llm_call(
             tier.value,
             elapsed_s,
@@ -165,6 +177,8 @@ class LLMClient:
                 "outcome": "ok",
                 "reason": reason,
                 "latency_ms": latency_ms,
+                "prompt_tokens": usage["prompt_tokens"],
+                "completion_tokens": usage["completion_tokens"],
                 "failover": failover,
             }
         )
@@ -199,21 +213,21 @@ class LLMClient:
 
         effective_overseas = self.allow_overseas if allow_overseas is None else allow_overseas
         if max_tokens is not None:
-            budget = max(64, min(int(max_tokens), self.settings.llm_output_cap))
+            output_token_limit = max(64, min(int(max_tokens), self.settings.llm_output_cap))
         else:
-            budget = max(2048, min(self.settings.llm_max_tokens, self.settings.llm_output_cap))
-        eff_temp = temperature if temperature is not None else self.settings.llm_temperature
+            output_token_limit = max(2048, min(self.settings.llm_max_tokens, self.settings.llm_output_cap))
+        sampling_temperature = temperature if temperature is not None else self.settings.llm_temperature
 
         endpoints = build_sensenova_endpoints(self.settings)
-        preferred = _PREFERRED_ENDPOINT.get()
+        preferred_endpoint_id = _PREFERRED_ENDPOINT.get()
         candidates = self._registry.select_candidates(
             endpoints,
             allow_overseas=effective_overseas,
-            preferred_endpoint_id=preferred,
+            preferred_endpoint_id=preferred_endpoint_id,
         )
 
         if not candidates:
-            fallback_ep = SensenovaEndpoint(
+            fallback_endpoint = SensenovaEndpoint(
                 endpoint_id="sensenova_default",
                 label="商汤默认通道",
                 region="domestic",
@@ -222,81 +236,79 @@ class LLMClient:
                 model=self._model_for_tier(tier),
                 direct_connection=self.settings.llm_direct_connection,
             )
-            candidates = [fallback_ep]
+            candidates = [fallback_endpoint]
 
         with self._slots:
-            last_exc: Optional[Exception] = None
             result: Optional[AIMessage] = None
-            had_failover = False
-
-            for idx, ep in enumerate(candidates):
-                try:
-                    raw_client = self._client_for_endpoint(ep)
-                    bound_client = raw_client.bind(temperature=eff_temp, max_tokens=budget)
-                    t0 = time.perf_counter()
-                    result = bound_client.invoke(messages)
+            for endpoint_index, endpoint in enumerate(candidates):
+                retried_endpoint = False
+                while True:
+                    attempt_started_at = time.perf_counter()
+                    try:
+                        model_attributes = {
+                            SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.LLM.value,
+                            "gen_ai.operation.name": "chat",
+                            SpanAttributes.LLM_MODEL_NAME: endpoint.model or self._model_for_tier(tier),
+                        }
+                        with node_span("llm.chat", model_attributes) as span:
+                            model_client = self._client_for_endpoint(endpoint)
+                            result = model_client.bind(
+                                temperature=sampling_temperature, max_tokens=output_token_limit,
+                            ).invoke(messages)
+                            usage = extract_usage(result)
+                            if span is not None:
+                                span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_PROMPT, usage["prompt_tokens"])
+                                span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_COMPLETION, usage["completion_tokens"])
+                    except Exception as exc:
+                        latency_ms = int((time.perf_counter() - attempt_started_at) * 1000)
+                        reason, cooldown = self._registry.classify_error(exc, self.settings)
+                        self._registry.record_failure(endpoint, reason, cooldown)
+                        has_next = endpoint_index < len(candidates) - 1
+                        self._record_route(
+                            {
+                                "endpoint_id": endpoint.endpoint_id,
+                                "label": endpoint.label,
+                                "region": endpoint.region,
+                                "model": endpoint.model,
+                                "outcome": "failed",
+                                "reason": reason,
+                                "latency_ms": latency_ms,
+                                "failover": has_next,
+                            }
+                        )
+                        if has_next:
+                            break
+                        transient_failure = reason in ("rate_limit", "network_timeout", "upstream_error")
+                        if len(candidates) == 1 and not retried_endpoint and transient_failure:
+                            retried_endpoint = True
+                            time.sleep(0.5)
+                            continue
+                        record_llm_error(tier.value)
+                        raise
+                    used_failover = endpoint_index > 0
+                    reason = "failover_recovered" if used_failover else "primary_ok"
                     self._on_invoke_success(
-                        ep,
-                        tier,
-                        result,
-                        time.perf_counter() - t0,
-                        failover=had_failover,
-                        reason="failover_recovered" if had_failover else "primary_ok",
+                        endpoint, tier, usage, time.perf_counter() - attempt_started_at, failover=used_failover,
+                        reason="single_endpoint_retry_ok" if retried_endpoint else reason,
                     )
                     break
-                except Exception as exc:
-                    last_exc = exc
-                    reason, cooldown = self._registry.classify_error(exc, self.settings)
-                    self._registry.record_failure(ep, reason, cooldown)
-                    has_next = idx < len(candidates) - 1
-                    self._record_route(
-                        {
-                            "endpoint_id": ep.endpoint_id,
-                            "label": ep.label,
-                            "region": ep.region,
-                            "model": ep.model,
-                            "outcome": "failed",
-                            "reason": reason,
-                            "latency_ms": 0,
-                            "failover": has_next,
-                        }
-                    )
-                    if has_next:
-                        had_failover = True
-                        continue
-
-                    if len(candidates) == 1 and reason in ("rate_limit", "network_timeout", "upstream_error"):
-                        time.sleep(0.5)
-                        try:
-                            t0 = time.perf_counter()
-                            result = raw_client.bind(temperature=eff_temp, max_tokens=budget).invoke(messages)
-                            self._on_invoke_success(
-                                ep,
-                                tier,
-                                result,
-                                time.perf_counter() - t0,
-                                failover=False,
-                                reason="single_endpoint_retry_ok",
-                            )
-                            break
-                        except Exception as exc2:
-                            last_exc = exc2
-                    record_llm_error(tier.value)
-                    raise last_exc
+                if result is not None:
+                    break
 
         if result is None:
-            raise last_exc or RuntimeError("所有商汤模型通道均不可用")
+            raise RuntimeError("所有商汤模型通道均不可用")
 
         text = result.content if isinstance(result.content, str) else str(result.content)
         text = clean_model_output(text)
 
-        if not text and _empty_retry < self.settings.llm_empty_retries and budget < self.settings.llm_output_cap:
+        if (not text and _empty_retry < self.settings.llm_empty_retries
+                and output_token_limit < self.settings.llm_output_cap):
             return self.chat(
                 prompt,
                 tier=tier,
                 system=system,
                 temperature=temperature,
-                max_tokens=min(self.settings.llm_output_cap, budget * 3),
+                max_tokens=min(self.settings.llm_output_cap, output_token_limit * 3),
                 _empty_retry=_empty_retry + 1,
                 allow_overseas=allow_overseas,
             )

@@ -21,26 +21,26 @@ _SPECIALIST_PATTERNS = [
 def plan_node(state: State) -> dict:
     """意图理解与多智能体路由规划（零外部模型调用）。"""
     _, job = validate_task_execution(state, "动态意图理解与多智能体路由规划", 10)
-    q = job["question"]
-    options = {k: f"{v[0]}：{v[1]}" for k, v in SPECIALIST_AGENTS.items()}
+    question = job["question"]
+    options = {role_id: f"{title}：{guidance}" for role_id, (title, guidance) in SPECIALIST_AGENTS.items()}
     decision = get_decision_engine().choice(
-        context=redact(q),
+        context=redact(question),
         options=options,
         multi_select=False,
         top_k=3,
         force_llm=False,
         allow_llm=False,
     )
-    selected_agents = [r for r in decision.selected if r in SPECIALIST_AGENTS]
+    selected_agents = [role_id for role_id in decision.selected if role_id in SPECIALIST_AGENTS]
     for role, patterns in _SPECIALIST_PATTERNS:
-        if any(w in q for w in patterns):
+        if any(keyword in question for keyword in patterns):
             selected_agents.append(role)
-    if not selected_agents or re.search("规格|尺寸|型号|参数|幅宽|切幅|材质", q):
+    if not selected_agents or re.search("规格|尺寸|型号|参数|幅宽|切幅|材质", question):
         selected_agents.insert(0, "product")
     selected_agents = list(dict.fromkeys(selected_agents))[:3]
 
     return dict(
-        question=q,
+        question=question,
         selected_agents=selected_agents or ["product"],
         model_calls=0,
         missing=[],

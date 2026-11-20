@@ -7,13 +7,13 @@
           {{
             isReviewPage
               ? '复核团队成员提交的高密级或待人工确认分析结论。'
-              : '按知识问答与商品调研分类追踪任务进度、阶段摘要与最终结论。'
+              : '按知识问答与选品调研分类追踪任务进度、阶段摘要与最终结论。'
           }}
         </p>
       </div>
       <div class="section-actions">
         <el-button @click="emit('reload')">刷新</el-button>
-        <el-button @click="emit('navigate', '选品调研')">新建商品调研</el-button>
+        <el-button @click="emit('navigate', '选品调研')">新建选品调研</el-button>
         <el-button type="primary" @click="emit('navigate', '知识问答')">新建问答任务</el-button>
       </div>
     </div>
@@ -60,8 +60,10 @@
     <div class="task-toolbar">
       <el-radio-group v-if="!isReviewPage" v-model="kindFilter" size="default">
         <el-radio-button value="all">全部 ({{ baseTasks.length }})</el-radio-button>
-        <el-radio-button value="ask">知识问答 ({{ askCount }})</el-radio-button>
-        <el-radio-button value="research">商品调研 ({{ researchCount }})</el-radio-button>
+        <el-radio-button value="ask">{{ traceKind('ask') }} ({{ askCount }})</el-radio-button>
+        <el-radio-button value="research"
+          >{{ traceKind('research') }} ({{ researchCount }})</el-radio-button
+        >
       </el-radio-group>
 
       <div class="task-toolbar-filters">
@@ -83,14 +85,14 @@
     </div>
 
     <el-table :data="pagedTasks" class="task-table" empty-text="当前筛选条件下暂无任务记录">
-      <el-table-column label="类型" width="104">
+      <el-table-column label="类型" width="132">
         <template #default="{ row }">
           <el-tag
             size="small"
             :type="row.kind === 'research' ? 'warning' : 'primary'"
             effect="light"
           >
-            {{ row.kind === 'research' ? '商品调研' : '知识问答' }}
+            {{ traceKind(row.kind) }}
           </el-tag>
         </template>
       </el-table-column>
@@ -171,6 +173,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { Task } from '../types'
+import { traceKind } from '../labels'
 
 const props = defineProps<{
   tasks: Task[]

@@ -13,7 +13,7 @@ from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence import document_repo, job_repo
 from taozhi.knowledge import queue
 from taozhi.knowledge.db import close_pools, database_connection
-from taozhi.observability.tracing import setup_tracing
+from taozhi.observability.tracing import flush_spans, job_trace, setup_tracing
 
 _LOG = logging.getLogger(__name__)
 STOP = threading.Event()
@@ -51,10 +51,12 @@ def run_job(job: dict) -> None:
     try:
         if job["kind"] == "ingest":
             process_ingestion_job(job)
-        elif job["kind"] == "research":
-            process_research_job(job)
         else:
-            process_question_job(job)
+            with job_trace(job["tenant_id"], job["id"], job["run_version"], f"task.{job['kind']}"):
+                if job["kind"] == "research":
+                    process_research_job(job)
+                else:
+                    process_question_job(job)
     except Exception as exc:
         message = exc.message if isinstance(exc, Denied) else "任务处理失败，请重试或联系管理员"
         with database_connection() as c:
@@ -96,8 +98,8 @@ def main() -> None:
     )
     signal.signal(signal.SIGTERM, lambda *_: STOP.set())
     signal.signal(signal.SIGINT, lambda *_: STOP.set())
+    setup_tracing()
     _LOG.info("企业任务进程已启动")
-    _LOG.info("执行轨迹: %s", "已启用（OTLP→Phoenix）" if setup_tracing("taozhi-worker") else "未启用")
     cfg = load_config()
     bg_threads: list[threading.Thread] = []
     if cfg.kafka_enabled:
@@ -128,6 +130,7 @@ def main() -> None:
         STOP.set()
         for t in bg_threads:
             t.join(timeout=5)
+        flush_spans()
         close_pools()
 
 

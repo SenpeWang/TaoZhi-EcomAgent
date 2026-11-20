@@ -5,6 +5,7 @@ import ast
 import re
 from typing import Dict, Tuple
 
+# 原有称谓参与意图匹配和向量索引。用户界面与执行记录的名称由 agent_catalog 解析。
 SPECIALIST_AGENTS: Dict[str, Tuple[str, str]] = {
     "product": ("Spec 规格专家", "核对型号、尺寸、材料、批次和参数，不混用不同型号。"),
     "compatibility": ("Details 细节攻坚", "死磕手机完整机型、屏幕形态、微缝公差与互斥死角，不推测兼容。"),

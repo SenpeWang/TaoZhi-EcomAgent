@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import secrets
 import threading
+from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
@@ -15,11 +16,11 @@ from taozhi.application.research.graph import build_autonomous_agent_graph, exec
 from taozhi.application.services import document_service
 from taozhi.config import get_settings, load_config
 from taozhi.core.memory.service import get_memory_store
+from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.access import can_review, can_task
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
-from taozhi.domain.rag_verification import SPECIALIST_AGENTS
 from taozhi.infrastructure.persistence import bi_repo, job_repo
 from taozhi.infrastructure.persistence.access_repo import (
     audit,
@@ -154,7 +155,7 @@ def steer_task(p: Principal, task_id: str, *, text: str, request_id: str = "") -
         if any(isinstance(item, dict) and str(item.get("id") or "") == steer_id for item in existing_items):
             return {"message": "中途干预指令已受理（幂等命中）", "task_id": task_id, "input": text, "request_id": steer_id}
         run_ver = r.get("run_version") or 1
-        job_repo.append_steering_to_job(c, p.tenant_id, task_id, run_ver, r.get("progress") or 50, steer_id, text)
+        job_repo.append_steering_to_job(c, r, steer_id, text)
         audit(c, p, "中途动态干预", task_id, r["node_id"], r["input_level"], detail={"request_id": steer_id})
 
     try:
@@ -434,14 +435,20 @@ def _try_answer_from_semantic_cache(job: dict[str, Any], cache: Any, queue_wait_
     if not cached:
         return False
 
-    with database_connection() as c:
-        if not (cached.get("sources") and sources_valid(c, p, cached.get("sources", []))):
+    with node_span("worker.semantic_cache_hit", {"job_id": job["id"], "run_version": job["run_version"]}), database_connection() as c:
+        row = job_repo.get_job_by_id(c, job["id"], for_update=True)
+        if not row or row["state"] != "running" or row["run_version"] != job["run_version"] or row["cancel_requested"]:
+            raise Denied("任务执行版本已失效", "STALE", 409)
+        p = load_principal(c, row["owner_id"])
+        if p.version != row["owner_version"]:
+            raise Denied("人员权限已变化，请重新提交", "PERMISSION_CHANGED", 409)
+        if _tenant_epoch(c, p.tenant_id) != epoch or not sources_valid(c, p, cached["sources"]):
             return False
         e2e_ms = _diff_ms(job.get("created_at"))
         result = dict(
             answer=cached["answer"],
             citations=cached["citations"],
-            specialists=[{"name": "Main 调度 / 语义缓存", "count": 1}],
+            specialists=[{"name": agent_display_name("semantic_cache"), "count": 1}],
             missing=[],
             hard_block=False,
             external_blocked=False,
@@ -453,6 +460,9 @@ def _try_answer_from_semantic_cache(job: dict[str, Any], cache: Any, queue_wait_
             token_usage=empty_token_usage(),
             degraded={},
         )
+        trace_id = current_trace_id()
+        if trace_id:
+            result["trace_id"] = trace_id
         job_repo.complete_job(
             c,
             tenant_id=p.tenant_id,
@@ -513,13 +523,12 @@ def _build_question_result(
     timing["queue_wait_ms"] = queue_wait_ms
     timing["e2e_ms"] = e2e_ms
     token_usage = state.get("token_usage") or empty_token_usage()
+    finding_counts = Counter(agent_display_name(finding["role"]) for finding in state["findings"])
+    selected_names = [agent_display_name(role_id) for role_id in state["selected_agents"]]
     result = dict(
         answer=state["answer"],
         citations=citations,
-        specialists=[
-            {"name": SPECIALIST_AGENTS[r][0], "count": sum(f["role"] == SPECIALIST_AGENTS[r][0] for f in state["findings"])}
-            for r in state["selected_agents"]
-        ],
+        specialists=[{"name": name, "count": finding_counts[name]} for name in selected_names],
         missing=state["missing"],
         hard_block=state["hard_block"],
         external_blocked=state["external_blocked"],
@@ -631,6 +640,10 @@ def process_research_job(job: dict[str, Any]) -> None:
         with database_connection() as c:
             job_repo.update_job_stage(c, job["tenant_id"], job["id"], job["run_version"], stage, progress)
 
+    def record_model_call(role: str, event: dict) -> None:
+        with database_connection() as c:
+            job_repo.record_research_model_call(c, job, role, event)
+
     def check_cancel() -> bool:
         with database_connection() as c:
             r = job_repo.get_job_by_id(c, job["id"])
@@ -658,6 +671,7 @@ def process_research_job(job: dict[str, Any]) -> None:
             checkpointer=saver,
             require_checkpointer=True,
             emit_event_fn=emit,
+            model_call_fn=record_model_call,
             initial_steering=initial_steering,
             timeout_seconds=max(240.0, float(settings.llm_timeout or 90.0) * 2.5),
             max_turns=int(settings.research_max_turns),

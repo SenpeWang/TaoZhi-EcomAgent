@@ -10,6 +10,8 @@ import json
 import threading
 from typing import Any, Dict, List, Optional, Sequence
 
+from opentelemetry.trace import StatusCode
+
 from taozhi.core.tools.outcome import (
     ToolOutcome,
     clamp_timeout_args,
@@ -88,8 +90,8 @@ class McpClientAdapter:
             except Exception:
                 return {"content": raw_text} if raw_text else []
 
-        with node_span(f"mcp.tool.{tool_name}", {"tool": tool_name}):
-            return execute_tool_with_outcome(
+        with node_span(f"mcp.tool.{tool_name}", {"openinference.span.kind": "TOOL", "tool": tool_name}) as span:
+            outcome = execute_tool_with_outcome(
                 tool_name,
                 _invoke_mcp,
                 {},
@@ -97,3 +99,10 @@ class McpClientAdapter:
                 cancel_event=cancel_event,
                 preview_chars=preview_chars,
             )
+            if span is not None:
+                span.set_attribute("tool.status", outcome.status)
+                span.set_attribute("tool.result_count", outcome.data_count)
+                if outcome.status in ("error", "timeout", "cancelled"):
+                    span.set_attribute("error.type", outcome.status)
+                    span.set_status(StatusCode.ERROR)
+            return outcome

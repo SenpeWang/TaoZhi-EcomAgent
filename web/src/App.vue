@@ -3,7 +3,7 @@
     v-if="!user"
     v-model:username="loginForm.username"
     v-model:password="loginForm.password"
-    :info="info"
+    :info="workspaceInfo"
     :busy="busy"
     @sign-in="signIn"
     @pick-account="pickAccount"
@@ -12,34 +12,30 @@
   <div v-else class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <div class="sidebar-logo-wrap">
-          <img :src="robotUrl" alt="平台标识" class="brand-logo-img" />
-        </div>
-        <div class="brand-meta">
-          <strong class="brand-title">淘智工作台</strong>
-          <span class="brand-edition">ENTERPRISE EDITION</span>
-        </div>
+        <span class="brand-monogram" aria-hidden="true">淘</span>
+        <strong class="brand-title">淘智企业工作台</strong>
       </div>
 
       <div class="tenant-badge-box">
-        <span class="tenant-name-text" :title="info.name">
-          {{ info.name || '企业工作空间' }}
+        <span class="tenant-name-text" :title="workspaceInfo.name">
+          {{ workspaceInfo.name || '企业工作空间' }}
         </span>
-        <span class="tenant-online-dot">
-          {{ info.tenant_code || 'default' }}
+        <span class="tenant-code">
+          {{ workspaceInfo.tenant_code || 'default' }}
         </span>
       </div>
 
       <nav class="sidebar-nav" aria-label="主导航">
-        <template v-for="group in navGroups" :key="group.title">
+        <template v-for="group in navigationGroups" :key="group.title">
           <div class="nav-group-label">{{ group.title }}</div>
           <button
             v-for="item in group.items"
-            :key="item.key"
+            :key="item.page"
             type="button"
             class="nav-item-btn"
-            :class="{ active: page === item.key }"
-            @click="navigate(item.key)"
+            :class="{ active: currentPage === item.page }"
+            :aria-current="currentPage === item.page ? 'page' : undefined"
+            @click="navigate(item.page)"
           >
             <svg
               class="nav-svg-icon"
@@ -50,9 +46,9 @@
               stroke-linecap="round"
               stroke-linejoin="round"
             >
-              <path v-for="(d, idx) in item.paths" :key="idx" :d="d" />
+              <path v-for="path in workspacePages[item.page].iconPaths" :key="path" :d="path" />
             </svg>
-            <span class="nav-label">{{ item.label }}</span>
+            <span class="nav-label">{{ item.page }}</span>
             <span v-if="item.badge" class="nav-badge-count">{{ item.badge }}</span>
           </button>
         </template>
@@ -77,20 +73,33 @@
     <div class="main-shell">
       <header class="topbar">
         <div class="topbar-breadcrumb">
-          <span class="bc-platform">{{ info.name || '企业工作台' }}</span>
+          <span class="bc-platform">{{ workspaceInfo.name || '企业工作台' }}</span>
           <span class="bc-slash">/</span>
-          <span class="bc-current">{{ page }}</span>
-          <span class="bc-desc">{{ currentSubtitle }}</span>
+          <span class="bc-current">{{
+            user.must_change ? '账号安全' : currentPageDefinition.group
+          }}</span>
         </div>
 
+        <select
+          class="mobile-navigation"
+          aria-label="工作台导航"
+          :value="currentPage"
+          @change="navigate(($event.target as HTMLSelectElement).value)"
+        >
+          <optgroup v-for="group in navigationGroups" :key="group.title" :label="group.title">
+            <option v-for="item in group.items" :key="item.page" :value="item.page">
+              {{ item.page }}
+            </option>
+          </optgroup>
+        </select>
         <div class="topbar-right">
           <button
-            v-if="caps.permissions && approvals.filter(isPendingApproval).length > 0"
+            v-if="capabilities.permissions && pendingApprovalCount > 0"
             type="button"
             class="topbar-alert-btn"
             @click="navigate('权限审批')"
           >
-            <span>待审批 {{ approvals.filter(isPendingApproval).length }}</span>
+            <span>待审批 {{ pendingApprovalCount }}</span>
           </button>
 
           <el-dropdown trigger="click" @command="handleUserCommand">
@@ -131,8 +140,8 @@
       <main class="content">
         <div class="page-heading">
           <div>
-            <h1>{{ page }}</h1>
-            <p>{{ currentSubtitle }}</p>
+            <h1>{{ currentPage }}</h1>
+            <p>{{ currentPageDefinition.description }}</p>
           </div>
         </div>
 
@@ -144,17 +153,18 @@
           title="安全提醒：当前账号使用初始密码或重置后的临时密码登录，请先在个人中心修改登录密码。"
         />
 
-        <template v-if="page === '工作概览'">
+        <template v-if="currentPage === '工作概览'">
           <section class="overview-banner">
             <div class="overview-banner-meta">
-              <h2>你好，{{ user.display_name }}</h2>
+              <h2>{{ primaryOrgName }}</h2>
               <p>
-                角色：{{ displayRoles(user) }} · 所属部门：{{ primaryOrgName }} · 数据权限：{{
-                  clearanceText
-                }}
+                {{ user.display_name }} · {{ displayRoles(user) }} · 数据权限 {{ clearanceText }}
               </p>
             </div>
             <div class="overview-banner-actions">
+              <el-button v-if="user.system_admin" @click="navigate('轨迹中台')"
+                >查看执行轨迹</el-button
+              >
               <el-button @click="navigate('知识问答')">发起知识问答</el-button>
               <el-button type="primary" @click="navigate('选品调研')">开始选品调研</el-button>
             </div>
@@ -196,23 +206,24 @@
               <div class="section-heading">
                 <div>
                   <h3>最近可访问文档</h3>
-                  <p class="section-sub">点击即可阅读授权正文或查看权限策略</p>
                 </div>
                 <el-button text type="primary" @click="navigate('知识文档')"> 全部文档 </el-button>
               </div>
               <div v-if="documents.length" class="document-cards">
                 <button
-                  v-for="d in documents.slice(0, 6)"
-                  :key="d.id"
+                  v-for="document in documents.slice(0, 6)"
+                  :key="document.id"
                   type="button"
                   class="document-card"
-                  @click="openDoc(d.id)"
+                  @click="openDoc(document.id)"
                 >
-                  <span class="level-pill" :class="`level-${d.level}`">{{
-                    levelText(d.level)
+                  <span class="level-pill" :class="`level-${document.level}`">{{
+                    levelText(document.level)
                   }}</span>
-                  <strong>{{ d.title }}</strong>
-                  <small>{{ d.scope === 'company' ? '全企业' : d.node_name || d.node_id }}</small>
+                  <strong>{{ document.title }}</strong>
+                  <small>{{
+                    document.scope === 'company' ? '全企业' : document.node_name || document.node_id
+                  }}</small>
                 </button>
               </div>
               <el-empty v-else description="当前权限范围内暂无文档" />
@@ -263,11 +274,17 @@
           </section>
         </template>
 
-        <ResearchChatView v-else-if="page === '选品调研'" :user="user" :api="api" />
+        <ResearchChatView v-else-if="currentPage === '选品调研'" :user="user" :api="api" />
 
-        <BiView v-else-if="page === '经营看板'" :user="user" :api="api" />
+        <BiView v-else-if="currentPage === '经营看板'" :user="user" :api="api" />
 
-        <template v-else-if="page === '知识问答'">
+        <TraceCenter
+          v-else-if="currentPage === '轨迹中台' && user.system_admin && !user.must_change"
+          :key="user.id"
+          :api="api"
+        />
+
+        <template v-else-if="currentPage === '知识问答'">
           <section class="question-grid">
             <div class="panel">
               <div class="section-head">
@@ -290,7 +307,12 @@
                 <div class="form-columns">
                   <el-form-item label="检索部门范围">
                     <el-select v-model="askForm.node_id">
-                      <el-option v-for="o in orgs" :key="o.id" :label="o.name" :value="o.id" />
+                      <el-option
+                        v-for="organization in organizations"
+                        :key="organization.id"
+                        :label="organization.name"
+                        :value="organization.id"
+                      />
                     </el-select>
                   </el-form-item>
                   <el-form-item label="数据密级">
@@ -352,9 +374,9 @@
         </template>
 
         <TaskCenter
-          v-else-if="page === '我的任务' || page === '团队审核'"
+          v-else-if="currentPage === '我的任务' || currentPage === '团队审核'"
           :tasks="visibleTasks"
-          :is-review-page="page === '团队审核'"
+          :is-review-page="currentPage === '团队审核'"
           :state-text="stateText"
           :state-tag="stateTag"
           @open="openTask"
@@ -363,11 +385,11 @@
         />
 
         <DocumentManager
-          v-else-if="page === '知识文档'"
+          v-else-if="currentPage === '知识文档'"
           v-model:search="search"
           :documents="documents"
-          :can-write="caps.write"
-          :can-manage-permissions="caps.permissions"
+          :can-write="capabilities.write"
+          :can-manage-permissions="capabilities.permissions"
           :level-text="levelText"
           :state-text="stateText"
           @reload="load"
@@ -378,7 +400,7 @@
         />
 
         <PolicyMatrix
-          v-else-if="page === '权限审批'"
+          v-else-if="currentPage === '权限审批'"
           mode="approvals"
           :approvals="approvals"
           :tree="tree"
@@ -387,7 +409,7 @@
         />
 
         <PolicyMatrix
-          v-else-if="page === '组织与成员'"
+          v-else-if="currentPage === '组织与成员'"
           mode="org"
           :approvals="approvals"
           :tree="tree"
@@ -400,7 +422,7 @@
           @disable-user="disableUser"
         />
 
-        <template v-else-if="page === '操作日志'">
+        <template v-else-if="currentPage === '操作日志'">
           <section class="panel">
             <div class="section-head">
               <div>
@@ -428,7 +450,7 @@
           </section>
         </template>
 
-        <template v-else-if="page === '系统状态'">
+        <template v-else-if="currentPage === '系统状态'">
           <section class="runtime-grid">
             <div class="panel">
               <h3>服务连接状态</h3>
@@ -485,9 +507,9 @@
         </template>
 
         <AccountCenter
-          v-else-if="page === '个人中心'"
+          v-else-if="currentPage === '个人中心'"
           :user="user"
-          :tenant-name="info.name || '企业工作空间'"
+          :tenant-name="workspaceInfo.name || '企业工作空间'"
           :busy="busy"
           :format-role-name="roleLabel"
           @change-password="changePassword"
@@ -533,8 +555,8 @@
           下载原文件
         </el-link>
         <el-button v-if="detail.can_write" @click="editDoc">编辑文档</el-button>
-        <el-button v-if="caps.permissions" @click="showPolicy">权限与密级</el-button>
-        <el-button v-if="caps.permissions" @click="showGrant">人员授权</el-button>
+        <el-button v-if="capabilities.permissions" @click="showPolicy">权限与密级</el-button>
+        <el-button v-if="capabilities.permissions" @click="showGrant">人员授权</el-button>
         <el-button v-if="detail.body" @click="showVersions">历史版本</el-button>
         <el-button v-if="detail.can_write" type="danger" plain @click="deleteDoc">
           删除文档
@@ -554,13 +576,18 @@
       <div v-if="!docForm.id" class="form-columns">
         <el-form-item label="可见范围">
           <el-select v-model="docForm.scope">
-            <el-option v-if="user?.is_boss || caps.system" label="全企业" value="company" />
+            <el-option v-if="user?.is_boss || capabilities.system" label="全企业" value="company" />
             <el-option label="指定部门" value="org" />
           </el-select>
         </el-form-item>
         <el-form-item v-if="docForm.scope === 'org'" label="所属部门">
           <el-select v-model="docForm.node_id">
-            <el-option v-for="o in orgs" :key="o.id" :label="o.name" :value="o.id" />
+            <el-option
+              v-for="organization in organizations"
+              :key="organization.id"
+              :label="organization.name"
+              :value="organization.id"
+            />
           </el-select>
         </el-form-item>
       </div>
@@ -613,7 +640,12 @@
       </div>
       <el-form-item v-if="policyForm.scope === 'org'" label="所属部门">
         <el-select v-model="policyForm.node_id">
-          <el-option v-for="o in orgs" :key="o.id" :label="o.name" :value="o.id" />
+          <el-option
+            v-for="organization in organizations"
+            :key="organization.id"
+            :label="organization.name"
+            :value="organization.id"
+          />
         </el-select>
       </el-form-item>
       <el-checkbox v-model="policyForm.ai_allowed">允许授权人员用于 AI 问答分析</el-checkbox>
@@ -747,7 +779,12 @@
           label="所属部门"
         >
           <el-select v-model="accountForm.node_id">
-            <el-option v-for="o in orgs" :key="o.id" :label="o.name" :value="o.id" />
+            <el-option
+              v-for="organization in organizations"
+              :key="organization.id"
+              :label="organization.name"
+              :value="organization.id"
+            />
           </el-select>
         </el-form-item>
       </div>
@@ -772,7 +809,12 @@
       </el-form-item>
       <el-form-item v-if="memberForm.role !== 'boss'" label="所属部门">
         <el-select v-model="memberForm.node_id">
-          <el-option v-for="o in orgs" :key="o.id" :label="o.name" :value="o.id" />
+          <el-option
+            v-for="organization in organizations"
+            :key="organization.id"
+            :label="organization.name"
+            :value="organization.id"
+          />
         </el-select>
       </el-form-item>
       <el-checkbox v-model="memberForm.remove">从所选部门中移除该成员</el-checkbox>
@@ -818,10 +860,10 @@
       <el-form-item label="上级部门">
         <el-select v-model="orgForm.parent_id">
           <el-option
-            v-for="o in orgs.filter((item) => item.id !== orgForm.id)"
-            :key="o.id"
-            :label="o.name"
-            :value="o.id"
+            v-for="organization in organizations.filter((item) => item.id !== orgForm.id)"
+            :key="organization.id"
+            :label="organization.name"
+            :value="organization.id"
           />
         </el-select>
       </el-form-item>
@@ -840,7 +882,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { requestApi } from './api'
 import { openTaskEventStream } from './composables/useTaskStream'
 import { levelText, stateTag, stateText } from './labels'
-import robotUrl from './assets/robot.svg'
+import { workspaceNavigation, workspacePages, type WorkspacePage } from './workspaceNavigation'
 import AccountCenter from './views/AccountCenter.vue'
 import BiView from './views/BiView.vue'
 import DocumentManager from './views/DocumentManager.vue'
@@ -849,6 +891,7 @@ import PolicyMatrix from './views/PolicyMatrix.vue'
 import ResearchChatView from './views/ResearchChatView.vue'
 import TaskCenter from './views/TaskCenter.vue'
 import TaskTimeline from './views/TaskTimeline.vue'
+import TraceCenter from './views/TraceCenter.vue'
 import type {
   Approval,
   AuditEvent,
@@ -870,29 +913,17 @@ import type {
   WorkspaceInfo,
 } from './types'
 
-interface NavItem {
-  key: string
-  label: string
-  paths: string[]
-  badge?: number
-}
-
-interface NavGroup {
-  title: string
-  items: NavItem[]
-}
-
-const info = ref<WorkspaceInfo>({
+const workspaceInfo = ref<WorkspaceInfo>({
   name: '',
   mode: '',
   tenant_code: '',
   quick_accounts: [],
 })
 const user = ref<User | null>(null)
-const page = ref('工作概览')
+const currentPage = ref<WorkspacePage>('工作概览')
 const busy = ref(false)
 const search = ref('')
-const orgs = ref<Organization[]>([])
+const organizations = ref<Organization[]>([])
 const documents = ref<DocumentListItem[]>([])
 const tasks = ref<Task[]>([])
 const approvals = ref<Approval[]>([])
@@ -986,7 +1017,7 @@ function isPendingApproval(row: Approval): boolean {
  * 读取当前登录身份的功能能力集合。
  * @returns 权限能力对象。
  */
-function resolveCaps(): Capabilities {
+function resolveCapabilities(): Capabilities {
   return (
     user.value?.capabilities || {
       system: false,
@@ -996,19 +1027,19 @@ function resolveCaps(): Capabilities {
     }
   )
 }
-const caps = computed(resolveCaps)
+const capabilities = computed(resolveCapabilities)
 
 /**
  * 计算组织根节点编号。
  * @returns 公司根节点 ID。
  */
-function resolveRootId(): string {
-  for (const o of orgs.value) {
-    if (o.kind === 'company') return o.id
+function resolveRootOrganizationId(): string {
+  for (const organization of organizations.value) {
+    if (organization.kind === 'company') return organization.id
   }
-  return orgs.value[0]?.id || ''
+  return organizations.value[0]?.id || ''
 }
-const root = computed(resolveRootId)
+const rootOrganizationId = computed(resolveRootOrganizationId)
 
 /**
  * 将组织平铺列表构造成前端树形控件结构。
@@ -1017,9 +1048,9 @@ const root = computed(resolveRootId)
  */
 function buildTree(parentId: string | null): OrganizationTree[] {
   const result: OrganizationTree[] = []
-  for (const o of orgs.value) {
-    if (o.parent_id !== parentId) continue
-    result.push({ ...o, label: o.name, children: buildTree(o.id) })
+  for (const organization of organizations.value) {
+    if (organization.parent_id !== parentId) continue
+    result.push({ ...organization, label: organization.name, children: buildTree(organization.id) })
   }
   return result
 }
@@ -1031,166 +1062,25 @@ const tree = computed(
   () => buildTree(null),
 )
 
-/**
- * 计算企业导航栏分组与权限可见菜单。
- * @returns 分组导航清单。
- */
-function computeNavGroups(): NavGroup[] {
-  if (!user.value) return []
-  if (user.value.must_change) {
-    return [
-      {
-        title: '账号安全',
-        items: [
-          {
-            key: '个人中心',
-            label: '个人中心',
-            paths: ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'],
-          },
-        ],
-      },
-    ]
-  }
-  const pendingCount = approvals.value.filter(isPendingApproval).length
-  const groups: NavGroup[] = [
-    {
-      title: '业务工作台',
-      items: [
-        {
-          key: '工作概览',
-          label: '工作概览',
-          paths: ['M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z'],
-        },
-        {
-          key: '选品调研',
-          label: '选品调研',
-          paths: ['M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z', 'M5 20a7 7 0 0 1 14 0'],
-        },
-        {
-          key: '经营看板',
-          label: '经营看板',
-          paths: ['M3 3v18h18', 'M18 17V9', 'M13 17V5', 'M8 17v-3'],
-        },
-        {
-          key: '知识问答',
-          label: '知识问答',
-          paths: ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'],
-        },
-      ],
-    },
-    {
-      title: '文档与任务',
-      items: [
-        {
-          key: '知识文档',
-          label: '知识文档',
-          paths: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6'],
-        },
-        {
-          key: '我的任务',
-          label: '我的任务',
-          paths: ['M9 11l3 3L22 4', 'M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'],
-        },
-        ...(caps.value.review
-          ? [
-              {
-                key: '团队审核',
-                label: '团队审核',
-                paths: [
-                  'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2',
-                  'M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
-                ],
-                badge: dashboard.value.review || undefined,
-              },
-            ]
-          : []),
-      ],
-    },
-  ]
-
-  const governanceItems: NavItem[] = []
-  if (caps.value.permissions) {
-    governanceItems.push({
-      key: '权限审批',
-      label: '权限审批',
-      paths: ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'],
-      badge: pendingCount || undefined,
-    })
-  }
-  if (caps.value.system) {
-    governanceItems.push({
-      key: '组织与成员',
-      label: '组织与成员',
-      paths: [
-        'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2',
-        'M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
-        'M22 21v-2a4 4 0 0 0-3-3.87',
-      ],
-    })
-  }
-  if (caps.value.system || caps.value.permissions) {
-    governanceItems.push({
-      key: '操作日志',
-      label: '操作日志',
-      paths: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M9 13h6', 'M9 17h6'],
-    })
-  }
-  if (caps.value.system) {
-    governanceItems.push({
-      key: '系统状态',
-      label: '系统状态',
-      paths: ['M22 12h-4l-3 9L9 3l-3 9H2'],
-    })
-  }
-  if (governanceItems.length) {
-    groups.push({ title: '组织与权限', items: governanceItems })
-  }
-
-  groups.push({
-    title: '账号设置',
-    items: [
-      {
-        key: '个人中心',
-        label: '个人中心',
-        paths: ['M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2', 'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z'],
-      },
-    ],
-  })
-  return groups
-}
-const navGroups = computed(computeNavGroups)
-
-const SUBTITLES: Record<string, string> = {
-  工作概览: '查看当前授权文档、待办任务及账号服务状态。',
-  选品调研: '自动对比货源行情与主流渠道价带，生成选品分析报告。',
-  经营看板: '权限受控的企业经营数据看板与自然语言指标查询。',
-  知识问答: '按组织架构与文档密级检索企业制度及业务资料。',
-  知识文档: '按部门与密级管理的企业文档知识库。',
-  我的任务: '追踪我发起的分析任务进度与历史结论。',
-  团队审核: '复核负责范围内提交的知识检索答案并决定是否发布。',
-  权限审批: '处理文档密级调整、阅读授权、部门架构及成员账号审批。',
-  组织与成员: '维护企业部门架构、成员账号及岗位角色。',
-  操作日志: '查看系统登录、文档读写与权限审批操作历史。',
-  系统状态: '查看数据库、后台任务服务与数据源连接情况。',
-  个人中心: '查看个人权限范围、所属部门及修改登录密码。',
-}
-
-const currentSubtitle = computed(
-  /**
-   * 获取当前页面对应的业务说明副标题。
-   * @returns 说明文本。
-   */
-  () => SUBTITLES[page.value] || '',
+const pendingApprovalCount = computed(() => approvals.value.filter(isPendingApproval).length)
+const navigationGroups = computed(() =>
+  workspaceNavigation(
+    user.value,
+    capabilities.value,
+    pendingApprovalCount.value,
+    dashboard.value.review,
+  ),
 )
+const currentPageDefinition = computed(() => workspacePages[currentPage.value])
 
 /**
  * 过滤当前任务视图（我的任务仅展示本人发起的任务，团队审核展示全部待审任务）。
  * @returns 当前页面可见任务列表。
  */
 function computeVisibleTasks(): Task[] {
-  if (page.value === '团队审核') return tasks.value
-  const uid = user.value?.id
-  return uid ? tasks.value.filter((t) => t.owner_id === uid) : tasks.value
+  if (currentPage.value === '团队审核') return tasks.value
+  const currentUserId = user.value?.id
+  return currentUserId ? tasks.value.filter((task) => task.owner_id === currentUserId) : tasks.value
 }
 const visibleTasks = computed(computeVisibleTasks)
 
@@ -1221,8 +1111,8 @@ const userToneClass = computed(computeUserTone)
  * @returns 部门名称。
  */
 function computePrimaryOrg(): string {
-  const m = user.value?.memberships?.[0]
-  return m?.name || orgName(m?.node_id) || '暂未分配部门'
+  const membership = user.value?.memberships?.[0]
+  return membership?.name || orgName(membership?.node_id) || '暂未分配部门'
 }
 const primaryOrgName = computed(computePrimaryOrg)
 
@@ -1233,7 +1123,7 @@ const primaryOrgName = computed(computePrimaryOrg)
  */
 function orgName(nodeId?: string | null): string {
   if (!nodeId) return '—'
-  return orgs.value.find((o) => o.id === nodeId)?.name || nodeId
+  return organizations.value.find((organization) => organization.id === nodeId)?.name || nodeId
 }
 
 /**
@@ -1296,9 +1186,9 @@ function displayRoles(row: User): string {
 /**
  * 清空客户端所有业务状态，确保退出或改密后不残留会话信息。
  */
-function wipe(): void {
+function clearSession(): void {
   user.value = null
-  orgs.value = []
+  organizations.value = []
   documents.value = []
   tasks.value = []
   approvals.value = []
@@ -1319,7 +1209,7 @@ function wipe(): void {
  * @returns 经过结构校验的服务端响应数据。
  */
 async function api<T>(path: string, method = 'GET', payload?: unknown): Promise<T> {
-  return requestApi<T>(path, info.value.mode, wipe, method, payload)
+  return requestApi<T>(path, workspaceInfo.value.mode, clearSession, method, payload)
 }
 
 /**
@@ -1352,29 +1242,30 @@ async function action(fn: () => Promise<void>): Promise<void> {
 async function load(): Promise<void> {
   if (!user.value) return
   if (user.value.must_change) {
-    page.value = '个人中心'
+    currentPage.value = '个人中心'
     return
   }
   const query = search.value ? '?q=' + encodeURIComponent(search.value) : ''
-  const requests = await Promise.all([
-    api<Dashboard>('/dashboard'),
-    api<Items<Organization>>('/organizations'),
-    api<Items<DocumentListItem>>('/documents' + query),
-    api<Items<Task>>('/tasks'),
-    caps.value.permissions
-      ? api<Items<Approval>>('/approvals')
-      : Promise.resolve({ items: [] as Approval[] }),
-    caps.value.system || caps.value.permissions
-      ? api<Items<User>>('/users')
-      : Promise.resolve({ items: [] as User[] }),
-  ])
-  dashboard.value = requests[0]
-  orgs.value = requests[1].items
-  documents.value = requests[2].items
-  tasks.value = requests[3].items
-  approvals.value = requests[4].items
-  users.value = requests[5].items
-  if (!askForm.node_id && orgs.value.length) askForm.node_id = orgs.value[0].id
+  const [overview, organizationPage, documentPage, taskPage, approvalPage, userPage] =
+    await Promise.all([
+      api<Dashboard>('/dashboard'),
+      api<Items<Organization>>('/organizations'),
+      api<Items<DocumentListItem>>('/documents' + query),
+      api<Items<Task>>('/tasks'),
+      capabilities.value.permissions
+        ? api<Items<Approval>>('/approvals')
+        : Promise.resolve({ items: [] as Approval[] }),
+      capabilities.value.system || capabilities.value.permissions
+        ? api<Items<User>>('/users')
+        : Promise.resolve({ items: [] as User[] }),
+    ])
+  dashboard.value = overview
+  organizations.value = organizationPage.items
+  documents.value = documentPage.items
+  tasks.value = taskPage.items
+  approvals.value = approvalPage.items
+  users.value = userPage.items
+  if (!askForm.node_id && organizations.value.length) askForm.node_id = organizations.value[0].id
 }
 
 /**
@@ -1384,12 +1275,12 @@ async function signIn(): Promise<void> {
   await action(async () => {
     const result = await api<LoginResponse>('/auth/login', 'POST', {
       ...loginForm,
-      tenant_code: info.value.tenant_code,
+      tenant_code: workspaceInfo.value.tenant_code,
     })
     const signedUser = result.user
     user.value = signedUser
     loginForm.password = ''
-    page.value = signedUser.must_change ? '个人中心' : '工作概览'
+    currentPage.value = signedUser.must_change ? '个人中心' : '工作概览'
     askForm.input_level = signedUser.is_boss ? 3 : signedUser.is_leader ? 2 : 1
     askForm.allow_external = !signedUser.is_boss
     await load()
@@ -1402,7 +1293,7 @@ async function signIn(): Promise<void> {
 async function signOut(): Promise<void> {
   await action(async () => {
     await api('/auth/logout', 'POST')
-    wipe()
+    clearSession()
     loginForm.username = ''
     ElMessage.success('已退出登录')
   })
@@ -1432,7 +1323,12 @@ function handleUserCommand(cmd: string): void {
  * @param name - 菜单名称。
  */
 async function navigate(name: string): Promise<void> {
-  page.value = name
+  const destination = navigationGroups.value
+    .flatMap((group) => group.items)
+    .find((item) => item.page === name)
+  if (!destination) return
+  currentPage.value = destination.page
+  if (name === '轨迹中台') return
   if (name === '系统状态') {
     await action(async () => {
       runtimeStatus.value = await api<RuntimeStatus>('/system/status')
@@ -1613,8 +1509,8 @@ function newDoc(): void {
     scope: user.value?.system_admin && !user.value?.is_boss ? 'company' : 'org',
     node_id:
       user.value?.system_admin && !user.value?.is_boss
-        ? root.value
-        : user.value?.memberships[0]?.node_id || root.value,
+        ? rootOrganizationId.value
+        : user.value?.memberships[0]?.node_id || rootOrganizationId.value,
     level: user.value?.system_admin && !user.value?.is_boss ? 1 : 2,
     version: 1,
   })
@@ -1662,7 +1558,7 @@ async function saveDoc(): Promise<void> {
       await api('/documents', 'POST', {
         title: docForm.title,
         body: docForm.body,
-        node_id: docForm.scope === 'company' ? root.value : docForm.node_id,
+        node_id: docForm.scope === 'company' ? rootOrganizationId.value : docForm.node_id,
         scope: docForm.scope,
         level: docForm.level,
       })
@@ -1722,7 +1618,7 @@ async function savePolicy(): Promise<void> {
   await action(async () => {
     await api('/documents/' + detail.value!.id + '/policy', 'POST', {
       ...policyForm,
-      node_id: policyForm.scope === 'company' ? root.value : policyForm.node_id,
+      node_id: policyForm.scope === 'company' ? rootOrganizationId.value : policyForm.node_id,
     })
     policyOpen.value = false
     ElMessage.success('权限变更已提交，等待企业负责人审批')
@@ -1799,7 +1695,7 @@ function newAccount(): void {
     password: '',
     display_name: '',
     role: 'employee',
-    node_id: root.value,
+    node_id: rootOrganizationId.value,
   })
   accountOpen.value = true
 }
@@ -1818,7 +1714,7 @@ async function saveAccount(): Promise<void> {
       await api('/users/' + r.id, 'PATCH', { system_admin: true })
     } else {
       await api('/users/' + r.id + '/memberships', 'POST', {
-        node_id: accountForm.role === 'boss' ? root.value : accountForm.node_id,
+        node_id: accountForm.role === 'boss' ? rootOrganizationId.value : accountForm.node_id,
         role: accountForm.role,
         remove: false,
       })
@@ -1837,7 +1733,7 @@ async function saveAccount(): Promise<void> {
 function membership(row: User): void {
   Object.assign(memberForm, {
     user_id: row.id,
-    node_id: row.memberships?.[0]?.node_id || root.value,
+    node_id: row.memberships?.[0]?.node_id || rootOrganizationId.value,
     role: row.memberships?.[0]?.role || 'employee',
     remove: false,
   })
@@ -1850,7 +1746,7 @@ function membership(row: User): void {
 async function saveMembership(): Promise<void> {
   await action(async () => {
     await api('/users/' + memberForm.user_id + '/memberships', 'POST', {
-      node_id: memberForm.role === 'boss' ? root.value : memberForm.node_id,
+      node_id: memberForm.role === 'boss' ? rootOrganizationId.value : memberForm.node_id,
       role: memberForm.role,
       remove: memberForm.remove,
     })
@@ -1917,7 +1813,7 @@ function newOrg(): void {
     id: '',
     name: '',
     kind: 'department',
-    parent_id: root.value,
+    parent_id: rootOrganizationId.value,
     active: true,
   })
   orgOpen.value = true
@@ -1998,7 +1894,7 @@ async function changePassword(payload: {
 }): Promise<void> {
   await action(async () => {
     await api('/auth/password', 'POST', payload)
-    wipe()
+    clearSession()
     ElMessage.success('密码已修改，请重新登录')
   })
 }
@@ -2007,7 +1903,7 @@ let timer: ReturnType<typeof setInterval>
 
 onMounted(async () => {
   try {
-    info.value = await api<WorkspaceInfo>('/info')
+    workspaceInfo.value = await api<WorkspaceInfo>('/info')
   } catch (e: unknown) {
     console.error('获取工作空间信息失败:', e)
   }

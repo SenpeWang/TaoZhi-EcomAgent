@@ -12,6 +12,7 @@ from taozhi.ai.client import LLMClient, ModelTier
 from taozhi.ai.router import route_audit_scope
 from taozhi.core.agent.context import ArtifactMetadata, SubagentContext
 from taozhi.core.memory.service import get_memory_store
+from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.research import StopReason
 from .hooks import attach_route_delta, emit_progress, get_hooks, make_failover_emitter
 from .schemas import AuditableAgentTransition, AutonomousAgentState, active_evidence
@@ -28,7 +29,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
     active_ev = active_evidence(state)
 
     emit_progress(hooks, "[agent_handoff] 整合已核验黑板证据，转入终审研报合成", 85)
-    ctx = SubagentContext(conversation_id=f"rep_{state.get('job_id', 'task')}_{int(time.time())}", role="终审研报合成专家")
+    ctx = SubagentContext(conversation_id=f"rep_{state.get('job_id', 'task')}_{int(time.time())}", role=agent_display_name("research.synthesizer"))
 
     evidence_payload = [
         {
@@ -64,7 +65,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
         "3. 结合用户诉求给出可落地的差异化与风险提示。"
     )
 
-    llm = LLMClient()
+    llm = LLMClient(on_attempt=hooks.model_call_observer("调研报告合成"))
     emit_progress(hooks, "[tool_execution_start] [终审研报合成] 正在生成结构化调研报告", 90)
     synth_route_events: List[Dict[str, Any]] = []
     synth_last_ep = ""
@@ -96,7 +97,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
 
     transition: AuditableAgentTransition = {
         "agent_id": ctx.conversation_id,
-        "role": "终审研报合成专家",
+        "role": agent_display_name("research.synthesizer"),
         "type_name": "synthesizer_agent",
         "state_from": "SYNTHESIZING",
         "state_to": "COMPLETED",

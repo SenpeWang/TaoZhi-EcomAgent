@@ -10,6 +10,7 @@ from typing import Any
 
 from taozhi.config import load_config
 from taozhi.domain.access import can_review, can_task
+from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
 from taozhi.infrastructure.persistence.access_repo import audit, sources_valid
@@ -70,6 +71,14 @@ def count_jobs_by_state(conn: Any, tenant_id: str) -> list[dict]:
     return fetch_all(conn, "SELECT state,count(*) AS count FROM jobs WHERE tenant_id=%s GROUP BY state", (tenant_id,))
 
 
+def _record_job_event(conn: Any, job: dict) -> None:
+    """按刚写入的任务状态保存事件，与任务变更共用同一事务。"""
+    conn.execute(
+        "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,%s,%s)",
+        (job["tenant_id"], job["id"], job["run_version"], job["stage"], job["progress"], job["state"]),
+    )
+
+
 def create_job(
     conn: Any,
     p: Any,
@@ -124,7 +133,9 @@ def create_job(
     )
     if cfg.kafka_enabled:
         conn.execute("INSERT INTO task_outbox(job_id) VALUES(%s)", (job["id"],))
-    audit(conn, p, "提交问答" if kind == "ask" else "提交资料解析", job["id"], node, level, detail={"kind": kind})
+    _record_job_event(conn, job)
+    action = {"ask": "提交问答", "research": "提交调研", "ingest": "提交资料解析"}[kind]
+    audit(conn, p, action, job["id"], node, level, detail={"kind": kind})
     return job
 
 
@@ -144,12 +155,17 @@ def list_task_events(conn: Any, tenant_id: str, job_id: str, after_id: int | Non
 
 
 def update_job_stage(conn: Any, tenant_id: str, job_id: str, run_version: int, stage: str, progress: int, status: str = "running") -> None:
-    """更新任务进度与追加事件流记录。"""
-    conn.execute("UPDATE jobs SET stage=%s,progress=%s WHERE id=%s AND run_version=%s", (stage, progress, job_id, run_version))
-    conn.execute(
-        "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,%s,%s)",
-        (tenant_id, job_id, run_version, stage, progress, status),
+    """只接受当前运行的回调，并发子任务的进度以数据库水位为准。"""
+    written = conn.execute(
+        "WITH changed AS (UPDATE jobs SET stage=%s,progress=GREATEST(progress,%s) "
+        "WHERE tenant_id=%s AND id=%s AND run_version=%s AND state='running' AND NOT cancel_requested "
+        "RETURNING tenant_id,id,run_version,stage,progress) "
+        "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) "
+        "SELECT tenant_id,id,run_version,stage,progress,%s FROM changed",
+        (stage, progress, tenant_id, job_id, run_version, status),
     )
+    if written.rowcount == 0:
+        raise Denied("任务已取消或执行版本已失效", "TASK_STOPPED", 409)
 
 
 def complete_job(
@@ -190,7 +206,7 @@ def mark_job_failed_or_cancelled(conn: Any, job: dict, status: str, message: str
     """将执行中失败或被取消的任务落库终态。"""
     stage_txt = "已取消" if status == "cancelled" else "处理失败"
     conn.execute(
-        "UPDATE jobs SET state=%s,error=%s,stage=%s,finished_at=now(),lease_until=NULL WHERE id=%s",
+        "UPDATE jobs SET state=%s,error=%s,stage=%s,progress=100,finished_at=now(),lease_until=NULL WHERE id=%s",
         (status, message, stage_txt, job["id"]),
     )
     conn.execute(
@@ -226,6 +242,20 @@ def expire_stale_reviews(conn: Any = None) -> int:
         return _expire(c)
 
 
+def _claim_locked_job(conn: Any, job_id: str, worker_id: str, lease_seconds: int) -> dict:
+    """认领行锁保护的任务，为实际开始的每次尝试登记独立的执行版本。"""
+    job = fetch_one(
+        conn,
+        "UPDATE jobs SET stage=CASE WHEN state='running' THEN '执行租约到期，已重新认领' ELSE '已开始执行' END,"
+        "state='running',progress=0,run_version=run_version+1,attempts=attempts+1,worker_id=%s,"
+        "lease_until=now()+(%s*interval '1 second'),started_at=COALESCE(started_at,now()),error='' "
+        "WHERE id=%s RETURNING *",
+        (worker_id, lease_seconds, job_id),
+    )
+    _record_job_event(conn, job)
+    return job
+
+
 def claim_next_job(worker_id: str | None = None) -> dict | None:
     """认领下一个可执行任务（含租约过期抢占与看门狗清理）。"""
     wid = worker_id or f"worker_{secrets.token_hex(8)}"
@@ -233,24 +263,25 @@ def claim_next_job(worker_id: str | None = None) -> dict | None:
     with database_connection() as c:
         expire_stale_reviews(c)
         c.execute(
-            "UPDATE jobs SET state='failed',error='任务重试次数已达上限',finished_at=now() "
-            "WHERE state IN ('queued','running') AND attempts>=%s AND (lease_until IS NULL OR lease_until<now())",
+            "WITH expired AS (UPDATE jobs SET state=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END,"
+            "error=CASE WHEN cancel_requested THEN '任务已取消' ELSE '任务重试次数已达上限' END,"
+            "stage=CASE WHEN cancel_requested THEN '已取消' ELSE '任务重试次数已达上限' END,"
+            "progress=100,finished_at=now(),lease_until=NULL WHERE state IN ('queued','running') "
+            "AND (attempts>=%s OR cancel_requested) AND (lease_until IS NULL OR lease_until<now()) "
+            "RETURNING tenant_id,id,run_version,stage,progress,state) "
+            "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) "
+            "SELECT tenant_id,id,run_version,stage,progress,state FROM expired",
             (cfg.max_attempts,),
         )
         row = fetch_one(
             c,
-            "SELECT * FROM jobs WHERE NOT cancel_requested AND attempts<%s AND (state='queued' OR (state='running' AND lease_until<now())) "
+            "SELECT id FROM jobs WHERE NOT cancel_requested AND attempts<%s AND (state='queued' OR (state='running' AND lease_until<now())) "
             "ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",
             (cfg.max_attempts,),
         )
         if not row:
             return None
-        return fetch_one(
-            c,
-            "UPDATE jobs SET state='running',run_version=run_version+1,attempts=attempts+1,worker_id=%s,"
-            "lease_until=now()+(%s*interval '1 second'),started_at=COALESCE(started_at,now()),error='' WHERE id=%s RETURNING *",
-            (wid, cfg.lease_seconds, row["id"]),
-        )
+        return _claim_locked_job(c, row["id"], wid, cfg.lease_seconds)
 
 
 def claim_job_by_id(job_id: str, worker_id: str | None = None) -> dict | None:
@@ -274,12 +305,7 @@ def claim_job_by_id(job_id: str, worker_id: str | None = None) -> dict | None:
         )
         if not row:
             return None
-        return fetch_one(
-            c,
-            "UPDATE jobs SET state='running',run_version=run_version+1,attempts=attempts+1,worker_id=%s,"
-            "lease_until=now()+(%s*interval '1 second'),started_at=COALESCE(started_at,now()),error='' WHERE id=%s RETURNING *",
-            (wid, cfg.lease_seconds, row["id"]),
-        )
+        return _claim_locked_job(c, row["id"], wid, cfg.lease_seconds)
 
 
 def delete_checkpoint_threads(conn: Any, thread_patterns: list[str]) -> None:
@@ -369,6 +395,17 @@ def update_model_call(conn: Any, call_id: str, elapsed_ms: int, prompt_tokens: i
     )
 
 
+def record_research_model_call(conn: Any, job: dict, role: str, event: dict) -> None:
+    """将端点尝试的实际结果一次写入账本，以调用起始时间对齐并行阶段。"""
+    conn.execute(
+        "INSERT INTO model_calls(tenant_id,job_id,role,elapsed_ms,prompt_tokens,completion_tokens,outcome,created_at) "
+        "SELECT tenant_id,id,%s,%s,%s,%s,%s,to_timestamp(%s) FROM jobs "
+        "WHERE tenant_id=%s AND id=%s AND kind='research' AND run_version=%s",
+        (role, event["latency_ms"], event.get("prompt_tokens", 0), event.get("completion_tokens", 0),
+         event["outcome"], event["started_at"], job["tenant_id"], job["id"], job["run_version"]),
+    )
+
+
 def last_conversation_question(conn: Any, tenant_id: str, owner_id: str, conversation_id: str, exclude_job_id: str) -> str | None:
     """读取同一会话中上一条已完成的提问，供短指代词多轮检索补全。"""
     row = fetch_one(
@@ -440,18 +477,25 @@ def delete_research_conversation_records(conn: Any, tenant_id: str, owner_id: st
 
 def mark_job_cancelled(conn: Any, job_id: str) -> None:
     """标记任务取消请求，非运行中任务直接置为已取消。"""
-    conn.execute(
-        "UPDATE jobs SET cancel_requested=true,state=CASE WHEN state='running' THEN state ELSE 'cancelled' END WHERE id=%s",
+    changed = fetch_one(
+        conn,
+        "UPDATE jobs SET cancel_requested=true,state=CASE WHEN state='running' THEN state ELSE 'cancelled' END,"
+        "stage=CASE WHEN state='running' THEN '已请求取消' ELSE '已取消' END,"
+        "progress=CASE WHEN state='running' THEN progress ELSE 100 END,"
+        "finished_at=CASE WHEN state='running' THEN finished_at ELSE now() END "
+        "WHERE id=%s AND NOT cancel_requested RETURNING tenant_id,id,run_version,stage,progress,state",
         (job_id,),
     )
+    if changed:
+        _record_job_event(conn, changed)
 
 
-def append_steering_to_job(conn: Any, tenant_id: str, job_id: str, run_ver: int, progress: int, steer_id: str, text: str) -> None:
+def append_steering_to_job(conn: Any, job: dict, steer_id: str, text: str) -> None:
     """向运行中任务的 JSON payload 追加幂等干预指令并写入事件流。"""
     stage_desc = f"【用户中途追加干预指令】：{text}"
     conn.execute(
-        "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,%s,'running')",
-        (tenant_id, job_id, run_ver, stage_desc, progress),
+        "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,%s,%s)",
+        (job["tenant_id"], job["id"], job["run_version"], stage_desc, job["progress"], job["state"]),
     )
     conn.execute(
         """UPDATE jobs SET payload = jsonb_set(
@@ -459,7 +503,7 @@ def append_steering_to_job(conn: Any, tenant_id: str, job_id: str, run_ver: int,
             '{steering_inputs}',
             COALESCE(payload->'steering_inputs', '[]'::jsonb) || jsonb_build_array(%s)
         ) WHERE id=%s""",
-        (as_jsonb({"id": steer_id, "text": text}), job_id),
+        (as_jsonb({"id": steer_id, "text": text}), job["id"]),
     )
 
 
@@ -474,7 +518,7 @@ def requeue_job(conn: Any, tenant_id: str, job_id: str, new_ver: int) -> None:
     """
     conn.execute(
         "UPDATE jobs SET state='queued',stage='工作流重新排队调度中...',progress=0,error='',cancel_requested=false,"
-        "run_version=%s,started_at=NULL,finished_at=NULL,lease_until=NULL WHERE id=%s",
+        "run_version=%s,started_at=NULL,finished_at=NULL,lease_until=NULL,worker_id=NULL,result=NULL WHERE id=%s",
         (new_ver, job_id),
     )
     conn.execute(
@@ -487,14 +531,17 @@ def requeue_job(conn: Any, tenant_id: str, job_id: str, new_ver: int) -> None:
 
 def save_task_review(conn: Any, tenant_id: str, job_id: str, reviewer_id: str, approve: bool, comment: str) -> None:
     """写入业务答案人工审核结论与任务终态。"""
-    conn.execute(
-        "UPDATE jobs SET state=%s,finished_at=now(),progress=100,stage=%s WHERE id=%s",
+    job = fetch_one(
+        conn,
+        "UPDATE jobs SET state=%s,finished_at=now(),progress=100,stage=%s WHERE id=%s "
+        "RETURNING tenant_id,id,run_version,stage,progress,state",
         ("completed" if approve else "rejected", "已发布" if approve else "审核未通过", job_id),
     )
     conn.execute(
         "INSERT INTO task_reviews(tenant_id,job_id,reviewer_id,decision,comment) VALUES(%s,%s,%s,%s,%s)",
         (tenant_id, job_id, reviewer_id, "approved" if approve else "rejected", comment),
     )
+    _record_job_event(conn, job)
 
 
 def present_job(
@@ -522,6 +569,16 @@ def present_job(
     source_ok = valid_override if valid_override is not None else sources_valid(conn, p, job["sources"])
     valid = job["state"] != "legacy" and source_ok
     result = job["result"] if valid and (job["state"] == "completed" or (job["state"] == "review" and can_review(p, job))) else None
+    if full and result:
+        result = dict(result)
+        # 历史任务保留生成时的角色记录，另行提供当前界面的角色名称。
+        for group, name_field in (("specialists", "name"), ("subagents", "role")):
+            if isinstance(result.get(group), list):
+                result[group] = [
+                    {**item, "display_name": agent_display_name(item[name_field])}
+                    if isinstance(item, dict) and isinstance(item.get(name_field), str) else item
+                    for item in result[group]
+                ]
     is_privileged_viewer = p.boss or p.id == job["owner_id"]
     events = []
     if full:

@@ -22,6 +22,18 @@ class RuntimeHooks:
     cancel_event: threading.Event = field(default_factory=threading.Event)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _progress: int = 0
+    model_call_fn: Optional[Callable[[str, Dict[str, Any]], None]] = None
+    model_calls: int = 0
+
+    def model_call_observer(self, role: str) -> Callable[[Dict[str, Any]], None]:
+        """绑定本次节点角色，供并行子任务分别登记端点调用。"""
+        def observe(event: Dict[str, Any]) -> None:
+            with self._lock:
+                self.model_calls += 1
+            if self.model_call_fn is not None:
+                self.model_call_fn(role[:128], event)
+
+        return observe
 
 
 _HOOKS_LOCK = threading.Lock()

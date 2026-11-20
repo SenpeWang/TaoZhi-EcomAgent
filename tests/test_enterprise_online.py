@@ -12,6 +12,7 @@ from taozhi.server.worker import process_next_job
 from taozhi.application.common.task_guard import validate_task_execution
 from taozhi.application.services.task_service import process_question_job
 from taozhi.infrastructure.persistence.job_repo import claim_next_job, create_job
+from taozhi.infrastructure.persistence.span_repo import write_spans
 import importlib.util
 spec=importlib.util.spec_from_file_location("v3_setup",Path(__file__).resolve().parents[1]/"scripts/manage_database.py")
 setup=importlib.util.module_from_spec(spec);spec.loader.exec_module(setup)
@@ -162,6 +163,136 @@ def test_cross_tenant_documents_tasks_and_tools(clients):
     assert boss.get("/api/documents/foreign_doc").status_code==404
     assert boss.get("/api/tasks/"+job["id"]).status_code==404
     assert "跨企业秘密标记" not in boss.post("/api/tools",json={"name":"search_knowledge","query":"秘密标记"}).text
+    admin = clients["admin"]
+    assert admin.get(f"/api/admin/traces/{job['id']}").status_code == 404
+    assert admin.get(f"/api/admin/traces/{job['id']}/runs").status_code == 404
+    assert admin.get(f"/api/admin/traces/{job['id']}/runs/1/spans").status_code == 404
+    assert admin.get("/api/admin/traces", params={"q": "其他企业问题"}).json()["items"] == []
+
+
+def test_admin_trace_access_and_cursor_across_owners(clients):
+    """同租户跨用户检索，新增提问不干扰翻页，普通业务身份无法进入中台。"""
+    path = "/api/admin/traces"
+    admin = clients["admin"]
+    first = task_id(clients["staff"], "轨迹检查 商品说明")
+    second = task_id(clients["boss"], "轨迹检查 渠道趋势", kind="research")
+    assert TestClient(app).get(path).status_code == 401
+    for role in ("staff", "leader", "boss"):
+        assert clients[role].get(path).status_code == 403
+        assert clients[role].get(f"{path}/{first}").status_code == 403
+
+    page = admin.get(path, params={"q": "轨迹检查", "limit": 1}).json()
+    assert [(row["id"], row["username"]) for row in page["items"]] == [(second, "boss")]
+    task_id(clients["leader"], "轨迹检查 新到的问题")
+    older = admin.get(path, params={"q": "轨迹检查", "limit": 1, "cursor": page["next_cursor"]}).json()
+    assert [row["id"] for row in older["items"]] == [first]
+    assert older["next_cursor"] is None
+
+    research = admin.get(path, params={"kind": "research", "q": "boss", "state": "queued"}).json()
+    assert [row["question"] for row in research["items"]] == ["轨迹检查 渠道趋势"]
+    assert admin.get(path, params={"kind": "ingest"}).status_code == 422
+
+
+def test_admin_trace_projects_question_and_execution_metadata(clients):
+    """详情增量读取持久化事件，保留历史运行版本与模型用量，限制原始业务内容。"""
+    job_id = task_id(clients["boss"], "供应商联系人13812345678", kind="research")
+    path = f"/api/admin/traces/{job_id}"
+    trace_id = "0123456789abcdef0123456789abcdef"
+    result = {"report": "保密报告正文", "trace_id": trace_id}
+    with database_connection() as c:
+        c.execute(
+            "UPDATE jobs SET state='completed', stage='调研报告已生成', progress=100, "
+            "finished_at=now(), result=%s WHERE id=%s", (as_jsonb(result), job_id),
+        )
+        for version in (1, 2):
+            c.execute(
+                "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) "
+                "VALUES('tenant_test',%s,%s,'等待处理',0,'queued')",
+                (job_id, version),
+            )
+        c.execute(
+            "INSERT INTO model_calls(tenant_id,job_id,role,elapsed_ms,prompt_tokens,completion_tokens,outcome) "
+            "VALUES('tenant_test',%s,'product',120,5,7,'ok')", (job_id,),
+        )
+    admin = clients["admin"]
+    response = admin.get(path, params={"event_limit": 1})
+    assert response.status_code == 200
+    assert "保密报告正文" not in response.text and "13812345678" not in response.text
+    detail = response.json()
+    assert detail["trace"]["id"] == job_id and detail["trace_id"] == trace_id
+    assert detail["has_more_events"]
+    call = detail["model_calls"][0]
+    assert call["role"] == "product" and call["role_label"] == "商品规格分析师"
+    assert (call["elapsed_ms"], call["prompt_tokens"], call["completion_tokens"]) == (120, 5, 7)
+    after = detail["events"][-1]["id"]
+    rest = admin.get(path, params={"after_event_id": after}).json()
+    assert not rest["has_more_events"]
+    assert all(event["id"] > after for event in rest["events"])
+    assert [event["run_version"] for event in detail["events"] + rest["events"]][-2:] == [1, 2]
+
+
+def test_admin_run_and_span_paging_across_retries(clients):
+    """核对执行版本隔离、未关节点的状态、并行节点分页及跨用户属性投影。"""
+    job_id = task_id(clients["staff"], "测试调研调用树", kind="research")
+    path = f"/api/admin/traces/{job_id}"
+    admin = clients["admin"]
+    assert admin.get(f"{path}/runs").json()["items"] == []
+    for role in ("staff", "leader", "boss"):
+        assert clients[role].get(f"{path}/runs").status_code == 403
+        assert clients[role].get(f"{path}/runs/2/spans").status_code == 403
+
+    root_id, model_id = "a" * 16, "b" * 16
+    with database_connection() as c:
+        c.execute("UPDATE jobs SET state='running',run_version=2,lease_until=now()+interval '1 minute' WHERE id=%s", (job_id,))
+        for version, span_id, parent_id, name, kind in (
+            (1, root_id, None, "worker.research", "CHAIN"),
+            (2, root_id, None, "worker.research", "CHAIN"),
+            (2, model_id, root_id, "llm.chat", "INTERNAL"),
+        ):
+            c.execute(
+                "INSERT INTO task_spans(tenant_id,job_id,run_version,trace_id,span_id,parent_span_id,"
+                "name,kind,status,started_at,attributes) "
+                "VALUES('tenant_test',%s,%s,%s,%s,%s,%s,%s,'running',now(),%s)",
+                (job_id, version, str(version) * 32, span_id, parent_id, name, kind,
+                 as_jsonb({"gen_ai.usage.input_tokens": 5, "prompt": "私密提示词"})),
+            )
+        started = fetch_one(
+            c, "SELECT * FROM task_spans WHERE job_id=%s AND span_id=%s", (job_id, model_id),
+        )
+    # 有些第三方采集器在调用结束时才提供 AI 角色。
+    write_spans([{**started, "kind": "LLM", "status": "error", "error_type": "TimeoutError",
+                  "ended_at": started["started_at"], "duration_ms": 0}])
+
+    first = admin.get(f"{path}/runs", params={"limit": 1}).json()
+    run = first["items"][0]
+    assert (run["run_version"], run["span_count"], run["status"]) == (2, 2, "running")
+    assert (run["failed_count"], run["input_tokens"], run["output_tokens"]) == (1, 5, 0)
+    matched = admin.get("/api/admin/traces", params={"q": "1" * 32}).json()["items"]
+    assert [(row["id"], row["matched_run_version"]) for row in matched] == [(job_id, 1)]
+    assert admin.get(path).json()["trace_id"] == "2" * 32
+    older = admin.get(f"{path}/runs", params={"before_version": first["next_before_version"]}).json()
+    assert [(row["run_version"], row["status"]) for row in older["items"]] == [(1, "interrupted")]
+    spans = admin.get(f"{path}/runs/2/spans", params={"limit": 1}).json()
+    assert spans["items"][0]["span_id"] == root_id and spans["items"][0]["parent_span_id"] is None
+    tail = admin.get(f"{path}/runs/2/spans", params={"cursor": spans["next_cursor"]}).json()
+    node = tail["items"][0]
+    assert node["kind"] == "LLM"
+    assert node["name"] == "llm.chat" and node["display_name"] == "模型推理"
+    assert (node["parent_span_id"], node["status"], node["error_type"]) == (root_id, "error", "TimeoutError")
+    assert node["attributes"] == {"gen_ai.usage.input_tokens": 5}
+    assert tail["next_cursor"] is None and tail["observed_at"]
+    assert admin.get(f"{path}/runs/3/spans").status_code == 404
+    with database_connection() as c:
+        c.execute("UPDATE jobs SET lease_until=now()-interval '1 second' WHERE id=%s", (job_id,))
+    assert admin.get(f"{path}/runs").json()["items"][0]["status"] == "interrupted"
+    with database_connection() as c:
+        c.execute("UPDATE jobs SET state='completed',finished_at=now() WHERE id=%s", (job_id,))
+    assert admin.get(f"{path}/runs/2/spans").json()["items"][0]["status"] == "running"
+    with database_connection() as c:
+        c.execute("UPDATE jobs SET finished_at=now()-interval '1 minute' WHERE id=%s", (job_id,))
+    assert admin.get(f"{path}/runs/2/spans").json()["items"][0]["status"] == "interrupted"
+
+
 def test_team_knowledge_filtered_before_model(monkeypatch,clients):
     seen=[];fake_model(monkeypatch,seen)
     with database_connection() as c:
@@ -172,6 +303,15 @@ def test_team_knowledge_filtered_before_model(monkeypatch,clients):
     assert r.json()["state"]=="completed",r.text
     assert seen and all("不得泄露机密标记" not in x for x in seen)
     assert "不得泄露机密标记" not in r.text
+    from taozhi.observability.tracing import flush_spans
+    assert flush_spans()
+    path = f"/api/admin/traces/{tid}/runs"
+    run = clients["admin"].get(path).json()["items"][0]
+    assert run["trace_id"] == r.json()["result"]["trace_id"]
+    spans = clients["admin"].get(f"{path}/{run['run_version']}/spans").json()["items"]
+    assert any(s["kind"] == "RETRIEVER" and s["name"] == "pipeline.retrieval" and s["status"] == "ok" for s in spans)
+    assert next(s for s in spans if s["parent_span_id"] is None)["status"] == "ok"
+    assert "不得泄露机密标记" not in str(spans)
 def test_confidential_ai_default_blocked(monkeypatch,clients):
     seen=[];fake_model(monkeypatch,seen)
     tid=task_id(clients["boss"],"老板经营决策备忘录",input_level=3,allow_external=True)
@@ -211,6 +351,51 @@ def test_worker_lease_fence_and_recovery(monkeypatch,clients):
     with pytest.raises(Denied):validate_task_execution({"job_id":tid,"run_version":old["run_version"]},"旧进程",10)
     process_question_job(new)
     assert clients["staff"].get("/api/tasks/"+tid).json()["state"]=="completed"
+
+
+def test_trace_lifecycle_tracks_attempts_and_rejects_stale_callbacks(clients):
+    """同一提问只入队一次，旧租约与已取消尝试均不能追加运行事件。"""
+    from taozhi.infrastructure.persistence.job_repo import claim_job_by_id, record_research_model_call, update_job_stage
+
+    staff = clients["staff"]
+    request = {"question": "检查调研执行轨迹", "kind": "research"}
+    headers = {"Idempotency-Key": "trace-lifecycle"}
+    first = staff.post("/api/tasks", json=request, headers=headers)
+    assert first.status_code == 202
+    job_id = first.json()["id"]
+    assert staff.post("/api/tasks", json=request, headers=headers).json()["id"] == job_id
+
+    original = claim_job_by_id(job_id, "first-worker")
+    with database_connection() as c:
+        c.execute("UPDATE jobs SET lease_until=now()-interval '1 second' WHERE id=%s", (job_id,))
+    active = claim_job_by_id(job_id, "second-worker")
+    with database_connection() as c:
+        event = {"outcome": "ok", "latency_ms": 150, "started_at": time.time(), "prompt_tokens": 12, "completion_tokens": 8}
+        record_research_model_call(c, original, "旧角色", event)
+        record_research_model_call(c, active, "调研主协调器", event)
+        calls = fetch_all(c, "SELECT role,prompt_tokens,completion_tokens,outcome FROM model_calls WHERE job_id=%s", (job_id,))
+        assert calls == [{"role": "调研主协调器", "prompt_tokens": 12, "completion_tokens": 8, "outcome": "ok"}]
+    with pytest.raises(Denied), database_connection() as c:
+        update_job_stage(c, active["tenant_id"], job_id, original["run_version"], "旧回调", 90)
+    with database_connection() as c:
+        for pct in (30, 20):
+            update_job_stage(c, active["tenant_id"], job_id, active["run_version"], "并发工具执行", pct)
+
+    assert staff.post(f"/api/tasks/{job_id}/cancel").status_code == 200
+    with pytest.raises(Denied), database_connection() as c:
+        update_job_stage(c, active["tenant_id"], job_id, active["run_version"], "延迟回调", 90)
+    with database_connection() as c:
+        c.execute("UPDATE jobs SET lease_until=now()-interval '1 second' WHERE id=%s", (job_id,))
+    claim_next_job()  # 旧 Worker 已掉线，看门狗写入取消终态。
+    with database_connection() as c:
+        events = fetch_all(c, "SELECT run_version,status,progress FROM task_events WHERE job_id=%s ORDER BY id", (job_id,))
+    old, new = original["run_version"], active["run_version"]
+    assert [(e["run_version"], e["status"], e["progress"]) for e in events] == [
+        (0, "queued", 0), (old, "running", 0), (new, "running", 0),
+        (new, "running", 30), (new, "running", 30), (new, "running", 30), (new, "cancelled", 100),
+    ]
+
+
 def test_cancellation_and_permission_change(monkeypatch,clients):
     fake_model(monkeypatch)
     tid=task_id(clients["staff"]);assert clients["staff"].post("/api/tasks/"+tid+"/cancel").status_code==200

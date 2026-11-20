@@ -118,3 +118,42 @@ assert.ok(res.html.includes('&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;')
         input=source, capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_trace_navigation_and_retry_analysis():
+    """跨用户入口只向系统管理员开放，异常子调用可在成功的执行中独立定位。"""
+    source = """
+import assert from 'node:assert/strict'
+import { workspaceNavigation } from './web/src/workspaceNavigation.ts'
+import { analysisRows, buildWaterfall, runDuration } from './web/src/traceWaterfall.ts'
+
+const capabilities = { system: true, permissions: true, review: true, write: true }
+function pages(user) {
+  return workspaceNavigation(user, capabilities, 0, 0)
+    .flatMap(group => group.items.map(item => item.page))
+}
+assert.ok(pages({ system_admin: true }).includes('轨迹中台'))
+assert.ok(!pages({ system_admin: false, is_boss: true }).includes('轨迹中台'))
+assert.deepEqual(pages({ system_admin: true, must_change: true }), ['个人中心'])
+
+const started = '2026-01-01T08:00:00Z'
+const ended = '2026-01-01T08:00:01Z'
+const run = { started_at: started, ended_at: ended, status: 'ok' }
+const root = { span_id: 'root', parent_span_id: null, status: 'ok',
+  started_at: started, ended_at: ended, duration_ms: 1000 }
+const failed = { ...root, span_id: 'failed', parent_span_id: 'root', status: 'error',
+  ended_at: '2026-01-01T08:00:00.300Z', duration_ms: 300 }
+const recovered = { ...root, span_id: 'recovered', parent_span_id: 'root',
+  started_at: failed.ended_at, duration_ms: 700 }
+const interrupted = { ...root, span_id: 'interrupted', parent_span_id: 'root',
+  status: 'interrupted', ended_at: null, duration_ms: null }
+const { rows } = buildWaterfall(run, [root, failed, interrupted, recovered], new Set(), Date.parse(ended))
+assert.deepEqual(analysisRows(rows, 'latency').map(row => row.span.span_id), ['recovered', 'failed'])
+assert.deepEqual(analysisRows(rows, 'issues').map(row => row.span.span_id), ['failed', 'interrupted'])
+assert.equal(runDuration({ ...run, status: 'interrupted', ended_at: null }, Date.parse(ended)), null)
+"""
+    result = subprocess.run(
+        [_node(), "--experimental-strip-types", "--input-type=module"],
+        input=source, cwd=PROJECT, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr

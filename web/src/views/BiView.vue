@@ -321,6 +321,7 @@ import {
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import AnswerChart from './AnswerChart.vue'
+import { chartAxisStyle, chartColors } from '../chartTheme'
 import { openTaskEventStream, pollTaskUntilTerminal } from '../composables/useTaskStream'
 
 echarts.use([
@@ -729,33 +730,32 @@ function refundTooltipValue(v: number): string {
 function renderCharts(): void {
   charts.forEach((c) => c.dispose())
   charts = []
-  const b = board.value
-  if (!b) return
-  const axis = {
-    axisLabel: { color: '#64748b', fontSize: 12 },
-    axisLine: { lineStyle: { color: '#e2e8f0' } },
-    splitLine: { lineStyle: { color: '#f1f5f9' } },
-  }
-  if (hasRows(b.trend) && b.trend && trendRef.value) {
-    const ch = echarts.init(trendRef.value)
-    ch.setOption({
+  const metrics = board.value
+  if (!metrics) return
+  if (hasRows(metrics.trend) && metrics.trend && trendRef.value) {
+    const chart = echarts.init(trendRef.value)
+    chart.setOption({
       tooltip: {
         trigger: 'axis',
         valueFormatter: trendTooltipValue,
       },
       grid: { left: 64, right: 20, top: 20, bottom: 30 },
-      xAxis: { type: 'category', data: b.trend.rows.map((r) => String(r[0]).slice(5)), ...axis },
-      yAxis: { type: 'value', ...axis },
+      xAxis: {
+        type: 'category',
+        data: metrics.trend.rows.map((r) => String(r[0]).slice(5)),
+        ...chartAxisStyle,
+      },
+      yAxis: { type: 'value', ...chartAxisStyle },
       series: [
         {
           name: '日成交额',
           type: 'line',
-          data: b.trend.rows.map((r) => r[1]),
+          data: metrics.trend.rows.map((r) => r[1]),
           smooth: true,
           symbol: 'circle',
           symbolSize: 5,
-          lineStyle: { width: 2.5, color: '#2563eb' },
-          itemStyle: { color: '#2563eb' },
+          lineStyle: { width: 2.5, color: chartColors.primary },
+          itemStyle: { color: chartColors.primary },
           areaStyle: {
             color: {
               type: 'linear',
@@ -764,30 +764,30 @@ function renderCharts(): void {
               x2: 0,
               y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(37, 99, 235, 0.20)' },
-                { offset: 1, color: 'rgba(37, 99, 235, 0.01)' },
+                { offset: 0, color: chartColors.primaryArea },
+                { offset: 1, color: 'transparent' },
               ],
             },
           },
         },
       ],
     })
-    charts.push(ch)
+    charts.push(chart)
   }
-  if (b.channel_gsv && Object.keys(b.channel_gsv).length && channelRef.value) {
-    const entries = Object.entries(b.channel_gsv).reverse()
-    const ch = echarts.init(channelRef.value)
-    ch.setOption({
+  if (metrics.channel_gsv && Object.keys(metrics.channel_gsv).length && channelRef.value) {
+    const entries = Object.entries(metrics.channel_gsv).reverse()
+    const chart = echarts.init(channelRef.value)
+    chart.setOption({
       tooltip: {
         trigger: 'axis',
         valueFormatter: channelTooltipValue,
       },
       grid: { left: 84, right: 64, top: 14, bottom: 26 },
-      xAxis: { type: 'value', ...axis },
+      xAxis: { type: 'value', ...chartAxisStyle },
       yAxis: {
         type: 'category',
         data: entries.map((e) => e[0]),
-        ...axis,
+        ...chartAxisStyle,
         splitLine: { show: false },
       },
       series: [
@@ -796,7 +796,7 @@ function renderCharts(): void {
           type: 'bar',
           data: entries.map((e) => e[1]),
           barWidth: 16,
-          itemStyle: { borderRadius: [0, 6, 6, 0], color: '#0891b2' },
+          itemStyle: { borderRadius: [0, 6, 6, 0], color: chartColors.secondary },
           label: {
             show: true,
             position: 'right',
@@ -807,13 +807,13 @@ function renderCharts(): void {
         },
       ],
     })
-    charts.push(ch)
+    charts.push(chart)
   }
-  if (hasRows(b.refund_rate) && b.refund_rate && refundRef.value) {
-    const rows = b.refund_rate.rows
-    const avg = rows.reduce((s, r) => s + Number(r[1]), 0) / Math.max(1, rows.length)
-    const ch = echarts.init(refundRef.value)
-    ch.setOption({
+  if (hasRows(metrics.refund_rate) && metrics.refund_rate && refundRef.value) {
+    const rows = metrics.refund_rate.rows
+    const averageRefundRate = rows.reduce((s, r) => s + Number(r[1]), 0) / Math.max(1, rows.length)
+    const chart = echarts.init(refundRef.value)
+    chart.setOption({
       tooltip: {
         trigger: 'axis',
         valueFormatter: refundTooltipValue,
@@ -822,10 +822,10 @@ function renderCharts(): void {
       xAxis: {
         type: 'category',
         data: rows.map((r) => String(r[0])),
-        ...axis,
-        axisLabel: { ...axis.axisLabel, rotate: 20 },
+        ...chartAxisStyle,
+        axisLabel: { ...chartAxisStyle.axisLabel, rotate: 20 },
       },
-      yAxis: { type: 'value', ...axis },
+      yAxis: { type: 'value', ...chartAxisStyle },
       series: [
         {
           name: '退货率',
@@ -841,59 +841,67 @@ function renderCharts(): void {
              * @returns 对应预警档位色值
              */
             color: (p: { value: number }) =>
-              p.value >= avg ? '#dc2626' : p.value >= avg * 0.7 ? '#d97706' : '#059669',
+              p.value >= averageRefundRate
+                ? chartColors.danger
+                : p.value >= averageRefundRate * 0.7
+                  ? chartColors.warning
+                  : chartColors.secondary,
           },
           markLine: {
             symbol: 'none',
             lineStyle: { type: 'dashed', color: '#94a3b8' },
-            label: { formatter: '均值 {c}%', color: '#64748b' },
-            data: [{ yAxis: Number(avg.toFixed(2)) }],
+            label: { formatter: '均值 {c}%', color: chartColors.label },
+            data: [{ yAxis: Number(averageRefundRate.toFixed(2)) }],
           },
         },
       ],
     })
-    charts.push(ch)
+    charts.push(chart)
   }
-  if (hasRows(b.aftersales) && b.aftersales && afterRef.value) {
-    const typeColor: Record<string, string> = {
-      refund: '#dc2626',
-      return: '#d97706',
-      exchange: '#2563eb',
+  if (hasRows(metrics.aftersales) && metrics.aftersales && afterRef.value) {
+    const aftersalesColors: Record<string, string> = {
+      refund: chartColors.danger,
+      return: chartColors.warning,
+      exchange: chartColors.primary,
     }
-    const typeName: Record<string, string> = {
+    const aftersalesLabels: Record<string, string> = {
       refund: '仅退款',
       return: '退货退款',
       exchange: '换新',
     }
-    const rows = b.aftersales.rows
+    const rows = metrics.aftersales.rows
     const reasons = [...new Set(rows.map((r) => String(r[1])))].slice(0, 10)
     const countMap = new Map<string, number>()
     for (const r of rows) {
       const key = `${String(r[0])}::${String(r[1])}`
       countMap.set(key, (countMap.get(key) || 0) + Number(r[2]))
     }
-    const ch = echarts.init(afterRef.value)
-    ch.setOption({
+    const chart = echarts.init(afterRef.value)
+    chart.setOption({
       tooltip: { trigger: 'axis' },
-      legend: { top: 0, textStyle: { color: '#64748b' } },
+      legend: { top: 0, textStyle: { color: chartColors.label } },
       grid: { left: 90, right: 24, top: 34, bottom: 26 },
-      xAxis: { type: 'value', ...axis, splitLine: { lineStyle: { color: '#f1f5f9' } } },
+      xAxis: {
+        type: 'value',
+        ...chartAxisStyle,
+        splitLine: { lineStyle: { color: chartColors.grid } },
+      },
       yAxis: {
         type: 'category',
         data: reasons,
-        ...axis,
+        ...chartAxisStyle,
         splitLine: { show: false },
       },
       series: ['refund', 'return', 'exchange'].map((t) => ({
-        name: typeName[t],
+        name: aftersalesLabels[t],
         type: 'bar',
         stack: 'total',
         barWidth: 16,
-        itemStyle: { color: typeColor[t] },
+        itemStyle: { color: aftersalesColors[t] },
         data: reasons.map((reason) => countMap.get(`${t}::${reason}`) || 0),
       })),
     })
-    charts.push(ch)
+    charts.push(chart)
   }
 }
 

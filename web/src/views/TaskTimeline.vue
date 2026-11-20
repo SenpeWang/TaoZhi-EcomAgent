@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { Task } from '../types'
-import { levelText, stateText } from '../labels'
+import { levelText, stateTag, stateText } from '../labels'
 import MarkdownReport from './MarkdownReport.vue'
 
 const props = defineProps<{
@@ -91,7 +91,7 @@ function onSteer() {
       <div v-if="task.events?.length" class="workflow-events-box">
         <div class="events-box-header">
           <strong>执行轨迹（共 {{ task.events.length }} 步）</strong>
-          <small>LangGraph 状态图编排 · 持久化检查点（Checkpoint）审计流水</small>
+          <small>按发生时间排列</small>
         </div>
         <div class="events-timeline-list">
           <div
@@ -123,7 +123,7 @@ function onSteer() {
       <template v-if="task.result">
         <template v-if="task.kind === 'research'">
           <div class="research-header-row">
-            <h3>商品调研报告</h3>
+            <h3>选品调研报告</h3>
             <el-button size="small" type="primary" plain @click="copyReport">
               复制报告全文
             </el-button>
@@ -147,28 +147,27 @@ function onSteer() {
 
           <div v-if="task.result.subagents?.length" class="subagents-roster-box">
             <div class="roster-header">
-              <strong>参与分析模块（{{ task.result.subagents.length }} 项）</strong>
-              <small>分模块并行检索与交叉验证</small>
+              <strong>调研执行记录（{{ task.result.subagents.length }} 次）</strong>
             </div>
             <div class="subagents-card-grid">
               <div
-                v-for="sa in task.result.subagents"
-                :key="sa.id || sa.type_name"
+                v-for="researchAgent in task.result.subagents"
+                :key="researchAgent.id || researchAgent.type_name"
                 class="subagent-roster-card"
               >
                 <div class="subagent-card-top">
-                  <span class="subagent-role-name">{{ sa.role }}</span>
-                  <el-tag
-                    size="small"
-                    :type="sa.status === 'completed' ? 'success' : 'info'"
-                    effect="light"
-                  >
-                    {{ sa.status === 'completed' ? '已完成' : sa.status }}
+                  <span class="subagent-role-name">{{
+                    researchAgent.display_name || researchAgent.role
+                  }}</span>
+                  <el-tag size="small" :type="stateTag(researchAgent.status)" effect="light">
+                    {{ stateText(researchAgent.status) }}
                   </el-tag>
                 </div>
                 <div class="subagent-card-bottom">
-                  <span class="subagent-tier-badge">{{ sa.type_name }}</span>
-                  <small v-if="sa.elapsed">{{ sa.elapsed }}s</small>
+                  <small :title="researchAgent.type_name"
+                    >任务编号 {{ researchAgent.type_name }}</small
+                  >
+                  <small v-if="researchAgent.elapsed != null">{{ researchAgent.elapsed }}s</small>
                 </div>
               </div>
             </div>
@@ -212,11 +211,14 @@ function onSteer() {
         <template v-else>
           <h3>检索结果</h3>
           <div class="detail-meta">
-            <el-tag type="primary" effect="dark">主流程校验</el-tag>
-            <el-tag v-for="s in task.result.specialists || []" :key="s.name" effect="plain">
-              {{ s.name }} · {{ s.count ? '命中 ' + s.count + ' 条原文' : '暂无匹配依据' }}
+            <el-tag
+              v-for="specialist in task.result.specialists || []"
+              :key="specialist.name"
+              effect="plain"
+            >
+              {{ specialist.display_name || specialist.name }} ·
+              {{ specialist.count ? '匹配 ' + specialist.count + ' 条依据' : '暂无匹配依据' }}
             </el-tag>
-            <el-tag type="success" effect="dark">终审通过</el-tag>
           </div>
           <div class="answer-body answer-markdown-view">
             <MarkdownReport

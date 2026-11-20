@@ -4,12 +4,15 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
 from langgraph.graph import END, START, StateGraph
 
 from taozhi.core.agent.session import AgentSession
+from taozhi.domain.agent_catalog import agent_display_name, research_agent_id
 from taozhi.domain.research import StopReason
+from taozhi.observability.tracing import current_trace_id, node_span
 from .hooks import RuntimeHooks, emit_progress, normalize_steering_item, register_hooks, unregister_hooks
 from .planner import lead_orchestrator_node, orchestrator_router
 from .reporter import final_persistence_node, synthesizer_node
@@ -17,6 +20,24 @@ from .schemas import AutonomousAgentState
 from .subagents import subagent_worker_node
 
 _LOG = logging.getLogger(__name__)
+
+
+def _traced_research_node(name: str, func: Callable) -> Callable:
+    """在并行分支记录节点耗时，用派工编号关联同一轮的子智能体。"""
+    @wraps(func)
+    def run(state):
+        attrs = {"openinference.span.kind": "CHAIN" if name == "final_node" else "AGENT", "job_id": state.get("job_id", "")}
+        task = state.get("current_task") or {}
+        if name == "subagent_worker":
+            attrs["gen_ai.agent.name"] = research_agent_id(task.get("role", ""))
+        elif name in {"orchestrator", "synthesizer"}:
+            attrs["gen_ai.agent.name"] = f"research.{name}"
+        if task.get("task_id"):
+            attrs["subagent_id"] = task["task_id"]
+        with node_span(f"research.{name}", attrs):
+            return func(state)
+
+    return run
 
 
 def build_autonomous_agent_graph(checkpointer: Any = None, *, require_checkpointer: bool = False) -> Any:
@@ -32,10 +53,13 @@ def build_autonomous_agent_graph(checkpointer: Any = None, *, require_checkpoint
     if require_checkpointer and checkpointer is None:
         raise ValueError("启用持久化或中断恢复时必须传入非空 checkpointer（如 PostgresSaver）")
     builder = StateGraph(AutonomousAgentState)
-    builder.add_node("orchestrator", lead_orchestrator_node)
-    builder.add_node("subagent_worker", subagent_worker_node)
-    builder.add_node("synthesizer", synthesizer_node)
-    builder.add_node("final_node", final_persistence_node)
+    for name, func in (
+        ("orchestrator", lead_orchestrator_node),
+        ("subagent_worker", subagent_worker_node),
+        ("synthesizer", synthesizer_node),
+        ("final_node", final_persistence_node),
+    ):
+        builder.add_node(name, _traced_research_node(name, func))
 
     builder.add_edge(START, "orchestrator")
     builder.add_conditional_edges(
@@ -191,7 +215,7 @@ def _build_research_result_payload(
         "reply": merged_state.get("report", ""),
         "outline": merged_state.get("outline", []),
         "platforms": platforms_summary,
-        "model_calls": len(merged_state.get("audit_trail", [])) + int(merged_state.get("turn_count", 0)),
+        "model_calls": hooks.model_calls,
         "elapsed": total_elapsed,
         "artifacts": merged_state.get("artifacts", []),
         "subagents": subagents_trace,
@@ -224,6 +248,7 @@ def execute_autonomous_agents(
     check_cancel_fn: Optional[Callable[[], bool]] = None,
     fetch_steering_fn: Optional[Callable[[], List[Any]]] = None,
     require_checkpointer: bool = False,
+    model_call_fn: Optional[Callable[[str, Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """在 AgentSession 与检查点保护下启动电商市场自主协同调研系统。
 
@@ -244,6 +269,7 @@ def execute_autonomous_agents(
         check_cancel_fn: 轮询检查任务是否已取消的回调。
         fetch_steering_fn: 轮询拉取新追加动态干预指令的回调。
         require_checkpointer: 为 True 时未传入持久化 checkpointer 将快速失败。
+        model_call_fn: 可选的逐次模型调用计量回调，独立运行时可省略。
 
     Returns:
         包含终审 Markdown 研报、平台分布、子智能体审计轨迹及路由记录的结果字典。
@@ -252,8 +278,10 @@ def execute_autonomous_agents(
         raise ValueError("启用持久化或中断恢复时必须传入非空 checkpointer（如 PostgresSaver）")
 
     hook_run_id = f"run_{uuid.uuid4().hex[:12]}"
-    hooks = RuntimeHooks(check_cancel_fn=check_cancel_fn, fetch_steering_fn=fetch_steering_fn, emit_fn=emit_event_fn)
-    register_hooks(hook_run_id, hooks)
+    hooks = RuntimeHooks(
+        check_cancel_fn=check_cancel_fn, fetch_steering_fn=fetch_steering_fn,
+        emit_fn=emit_event_fn, model_call_fn=model_call_fn,
+    )
     session = AgentSession(
         conversation_id=conversation_id or job_id or hook_run_id,
         tenant_id=tenant_id,
@@ -318,32 +346,38 @@ def execute_autonomous_agents(
 
     thread_id = f"research_{job_id}_{run_version}" if job_id else f"research_{int(time.time())}"
     config = {"configurable": {"thread_id": thread_id}}
-    emit_progress(hooks, f"[agent_start] 启动多智能体协同调研主协调器 · 调研主题：【{keyword}】", 5)
+    emit_progress(hooks, f"[agent_start] {agent_display_name('research.orchestrator')}启动选品调研 · 调研主题：【{keyword}】", 5)
 
     list_fields = ("steering_inbox", "steering_event_ids", "evidence_pool", "invalidated_evidence_ids", "audit_trail", "llm_route_history", "artifacts")
     merged_state: Dict[str, Any] = dict(init_state)
     for list_key in list_fields:
         merged_state[list_key] = list(init_state[list_key])
 
-    try:
-        for chunk in graph.stream(init_state, config=config, stream_mode="updates"):
-            for _, delta in chunk.items():
-                if not isinstance(delta, dict):
-                    continue
-                for k, v in delta.items():
-                    if k in list_fields and isinstance(v, list):
-                        merged_state[k].extend(v)
-                    else:
-                        merged_state[k] = v
-    finally:
-        unregister_hooks(hook_run_id)
+    attrs = {"job_id": job_id, "run_version": run_version, "openinference.span.kind": "CHAIN"}
+    with node_span("worker.research", attrs):
+        register_hooks(hook_run_id, hooks)
+        try:
+            for chunk in graph.stream(init_state, config=config, stream_mode="updates"):
+                for delta in chunk.values():
+                    if not isinstance(delta, dict):
+                        continue
+                    for k, v in delta.items():
+                        if k in list_fields and isinstance(v, list):
+                            merged_state[k].extend(v)
+                        else:
+                            merged_state[k] = v
+        finally:
+            unregister_hooks(hook_run_id)
 
-    total_elapsed = round(max(0.0, time.time() - started_at), 1)
-    return _build_research_result_payload(
-        merged_state=merged_state,
-        keyword=keyword,
-        conversation_id=conversation_id,
-        total_elapsed=total_elapsed,
-        session=session,
-        hooks=hooks,
-    )
+        result = _build_research_result_payload(
+            merged_state=merged_state,
+            keyword=keyword,
+            conversation_id=conversation_id,
+            total_elapsed=round(max(0.0, time.time() - started_at), 1),
+            session=session,
+            hooks=hooks,
+        )
+        trace_id = current_trace_id()
+        if trace_id:
+            result["trace_id"] = trace_id
+        return result

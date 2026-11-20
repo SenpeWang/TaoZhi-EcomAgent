@@ -12,6 +12,7 @@ from langgraph.types import Send
 from taozhi.ai.client import LLMClient, ModelTier
 from taozhi.ai.router import route_audit_scope
 from taozhi.core.tools.search_web import extract_search_keyword
+from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.research import (
     WEB_TOOLS,
     ResearchBudget,
@@ -43,13 +44,13 @@ _LOG = logging.getLogger(__name__)
 
 
 def default_fallback_tasks(keyword: str, scope: ResearchScope, steering: List[str]) -> List[SubagentTaskSpec]:
-    """当主脑结构化决策解析失败且黑板尚无证据时的安全起步任务生成。"""
+    """当调研协调员结构化决策解析失败且黑板尚无证据时的安全起步任务生成。"""
     steer_suffix = f" {' '.join(steering[-2:])}".strip() if steering else ""
     base_query = f"{keyword} {steer_suffix}".strip()
     tasks = [
         SubagentTaskSpec(
             task_id="sub_web_init",
-            role="全网口碑与市场情报专员",
+            role=agent_display_name("research.market_intelligence"),
             goal=f"检索并提炼【{keyword}】的全网主流定价、热销卖点与消费者高频差评痛点",
             allowed_tools=tuple(t for t in WEB_TOOLS if t in scope.allowed_tools),
             seed_queries=(base_query,),
@@ -61,7 +62,7 @@ def default_fallback_tasks(keyword: str, scope: ResearchScope, steering: List[st
             tasks.append(
                 SubagentTaskSpec(
                     task_id="sub_1688_init",
-                    role="1688源头工厂采购专员",
+                    role=agent_display_name("research.sourcing"),
                     goal=f"核查【{keyword}】在1688源头工厂的一手出厂价梯度、MOQ起订量与核心产区",
                     allowed_tools=("search_1688_wholesale",),
                     seed_queries=(extract_search_keyword(keyword) or keyword,),
@@ -72,7 +73,7 @@ def default_fallback_tasks(keyword: str, scope: ResearchScope, steering: List[st
             tasks.append(
                 SubagentTaskSpec(
                     task_id="sub_amz_init",
-                    role="亚马逊跨境比价专员",
+                    role=agent_display_name("research.competitive_pricing"),
                     goal=f"核查【{keyword}】在Amazon全球站的美元定价带、星级评价与跨境机会",
                     allowed_tools=("search_amazon",),
                     seed_queries=(extract_search_keyword(keyword) or keyword,),
@@ -98,7 +99,7 @@ def deserialize_task(raw: Dict[str, Any]) -> SubagentTaskSpec:
     """将检查点中的任务字典反序列化为领域子任务规约。"""
     return SubagentTaskSpec(
         task_id=str(raw.get("task_id") or f"sub_{uuid.uuid4().hex[:6]}"),
-        role=str(raw.get("role") or "市场调研专员"),
+        role=agent_display_name(str(raw.get("role") or "research.subagent_worker")),
         goal=str(raw.get("goal") or "收集客观市场事实"),
         allowed_tools=tuple(str(x) for x in (raw.get("allowed_tools") or [])),
         seed_queries=tuple(str(x) for x in (raw.get("seed_queries") or [])),
@@ -136,7 +137,7 @@ def _build_orchestrator_prompt(
     all_steer_note = f"累计干预指令：{all_inbox}\n" if all_inbox else ""
     notice_note = f"上轮领域守卫拦截提示：{notices}\n" if notices else ""
     return (
-        f"你是一名电商市场调研多智能体系统的主协调代理（Lead Research Agent）。\n"
+        f"你是电商选品团队的调研协调员。\n"
         f"目标品类：【{keyword}】\n"
         f"用户完整诉求：{query}\n"
         f"{steer_note}{all_steer_note}{notice_note}"
@@ -162,8 +163,8 @@ def _decide_orchestrator_action(
     outline: List[str],
     active_ev: List[Dict[str, Any]],
 ) -> Tuple[_OrchestratorDecisionSchema, List[Dict[str, Any]], str]:
-    """调用主脑模型获取结构化规划，解析失败时降级至安全规则决策。"""
-    llm = LLMClient()
+    """调用调研协调员模型获取结构化规划，解析失败时降级至安全规则决策。"""
+    llm = LLMClient(on_attempt=hooks.model_call_observer("调研主协调器"))
     parsed: Optional[_OrchestratorDecisionSchema] = None
     route_events: List[Dict[str, Any]] = []
     last_ep = ""
@@ -176,7 +177,7 @@ def _decide_orchestrator_action(
                 prompt=prompt,
                 schema=_OrchestratorDecisionSchema,
                 tier=ModelTier.FAST,
-                system="你是客观严谨、擅长并行任务分解与质量核查的电商调研主协调智能体。严禁编造数据。",
+                system="你是客观严谨、负责并行任务分解与证据核查的调研协调员。严禁编造数据。",
                 retries=2,
             )
             if isinstance(raw_decision, _OrchestratorDecisionSchema):
@@ -193,7 +194,7 @@ def _decide_orchestrator_action(
         if not active_ev:
             parsed = _OrchestratorDecisionSchema(
                 action="spawn_subagents",
-                thought="主脑结构化输出降级，按当前合法工具边界并发启动基础调研子智能体",
+                thought="调研协调员结构化输出降级，按当前合法工具边界并发启动基础调研子智能体",
                 outline=outline or ["市场需求与消费者痛点分析", "产品价格带与竞争格局", "供应链成本与选品建议"],
                 subtasks=[
                     _ProposedSubtaskSchema(
@@ -209,14 +210,14 @@ def _decide_orchestrator_action(
         else:
             parsed = _OrchestratorDecisionSchema(
                 action="finish",
-                thought="主脑结构化输出降级，基于黑板既有有效证据收敛生成研报",
+                thought="调研协调员结构化输出降级，基于黑板既有有效证据收敛生成研报",
                 outline=outline or ["市场需求与竞品格局", "多渠道数据汇总", "选品与操盘建议"],
             )
     return parsed, route_events, last_ep
 
 
 def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
-    """主脑规划节点：吸收 Steering 信号、领域准入授权并动态拆分子任务。"""
+    """调研协调员规划节点：吸收 Steering 信号、领域准入授权并动态拆分子任务。"""
     hooks = get_hooks(state.get("hook_run_id", ""))
     keyword = state.get("keyword", "")
     query = state.get("user_query") or keyword
@@ -311,7 +312,7 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
             "next_action": "synthesizer",
             "pending_tasks": [],
             "guard_notices": [],
-            "current_rationale": parsed.thought or "主脑确认各维度证据充实，开始合成终审研报",
+            "current_rationale": parsed.thought or "调研协调员确认各维度证据充实，开始合成终审研报",
             "system_status": "REPORTING",
             "cancelled": False,
             "stop_reason": StopReason.CONTINUE.value,
@@ -342,7 +343,7 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
     if not authorized_tasks and remaining_valid_count == 0:
         fallback_plan = authorize_subagent_tasks(default_fallback_tasks(keyword, scope, all_inbox), scope=scope, budget=budget)
         authorized_tasks = list(fallback_plan.tasks)
-        new_notices.append("主脑原提案均超出当前调研边界，已按允许白名单重置起步任务")
+        new_notices.append("调研协调员原提案均超出当前调研边界，已按允许白名单重置起步任务")
 
     if not authorized_tasks:
         emit_progress(hooks, "[agent_handoff] 无新增待派发任务，收敛现有证据并转入研报合成", 80)
@@ -360,7 +361,7 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
         "next_action": next_act,
         "pending_tasks": [serialize_task(t) for t in authorized_tasks],
         "guard_notices": new_notices,
-        "current_rationale": parsed.thought or "主脑派发并行子智能体探索市场事实",
+        "current_rationale": parsed.thought or "调研协调员派发并行子智能体探索市场事实",
         "system_status": sys_status,
         "cancelled": False,
         "stop_reason": StopReason.CONTINUE.value,
@@ -382,6 +383,7 @@ def orchestrator_router(state: AutonomousAgentState) -> Any:
                     "subagent_worker",
                     {
                         "current_task": task,
+                        "job_id": state.get("job_id", ""),
                         "hook_run_id": state.get("hook_run_id", ""),
                         "user_query": state.get("user_query", ""),
                         "keyword": state.get("keyword", ""),

@@ -92,6 +92,7 @@ export interface ResearchSubagent {
   id: string
   type_name: string
   role: string
+  display_name?: string
   model_tier?: string
   status: string
   elapsed?: number
@@ -106,7 +107,7 @@ export interface TaskResult {
   artifacts?: string[]
   elapsed?: number
   model_calls?: number
-  specialists?: { name: string; count: number }[]
+  specialists?: { name: string; display_name?: string; count: number }[]
   missing?: string[]
   citations?: Citation[]
 }
@@ -116,6 +117,85 @@ export interface TaskEventItem {
   progress: number
   status: string
   created_at?: string | null
+}
+export interface TraceSummary {
+  id: string
+  kind: 'ask' | 'research'
+  question: string
+  owner_id: string
+  username: string | null
+  display_name: string | null
+  node_name: string | null
+  state: string
+  stage: string
+  progress: number
+  attempts: number
+  matched_run_version?: number | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+export interface TracePage {
+  items: TraceSummary[]
+  next_cursor: string | null
+}
+export interface TraceEvent extends TaskEventItem {
+  run_version: number
+  created_at: string
+}
+export interface TraceModelCall {
+  id: number
+  role: string
+  role_label?: string | null
+  elapsed_ms: number
+  prompt_tokens: number
+  completion_tokens: number
+  outcome: string
+  created_at: string
+}
+export interface TraceDetail {
+  trace: TraceSummary
+  trace_id: string | null
+  events: TraceEvent[]
+  has_more_events: boolean
+  model_calls: TraceModelCall[]
+  has_more_calls: boolean
+}
+export type SpanStatus = 'running' | 'ok' | 'error' | 'interrupted'
+export type SpanKind = 'CHAIN' | 'AGENT' | 'LLM' | 'TOOL' | 'RETRIEVER' | 'INTERNAL'
+export interface TraceRun {
+  run_version: number
+  trace_id: string
+  started_at: string
+  ended_at: string | null
+  status: SpanStatus
+  span_count: number
+  failed_count: number
+  input_tokens: number
+  output_tokens: number
+}
+export interface TraceRunPage {
+  items: TraceRun[]
+  next_before_version: number | null
+}
+export interface TraceSpan {
+  trace_id: string
+  span_id: string
+  parent_span_id: string | null
+  name: string
+  display_name?: string | null
+  kind: SpanKind
+  started_at: string
+  ended_at: string | null
+  duration_ms: number | null
+  status: SpanStatus
+  error_type: string | null
+  attributes: Record<string, string | number | boolean>
+}
+export interface TraceSpanPage {
+  items: TraceSpan[]
+  next_cursor: string | null
+  observed_at: string
 }
 export interface Task {
   id: string
