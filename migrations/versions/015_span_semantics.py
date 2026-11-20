@@ -36,7 +36,7 @@ def upgrade() -> None:
                   AND name='rag.specialist.' || (attributes->>'agent.name')""")
     op.execute("DROP INDEX idx_task_spans_run")
     op.execute("CREATE INDEX idx_task_spans_run ON task_spans(tenant_id,job_id,run_version,trace_id)")
-    op.execute("CREATE INDEX idx_task_spans_trace_page ON task_spans(trace_id,id)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_task_spans_trace_page ON task_spans(trace_id,id)")
 
 
 def downgrade() -> None:
