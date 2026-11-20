@@ -109,22 +109,46 @@ def resolve_node_id(conn, tenant_id, node_ref):
     return node_ref
 
 
-def seed_users(conn, tenant_id, org):
-    """建档并重置口令：每次 seed 都把口令刷成 EVAL_PASSWORD，保证可复现登录。"""
-    hashed = hash_password(EVAL_PASSWORD, load_config().mode)
+def resolve_user_ids(conn, tenant_id, org):
+    """按 username 解析已存在的正式/评测账号 ID 映射。"""
     ids = {}
     for i in org["identities"]:
-        uid = "usr_syn_" + i["username"]
+        row = fetch_one(conn, "SELECT id FROM users WHERE tenant_id=%s AND username=%s", (tenant_id, i["username"]))
+        ids[i["logical_id"]] = row["id"] if row else ("usr_syn_" + i["username"])
+    return ids
+
+
+def seed_users(conn, tenant_id, org):
+    """建档或复用正式账号并对齐评测口令与组织成员关系。"""
+    hashed = hash_password(EVAL_PASSWORD, load_config().mode)
+    ids = {}
+    seen_users = set()
+    for i in org["identities"]:
+        existing = fetch_one(conn, "SELECT id FROM users WHERE tenant_id=%s AND username=%s", (tenant_id, i["username"]))
+        uid = existing["id"] if existing else ("usr_syn_" + i["username"])
         ids[i["logical_id"]] = uid
-        upsert(conn, "users",
-               dict(id=uid, tenant_id=tenant_id, username=i["username"]),
-               dict(display_name=i["display_name"], password_hash=hashed,
-                    system_admin=bool(i.get("system_admin")), active=True, must_change=False),
-               ["tenant_id", "id"])
+        if uid not in seen_users:
+            seen_users.add(uid)
+            if existing:
+                conn.execute(
+                    "UPDATE users SET password_hash=%s, active=true, must_change=false WHERE tenant_id=%s AND id=%s",
+                    (hashed, tenant_id, uid),
+                )
+            else:
+                upsert(conn, "users",
+                       dict(id=uid, tenant_id=tenant_id, username=i["username"]),
+                       dict(display_name=i["display_name"], password_hash=hashed,
+                            system_admin=bool(i.get("system_admin")), active=True, must_change=False),
+                       ["tenant_id", "id"])
         node_id = resolve_node_id(conn, tenant_id, i["node"])
-        conn.execute("DELETE FROM memberships WHERE tenant_id=%s AND user_id=%s", (tenant_id, uid))
-        conn.execute("INSERT INTO memberships(tenant_id,user_id,node_id,role) VALUES(%s,%s,%s,%s)",
-                     (tenant_id, uid, node_id, i["role"]))
+        has_mem = fetch_one(
+            conn,
+            "SELECT 1 FROM memberships WHERE tenant_id=%s AND user_id=%s AND node_id=%s",
+            (tenant_id, uid, node_id),
+        )
+        if not has_mem:
+            conn.execute("INSERT INTO memberships(tenant_id,user_id,node_id,role) VALUES(%s,%s,%s,%s)",
+                         (tenant_id, uid, node_id, i["role"]))
     return ids
 
 
@@ -350,7 +374,7 @@ def main() -> int:
                   f"授权 {n_grants}、补齐指标 {n_met}")
         if True:  # 灌完必校验：夹具写坏比不写更危险（白检的安全感）
             if not user_ids:
-                user_ids = {i["logical_id"]: "usr_syn_" + i["username"] for i in org["identities"]}
+                user_ids = resolve_user_ids(conn, tenant["id"], org)
             problems = verify(conn, tenant["id"], org, fixtures, user_ids)
             if problems:
                 print(f"✗ 校验发现 {len(problems)} 个问题：", file=sys.stderr)

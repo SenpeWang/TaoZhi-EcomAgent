@@ -4,7 +4,7 @@
   "spec_sha256": {
     "corpus.yaml": "1b913a4c0a4e871d4bd1db08316e1095a25ee0abcbede247d5dd945901187e7e",
     "fixtures.yaml": "91951bb8cdb317a646f1f524270a10dd97d5ba31d5cbdc30b0f371110c70c1ee",
-    "org.yaml": "f2c83b49afaa9966f05ebb31e58aba951b22c8235fc056f83a474b520b6139e0",
+    "org.yaml": "9e65a6e3b14f61b968935562c22312894dda7aff47c983f8909f08ef48795a3e",
     "parsing.yaml": "29874a2099631d5f4b9b42902952dbd341b689bde917835f6dcb19a70776a44b",
     "templates.yaml": "7fe8e0d7e855da565fd0f9cb138bcd8dec4f45fb1ab57aa98e541d0958d857f5"
   },

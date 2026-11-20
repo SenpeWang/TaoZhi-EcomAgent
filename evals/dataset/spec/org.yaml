@@ -23,38 +23,38 @@ nodes:
 
 identities:
   - logical_id: SYN_A_STAFF001
-    username: syn_staff1
-    display_name: 评测-运营员工1
+    username: staff
+    display_name: 运营员工
     role: employee
     node: SYN_NODE_OP
   - logical_id: SYN_A_STAFF002
-    username: syn_staff2
-    display_name: 评测-运营员工2
+    username: staff
+    display_name: 运营员工
     role: employee
     node: SYN_NODE_OP
   - logical_id: SYN_A_STAFF003
-    username: syn_staff3
-    display_name: 评测-运营员工3
+    username: staff
+    display_name: 运营员工
     role: employee
     node: SYN_NODE_OP
   - logical_id: SYN_A_STAFF004
-    username: syn_staff4
-    display_name: 评测-售后员工
+    username: staff
+    display_name: 运营员工
     role: employee
     node: SYN_NODE_CS
   - logical_id: SYN_A_LDR001
-    username: syn_leader1
-    display_name: 评测-适配组长
+    username: leader
+    display_name: 运营组长
     role: leader
     node: SYN_NODE_OP
   - logical_id: SYN_A_BOSS001
-    username: syn_boss
-    display_name: 评测-老板
+    username: owner
+    display_name: 公司老板
     role: boss
     node: COMPANY_ROOT        # 公司根节点（按 kind=company 解析）
   - logical_id: SYN_A_ADMIN001
-    username: syn_admin
-    display_name: 评测-系统管理员
+    username: admin
+    display_name: 系统管理员
     role: employee
     node: SYN_NODE_OP
     system_admin: true

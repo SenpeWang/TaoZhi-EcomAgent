@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         tid = tenant["id"]
         owner_ids = [r["id"] for r in c.execute(
-            "SELECT id FROM users WHERE tenant_id=%s AND username IN ('leader','staff','syn_leader1','syn_staff1')",
+            "SELECT id FROM users WHERE tenant_id=%s AND username IN ('leader','staff')",
             (tid,)).fetchall()]
         node_ids = [r["id"] for r in c.execute(
             "SELECT id FROM org_nodes WHERE tenant_id=%s AND name IN ('店铺运营组','售前客服组')", (tid,)).fetchall()]

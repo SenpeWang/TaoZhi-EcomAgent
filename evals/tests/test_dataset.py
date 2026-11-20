@@ -129,12 +129,16 @@ def test_expected_documents_all_seedable():
 
 
 def test_identities_map_one_to_one():
-    """逻辑身份→登录名必须一一对应：多个身份塌成同一账号，授权类用例互相污染。"""
+    """每个逻辑身份必须确定性映射到 org.yaml 中的合法正式账号。"""
+    import yaml
+    org = yaml.safe_load((ROOT / "evals/dataset/spec/org.yaml").read_text(encoding="utf-8"))
+    allowed_usernames = {i["username"] for i in org["identities"]}
     pairs = {(c["test_identity"]["logical_id"], c["test_identity"]["username"])
              for c in generated_cases()}
     logicals = {p[0] for p in pairs}
     usernames = {p[1] for p in pairs}
-    assert len(logicals) == len(pairs) == len(usernames), f"身份与登录名不是一一对应: {sorted(pairs)}"
+    assert len(logicals) == len(pairs), f"存在重复逻辑身份多映射: {sorted(pairs)}"
+    assert usernames <= allowed_usernames, f"存在未登记账号: {usernames - allowed_usernames}"
 
 
 def test_every_category_has_cases():

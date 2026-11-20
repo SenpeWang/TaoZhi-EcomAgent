@@ -533,7 +533,7 @@ def phase_retrieval():
 # 对抗层身份：种子数据集里的员工账号（org.yaml: SYN_A_STAFF001）。
 # 权限题（P1/P2）必须是非特权身份才会触发拒绝路径；用 syn_staff1 而非旧硬编码
 # staff/123456，是为了与 seed.py 灌库的账号同源（身份是数据，不是字符串映射）。
-ADVERSARIAL_IDENTITY = {"username": "syn_staff1", "password": EVAL_PASSWORD}
+ADVERSARIAL_IDENTITY = {"username": "staff", "password": EVAL_PASSWORD}
 # --only 类别过滤（冒烟与坏例定位用）：空集合表示全跑
 ONLY_CATS: set = set()
 
