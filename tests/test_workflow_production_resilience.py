@@ -11,7 +11,7 @@ from taozhi.infrastructure.persistence.access_repo import load_principal
 
 def _get_client_and_job():
     client = TestClient(app)
-    login_res = client.post("/api/auth/login", json={"username": "syn_admin", "password": "taozhi2026eval"})
+    login_res = client.post("/api/auth/login", json={"username": "admin", "password": "taozhi2026eval"})
     if login_res.status_code != 200:
         login_res = client.post("/api/auth/login", json={"username": "admin", "password": "123456"})
     assert login_res.status_code == 200, login_res.text
