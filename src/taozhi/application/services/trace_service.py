@@ -35,7 +35,7 @@ _TRACE_OPERATIONS = {
     "bi.query_metric": "检索经营指标",
     "bi.bi_publish": "生成指标答复",
     "research.final_node": "归档调研成果",
-    "llm.structured_output": "获取并校验模型结构化结果",
+    "llm.structured_output": "校验模型结构化响应",
     "embedding.query": "生成查询向量",
     "embedding.passages": "生成文档向量",
     "reranker.rerank": "重排检索结果",

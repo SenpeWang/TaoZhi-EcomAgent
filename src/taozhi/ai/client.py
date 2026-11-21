@@ -385,21 +385,22 @@ class LLMClient:
             if acc is not None:
                 acc.add_json_attempt(is_retry=(attempt > 0))
             outcome = "retry" if attempt + 1 < retries else "fallback"
-            with node_span("llm.structured_output", "CHAIN"):
-                try:
-                    raw = self.chat(
-                        full_prompt
-                        if attempt == 0
-                        else f"{full_prompt}\n\n上一次输出无法解析为合法 JSON：\n{last_raw[:400]}\n请严格重新输出规范 JSON。",
-                        tier=tier,
-                        system=system or "你是严谨的电商业务结构化信息抽取引擎。",
-                        allow_overseas=allow_overseas,
-                        **({"max_tokens": max_tokens} if max_tokens else {}),
-                    )
-                except Exception as exc:
+            try:
+                raw = self.chat(
+                    full_prompt
+                    if attempt == 0
+                    else f"{full_prompt}\n\n上一次输出无法解析为合法 JSON：\n{last_raw[:400]}\n请严格重新输出规范 JSON。",
+                    tier=tier,
+                    system=system or "你是严谨的电商业务结构化信息抽取引擎。",
+                    allow_overseas=allow_overseas,
+                    **({"max_tokens": max_tokens} if max_tokens else {}),
+                )
+            except Exception as exc:
+                with node_span("llm.structured_output", "CHAIN"):
                     record_diagnostic("model.structured_request", outcome, exc)
-                    continue
-                last_raw = raw
+                continue
+            last_raw = raw
+            with node_span("llm.structured_output", "CHAIN"):
                 try:
                     return parser.parse(raw) if parser is not None else JsonOutputParser().parse(raw)
                 except Exception as exc:

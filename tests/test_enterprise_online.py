@@ -749,6 +749,12 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
         assert call["attributes"]["llm.token_count.prompt"] == 11
         assert call["attributes"]["llm.token_count.completion"] == 7
     assert {"product", "supply"} <= specialist_roles
+    validations = [s for s in spans if s["name"] == "llm.structured_output"]
+    assert validations
+    for validation in validations:
+        assert by_id[validation["parent_span_id"]]["name"] == "rag.specialist"
+        assert any(call["parent_span_id"] == validation["parent_span_id"]
+                   and call["ended_at"] <= validation["started_at"] for call in models)
     activity_path = f"{path}/{trace_id}/activities"
     contexts = staff.get(activity_path, params={"category": "CONTEXT"}).json()["items"]
     recalled, = [s for s in contexts if s["name"] == "context.recall_conversation"]
