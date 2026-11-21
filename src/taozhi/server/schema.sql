@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS eval_case_results (
  tenant_id text NOT NULL, run_id text NOT NULL, case_id text NOT NULL, case_sha256 text NOT NULL,
  name text NOT NULL, category text, suite text NOT NULL, status text NOT NULL CHECK(status IN ('passed','failed','unassessable')),
  score double precision CHECK (score BETWEEN 0 AND 1), hard_failure boolean NOT NULL, trace_id varchar(32),
- expected jsonb, observed jsonb, steps_complete boolean, verdicts jsonb NOT NULL,
+ expected jsonb NOT NULL, observed jsonb, steps_complete boolean, verdicts jsonb NOT NULL,
  PRIMARY KEY (tenant_id,run_id,case_id),
  FOREIGN KEY (tenant_id,run_id) REFERENCES eval_runs(tenant_id,run_id) ON DELETE CASCADE
 );

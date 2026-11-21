@@ -6,6 +6,8 @@ from graphlib import CycleError, TopologicalSorter
 
 from taozhi.domain.research import ALL_RESEARCH_TOOLS
 
+REPORT_SCHEMA_VERSION = 3
+
 CASE_FIELDS = {
     "id", "category", "name", "prompt", "keyword", "suite", "critical",
     "required_tools", "forbidden_tools", "allowed_tools", "tool_expectations", "tool_order",
@@ -20,6 +22,32 @@ def _strings(values: object, field: str) -> set[str]:
     if len(set(values)) != len(values):
         raise ValueError(f"{field} 有重复值")
     return set(values)
+
+
+def required_tool_names(required: list[str], expectations: list[dict], order: list[list[str]]) -> set[str]:
+    """供评分和报告使用同一套必调来源，排除未触发的可选步骤。"""
+    names = set(required)
+    names.update(rule["tool_name"] for rule in expectations if not rule.get("optional"))
+    names.update(tool for edge in order for tool in edge)
+    return names
+
+
+def expectation_notes(case: dict) -> list[str]:
+    """从版本化用例提取评审需要的参数约束与合成参考事实。"""
+    notes = [f"参考事实：{' / '.join(fact['any_of'])}" for fact in case.get("reference_facts", ())]
+    for rule in case.get("tool_expectations", ()):
+        name = f"可选调用 {rule['tool_name']}" if rule.get("optional") else rule["tool_name"]
+        for key, constraint in rule.get("parameters", {}).items():
+            if isinstance(constraint, dict) and "contains" in constraint:
+                notes.append(f"{name} 的 {key} 需包含 {constraint['contains']}")
+            elif isinstance(constraint, dict) and "identifier" in constraint:
+                notes.append(f"{name} 的 {key} 需包含完整型号 {constraint['identifier']}")
+            else:
+                notes.append(f"{name} 的 {key} 应为 {constraint}")
+        if "status" in rule:
+            notes.append(f"{name} 的预期状态为 {rule['status']}")
+    notes.extend(f"交付报告涵盖{section}" for section in case.get("required_sections", ()))
+    return notes
 
 
 def _validate_tools(case: dict) -> None:

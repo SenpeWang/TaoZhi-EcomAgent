@@ -8,9 +8,9 @@ import re
 from collections import Counter
 from statistics import mean, median
 
-from taozhi.domain.evaluation_comparison import pair_case_results
 from taozhi.domain.research import ALL_RESEARCH_TOOLS, StopReason
 
+from .contracts import REPORT_SCHEMA_VERSION, expectation_notes, required_tool_names
 from .harness import AgentRunResult
 from .judges import JudgeVerdict, matches_any_arguments
 
@@ -91,7 +91,7 @@ def _public_verdict(verdict: JudgeVerdict) -> dict:
     failure = verdict.failure_type
     return {
         "judge": verdict.judge_name, "dimension": verdict.dimension, "status": status,
-        "passed": status == "passed", "score": verdict.score if status != "unassessable" else None,
+        "score": verdict.score if status != "unassessable" else None,
         "failure_type": failure, "hard_failure": verdict.hard_failure,
         "reason": FAILURE_LABELS.get(failure, "判定通过" if status == "passed" else "判定未通过"),
         "issues": issues,
@@ -105,7 +105,7 @@ def case_record(case: dict, result: AgentRunResult | None, verdicts: list[JudgeV
     if result is None:
         checks.append({
             "judge": "Observation", "dimension": "trajectory", "status": "unassessable",
-            "passed": False, "score": None, "failure_type": "missing_observation",
+            "score": None, "failure_type": "missing_observation",
             "reason": FAILURE_LABELS["missing_observation"], "hard_failure": False, "issues": [], "counts": {},
         })
     statuses = {v["status"] for v in checks}
@@ -121,24 +121,23 @@ def case_record(case: dict, result: AgentRunResult | None, verdicts: list[JudgeV
     stop = result.stop_reason if result else None
     terminal = result.system_status if result else None
     rules = case.get("tool_expectations", [])
-    required = set(case.get("required_tools", []))
-    required.update(rule["tool_name"] for rule in rules if not rule.get("optional"))
-    required.update(tool for edge in case.get("tool_order", []) for tool in edge)
+    required = required_tool_names(case.get("required_tools", []), rules, case.get("tool_order", []))
     forbidden = set(case.get("forbidden_tools", []))
     if "allowed_tools" in case:
         forbidden.update(set(ALL_RESEARCH_TOOLS) - set(case["allowed_tools"]))
     return {
         "case_id": case["id"], "case_sha256": fingerprint(case), "name": case["name"],
         "category": case.get("category"), "suite": case.get("suite", "benchmark"),
-        "status": status, "passed": status == "passed", "score": round(mean(scores), 4) if scores else None,
+        "status": status, "score": round(mean(scores), 4) if scores else None,
         "critical": bool(case.get("critical")), "hard_failure": any(v["hard_failure"] for v in checks),
         "observed": result is not None, "elapsed": result.elapsed if result else None,
         "system_status": terminal if terminal in {"COMPLETED", "FAILED", "TIMEOUT", "CANCELLED"} else None,
         "stop_reason": stop if stop in {reason.value for reason in StopReason} else None,
         "observed_models_sha256": fingerprint(sorted(set(models))) if models else None,
         "trace_id": trace if trace and re.fullmatch(r"[0-9a-f]{32}", trace) else None,
-        "subagents_count": len(result.subagents) if result else None,
+        "subagents_count": result.subagents_count if result else None,
         "tool_calls_count": len(result.tool_calls) if result else None,
+        "expectation_notes": expectation_notes(case),
         "expected_tools": sorted(required),
         "forbidden_tools": sorted(forbidden),
         "expected_parameters": [
@@ -208,7 +207,7 @@ def release_gate(records: list[dict]) -> dict:
         required = record["critical"] or record["suite"] in {"regression", "golden"}
         if record["hard_failure"] or (required and record["status"] != "passed") or (incomplete and record["suite"] != "challenge"):
             blockers.append(record["case_id"])
-    benchmark_passed = sum(r["passed"] for r in benchmark)
+    benchmark_passed = sum(r["status"] == "passed" for r in benchmark)
     meets_floor = 4 * benchmark_passed >= 3 * len(benchmark)
     any_observations = any(r["observed"] for r in records)
     return {
@@ -217,23 +216,9 @@ def release_gate(records: list[dict]) -> dict:
     }
 
 
-def review_candidates(records: list[dict]) -> list[dict]:
-    """为后续人工归因和合成重建保留最小索引，避免复制业务样本。"""
-    candidates = []
-    for record in records:
-        for verdict in record["verdicts"]:
-            if verdict["status"] != "passed":
-                candidates.append({
-                    "case_id": record["case_id"], "case_sha256": record["case_sha256"],
-                    "trace_id": record["trace_id"], "judge": verdict["judge"],
-                    "failure_type": verdict["failure_type"], "issues": verdict["issues"],
-                })
-    return candidates
-
-
-def validate_baseline(baseline: dict, *, schema_version: int, mode: str, judges_sha256: str) -> None:
+def validate_baseline(baseline: dict, *, mode: str, judges_sha256: str) -> None:
     """在调用模型前确认对照可用，拒绝旧报告、来源错配与重复样本。"""
-    if not isinstance(baseline, dict) or baseline.get("schema_version") != schema_version:
+    if not isinstance(baseline, dict) or baseline.get("schema_version") != REPORT_SCHEMA_VERSION:
         raise ValueError("对照报告版本不兼容")
     if baseline.get("mode") != mode:
         raise ValueError("对照报告与当前报告的执行来源不同")
@@ -252,10 +237,3 @@ def validate_baseline(baseline: dict, *, schema_version: int, mode: str, judges_
                 or row.get("status") not in ("passed", "failed", "unassessable")):
             raise ValueError("对照报告含重复或无效的用例记录")
         seen.add(case_id)
-
-
-def compare_reports(current: dict, baseline: dict) -> dict:
-    """只配对同来源、同裁判、同用例版本的观察，挑战集退化单列。"""
-    validate_baseline(baseline, schema_version=current["schema_version"], mode=current["mode"],
-                      judges_sha256=current["judges_sha256"])
-    return {"baseline_sha256": fingerprint(baseline), **pair_case_results(current["case_results"], baseline["case_results"])}

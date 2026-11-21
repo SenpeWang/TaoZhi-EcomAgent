@@ -1,41 +1,5 @@
 #!/usr/bin/env python3
-"""把评估集与逐例评估结果同步到 Arize Phoenix。
-
-为什么需要单独一个脚本
-----------------------
-evals/ 的产物一直是文件：``datasets/generated/latest/cases.jsonl`` 是用例集，
-``reports/*.json`` 是逐例判定结果。应用的 OTel 运行轨迹由工作台保存，
-评估集与逐例分数通过本脚本单独同步。
-
-职责边界不变：评估在 ``evals/rag_eval/run.py`` 跑（纯离线计算，不依赖 Phoenix），
-本脚本只把已有产物搬进 Phoenix 供人查看与横向对比。Phoenix 没起时评估照常产出
-报告，本脚本报一句警告退出 0——观测是旁路，不能反过来卡住评估。
-
-三个入口
---------
-``--dataset``  用例集 → Phoenix Datasets（每例 input / output / metadata）
-``--report``   一次报告的逐例结果 → Phoenix Experiment（run + evaluation 分数）
-``--follow``   跟随 evals/rag_eval/run.py 的逐例进度文件，边跑边推（约 2 小时的跑批期间
-               界面上能持续看到新用例）。experiment 名字与 ``--report`` 算同一个，
-               所以跑完再同步是"已存在，跳过"而不是写第二份。
-
-幂等设计
---------
-- 数据集按 ``metadata.case_id`` 去重，只补新增用例，重复跑不会重复插
-- experiment 按名字去重，同名已存在则跳过（``--force`` 另建 ``-r2`` 后缀）
-- evaluation 由服务端按 ``(experiment_run_id, name)`` upsert，重复推送即覆盖
-
-运行环境
---------
-phoenix 客户端装在独立 venv，不在项目 .venv 里（避免把观测依赖塞进生产环境）::
-
-    ~/.local/share/ecom-agent/phoenix-venv/bin/python evals/sync_phoenix.py --all
-
-环境变量
---------
-``ECOM_PHOENIX_URL``      默认 http://127.0.0.1:6006
-``ECOM_PHOENIX_DATASET``  默认 taozhi-eval-generated-v2
-"""
+"""将 RAG 评估集、逐例进度或指定的 Agent 调研报告同步到 Phoenix。"""
 
 from __future__ import annotations
 
@@ -44,7 +8,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -58,7 +22,6 @@ DEFAULT_DATASET = os.environ.get("ECOM_PHOENIX_DATASET", "taozhi-eval-generated-
 ANSWER_CHARS = 2000
 EVIDENCE_CHARS = 500
 HTTP_TIMEOUT = 60
-
 
 
 def load_cases() -> list:
@@ -109,7 +72,6 @@ def case_to_example(c: dict) -> dict:
             "dataset": c.get("dataset"),
         },
     }
-
 
 
 def slot(results: dict, cid: str) -> dict:
@@ -193,67 +155,38 @@ def collect_results(report: dict) -> dict:
     return out
 
 
-
-def _attr(obj, key, default=None):
-    """客户端里 Dataset 是对象、list() 元素是 dict，两种都得能取。"""
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-def _existing_case_ids(client, name: str) -> tuple:
-    """(数据集对象, 已存在的 case_id 集合)；数据集不存在时返回 (None, set())。
-
-    只捕 ValueError——那是 get_dataset 在"名字查不到"时抛的类型（实测）。
-    连接失败、认证失败会抛别的异常，必须继续往上冒：把它们当成"不存在"会让
-    后面走 create_dataset 分支，把一次网络抖动变成重复建集。
-    """
-    try:
-        ds = client.datasets.get_dataset(dataset=name, timeout=HTTP_TIMEOUT)
-    except ValueError:
-        return None, set()
-    ids = {(_attr(e, "metadata") or {}).get("case_id") for e in ds}
-    return ds, {i for i in ids if i}
-
-
-def sync_dataset(client, cases: list, name: str, dry_run: bool) -> None:
-    examples = [case_to_example(c) for c in cases]
-    ds, known = _existing_case_ids(client, name)
-
-    if ds is None:
-        print(f"[dataset] 新建：{name}（{len(examples)} 例）")
-        if not dry_run:
-            client.datasets.create_dataset(
-                name=name, examples=examples, timeout=HTTP_TIMEOUT,
-                dataset_description="淘智电商 Agent 评估集：input=问题/身份/多轮，"
-                                    "output=预期行为/金标准文档/必备事实/禁披露，"
-                                    "metadata=类别/难度/风险等筛选维度")
-        return
-
-    todo = [e for e in examples if e["metadata"]["case_id"] not in known]
-    skipped = len(examples) - len(todo)
-    if not todo:
-        print(f"[dataset] {name} 已是最新：{len(known)} 例，无新增")
-        return
-    print(f"[dataset] {name} 追加 {len(todo)} 例（已存在 {skipped} 例，跳过）")
-    if not dry_run:
-        client.datasets.add_examples_to_dataset(dataset=name, examples=todo,
-                                               timeout=HTTP_TIMEOUT)
+def sync_examples(client, examples: list, name: str, description: str, dry_run: bool):
+    """按用例编号追加缺少的样本，返回写入后的数据集与样本索引。"""
+    dataset, index = _dataset_index(client, name)
+    missing = [row for row in examples if row["metadata"]["case_id"] not in index]
+    print(f"[dataset] {name} 已有 {len(index)} 例，待写入 {len(missing)} 例")
+    if not missing or dry_run:
+        return dataset, index
+    if dataset is None:
+        client.datasets.create_dataset(name=name, examples=missing, dataset_description=description,
+                                       timeout=HTTP_TIMEOUT)
+    else:
+        client.datasets.add_examples_to_dataset(dataset=name, examples=missing, timeout=HTTP_TIMEOUT)
+    return _dataset_index(client, name)
 
 
 def _find_experiment(client, dataset_id: str, name: str):
-    """按名字找 experiment，返回对象或 None。
-
-    ``experiments.list()`` 的 dataset_id 是必填关键字参数（不传直接 TypeError）。
-    这里刻意**不吞异常**：上一版用 ``except Exception: return False`` 兜底，结果
-    list() 一抛错就被当成"不存在"，重复跑会静默建出两个同名实验。查不到就让它
-    报错，别把"判断失败"伪装成"判断为否"。
-    """
     items = client.experiments.list(dataset_id=dataset_id, timeout=HTTP_TIMEOUT)
     for x in items:
-        if _attr(x, "name") == name:
+        if x["name"] == name:
             return x
     return None
+
+
+def _experiment_target(client, dataset_id: str, base: str, force: bool):
+    name = base
+    revision = 1
+    while True:
+        existing = _find_experiment(client, dataset_id, name)
+        if existing is None or not force:
+            return name, existing
+        revision += 1
+        name = f"{base}-r{revision}"
 
 
 def experiment_name(at: str, git: str) -> str:
@@ -270,26 +203,19 @@ def experiment_name(at: str, git: str) -> str:
 
 
 def _log_case(client, exp_id: str, example_id: str, payload: dict,
-              start: datetime, end: datetime) -> int:
-    """写一条 run + 它名下全部 evaluation，返回 evaluation 条数（已存在返回 -1）。
-
-    实时跟随与事后同步共用：先 run 后 evaluation 的顺序、字段口径只此一处，
-    两个入口产出的数据才可比。
-
-    409 = 同一 (dataset_example_id, repetition) 已有 run。服务端拿它当冲突拒掉，
-    对跟随进程来说这正是"这条已经推过"，跳过即可——断线重连后一定会撞上。
-    """
-    try:
-        run = client.experiments.log_run(
-            experiment_id=exp_id, dataset_example_id=example_id,
-            output=payload["output"], start_time=start, end_time=end,
-            timeout=HTTP_TIMEOUT,
-        )
-    except Exception as exc:
-        if getattr(getattr(exc, "response", None), "status_code", None) == 409:
-            return -1
-        raise
-    run_id = _attr(run, "id")
+              start: datetime, end: datetime, *, run_id: str | None = None) -> int:
+    """写入一次执行与逐项判定，已知 run 可重新写入判定。"""
+    if run_id is None:
+        try:
+            run = client.experiments.log_run(
+                experiment_id=exp_id, dataset_example_id=example_id,
+                output=payload["output"], start_time=start, end_time=end, timeout=HTTP_TIMEOUT,
+            )
+        except Exception as exc:
+            if getattr(getattr(exc, "response", None), "status_code", None) == 409:
+                return -1
+            raise
+        run_id = run["id"]
     for ev in payload["evaluations"]:
         client.experiments.log_evaluation(
             experiment_run_id=run_id, name=ev["name"],
@@ -308,7 +234,7 @@ def _logged_example_ids(client, exp_id: str) -> set:
     """
     try:
         ran = client.experiments.get_experiment(experiment_id=exp_id)
-        runs = _attr(ran, "task_runs") or []
+        runs = ran["task_runs"]
     except Exception as exc:
         print(f"⚠ 读不到已有实验的 run 列表（可能重复推送）：{type(exc).__name__}: {exc}")
         return set()
@@ -322,16 +248,10 @@ def sync_report(client, report_path: Path, report: dict, name: str,
         print("[report] 该报告没有逐例数据（旧格式），无从同步")
         return
 
-    try:
-        ds = client.datasets.get_dataset(dataset=name, timeout=HTTP_TIMEOUT)
-    except ValueError:
-        print(f"[report] Phoenix 里没有数据集 {name}，先跑一次 `--dataset` 再同步报告")
+    ds, by_case = _dataset_index(client, name)
+    if ds is None:
+        print(f"[report] Phoenix 里没有数据集 {name}，先跑一次 --dataset 再同步报告")
         return
-    by_case = {}
-    for e in ds:
-        cid = (_attr(e, "metadata") or {}).get("case_id")
-        if cid:
-            by_case[cid] = _attr(e, "node_id")
 
     matched = sorted(set(results) & set(by_case))
     missing = sorted(set(results) - set(by_case))
@@ -352,14 +272,11 @@ def sync_report(client, report_path: Path, report: dict, name: str,
         end = start
 
     base = experiment_name(at, report.get("git"))
-    dataset_id = _attr(ds, "id")
-    exp_name, seq = base, 1
-    while _find_experiment(client, dataset_id, exp_name) is not None:
-        if not force:
-            print(f"[experiment] {exp_name} 已存在，跳过（--force 可另建一份）")
-            return
-        seq += 1
-        exp_name = f"{base}-r{seq}"
+    dataset_id = ds.id
+    exp_name, existing = _experiment_target(client, dataset_id, base, force)
+    if existing is not None:
+        print(f"[experiment] {exp_name} 已存在，跳过（--force 可另建一份）")
+        return
     print(f"[experiment] 新建 {exp_name}（{len(matched)} 条 run）")
     if dry_run:
         sample = matched[0] if matched else None
@@ -378,15 +295,14 @@ def sync_report(client, report_path: Path, report: dict, name: str,
                              "faithfulness_micro": (six.get("faithfulness") or {}).get("micro")},
         timeout=HTTP_TIMEOUT,
     )
-    exp_id = _attr(exp, "id")
+    exp_id = exp["id"]
 
     runs = evals = 0
     for cid in matched:
         evals += _log_case(client, exp_id, by_case[cid], results[cid], start, end)
         runs += 1
     print(f"[experiment] 完成：{runs} 条 run / {evals} 条 evaluation")
-    print(f"[url] {url}/datasets/{_attr(ds, 'id')}/experiments")
-
+    print(f"[url] {url}/datasets/{ds.id}/experiments")
 
 
 def _dataset_index(client, name: str):
@@ -397,9 +313,9 @@ def _dataset_index(client, name: str):
         return None, {}
     by_case = {}
     for e in ds:
-        cid = (_attr(e, "metadata") or {}).get("case_id")
+        cid = (e.get("metadata") or {}).get("case_id")
         if cid:
-            by_case[cid] = _attr(e, "node_id")
+            by_case[cid] = e["node_id"]
     return ds, by_case
 
 
@@ -419,7 +335,7 @@ def follow_live(client, live_path: Path, name: str, url: str,
     if ds is None:
         print(f"[follow] Phoenix 里没有数据集 {name}，先跑一次 `--dataset`")
         return
-    dataset_id = _attr(ds, "id")
+    dataset_id = ds.id
 
     results: dict = {}
     meta = {"at": "", "git": ""}
@@ -479,10 +395,10 @@ def follow_live(client, live_path: Path, name: str, url: str,
                                              "live": True},
                         timeout=HTTP_TIMEOUT,
                     )
-                    exp_id = _attr(exp, "id")
+                    exp_id = exp["id"]
                     print(f"[follow] 新建 experiment {exp_name}")
                 else:
-                    exp_id = _attr(exist, "id")
+                    exp_id = exist["id"]
                     logged = _logged_example_ids(client, exp_id)
                     print(f"[follow] 接入已有 experiment {exp_name}"
                           f"（已推 {len(logged)} 例，只补缺口）")
@@ -525,160 +441,67 @@ def follow_live(client, live_path: Path, name: str, url: str,
         print(f"[follow] 结束：共推送 {done} 例 → {url}/datasets/{dataset_id}/experiments")
 
 
+def _agent_payload(case: dict) -> dict:
+    labels = {"passed": "PASS", "failed": "FAIL", "unassessable": "UNASSESSABLE"}
+    status = case["status"]
+    verdicts = [{
+        "name": "pass_verdict", "kind": "CODE", "score": {"passed": 1.0, "failed": 0.0, "unassessable": None}[status],
+        "label": labels[status], "explanation": "",
+    }]
+    verdicts.extend({
+        "name": item["judge"], "kind": "CODE", "score": item["score"],
+        "label": labels[item["status"]], "explanation": item["reason"][:500],
+    } for item in case["verdicts"])
+    return {"output": {key: case[key] for key in ("name", "score", "status", "elapsed", "tool_calls_count")},
+            "evaluations": verdicts}
 
 
+def sync_agent_eval(client, report_path: Path, url: str, force: bool, dry_run: bool) -> None:
+    """只导出指定的真实调研报告，重试时复用该批次已写入的执行记录。"""
+    from evals.agent_eval.cases import AGENT_BENCHMARK_CASES
+    from evals.agent_eval.contracts import REPORT_SCHEMA_VERSION
 
-def _agent_label(result: dict) -> str:
-    if result.get("status") == "unassessable":
-        return "UNASSESSABLE"
-    return "PASS" if result["passed"] else "FAIL"
-
-
-def sync_agent_eval(client, url: str, force: bool, dry_run: bool) -> None:
-    """把多智能体（Agent Eval）用例集与评测报告同步到 Phoenix。"""
-    try:
-        from evals.agent_eval.cases import AGENT_BENCHMARK_CASES
-    except ImportError:
-        sys.path.insert(0, str(REPO_ROOT))
-        from evals.agent_eval.cases import AGENT_BENCHMARK_CASES
-
-    agent_dataset_name = "taozhi-agent-eval-benchmark"
-    examples = []
-    for c in AGENT_BENCHMARK_CASES:
-        if c.get("execution_mode") == "synthetic_trace_regrade":
-            continue
-        examples.append({
-            "input": {
-                "prompt": c["prompt"],
-                "keyword": c.get("keyword", ""),
-            },
-            "output": {
-                "required_tools": c.get("required_tools", []),
-                "forbidden_tools": c.get("forbidden_tools", []),
-                "required_sections": c.get("required_sections", []),
-                "min_chars": c.get("min_chars", 80),
-            },
-            "metadata": {
-                "case_id": c["id"],
-                "category": c.get("category", ""),
-                "name": c.get("name", ""),
-            },
-        })
-
-    ds, known = _existing_case_ids(client, agent_dataset_name)
+    report = json.loads(report_path.read_bytes())
+    if not isinstance(report, dict) or report.get("schema_version") != REPORT_SCHEMA_VERSION or report.get("mode") != "live":
+        raise ValueError("请选择当前格式的真实调研报告")
+    examples = [{
+        "input": {"prompt": case["prompt"], "keyword": case["keyword"]},
+        "output": {key: case[key] for key in ("required_tools", "forbidden_tools", "required_sections", "min_chars")},
+        "metadata": {"case_id": case["id"], "category": case["category"], "name": case["name"]},
+    } for case in AGENT_BENCHMARK_CASES if case.get("execution_mode") != "synthetic_trace_regrade"]
+    payloads = {case["case_id"]: _agent_payload(case) for case in report["case_results"]}
+    if not payloads or len(payloads) != len(report["case_results"]):
+        raise ValueError("调研报告缺少用例或包含重复编号")
+    if payloads.keys() - {example["metadata"]["case_id"] for example in examples}:
+        raise ValueError("调研报告含未登记的用例")
+    metadata = {"git": report["git_sha"], "dataset_sha256": report["dataset_sha256"],
+                "judges_sha256": report["judges_sha256"], "pass_rate": report["metrics"]["task_completion"]["rate"],
+                "total_cases": report["metrics"]["selected"]}
+    name = "agent-" + report["run_id"]
+    dataset, index = sync_examples(client, examples, "taozhi-agent-eval-benchmark", "淘智多智能体调研评测基准集", dry_run)
     if dry_run:
-        print(f"[agent-dataset] 待同步用例 {sum(e['metadata']['case_id'] not in known for e in examples)} 个")
+        print(f"[agent-experiment] {name} 待同步 {len(payloads)} 例")
         return
-    if ds is None:
-        print(f"[agent-dataset] 新建：{agent_dataset_name}（{len(examples)} 例）")
-        ds = client.datasets.create_dataset(
-            name=agent_dataset_name,
-            examples=examples,
-            timeout=HTTP_TIMEOUT,
-            dataset_description="淘智多智能体调研评测基准集",
+
+    dataset_id = dataset.id
+    name, experiment = _experiment_target(client, dataset_id, name, force)
+    run_ids = {}
+    if experiment is None:
+        experiment = client.experiments.create(
+            dataset_id=dataset_id, experiment_name=name, experiment_description=f"调研评测报告 {report_path.name}",
+            experiment_metadata=metadata, timeout=HTTP_TIMEOUT,
         )
     else:
-        todo = [e for e in examples if e["metadata"]["case_id"] not in known]
-        if todo:
-            print(f"[agent-dataset] 追加 {len(todo)} 例")
-            client.datasets.add_examples_to_dataset(
-                dataset=agent_dataset_name,
-                examples=todo,
-                timeout=HTTP_TIMEOUT,
-            )
-        ds = client.datasets.get_dataset(dataset=agent_dataset_name, timeout=HTTP_TIMEOUT)
+        previous = client.experiments.get_experiment(experiment_id=experiment["id"])
+        run_ids = {run["dataset_example_id"]: run["id"] for run in previous["task_runs"]}
+    experiment_id = experiment["id"]
+    now = datetime.now(timezone.utc)
+    for case_id, payload in payloads.items():
+        example_id = index[case_id]
+        if _log_case(client, experiment_id, example_id, payload, now, now, run_id=run_ids.get(example_id)) < 0:
+            raise RuntimeError(f"用例 {case_id} 正在并发写入，可重新同步该报告")
+    print(f"[agent-experiment] {name} 已同步 {len(payloads)} 例 → {url}/datasets/{dataset_id}/experiments")
 
-    dataset_id = _attr(ds, "id")
-    by_case = {}
-    for e in ds:
-        cid = (_attr(e, "metadata") or {}).get("case_id")
-        node_id = _attr(e, "node_id") or _attr(e, "id")
-        if cid and node_id:
-            by_case[cid] = node_id
-
-    report_dir = REPO_ROOT / "evals/reports/agent_eval"
-    if not report_dir.is_dir():
-        return
-    report_files = sorted(report_dir.glob("agent_eval_report_*.json"))
-    for rep_file in report_files:
-        try:
-            rep_data = json.loads(rep_file.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if rep_data.get("mode", "live") != "live":
-            continue
-        exp_name = f"agent-{rep_file.stem.replace('agent_eval_report_', '')}"
-        exist = _find_experiment(client, dataset_id, exp_name)
-        if exist is not None and not force:
-            continue
-
-        exp = client.experiments.create(
-            dataset_id=dataset_id,
-            experiment_name=exp_name,
-            experiment_description=f"多智能体自治评测报告 {rep_file.name}",
-            experiment_metadata={
-                "git": rep_data.get("git_sha", "latest"),
-                "pass_rate": rep_data.get("pass_rate", 0),
-                "total_cases": rep_data.get("total_cases", 0),
-                "dataset_sha256": rep_data.get("dataset_sha256"),
-                "judges_sha256": rep_data.get("judges_sha256"),
-            },
-            timeout=HTTP_TIMEOUT,
-        )
-        exp_id = _attr(exp, "id")
-        now = datetime.now()
-        logged = 0
-        for case_res in rep_data.get("case_results", []):
-            cid = case_res.get("case_id")
-            node_id = by_case.get(cid)
-            if not node_id:
-                continue
-            try:
-                run = client.experiments.log_run(
-                    experiment_id=exp_id,
-                    dataset_example_id=node_id,
-                    output={
-                        "name": case_res.get("name"),
-                        "score": case_res.get("score"),
-                        "passed": case_res.get("passed"),
-                        "status": case_res.get("status"),
-                        "elapsed": case_res.get("elapsed"),
-                        "tool_calls_count": case_res.get("tool_calls_count", 0),
-                    },
-                    start_time=now,
-                    end_time=now,
-                    timeout=HTTP_TIMEOUT,
-                )
-                run_id = _attr(run, "id")
-                client.experiments.log_evaluation(
-                    experiment_run_id=run_id,
-                    name="pass_verdict",
-                    annotator_kind="CODE",
-                    score=None if case_res.get("status") == "unassessable" else float(bool(case_res.get("passed"))),
-                    label=_agent_label(case_res),
-                    explanation=f"综合得分: {case_res.get('score')}",
-                    start_time=now,
-                    end_time=now,
-                    timeout=HTTP_TIMEOUT,
-                )
-                for v in case_res.get("verdicts", []):
-                    client.experiments.log_evaluation(
-                        experiment_run_id=run_id,
-                        name=v.get("judge", "judge"),
-                        annotator_kind="CODE",
-                        score=v.get("score"),
-                        label=_agent_label(v),
-                        explanation=v.get("reason", "")[:500],
-                        start_time=now,
-                        end_time=now,
-                        timeout=HTTP_TIMEOUT,
-                    )
-                logged += 1
-            except Exception as exc:
-                print(f"[agent-experiment] {cid} 同步未完成（{type(exc).__name__}）", file=sys.stderr)
-        print(f"[agent-experiment] {exp_name} 同步完成（{logged} 条 run）")
-
-    print(f"[agent-url] {url}/datasets/{dataset_id}/experiments")
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="同步评估集与评估结果到 Phoenix")
@@ -686,7 +509,7 @@ def main() -> int:
     ap.add_argument("--report", nargs="?", const="latest", metavar="PATH",
                     help="把一次评估报告同步为 Experiment（缺省取最新）")
     ap.add_argument("--all", action="store_true", help="数据集 + 最新报告")
-    ap.add_argument("--agent", action="store_true", help="同步多智能体 (Agent Eval) 用例集与评测报告")
+    ap.add_argument("--agent", type=Path, metavar="REPORT", help="同步指定的真实调研报告及其用例集")
     ap.add_argument("--follow", nargs="?", const=str(LIVE_PATH), metavar="PATH",
                     help="跟随 evals/rag_eval/run.py 的实时进度文件，逐例推送（缺省 "
                          "evals/reports/live.jsonl）")
@@ -711,7 +534,7 @@ def main() -> int:
         from phoenix.client import Client
     except ImportError:
         print("缺少 phoenix 客户端。用独立环境运行：\n"
-              "  ~/.local/share/ecom-agent/phoenix-venv/bin/python evals/sync_phoenix.py --all",
+              "  PYTHONPATH=src ~/.local/share/ecom-agent/phoenix-venv/bin/python -m evals.sync_phoenix --all",
               file=sys.stderr)
         return 1 if args.strict else 0
 
@@ -725,7 +548,8 @@ def main() -> int:
 
     try:
         if args.dataset or args.all:
-            sync_dataset(client, load_cases(), args.dataset_name, args.dry_run)
+            sync_examples(client, [case_to_example(case) for case in load_cases()], args.dataset_name,
+                          "淘智电商 RAG 评估集", args.dry_run)
 
         if args.report or args.all:
             path = latest_report() if args.report in (None, "latest") else Path(args.report)
@@ -738,13 +562,16 @@ def main() -> int:
             follow_live(client, Path(args.follow), args.dataset_name, args.url,
                         args.poll, args.idle_timeout, args.dry_run)
 
-        if args.agent or args.all:
-            sync_agent_eval(client, args.url, args.force, args.dry_run)
+        if args.agent:
+            sync_agent_eval(client, args.agent, args.url, args.force, args.dry_run)
+    except (FileNotFoundError, ValueError, KeyError, TypeError) as exc:
+        print(f"评估同步输入无效：{exc}", file=sys.stderr)
+        return 2
     except Exception as exc:
         print(f"⚠ 同步中断：{type(exc).__name__}: {exc}", file=sys.stderr)
         print("  评估报告本身不受影响，修好 Phoenix 后重跑本命令即可（幂等）。",
               file=sys.stderr)
-        return 1 if args.strict else 0
+        return 1 if args.strict or args.agent else 0
 
     if args.dry_run:
         print("\n（--dry-run：以上均未写入）")

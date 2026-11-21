@@ -33,15 +33,14 @@
       <div class="evaluation-evidence">
         <section>
           <h4>预期行为</h4>
-          <p v-if="detail.expected === null" class="evaluation-muted">该版本报告未保存预期行为。</p>
-          <ul v-else-if="detail.expected.length">
+          <ul v-if="detail.expected.length">
             <li v-for="line in detail.expected" :key="line">{{ line }}</li>
           </ul>
           <p v-else class="evaluation-muted">该用例没有具体行为标注。</p>
         </section>
         <section>
           <h4>{{ run.mode === 'live' ? '实际工具调用' : '回放工具调用' }}</h4>
-          <p v-if="detail.observed === null" class="evaluation-muted">该版本报告未记录工具步骤。</p>
+          <p v-if="detail.observed === null" class="evaluation-muted">本次评测未采集到工具步骤。</p>
           <template v-else>
             <p v-if="detail.steps_complete === false" class="evaluation-muted">
               只采集到了部分工具步骤。
@@ -101,7 +100,7 @@
             <li v-for="(issue, index) in item.issues" :key="index">
               <template v-if="issue.step !== null">步骤 {{ issue.step }} · </template>
               <template v-if="issue.tool_name">{{ issue.tool_name }} · </template>
-              {{ evaluationFailures[issue.failure_type] || issue.failure_type }}
+              {{ issue.reason }}
             </li>
           </ul>
         </li>
@@ -119,9 +118,9 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import type { ApiReader } from '../types'
 import {
   evaluationDimensions,
-  evaluationFailures,
   evaluationJudges,
   evaluationSource,
   evaluationRunPath,
@@ -129,12 +128,11 @@ import {
   evaluationSuites,
   evaluationTags,
   evaluationToolStatuses,
-  type EvaluationApi,
   type EvaluationCaseDetail,
   type EvaluationRun,
 } from '../evaluations'
 
-const props = defineProps<{ run: EvaluationRun; caseId: string; api: EvaluationApi }>()
+const props = defineProps<{ run: EvaluationRun; caseId: string; api: ApiReader }>()
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'inspect', taskId: string, traceId: string): void

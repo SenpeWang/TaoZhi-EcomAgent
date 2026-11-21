@@ -103,6 +103,7 @@ class McpClientAdapter:
             )
             if span is not None:
                 span.set_attribute("tool.status", outcome.status)
+                span.set_attribute("tool.dispatched", outcome.dispatched)
                 span.set_attribute("tool.result_count", outcome.data_count)
                 if outcome.status in ("error", "timeout", "cancelled"):
                     if not any(e.name == EVENT_NAME and e.attributes.get("outcome") == "failed" for e in span.events):

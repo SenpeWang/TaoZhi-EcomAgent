@@ -1493,20 +1493,24 @@ def test_pipeline_quote_and_arithmetic_derivation_guards():
 
 def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_path):
     """报告导入、同租户发起人权限、两个批次的授权和跨租户隔离由真实入口验证。"""
+    from evals.agent_eval.contracts import REPORT_SCHEMA_VERSION
     from evals.agent_eval.publish import publish_report
-    from evals.agent_eval.reporting import fingerprint
+    from evals.agent_eval.reporting import fingerprint, group_metrics
 
     tenant = "tenant_test"
     users, _ = ids()
     url = "/api/evaluations/runs"
     sample = {
+        "expectation_notes": [], "expected_tools": [], "forbidden_tools": [], "expected_parameters": [],
+        "steps": None, "steps_complete": None,
         "case_id": "SYN-A", "case_sha256": "a" * 64, "suite": "regression", "status": "passed",
         "score": 1.0, "hard_failure": False, "verdicts": [],
     }
     baseline = {
-        "schema_version": 2, "run_id": "baseline", "timestamp": "20261120_120000_000001",
-        "mode": "synthetic_trace_regrade", "dataset_sha256": "a" * 64, "judges_sha256": "b" * 64, "metrics": {},
-        "gate": {"passed": True}, "total_cases": 2, "passed_cases": 2,
+        "schema_version": REPORT_SCHEMA_VERSION, "run_id": "baseline", "timestamp": "20261120_120000_000001",
+        "mode": "synthetic_trace_regrade", "dataset_sha256": "a" * 64, "judges_sha256": "b" * 64,
+        "gate": {"passed": True}, "transcript_sha256": "1" * 64,
+        "metrics": {**group_metrics([]), "selected": 2, "passed": 2},
         "case_results": [sample, {**sample, "case_id": "SYN-B"}],
     }
 
@@ -1529,7 +1533,8 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
         publish(baseline, "eval_foreign", users["boss"])
     assert publish({**baseline, "run_id": "foreign_report"}, "eval_foreign", "eval_foreign_user")
     current = {
-        **baseline, "run_id": "candidate", "passed_cases": 1, "gate": {"passed": False},
+        **baseline, "run_id": "candidate", "gate": {"passed": False},
+        "metrics": {**baseline["metrics"], "passed": 1, "failed": 1},
         "transcript_sha256": "1" * 64, "counterexamples_sha256": "2" * 64, "model_config_sha256": "3" * 64,
         "case_results": [{**sample, "status": "failed", "score": 0}, baseline["case_results"][1]],
         "comparison": {"baseline_sha256": fingerprint(baseline)},
@@ -1540,15 +1545,11 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
     assert [item["run_id"] for item in listing] == ["candidate"]
     for key in ("transcript_sha256", "counterexamples_sha256", "model_config_sha256"):
         assert listing[0][key] == current[key]
-        assert admin.get(f"{url}/baseline").json()["run"][key] is None
-    with database_connection() as conn:
-        conn.execute("UPDATE eval_runs SET metrics=metrics-'provenance' WHERE tenant_id=%s AND run_id=%s",
-                     (tenant, current["run_id"]))
-    assert staff.get(f"{url}/candidate").json()["run"]["counterexamples_sha256"] is None
+    assert admin.get(f"{url}/baseline").json()["run"]["counterexamples_sha256"] is None
     assert not publish(current, tenant, users["staff"])
-    restored = staff.get(f"{url}/candidate").json()
-    assert restored["run"]["counterexamples_sha256"] == current["counterexamples_sha256"]
-    assert "provenance" not in restored["metrics"]
+    detail = staff.get(f"{url}/candidate").json()
+    assert detail["run"]["counterexamples_sha256"] == current["counterexamples_sha256"]
+    assert "provenance" not in detail["metrics"]
     assert staff.get(url, params={"owner_id": "all"}).status_code == 403
     assert staff.get(url, params={"owner_id": users["boss"]}).status_code == 403
     assert [item["run_id"] for item in admin.get(url, params={"owner_id": users["boss"]}).json()["items"]] == ["baseline"]
@@ -1565,7 +1566,9 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
     assert compared["changes"]["standard"]["regressed"] == ["SYN-A"]
     assert admin.get(f"{url}/candidate/comparison", params={"baseline_id": "baseline"}).json() == compared
     assert admin.get(f"{url}/candidate/comparison", params={"baseline_id": "candidate"}).status_code == 422
-    assert publish({**baseline, "run_id": "other_mode", "mode": "live"}, tenant, users["staff"])
+    assert publish({**baseline, "run_id": "other_mode", "mode": "live", "transcript_sha256": None,
+                    "comparison": {"baseline_sha256": fingerprint(current)}}, tenant, users["staff"])
+    assert staff.get(f"{url}/other_mode").json()["comparison"] is None
     assert staff.get(f"{url}/candidate/comparison", params={"baseline_id": "other_mode"}).status_code == 422
     assert [item["case_id"] for item in staff.get(f"{url}/candidate/cases", params={"status": "failed"}).json()["items"]] == ["SYN-A"]
     assert staff.get(f"{url}/candidate/cases/SYN-A").json()["observed"] is None
@@ -1575,7 +1578,9 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
 
 def test_live_evaluation_links_require_visible_business_task(clients, tmp_path):
     """批次归属与业务轨迹归属各自鉴权。"""
+    from evals.agent_eval.contracts import REPORT_SCHEMA_VERSION
     from evals.agent_eval.publish import publish_report
+    from evals.agent_eval.reporting import group_metrics
 
     users, _ = ids()
     task = task_id(clients["boss"], "合成业务问答")
@@ -1584,11 +1589,12 @@ def test_live_evaluation_links_require_visible_business_task(clients, tmp_path):
         conn.execute("INSERT INTO task_spans(tenant_id,job_id,run_version,trace_id,span_id,name,kind,status,started_at) "
                      "VALUES('tenant_test',%s,1,%s,%s,'task.ask','CHAIN','ok',now())", (task, trace, "a" * 16))
     raw = {
-        "schema_version": 2, "run_id": "live_report", "timestamp": "20261120_120000_000001",
-        "mode": "live", "dataset_sha256": "a" * 64, "judges_sha256": "b" * 64, "metrics": {},
-        "gate": {"passed": True}, "total_cases": 1, "passed_cases": 1,
+        "schema_version": REPORT_SCHEMA_VERSION, "run_id": "live_report", "timestamp": "20261120_120000_000001",
+        "mode": "live", "dataset_sha256": "a" * 64, "judges_sha256": "b" * 64,
+        "gate": {"passed": True}, "metrics": {**group_metrics([]), "selected": 1, "passed": 1},
         "case_results": [{"case_id": "SYN-A", "case_sha256": "c" * 64, "suite": "benchmark", "status": "passed",
-                          "score": 1, "trace_id": trace, "hard_failure": False, "verdicts": []}],
+                          "score": 1, "trace_id": trace, "hard_failure": False, "verdicts": [], "expectation_notes": [], "expected_tools": [],
+                          "forbidden_tools": [], "expected_parameters": [], "steps": [], "steps_complete": True}],
     }
     path = tmp_path / "report.json"
     path.write_text(json.dumps(raw), encoding="utf-8")

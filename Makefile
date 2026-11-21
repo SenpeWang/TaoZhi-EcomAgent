@@ -98,11 +98,11 @@ evals-agent-replay:
 
 evals-sync:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
-	$(PHOENIX_PY) evals/sync_phoenix.py --all
+	PYTHONPATH=src $(PHOENIX_PY) -m evals.sync_phoenix --all
 
 evals-follow:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
-	$(PHOENIX_PY) evals/sync_phoenix.py --follow
+	PYTHONPATH=src $(PHOENIX_PY) -m evals.sync_phoenix --follow
 
 evals-archive:
 	$(PYTHON) scripts/archive_baseline.py archive

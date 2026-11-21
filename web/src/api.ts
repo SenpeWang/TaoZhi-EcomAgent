@@ -103,6 +103,87 @@ function validActivityActor(actor: unknown): boolean {
 }
 
 /**
+ * 检查可按项展示的文本列表。
+ * @param value - 响应中的列表字段。
+ * @returns 是否为纯字符串数组。
+ */
+function isStringList(value: unknown): boolean {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+/**
+ * 核对列表及详情共用的用例标识、判定与可格式化得分。
+ * @param item - 接口返回的用例摘要。
+ * @returns 是否具有页面所需的用例字段。
+ */
+function validEvaluationCase(item: unknown): item is JsonRecord & { case_id: string } {
+  return (
+    isRecord(item) &&
+    typeof item.case_id === 'string' &&
+    ['passed', 'failed', 'unassessable'].includes(String(item.status)) &&
+    (item.score === null || Number.isFinite(item.score))
+  )
+}
+
+/**
+ * 核对批次身份及页面用于识别运行来源的版本摘要。
+ * @param item - 批次列表或详情中的摘要。
+ * @returns 是否能安全展示该批次。
+ */
+function validEvaluationRun(item: unknown): item is JsonRecord & { run_id: string } {
+  return (
+    isRecord(item) &&
+    typeof item.run_id === 'string' &&
+    ['live', 'synthetic_trace_regrade'].includes(String(item.mode)) &&
+    typeof item.dataset_sha256 === 'string' &&
+    typeof item.judges_sha256 === 'string' &&
+    ['git_sha', 'transcript_sha256', 'counterexamples_sha256', 'model_config_sha256'].every(
+      (key) => item[key] === null || typeof item[key] === 'string',
+    )
+  )
+}
+
+/**
+ * 校验批次的四项判定比例和可缺测的 Token 计数。
+ * @param metrics - 已解析的批次指标。
+ * @returns 是否能区分零样本和零命中。
+ */
+function validEvaluationMetrics(metrics: unknown): boolean {
+  if (!isRecord(metrics)) return false
+  for (const key of [
+    'required_tool_coverage',
+    'parameter_accuracy',
+    'reference_fact_coverage',
+    'call_coverage_among_known',
+  ]) {
+    const ratio = metrics[key]
+    if (!isRecord(ratio)) return false
+    const { numerator, denominator, rate } = ratio
+    if (
+      typeof numerator !== 'number' ||
+      !Number.isSafeInteger(numerator) ||
+      numerator < 0 ||
+      typeof denominator !== 'number' ||
+      !Number.isSafeInteger(denominator) ||
+      denominator < numerator
+    )
+      return false
+    if (
+      denominator === 0
+        ? rate !== null
+        : typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0 || rate > 1
+    )
+      return false
+  }
+  return ['measured_prompt_tokens', 'measured_completion_tokens'].every((key) => {
+    const count = metrics[key]
+    return (
+      count === null || (typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)
+    )
+  })
+}
+
+/**
  * 校验评测结果的身份、分页边界和可展示内容，避免将另一条用例的详情显示在当前批次。
  * @param resource - 去除筛选参数的 API 路径。
  * @param data - 已解析的业务响应。
@@ -117,39 +198,32 @@ function validateEvaluationResponse(resource: string, data: JsonRecord): void {
       (data.next_cursor !== null && typeof data.next_cursor !== 'string')
     )
       throw invalid
-    for (const item of data.items) {
-      if (!isRecord(item)) throw invalid
-      if (runId) {
-        if (
-          typeof item.case_id !== 'string' ||
-          !['passed', 'failed', 'unassessable'].includes(String(item.status))
-        )
-          throw invalid
-      } else if (
-        typeof item.run_id !== 'string' ||
-        !['live', 'synthetic_trace_regrade'].includes(String(item.mode)) ||
-        typeof item.dataset_sha256 !== 'string' ||
-        typeof item.judges_sha256 !== 'string'
-      )
-        throw invalid
-    }
+    if (!data.items.every(runId ? validEvaluationCase : validEvaluationRun)) throw invalid
     return
   }
   if (caseId) {
     if (
-      !isRecord(data.case) ||
-      typeof data.case.case_id !== 'string' ||
+      !validEvaluationCase(data.case) ||
       encodeURIComponent(data.case.case_id) !== caseId ||
-      !(
-        data.expected === null ||
-        (Array.isArray(data.expected) && data.expected.every((item) => typeof item === 'string'))
-      ) ||
+      !isStringList(data.expected) ||
+      !(data.steps_complete === null || typeof data.steps_complete === 'boolean') ||
       !(
         data.observed === null ||
-        (Array.isArray(data.observed) && data.observed.every(isRecord))
+        (Array.isArray(data.observed) &&
+          data.observed.every(
+            (step) =>
+              isRecord(step) &&
+              typeof step.tool_name === 'string' &&
+              (step.parameter_keys === null || isStringList(step.parameter_keys)),
+          ))
       ) ||
       !Array.isArray(data.verdicts) ||
-      !data.verdicts.every((item) => isRecord(item) && Array.isArray(item.issues)) ||
+      !data.verdicts.every(
+        (item) =>
+          isRecord(item) &&
+          Array.isArray(item.issues) &&
+          item.issues.every((issue) => isRecord(issue) && typeof issue.reason === 'string'),
+      ) ||
       !(
         data.trace_link === null ||
         (isRecord(data.trace_link) &&
@@ -164,10 +238,9 @@ function validateEvaluationResponse(resource: string, data: JsonRecord): void {
   }
   if (
     !child &&
-    (!isRecord(data.run) ||
-      typeof data.run.run_id !== 'string' ||
+    (!validEvaluationRun(data.run) ||
       encodeURIComponent(data.run.run_id) !== runId ||
-      !isRecord(data.metrics))
+      !validEvaluationMetrics(data.metrics))
   )
     throw invalid
   const comparison = child === 'comparison' ? data : data.comparison
@@ -184,7 +257,7 @@ function validateEvaluationResponse(resource: string, data: JsonRecord): void {
     if (
       !isRecord(changes) ||
       !['regressed', 'fixed', 'stable_passed', 'stable_failed'].every((change) =>
-        Array.isArray(changes[change]),
+        isStringList(changes[change]),
       )
     )
       throw invalid
@@ -192,7 +265,7 @@ function validateEvaluationResponse(resource: string, data: JsonRecord): void {
   const excluded = comparison.excluded
   if (
     !['new', 'baseline_only', 'definition_changed', 'unassessable'].every((key) =>
-      Array.isArray(excluded[key]),
+      isStringList(excluded[key]),
     )
   )
     throw invalid

@@ -18,9 +18,9 @@ class EvaluationRun(BaseModel):
     git_sha: str | None
     dataset_sha256: str
     judges_sha256: str
-    transcript_sha256: str | None = None
-    counterexamples_sha256: str | None = None
-    model_config_sha256: str | None = None
+    transcript_sha256: str | None
+    counterexamples_sha256: str | None
+    model_config_sha256: str | None
     gate_passed: bool
     total_cases: int
     passed_cases: int
@@ -50,6 +50,7 @@ class EvaluationCasePage(BaseModel):
 
 class EvaluationIssue(BaseModel):
     failure_type: str
+    reason: str
     tool_name: str | None
     step: int | None
 
@@ -79,7 +80,7 @@ class EvaluationTraceLink(BaseModel):
 
 class EvaluationCaseDetail(BaseModel):
     case: EvaluationCase
-    expected: list[str] | None
+    expected: list[str]
     observed: list[EvaluationStep] | None
     steps_complete: bool | None
     verdicts: list[EvaluationVerdict]
@@ -103,12 +104,12 @@ class EvaluationRatio(BaseModel):
 
 
 class EvaluationMetrics(BaseModel):
-    required_tool_coverage: EvaluationRatio | None = None
-    parameter_accuracy: EvaluationRatio | None = None
-    reference_fact_coverage: EvaluationRatio | None = None
-    call_coverage_among_known: EvaluationRatio | None = None
-    measured_prompt_tokens: int | None = None
-    measured_completion_tokens: int | None = None
+    required_tool_coverage: EvaluationRatio
+    parameter_accuracy: EvaluationRatio
+    reference_fact_coverage: EvaluationRatio
+    call_coverage_among_known: EvaluationRatio
+    measured_prompt_tokens: int | None
+    measured_completion_tokens: int | None
 
 
 class EvaluationRunDetail(BaseModel):

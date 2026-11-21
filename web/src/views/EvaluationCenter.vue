@@ -2,7 +2,7 @@
   <EvaluationRunInspector
     v-if="selected"
     :key="selected.run_id"
-    :summary="selected"
+    :initial-run="selected"
     :api="api"
     :owner-filter="isAdmin ? owner : null"
     @back="selected = null"
@@ -77,12 +77,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useEvaluationPage } from '../composables/useEvaluationPage'
+import { computed, ref, watch } from 'vue'
+import type { ApiReader } from '../types'
+import { useCursorPage } from '../composables/useCursorPage'
 import {
   evaluationModes,
   evaluationSource,
-  type EvaluationApi,
   type EvaluationMode,
   type EvaluationRun,
 } from '../evaluations'
@@ -91,7 +91,7 @@ import EvaluationRunInspector from './EvaluationRunInspector.vue'
 import TenantOwnerSelect from './TenantOwnerSelect.vue'
 import '../evaluations.css'
 
-const props = defineProps<{ isAdmin: boolean; api: EvaluationApi }>()
+const props = defineProps<{ isAdmin: boolean; api: ApiReader }>()
 const emit = defineEmits<{ (e: 'inspect', taskId: string, traceId: string): void }>()
 const selected = ref<EvaluationRun | null>(null)
 const owner = ref('all')
@@ -104,8 +104,9 @@ const endpoint = computed(() => {
   if (gate.value) query.set('gate_passed', gate.value)
   return '/evaluations/runs?' + query
 })
-const { rows, busy, error, page, nextCursor, refresh, turn } = useEvaluationPage<EvaluationRun>(
+const { rows, busy, error, page, nextCursor, refresh, reset, turn } = useCursorPage<EvaluationRun>(
   props.api,
   endpoint,
 )
+watch(endpoint, reset)
 </script>

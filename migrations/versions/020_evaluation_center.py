@@ -8,7 +8,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    """创建评测报告表，兼容从基础结构或已有部署升级。"""
     op.execute("""
         CREATE TABLE IF NOT EXISTS eval_runs (
          tenant_id text NOT NULL, run_id text NOT NULL, owner_id text NOT NULL, created_at timestamptz NOT NULL,
@@ -31,7 +30,7 @@ def upgrade() -> None:
          tenant_id text NOT NULL, run_id text NOT NULL, case_id text NOT NULL, case_sha256 text NOT NULL,
          name text NOT NULL, category text, suite text NOT NULL, status text NOT NULL CHECK(status IN ('passed','failed','unassessable')),
          score double precision CHECK (score BETWEEN 0 AND 1), hard_failure boolean NOT NULL, trace_id varchar(32),
-         expected jsonb, observed jsonb, steps_complete boolean, verdicts jsonb NOT NULL,
+         expected jsonb NOT NULL, observed jsonb, steps_complete boolean, verdicts jsonb NOT NULL,
          PRIMARY KEY (tenant_id,run_id,case_id),
          FOREIGN KEY (tenant_id,run_id) REFERENCES eval_runs(tenant_id,run_id) ON DELETE CASCADE
         )
@@ -42,6 +41,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """按外键依赖顺序回退本次新增的表。"""
     op.drop_table("eval_case_results")
     op.drop_table("eval_runs")

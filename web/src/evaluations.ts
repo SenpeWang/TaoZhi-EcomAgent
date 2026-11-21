@@ -1,6 +1,5 @@
 export type EvaluationMode = 'live' | 'synthetic_trace_regrade'
 export type EvaluationStatus = 'passed' | 'failed' | 'unassessable'
-export type EvaluationApi = <T>(path: string) => Promise<T>
 
 export interface EvaluationRun {
   run_id: string
@@ -43,7 +42,7 @@ export interface EvaluationStep {
 
 export interface EvaluationCaseDetail {
   case: EvaluationCase
-  expected: string[] | null
+  expected: string[]
   observed: EvaluationStep[] | null
   steps_complete: boolean | null
   verdicts: {
@@ -51,7 +50,12 @@ export interface EvaluationCaseDetail {
     dimension: string
     status: EvaluationStatus
     reason: string
-    issues: { failure_type: string; tool_name: string | null; step: number | null }[]
+    issues: {
+      failure_type: string
+      reason: string
+      tool_name: string | null
+      step: number | null
+    }[]
   }[]
   trace_link: { task_id: string; trace_id: string } | null
 }
@@ -83,11 +87,17 @@ export interface EvaluationRatio {
   rate: number | null
 }
 
-export interface EvaluationMetrics {
-  required_tool_coverage: EvaluationRatio | null
-  parameter_accuracy: EvaluationRatio | null
-  reference_fact_coverage: EvaluationRatio | null
-  call_coverage_among_known: EvaluationRatio | null
+export const evaluationMeasures = {
+  required_tool_coverage: '必调工具覆盖率',
+  parameter_accuracy: '工具参数准确率',
+  reference_fact_coverage: '参考事实覆盖率',
+  call_coverage_among_known: 'Token 用量采集覆盖率',
+} as const
+
+export interface EvaluationMetrics extends Record<
+  keyof typeof evaluationMeasures,
+  EvaluationRatio
+> {
   measured_prompt_tokens: number | null
   measured_completion_tokens: number | null
 }
@@ -98,9 +108,14 @@ export interface EvaluationRunDetail {
   comparison: EvaluationComparison | null
 }
 
-export interface EvaluationPage<T> {
-  items: T[]
-  next_cursor: string | null
+/**
+ * 按有效分母展示判定比例，零样本单独标识。
+ * @param ratio - 批次报告中的指标计数及比例。
+ * @returns 百分比和样本数，或无可判定样本的提示。
+ */
+export function formatEvaluationRatio(ratio: EvaluationRatio): string {
+  if (ratio.rate === null) return '无可判定样本'
+  return (ratio.rate * 100).toFixed(1) + '%（' + ratio.numerator + '/' + ratio.denominator + '）'
 }
 
 export const evaluationModes = {
@@ -144,7 +159,7 @@ export const evaluationToolStatuses: Record<string, string> = {
  * @returns 面向工作台用户的执行来源名称。
  */
 export function evaluationSource(run: EvaluationRun): string {
-  if (run.mode === 'live') return '真实调研'
+  if (run.mode === 'live') return evaluationModes.live
   return run.counterexamples_sha256 ? '合成反例复核' : '合成回放'
 }
 
@@ -169,22 +184,4 @@ export function isBaselineCandidate(run: EvaluationRun, candidate: EvaluationRun
     run.mode === candidate.mode &&
     run.judges_sha256 === candidate.judges_sha256
   )
-}
-
-export const evaluationFailures: Record<string, string> = {
-  missing_observation: '缺少可判定的观测',
-  run_status: '执行未按预期结束',
-  tool_forbidden: '实际调用了禁用工具',
-  tool_missing: '缺少必调工具',
-  tool_arguments: '工具入参未满足契约',
-  tool_status: '工具返回状态与预期不符',
-  tool_data: '工具数据量与预期不符',
-  tool_order: '工具调用依赖顺序不符',
-  deliverable_structure: '交付内容缺少约定结构',
-  fabricated_trace: '报告包含模拟执行文案',
-  steering: '运行期干预未满足约定',
-  reference_fact: '报告缺少参考事实',
-  evidence_citation: '参考事实缺少对应证据',
-  forbidden_claim: '报告出现标注禁止的结论',
-  unclassified: '未分类',
 }

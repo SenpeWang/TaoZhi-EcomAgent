@@ -5,9 +5,19 @@ from .roles import is_system_admin
 from typing import Optional
 
 from .entities import Principal
+from .errors import Denied
 
 
 RESTRICTED_QUESTION = "来源权限已变化，请重新查询"
+
+
+def visible_owner_id(p: Principal, requested: str | None = None) -> str | None:
+    """管理员可选择租户内全部发起人，普通成员只能查询本人。"""
+    if is_system_admin(p.role_level):
+        return None if requested in (None, "all") else requested
+    if requested not in (None, p.id):
+        raise Denied("只能查看本人发起的记录")
+    return p.id
 
 
 def can_task(p: Principal, job: dict) -> bool:

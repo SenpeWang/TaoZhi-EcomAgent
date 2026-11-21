@@ -54,7 +54,7 @@ make evals-agent-replay
 
 ### 查看工作台评测结果
 
-已部署的工作台需应用 `020_evaluation_center` 迁移。运维可在连接该工作台数据库的受信环境中指定租户和发起人，把已生成的报告归档。重复导入相同内容和归属的批次是幂等的。
+评测中心归档第 3 版 Agent 报告，早期格式需要重新运行评测生成报告。已部署的工作台需应用 `020_evaluation_center` 迁移。运维可在连接该工作台数据库的受信环境中指定租户和发起人，把已生成的报告归档。重复导入相同内容和归属的批次是幂等的。
 
 ```bash
 PYTHONPATH=src python -m evals.agent_eval.publish "$REPORT_PATH" --tenant-id "$TENANT_ID" --owner-id "$OWNER_ID"
@@ -85,7 +85,7 @@ PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay ev
 make evals-quick      # 检索 + 对抗，约 5 分钟
 make evals-full       # 三层全跑（180 例逐题 judge；对比基线 + 门禁，不过则退出码 1）
 make evals-baseline   # 三层全跑后锁定为基线
-make evals-agent      # 多智能体自治调研评测（10大用例全跑，完成后自动同步至 Phoenix）
+make evals-agent      # 执行 10 个真实调研用例并保存评分报告
 make evals-tests      # 评估代码自身的单元测试（不需要在线服务）
 make evals-sync       # 评估集 + 最新报告 -> Phoenix（旁路；Phoenix 离线只跳过）
 make evals-pipeline   # evals-full 之后自动同步；门禁不过也同步，失败样例要可见
@@ -114,8 +114,8 @@ make evals-follow        # 跟随跑批进度逐例推（另一个终端，评�
 make evals-pipeline      # 三层评估后自动同步
 
 # 直接调用（Phoenix 客户端在独立 venv，项目 .venv 里没有）
-ECOM_PHOENIX_URL=http://127.0.0.1:6006 \
-  ~/.local/share/ecom-agent/phoenix-venv/bin/python evals/sync_phoenix.py --all
+PYTHONPATH=src ~/.local/share/ecom-agent/phoenix-venv/bin/python -m evals.sync_phoenix --all
+PYTHONPATH=src ~/.local/share/ecom-agent/phoenix-venv/bin/python -m evals.sync_phoenix --agent "$REPORT_PATH"
 ```
 
 | 入口 | 去向 | 内容 |
@@ -123,6 +123,7 @@ ECOM_PHOENIX_URL=http://127.0.0.1:6006 \
 | `--dataset` | Phoenix **Datasets** | 180 例：input=问题/身份/多轮，output=预期行为/金标准文档/必备事实/禁披露，metadata=类别/难度/风险 |
 | `--report` | Phoenix **Experiment** | 逐例 run（答案 + 引用标题/chunk_id/**引用正文**）+ evaluation（answer_pass / faithfulness_decl / answer_relevant / abstain / retrieval.*） |
 | `--follow` | Phoenix **Experiment**（同一次跑、边跑边写） | 同上，只是按"每完成一例"推送而不是整份报告 |
+| `--agent REPORT` | Phoenix **Experiment** | 手动导出一份当前版本的真实调研报告，保留通过、失败、不可判定三种结果 |
 
 **实时观看**：`evals/rag_eval/run.py` 每完成一例就往 `evals/reports/live.jsonl` 追加一行
 （检索层一行、行为层一行，末行 `end`）。`sync_phoenix.py --follow` 只读这个文件，

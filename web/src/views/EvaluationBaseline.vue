@@ -7,7 +7,7 @@
         aria-label="选择对照批次"
         placeholder="随报告保存的对比"
         clearable
-        @visible-change="openChoices"
+        @visible-change="(visible: boolean) => visible && !loadedChoices && loadChoices()"
       >
         <el-option label="随报告保存的对比" value="" />
         <el-option
@@ -44,7 +44,7 @@
     </div>
     <el-skeleton v-else-if="busy" :rows="2" animated />
     <p v-else-if="!comparison" class="evaluation-muted">
-      此报告未附基线对比，可选择其他已入库批次。
+      当前没有可查看的基线对比，可选择其他已入库批次。
     </p>
     <template v-else>
       <p class="evaluation-muted">
@@ -96,20 +96,19 @@
 
 <script setup lang="ts">
 import { onScopeDispose, ref, watch } from 'vue'
+import type { ApiReader, CursorPage } from '../types'
 import {
   evaluationRunPath,
   evaluationSource,
   isBaselineCandidate,
-  type EvaluationApi,
   type EvaluationComparison,
-  type EvaluationPage,
   type EvaluationRun,
 } from '../evaluations'
 import { traceTime } from '../labels'
 
 const props = defineProps<{
   run: EvaluationRun
-  api: EvaluationApi
+  api: ApiReader
   ownerFilter: string | null
   storedComparison: EvaluationComparison | null
 }>()
@@ -151,7 +150,7 @@ async function loadChoices(): Promise<void> {
   if (props.ownerFilter) query.set('owner_id', props.ownerFilter)
   if (nextCursor.value) query.set('cursor', nextCursor.value)
   try {
-    const page = await props.api<EvaluationPage<EvaluationRun>>('/evaluations/runs?' + query)
+    const page = await props.api<CursorPage<EvaluationRun>>('/evaluations/runs?' + query)
     candidates.value.push(...page.items.filter((item) => isBaselineCandidate(props.run, item)))
     nextCursor.value = page.next_cursor
     loadedChoices = true
@@ -160,14 +159,6 @@ async function loadChoices(): Promise<void> {
   } finally {
     choiceBusy.value = false
   }
-}
-
-/**
- * 打开列表时按需读取候选批次。
- * @param visible - 下拉面板是否已打开。
- */
-function openChoices(visible: boolean): void {
-  if (visible && !loadedChoices) void loadChoices()
 }
 
 /** 加载所选基线或报告附带的比较结果，快速切换时只保留最后一次响应。 */

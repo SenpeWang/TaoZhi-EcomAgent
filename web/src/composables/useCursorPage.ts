@@ -1,13 +1,13 @@
-import { computed, onScopeDispose, ref, shallowRef, watch, type ComputedRef } from 'vue'
-import type { EvaluationApi, EvaluationPage } from '../evaluations'
+import { computed, onMounted, onScopeDispose, ref, shallowRef, type ComputedRef } from 'vue'
+import type { ApiReader, CursorPage } from '../types'
 
 /**
- * 按游标加载评测批次或用例，筛选变化时清空旧页并丢弃迟到响应。
+ * 按游标翻页，同时丢弃筛选变化后迟到的响应。
  * @param api - 已绑定账号的读取接口。
  * @param endpoint - 包含当前筛选条件的页面接口路径。
  * @returns 当前数据、分页位置和读取操作。
  */
-export function useEvaluationPage<T>(api: EvaluationApi, endpoint: ComputedRef<string>) {
+export function useCursorPage<T>(api: ApiReader, endpoint: ComputedRef<string>) {
   const rows = shallowRef<T[]>([])
   const cursors = ref([''])
   const nextCursor = ref<string | null>(null)
@@ -25,14 +25,13 @@ export function useEvaluationPage<T>(api: EvaluationApi, endpoint: ComputedRef<s
     rows.value = []
     nextCursor.value = null
     try {
-      const result = await api<EvaluationPage<T>>(path)
+      const result = await api<CursorPage<T>>(path)
       if (version === request) {
         rows.value = result.items
         nextCursor.value = result.next_cursor
       }
     } catch (cause) {
-      if (version === request)
-        error.value = cause instanceof Error ? cause.message : '读取评测记录失败'
+      if (version === request) error.value = cause instanceof Error ? cause.message : '读取列表失败'
     } finally {
       if (version === request) busy.value = false
     }
@@ -50,14 +49,13 @@ export function useEvaluationPage<T>(api: EvaluationApi, endpoint: ComputedRef<s
     void refresh()
   }
 
-  watch(
-    endpoint,
-    () => {
-      cursors.value = ['']
-      void refresh()
-    },
-    { immediate: true },
-  )
+  /** 返回当前筛选条件的第一页。 */
+  function reset(): void {
+    cursors.value = ['']
+    void refresh()
+  }
+
+  onMounted(refresh)
   onScopeDispose(() => {
     request++
   })
@@ -68,6 +66,7 @@ export function useEvaluationPage<T>(api: EvaluationApi, endpoint: ComputedRef<s
     error,
     page: computed(() => cursors.value.length),
     refresh,
+    reset,
     turn,
   }
 }

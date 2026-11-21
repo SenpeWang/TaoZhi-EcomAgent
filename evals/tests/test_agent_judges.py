@@ -4,15 +4,11 @@ from __future__ import annotations
 import unittest
 
 from evals.agent_eval.harness import AgentRunResult
-from evals.agent_eval.judges import ReferenceFactJudge, ToolExecutionJudge, evaluate_case
+from evals.agent_eval.judges import ReferenceFactJudge, ToolBoundaryJudge, ToolExecutionJudge, evaluate_case
 
 
 def run_result(calls=(), report="", **fields):
-    return AgentRunResult(
-        case_id="TEST", task_prompt="合成样本", keyword="SYN-P8", report=report,
-        subagents=[], tool_calls=list(calls), state_transitions=[], artifacts=[], elapsed=0.2,
-        trace_id="", system_status=fields.pop("system_status", "COMPLETED"), **fields,
-    )
+    return AgentRunResult(report=report, tool_calls=list(calls), system_status=fields.pop("system_status", "COMPLETED"), **fields)
 
 
 def call(name, **fields):
@@ -50,7 +46,7 @@ class ToolContractTests(unittest.TestCase):
         self.assertTrue(verdict.passed)
 
     def test_forbidden_attempt_distinct_from_actual_execution(self):
-        judge = ToolExecutionJudge(allowed_tools=["search_web"])
+        judge = ToolBoundaryJudge(allowed_tools=["search_web"], forbidden_tools=[])
         blocked = call("search_amazon", dispatched=False, status="error", sequence=1)
         verdict = judge.evaluate(run_result([blocked]))
         self.assertTrue(verdict.passed)
@@ -88,7 +84,7 @@ class ToolContractTests(unittest.TestCase):
         self.assertEqual(wrong.failure_type, "tool_order")
 
     def test_incomplete_trace_does_not_certify_absence_or_missing_tool(self):
-        judge = ToolExecutionJudge(required_tools=["search_web"], forbidden_tools=["search_amazon"])
+        judge = ToolBoundaryJudge(allowed_tools=None, forbidden_tools=["search_amazon"])
         incomplete = judge.evaluate(run_result(tool_trace_complete=False))
         self.assertEqual(incomplete.status, "unassessable")
         known = judge.evaluate(run_result([call("search_amazon")], tool_trace_complete=False))
@@ -101,12 +97,26 @@ class ToolContractTests(unittest.TestCase):
         self.assertEqual(uncertain.details["forbidden_executions"], 0)
 
 
+    def test_missing_dispatch_is_unknown_even_with_nonzero_count(self):
+        case = {"required_tools": ["search_web"], "forbidden_tools": ["search_amazon"]}
+        calls = [{"tool_name": name, "data_count": 2} for name in ("search_web", "search_amazon")]
+        checks = evaluate_case(case, run_result(calls, "概况 供应链 建议"))
+        trajectory = next(check for check in checks if check.dimension == "trajectory")
+        boundary = next(check for check in checks if check.dimension == "governance")
+        self.assertEqual(trajectory.status, "unassessable")
+        self.assertEqual(trajectory.details["required_tool_hits"], 0)
+        self.assertEqual(boundary.status, "unassessable")
+        self.assertEqual(boundary.details["forbidden_executions"], 0)
+
+
 class OutcomeContractTests(unittest.TestCase):
     def test_fact_requires_same_paragraph_citation_and_observed_evidence(self):
         judge = ReferenceFactJudge([{"id": "price", "any_of": ["20 元"], "evidence_ids": ["SYN-A"]}], [])
         self.assertTrue(judge.evaluate(run_result(report="20 元 [SYN-A]", evidence_ids=["SYN-A"])).passed)
-        self.assertEqual(judge.evaluate(run_result(report="120 元 [SYN-A]", evidence_ids=["SYN-A"])).failure_type,
-                         "reference_fact")
+        for amount in ("120 元", "-20 元", "−20 元"):
+            with self.subTest(amount=amount):
+                self.assertEqual(judge.evaluate(run_result(report=amount + " [SYN-A]", evidence_ids=["SYN-A"])).failure_type,
+                                 "reference_fact")
         for text, ids in [("20 元\n\n[SYN-A]", ["SYN-A"]), ("20 元 [SYN-A]", [])]:
             with self.subTest(text=text, ids=ids):
                 self.assertEqual(judge.evaluate(run_result(report=text, evidence_ids=ids)).failure_type, "evidence_citation")

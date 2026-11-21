@@ -11,11 +11,13 @@ import subprocess
 import sys
 from uuid import uuid4
 
+from taozhi.domain.evaluation_comparison import pair_case_results
+
 from .cases import AGENT_BENCHMARK_CASES
-from .contracts import validate_cases
+from .contracts import REPORT_SCHEMA_VERSION, validate_cases
 from .harness import AgentEvalHarness, replay_transcript
 from .judges import evaluate_case
-from .reporting import case_record, compare_reports, fingerprint, group_metrics, release_gate, review_candidates, validate_baseline
+from .reporting import case_record, fingerprint, group_metrics, release_gate, validate_baseline
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = ROOT / "evals/reports/agent_eval"
@@ -51,18 +53,7 @@ def read_synthetic_replay(path: Path, known_ids: set[str]) -> tuple[dict, dict]:
     }
 
 
-def _sync_live_reports() -> None:
-    """保留已有 Phoenix 同步入口，退出状态独立于评测门禁。"""
-    from taozhi.config import resolve_runtime_dir
-
-    executable = resolve_runtime_dir() / "phoenix-venv/bin/python"
-    result = subprocess.run([str(executable) if executable.is_file() else sys.executable,
-                             str(ROOT / "evals/sync_phoenix.py"), "--agent"], check=False)
-    if result.returncode:
-        print("Phoenix 同步未完成，评测报告已保存在本地。", file=sys.stderr)
-
-
-def run_agent_evaluations(cases: list[dict], sync_phoenix: bool = True, *,
+def run_agent_evaluations(cases: list[dict], *,
                           replay_file: Path | None = None, reports_dir: Path | None = None,
                           catalog: list[dict] | None = None, compare_file: Path | None = None,
                           counterexamples_file: Path | None = None, publish_to: tuple[str, str] | None = None) -> dict:
@@ -80,12 +71,14 @@ def run_agent_evaluations(cases: list[dict], sync_phoenix: bool = True, *,
         raise ValueError("反例变更只能应用到合成回放")
     if replay_file is None and any(case.get("execution_mode") == "synthetic_trace_regrade" for case in cases):
         raise ValueError("所选用例依赖固定合成证据，请指定 --replay")
-    schema_version = 2
-    judges_sha256 = hashlib.sha256(Path(__file__).with_name("judges.py").read_bytes()).hexdigest()
+    judges_sha256 = fingerprint({
+        name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+        for name in ("contracts.py", "harness.py", "judges.py", "reporting.py")
+    })
     baseline = None
     if compare_file is not None:
         baseline = json.loads(Path(compare_file).read_bytes())
-        validate_baseline(baseline, schema_version=schema_version, mode=mode, judges_sha256=judges_sha256)
+        validate_baseline(baseline, mode=mode, judges_sha256=judges_sha256)
     captured = {}
     source = {"model_config_sha256": None}
     if replay_file is None:
@@ -137,19 +130,17 @@ def run_agent_evaluations(cases: list[dict], sync_phoenix: bool = True, *,
     metrics = group_metrics(records)
     scores = [r["score"] for r in records if r["score"] is not None]
     report = {
-        "schema_version": schema_version, "git_sha": git_sha(), "timestamp": timestamp, "run_id": run_id,
+        "schema_version": REPORT_SCHEMA_VERSION, "git_sha": git_sha(), "timestamp": timestamp, "run_id": run_id,
         "mode": mode, "dataset_sha256": fingerprint(sorted(dataset, key=lambda c: c["id"])),
         "judges_sha256": judges_sha256,
-        **source, "total_cases": len(records), "passed_cases": metrics["passed"],
-        "pass_rate": metrics["task_completion"]["rate"], "mean_score": round(mean(scores), 4) if scores else None,
-        "latency_p50_seconds": metrics["latency_p50_seconds"], "latency_p95_seconds": metrics["latency_p95_seconds"],
+        **source, "mean_score": round(mean(scores), 4) if scores else None,
         "metrics": metrics,
         "suites": {suite: group_metrics([r for r in records if r["suite"] == suite])
                    for suite in sorted({r["suite"] for r in records})},
-        "gate": release_gate(records), "case_results": records, "review_candidates": review_candidates(records),
+        "gate": release_gate(records), "case_results": records,
     }
-    if compare_file is not None:
-        comparison = compare_reports(report, baseline)
+    if baseline is not None:
+        comparison = {"baseline_sha256": fingerprint(baseline), **pair_case_results(records, baseline["case_results"])}
         report["comparison"] = comparison
         if not comparison["passed"]:
             report["gate"]["passed"] = False
@@ -157,9 +148,7 @@ def run_agent_evaluations(cases: list[dict], sync_phoenix: bool = True, *,
             blockers.extend(cid for cid in comparison["changes"]["standard"]["regressed"] if cid not in blockers)
 
     root.mkdir(parents=True, exist_ok=True)
-    observation_path = root / f"agent_observations_{run_id}.jsonl"
     report_path = root / f"agent_eval_report_{run_id}.json"
-    observation_path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records), encoding="utf-8")
     temporary = report_path.with_suffix(".tmp")
     temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     temporary.replace(report_path)
@@ -169,11 +158,6 @@ def run_agent_evaluations(cases: list[dict], sync_phoenix: bool = True, *,
 
         publish_report(report_path, *publish_to)
         print(f"评测中心已收录批次 {run_id}")
-    if sync_phoenix and replay_file is None and root.resolve() == REPORTS_DIR.resolve():
-        try:
-            _sync_live_reports()
-        except (ImportError, OSError, RuntimeError):
-            print("Phoenix 暂不可用，评测报告已保存在本地。", file=sys.stderr)
     return report
 
 
@@ -187,7 +171,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--counterexamples", type=Path, metavar="PATH", help="在合成回放上重现指定反例，每次只改一项观测")
     parser.add_argument("--publish", nargs=2, metavar=("TENANT_ID", "OWNER_ID"), help="在已配置的工作台数据库归档本次结果")
     parser.add_argument("--output-dir", type=Path, help="报告目录，合成重评另存于其子目录")
-    parser.add_argument("--no-sync", action="store_true", help="跳过真实运行报告的 Phoenix 同步")
     args = parser.parse_args(argv)
     if args.dataset and args.replay is None:
         parser.error("合成数据集需要 --replay 执行记录")
@@ -201,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     if not selected:
         parser.error("未找到指定用例")
     try:
-        report = run_agent_evaluations(selected, sync_phoenix=not args.no_sync, replay_file=args.replay,
+        report = run_agent_evaluations(selected, replay_file=args.replay,
                                        reports_dir=args.output_dir, catalog=AGENT_BENCHMARK_CASES,
                                        compare_file=args.compare, counterexamples_file=args.counterexamples,
                                        publish_to=tuple(args.publish) if args.publish else None)

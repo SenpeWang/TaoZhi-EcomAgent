@@ -1,32 +1,54 @@
 #!/usr/bin/env python3
-"""Phoenix 同步的单元测试：报告 → 逐例结果的拍平逻辑。
-
-为什么值得测：这段逻辑决定 Phoenix 界面上"一个用例看到什么分数"。拍错一次
-（比如 claims=0 时算出除零、或把失败写成通过），归因就会指向错误的方向，
-而且没有任何报错提醒——所以用固定输入把口径钉住。
-
-不需要 Phoenix 在线：模块级的 import 只有标准库，phoenix 客户端在 main() 里才导入。
-"""
+"""验证 Phoenix 导出的逐例指标和幂等写入。"""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "evals"))
-
+import json
 from datetime import datetime
+from unittest.mock import Mock
 
-from sync_phoenix import (
-    _agent_label, _log_case, apply_behavior, apply_retrieval, case_to_example, collect_results,
-    experiment_name,
+import pytest
+
+from evals.agent_eval.contracts import REPORT_SCHEMA_VERSION
+from evals.sync_phoenix import (
+    _log_case, apply_behavior, apply_retrieval, case_to_example, collect_results,
+    experiment_name, sync_agent_eval,
 )
 
 
-def test_agent_labels_preserve_unknown_results_and_older_scores():
-    assert _agent_label({"status": "unassessable", "passed": False}) == "UNASSESSABLE"
-    assert _agent_label({"passed": True}) == "PASS"
-    assert _agent_label({"passed": False}) == "FAIL"
+@pytest.mark.parametrize(("version", "mode"), [(REPORT_SCHEMA_VERSION - 1, "live"),
+                                                (REPORT_SCHEMA_VERSION, "synthetic_trace_regrade")])
+def test_agent_export_rejects_unsupported_reports_before_writing(tmp_path, version, mode):
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps({"schema_version": version, "mode": mode}))
+    client = Mock()
+    with pytest.raises(ValueError, match="当前格式的真实调研报告"):
+        sync_agent_eval(client, path, "test", False, False)
+    assert not client.mock_calls
+
+
+def test_agent_export_resumes_missing_annotations_without_creating_runs(tmp_path):
+    class Dataset(list):
+        id = "dataset"
+
+    case_id = "AGENT-WEB-003"
+    case = {"case_id": case_id, "name": "网页调研", "status": "unassessable", "score": None, "elapsed": None,
+            "tool_calls_count": None,
+            "verdicts": [{"judge": "Observation", "status": "unassessable", "reason": "无观测", "score": None}]}
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps({"schema_version": REPORT_SCHEMA_VERSION, "mode": "live", "run_id": "batch",
+                                "git_sha": None, "dataset_sha256": "a" * 64, "judges_sha256": "b" * 64,
+                                "metrics": {"selected": 1, "task_completion": {"rate": None}}, "case_results": [case]}))
+    client = Mock()
+    client.datasets.get_dataset.return_value = Dataset([{"metadata": {"case_id": case_id}, "node_id": "example"}])
+    client.experiments.list.return_value = [{"name": "agent-batch", "id": "exp"}]
+    client.experiments.get_experiment.return_value = {"task_runs": [{"dataset_example_id": "example", "id": "run"}]}
+    sync_agent_eval(client, path, "test", False, False)
+    client.experiments.create.assert_not_called()
+    client.experiments.log_run.assert_not_called()
+    annotations = [call.kwargs for call in client.experiments.log_evaluation.call_args_list]
+    assert [row["name"] for row in annotations] == ["pass_verdict", "Observation"]
+    assert all(row["score"] is None and row["label"] == "UNASSESSABLE" and row["experiment_run_id"] == "run"
+               for row in annotations)
 
 
 def test_case_to_example_splits_three_parts():

@@ -32,6 +32,7 @@ const agentActions: Record<string, string> = {
   'rag.specialist': '核验问答资料',
 }
 const toolOutcomes: Record<string, string> = {
+  error: '工具执行失败',
   empty: '无匹配结果',
   timeout: '工具超时',
   cancelled: '工具已取消',
@@ -80,6 +81,13 @@ export function activityResult(entry: TraceActivity): string {
   const details: string[] = []
   const toolStatus = attrs['tool.status']
   if (entry.kind === 'TOOL') {
+    const dispatched = attrs['tool.dispatched']
+    if (dispatched === false) {
+      if (toolStatus === 'timeout') return '未派发 · 派发前已超时'
+      if (toolStatus === 'cancelled') return '未派发 · 派发前已取消'
+      return entry.error_type ? '未派发 · ' + entry.error_type : '未派发'
+    }
+    if (dispatched === true) details.push('已派发')
     const outcome =
       typeof toolStatus === 'string' && Object.hasOwn(toolOutcomes, toolStatus)
         ? toolOutcomes[toolStatus]
@@ -132,7 +140,11 @@ export function activityResult(entry: TraceActivity): string {
   }
   if (
     entry.error_type &&
-    !(entry.kind === 'TOOL' && toolStatus === entry.error_type && details.length)
+    !(
+      entry.kind === 'TOOL' &&
+      toolStatus === entry.error_type &&
+      Object.hasOwn(toolOutcomes, toolStatus)
+    )
   ) {
     details.push(entry.error_type)
   }

@@ -17,20 +17,14 @@ def _unknown_usage() -> dict:
 class AgentRunResult:
     """一次真实运行或记录重评分的观测。缺失的计量和证据保持未知。"""
 
-    case_id: str
-    task_prompt: str
-    keyword: str
     report: str
-    subagents: list[dict]
-    tool_calls: list[dict]
-    state_transitions: list[dict]
-    artifacts: list[str]
-    elapsed: float | None
-    trace_id: str
     system_status: str
+    tool_calls: list[dict] = field(default_factory=list)
+    subagents_count: int | None = None
+    elapsed: float | None = None
+    trace_id: str = ""
     steering_applied: bool = False
     error: str | None = None
-    mode: str = "live"
     evidence_ids: list[str] | None = None
     token_usage: dict = field(default_factory=_unknown_usage)
     stop_reason: str | None = None
@@ -39,7 +33,7 @@ class AgentRunResult:
     steering_after_sequence: int | None = None
 
 
-def execute_autonomous_agents(*, observe_trace: Callable[[str], None], **kwargs: Any) -> dict:
+def _run_research(*, observe_trace: Callable[[str], None], **kwargs: Any) -> dict:
     """按需加载在线依赖，将本次执行关联到独立的评测轨迹。"""
     from taozhi.application.research import graph
     from taozhi.observability.tracing import current_trace_id, node_span
@@ -52,11 +46,11 @@ def execute_autonomous_agents(*, observe_trace: Callable[[str], None], **kwargs:
 class _RunObservation:
     """收集并行节点的用量，在首个工具完成且协调器再次轮询时交付干预。"""
 
-    def __init__(self, steering: list[str], initial_delivery: bool) -> None:
+    def __init__(self, steering: list[str]) -> None:
         self._lock = threading.Lock()
         self.steering = steering
         self.tool_finished = False
-        self.delivered = initial_delivery
+        self.delivered = False
         self.received = False
         self.trace_id = ""
         self.model_attempts = 0
@@ -107,35 +101,18 @@ class _RunObservation:
             }
 
 
-_TOOL_ARGUMENT = {
-    "search_web": "query", "fetch_web_page": "url",
-    "search_1688_wholesale": "keyword", "search_amazon": "query",
-}
-
-
 def _tool_observations(subagents: list[dict]) -> list[dict]:
     """将已送入 MCP 客户端的工具记录与派发前的授权拒绝分开。"""
     calls = []
     workers = [agent for agent in subagents if isinstance(agent, dict) and isinstance(agent.get("tools"), list) and agent["tools"]]
     for worker in workers:
         for position, tool in enumerate(worker["tools"], start=1):
-            name = tool["name"]
-            parameters = tool.get("parameters")
-            dispatched = None
-            if isinstance(parameters, dict):
-                if tool.get("status") == "error" and set(parameters) == {"query_or_url"}:
-                    dispatched = False
-                elif name in _TOOL_ARGUMENT and _TOOL_ARGUMENT[name] in parameters:
-                    dispatched = True
             calls.append({
-                "agent_role": worker.get("role"),
-                "agent_type": worker.get("type_name"),
-                "tool_name": name,
-                "parameters": parameters,
+                "tool_name": tool["name"],
+                "parameters": tool.get("parameters"),
                 "status": tool.get("status"),
                 "data_count": tool.get("data_count"),
-                "result_summary": tool.get("description", ""),
-                "dispatched": dispatched,
+                "dispatched": tool.get("dispatched"),
                 "sequence": position if len(workers) == 1 else None,
             })
     return calls
@@ -159,52 +136,41 @@ def _evidence_ids(evidence_pool: list[dict] | None) -> list[str] | None:
 class AgentEvalHarness:
     """从真实调研入口执行评测，测试可注入相同调用契约的执行函数。"""
 
-    def __init__(self, checkpointer: Any = None, *, execute: Callable[..., dict] | None = None) -> None:
-        self.checkpointer = checkpointer
+    def __init__(self, *, execute: Callable[..., dict] = _run_research) -> None:
         self.execute = execute
 
-    def run(self, case: dict, initial_steering: list[str] | None = None) -> AgentRunResult:
+    def run(self, case: dict) -> AgentRunResult:
         if case.get("execution_mode") == "synthetic_trace_regrade":
             raise ValueError("此用例需要合成执行记录，请使用回放入口")
-        case_id = case["id"]
         prompt = case["prompt"]
         keyword = case.get("keyword") or prompt
-        runtime_steering = case.get("steering", []) if initial_steering is None else []
-        observer = _RunObservation(runtime_steering, initial_delivery=bool(initial_steering))
+        observer = _RunObservation(case.get("steering", []))
         started = time.perf_counter()
-        result = AgentRunResult(case_id, prompt, keyword, "", [], [], [], [], None, "", "FAILED")
+        result = AgentRunResult(report="", system_status="UNKNOWN")
         try:
-            arguments = {
-                "keyword": keyword, "user_query": prompt,
-                "job_id": f"eval_{uuid4().hex}", "tenant_id": "eval_tenant",
-                "checkpointer": self.checkpointer, "initial_steering": initial_steering,
-                "model_call_fn": observer.observe_model, "emit_event_fn": observer.observe_progress,
-                "fetch_steering_fn": observer.fetch_steering,
-            }
-            if self.execute is None:
-                raw = execute_autonomous_agents(observe_trace=observer.observe_trace, **arguments)
-            else:
-                raw = self.execute(**arguments)
+            raw = self.execute(
+                keyword=keyword, user_query=prompt, job_id=f"eval_{uuid4().hex}", tenant_id="eval_tenant",
+                observe_trace=observer.observe_trace, model_call_fn=observer.observe_model,
+                emit_event_fn=observer.observe_progress, fetch_steering_fn=observer.fetch_steering,
+            )
             result.report = raw.get("report", "")
             subagents = raw.get("subagents")
             result.tool_trace_complete = isinstance(subagents, list) and all(
                 isinstance(agent, dict) and isinstance(agent.get("tools"), list) for agent in subagents
             )
-            result.subagents = subagents if isinstance(subagents, list) else []
-            result.tool_calls = _tool_observations(result.subagents)
-            result.state_transitions = raw.get("audit_trail", [])
-            result.artifacts = raw.get("artifacts", [])
+            if isinstance(subagents, list):
+                result.subagents_count = len(subagents)
+                result.tool_calls = _tool_observations(subagents)
             result.evidence_ids = _evidence_ids(raw.get("evidence_pool"))
             result.system_status = raw.get("system_status") or "UNKNOWN"
             result.stop_reason = raw.get("stop_reason")
-            result.trace_id = raw.get("trace_id") or observer.trace_id
             result.token_usage = observer.usage(raw.get("model_calls"))
         except Exception as exc:
             result.error = type(exc).__name__
             result.system_status = "FAILED"
             result.tool_trace_complete = False
-            result.trace_id = observer.trace_id
             result.token_usage = observer.usage()
+        result.trace_id = observer.trace_id
         result.elapsed = time.perf_counter() - started
         result.steering_applied = observer.received
         result.model_names = sorted(observer.model_names)
@@ -292,10 +258,9 @@ def replay_transcript(case: dict, transcript: dict) -> AgentRunResult:
     if not isinstance(trace_id, str) or any(value is not None and not isinstance(value, str) for value in (error, stop_reason)):
         raise ValueError("trace_id、stop_reason 和 error 必须是字符串")
     return AgentRunResult(
-        case_id=case["id"], task_prompt=case["prompt"], keyword=case.get("keyword") or case["prompt"],
-        report=report, subagents=[], tool_calls=calls, state_transitions=[], artifacts=[], elapsed=elapsed,
+        report=report, tool_calls=calls, elapsed=elapsed,
         trace_id=trace_id, system_status=status, steering_applied=steering, error=error,
-        mode="transcript", evidence_ids=ids, token_usage=_transcript_usage(transcript.get("token_usage")),
+        evidence_ids=ids, token_usage=_transcript_usage(transcript.get("token_usage")),
         stop_reason=stop_reason, tool_trace_complete=complete, model_names=sorted(set(model_names)),
         steering_after_sequence=boundary,
     )

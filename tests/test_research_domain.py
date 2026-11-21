@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import Future
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
@@ -20,10 +21,7 @@ from taozhi.domain.research import (
     enforce_tool_allowed,
     evaluate_hard_stop,
 )
-from taozhi.application.research.hooks import (
-    RuntimeHooks as _RuntimeHooks,
-    collect_new_steering as _collect_new_steering,
-)
+from taozhi.application.research.hooks import RuntimeHooks, collect_new_steering
 from taozhi.application.research.schemas import (
     _OrchestratorDecisionSchema,
     _ProposedSubtaskSchema,
@@ -132,6 +130,7 @@ def test_tool_outcome_distinguishes_empty_error_timeout_cancel():
 
     err = execute_tool_with_outcome("search_web", boom, {"query": "x"})
     assert err.status == "error"
+    assert err.dispatched is True
     assert "upstream 502" in err.error_reason
 
     def slow(**_):
@@ -140,11 +139,25 @@ def test_tool_outcome_distinguishes_empty_error_timeout_cancel():
 
     to = execute_tool_with_outcome("search_web", slow, {"query": "x"}, remaining_seconds=0.5)
     assert to.status == "timeout"
+    assert to.dispatched is True
 
     ev = threading.Event()
     ev.set()
     ca = execute_tool_with_outcome("search_web", lambda query: [{"title": "a"}], {"query": "x"}, cancel_event=ev)
     assert ca.status == "cancelled"
+    assert ca.dispatched is False
+    exhausted = execute_tool_with_outcome("search_web", boom, {}, remaining_seconds=0)
+    assert exhausted.status == "timeout" and exhausted.dispatched is False
+
+
+def test_tool_timeout_in_queue_is_not_dispatched():
+    queued = Future()
+    tool = MagicMock()
+    with patch("taozhi.core.tools.outcome._get_tool_pool") as pool:
+        pool.return_value.submit.return_value = queued
+        result = execute_tool_with_outcome("search_web", tool, {}, remaining_seconds=0.5)
+    assert queued.cancelled() and result.status == "timeout" and result.dispatched is False
+    tool.assert_not_called()
 
 
 def test_steering_impact_classification():
@@ -335,7 +348,7 @@ def test_checkpointer_required_for_persistent_graph():
 
 def test_idempotent_steering_deduplicates_by_event_id():
     """测试带唯一 id 的 Steering 队列在跨通道重放/重试下严格幂等。"""
-    hooks = _RuntimeHooks(
+    hooks = RuntimeHooks(
         fetch_steering_fn=lambda: [
             {"id": "req_1", "text": "核查1688底价"},
             {"id": "req_1", "text": "核查1688底价"},
@@ -346,14 +359,14 @@ def test_idempotent_steering_deduplicates_by_event_id():
         "steering_inbox": ["初始指令"],
         "steering_event_ids": ["req_0"],
     }
-    delta_texts, delta_ids, all_inbox = _collect_new_steering(state, hooks)
+    delta_texts, delta_ids, all_inbox = collect_new_steering(state, hooks)
     assert delta_ids == ["req_1", "req_2"]
     assert delta_texts == ["核查1688底价", "核查1688底价"]
     assert all_inbox == ["初始指令", "核查1688底价", "核查1688底价"]
 
     state["steering_inbox"].extend(delta_texts)
     state["steering_event_ids"].extend(delta_ids)
-    delta_texts_2, delta_ids_2, _ = _collect_new_steering(state, hooks)
+    delta_texts_2, delta_ids_2, _ = collect_new_steering(state, hooks)
     assert delta_texts_2 == []
     assert delta_ids_2 == []
 
@@ -504,7 +517,7 @@ def test_sensenova_router_failover_circuit_and_compliance():
 
     reg = CircuitBreakerRegistry()
     ledger = []
-    hooks = _RuntimeHooks(model_call_fn=lambda role, event: ledger.append((role, event)))
+    hooks = RuntimeHooks(model_call_fn=lambda role, event: ledger.append((role, event)))
     observer = hooks.model_call_observer("research.orchestrator")
     client = LLMClient(settings=fake_settings, allow_overseas=True, registry=reg, on_attempt=observer)
 

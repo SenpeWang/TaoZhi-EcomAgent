@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .contracts import required_tool_names
+
 if TYPE_CHECKING:
     from .harness import AgentRunResult
 
@@ -45,14 +47,6 @@ def _verdict(name: str, dimension: str, issues: list[dict], success: str, **coun
         name, not issues, float(not issues), "。".join(issue["reason"] for issue in issues) or success,
         {"issues": issues, **counts}, dimension, primary,
     )
-
-
-def _dispatch(call: dict) -> bool | None:
-    if "dispatched" in call:
-        return call["dispatched"]
-    if (call.get("data_count") or 0) > 0:
-        return True
-    return None
 
 
 def _arguments_match(parameters: dict | None, constraints: dict) -> bool | None:
@@ -126,7 +120,7 @@ class ToolBoundaryJudge:
             name = call["tool_name"]
             restricted = name in self.forbidden or (self.allowed is not None and name not in self.allowed)
             attempts += int(restricted)
-            dispatched = _dispatch(call)
+            dispatched = call.get("dispatched")
             if dispatched is None:
                 unknown += 1
                 if restricted:
@@ -147,20 +141,14 @@ class ToolExecutionJudge:
     """校验实际调度、参数、状态、必需来源与有因果依赖的工具顺序。"""
 
     def __init__(
-        self, required_tools: list[str] | None = None, forbidden_tools: list[str] | None = None,
-        min_data_count: int = 1, *, allowed_tools: list[str] | None = None,
+        self, required_tools: list[str] | None = None, *, min_data_count: int = 1,
         tool_expectations: list[dict] | None = None, tool_order: list[list[str]] | None = None,
     ) -> None:
-        self.required = set(required_tools or ())
-        self.boundary = None
-        if allowed_tools is not None or forbidden_tools:
-            self.boundary = ToolBoundaryJudge(allowed_tools, forbidden_tools)
         self.rules: dict[str, list[dict]] = {}
         for rule in tool_expectations or ():
             self.rules.setdefault(rule["tool_name"], []).append(rule)
         self.order = tool_order or []
-        self.required.update(name for name, rules in self.rules.items() if any(not r.get("optional") for r in rules))
-        self.required.update(tool for edge in self.order for tool in edge)
+        self.required = required_tool_names(required_tools or [], tool_expectations or [], self.order)
         self.min_data_count = min_data_count
 
     def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
@@ -174,7 +162,7 @@ class ToolExecutionJudge:
         parameter_hits = parameter_total = parameter_unknown = 0
         for call in result.tool_calls:
             name = call["tool_name"]
-            dispatch = _dispatch(call)
+            dispatch = call.get("dispatched")
             if dispatch is None:
                 uncertain.add(name)
             if dispatch is not True:
@@ -208,9 +196,7 @@ class ToolExecutionJudge:
                 if rule.get("optional") and rule.get("parameters"):
                     applicable = [call for call in calls if _arguments_match(call.get("parameters"), rule["parameters"])]
                 candidates = [_contract_issues(rule, call) for call in applicable]
-                if not candidates:
-                    continue
-                if not all(candidates):
+                if not candidates or not all(candidates):
                     continue
                 possible = [errors for errors in candidates if all(e["failure_type"] == "missing_observation" for e in errors)]
                 if (name in uncertain or not complete) and not possible:
@@ -234,18 +220,13 @@ class ToolExecutionJudge:
                     kind = "missing_observation" if None in precedes or first in uncertain or not complete else "tool_order"
                     issues.append(_issue(kind, f"未证实 {first} 先于 {second} 执行", second, later))
 
-        if not self.required and not self.rules and self.boundary is None and self.min_data_count > 0:
+        if not self.required and not self.rules and self.min_data_count > 0:
             counts = [call.get("data_count") for calls in observed.values() for call in calls
                       if call.get("status") in (None, "ok")]
             if sum(n for n in counts if n is not None) < self.min_data_count:
                 kind = "missing_observation" if None in counts or uncertain or not complete else "tool_data"
                 issues.append(_issue(kind, "工具有效数据条数不足"))
 
-        boundary_counts = {}
-        if self.boundary:
-            boundary = self.boundary.evaluate(result)
-            issues.extend(boundary.details["issues"])
-            boundary_counts = {key: value for key, value in boundary.details.items() if key != "issues"}
         unique_issues = []
         for issue in issues:
             if issue not in unique_issues:
@@ -255,7 +236,6 @@ class ToolExecutionJudge:
             required_tool_hits=len(self.required.intersection(observed)), required_tool_total=len(self.required),
             required_tool_unknown=required_unknown,
             parameter_hits=parameter_hits, parameter_total=parameter_total, parameter_unknown=parameter_unknown,
-            **boundary_counts,
         )
         if issues and all(issue["failure_type"] == "tool_data" for issue in issues):
             verdict.score = 0.5
@@ -311,13 +291,13 @@ class SteeringJudge:
             matched = False
             uncertain = False
             for call in result.tool_calls:
-                if call["tool_name"] != rule["tool_name"] or _dispatch(call) is False:
+                if call["tool_name"] != rule["tool_name"] or call.get("dispatched") is False:
                     continue
                 same_args = _arguments_match(call.get("parameters"), rule.get("parameters", {}))
                 if same_args is False:
                     continue
                 sequence = call.get("sequence")
-                if same_args is None or _dispatch(call) is None or sequence is None:
+                if same_args is None or call.get("dispatched") is None or sequence is None:
                     uncertain = True
                 elif (sequence <= boundary) == (phase == "before"):
                     matched = True
@@ -345,7 +325,7 @@ def _fact_matches(value: str, paragraph: str) -> bool:
     """避免事实中的金额与型号成为另一数字或标识符的子串。"""
     prefix = r"(?<![A-Za-z0-9.])" if value[0].isascii() and value[0].isalnum() else ""
     if value[0].isdigit():
-        prefix += r"(?<!\d[,，])"
+        prefix += r"(?<![-−－])(?<!\d[,，])"
     suffix = r"(?![A-Za-z0-9]|\.\d)" if value[-1].isascii() and value[-1].isalnum() else ""
     return bool(re.search(prefix + re.escape(value) + suffix, paragraph))
 

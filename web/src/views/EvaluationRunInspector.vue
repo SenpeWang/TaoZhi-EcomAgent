@@ -32,9 +32,9 @@
         </div>
       </dl>
       <dl v-if="detail" class="evaluation-measures">
-        <div v-for="item in measures" :key="item.key">
-          <dt>{{ item.label }}</dt>
-          <dd>{{ formatRatio(detail.metrics[item.key]) }}</dd>
+        <div v-for="(label, key) in evaluationMeasures" :key="key">
+          <dt>{{ label }}</dt>
+          <dd>{{ formatEvaluationRatio(detail.metrics[key]) }}</dd>
         </div>
         <div>
           <dt>已计量输入 / 输出 Token</dt>
@@ -86,10 +86,10 @@
     <EvaluationBaseline
       v-else
       :stored-comparison="detail.comparison"
-      :run="summary"
+      :run="detail.run"
       :api="api"
       :owner-filter="ownerFilter"
-      @select-case="selectCase"
+      @select-case="selectedCase = $event"
     />
     <section class="panel">
       <div class="section-heading">
@@ -122,7 +122,7 @@
       >
         <el-table-column label="用例" min-width="215">
           <template #default="{ row }"
-            ><button class="evaluation-link" type="button" @click="selectCase(row.case_id)">
+            ><button class="evaluation-link" type="button" @click="selectedCase = row.case_id">
               {{ row.name }}
             </button>
             <small class="evaluation-meta">{{ row.case_id }}</small>
@@ -164,19 +164,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useEvaluationPage } from '../composables/useEvaluationPage'
+import { computed, onMounted, ref, watch } from 'vue'
+import type { ApiReader } from '../types'
+import { useCursorPage } from '../composables/useCursorPage'
 import {
+  evaluationMeasures,
+  formatEvaluationRatio,
   evaluationSource,
   evaluationRunPath,
   evaluationStatuses,
   evaluationTags,
   evaluationSuites,
-  type EvaluationApi,
   type EvaluationRun,
   type EvaluationRunDetail,
   type EvaluationCase,
-  type EvaluationRatio,
   type EvaluationStatus,
 } from '../evaluations'
 import { traceTime } from '../labels'
@@ -184,42 +185,26 @@ import EvaluationBaseline from './EvaluationBaseline.vue'
 import EvaluationCaseInspector from './EvaluationCaseInspector.vue'
 
 const props = defineProps<{
-  summary: EvaluationRun
-  api: EvaluationApi
+  initialRun: EvaluationRun
+  api: ApiReader
   ownerFilter: string | null
 }>()
 const emit = defineEmits<{
   (e: 'back'): void
   (e: 'inspect', taskId: string, traceId: string): void
 }>()
-const measures = [
-  { key: 'required_tool_coverage', label: '必调工具覆盖率' },
-  { key: 'parameter_accuracy', label: '工具参数准确率' },
-  { key: 'reference_fact_coverage', label: '参考事实覆盖率' },
-  { key: 'call_coverage_among_known', label: 'Token 用量采集覆盖率' },
-] as const
 const detail = ref<EvaluationRunDetail | null>(null)
 const detailError = ref('')
+const summary = computed(() => detail.value?.run ?? props.initialRun)
 
 /** 加载已入库的批次指标及随报告保存的基线比较。 */
 async function loadDetail(): Promise<void> {
   detailError.value = ''
   try {
-    detail.value = await props.api<EvaluationRunDetail>(evaluationRunPath(props.summary.run_id))
+    detail.value = await props.api<EvaluationRunDetail>(evaluationRunPath(props.initialRun.run_id))
   } catch (cause) {
     detailError.value = cause instanceof Error ? cause.message : '读取批次指标失败'
   }
-}
-
-/**
- * 展示有效分母与覆盖比例，缺测或没有适用调用时保留对应状态。
- * @param ratio - 该指标的适用样本和得分。
- * @returns 比例及样本数的说明。
- */
-function formatRatio(ratio: EvaluationRatio | null): string {
-  if (!ratio) return '未记录'
-  if (ratio.rate === null) return '无可判定样本'
-  return (ratio.rate * 100).toFixed(1) + '%（' + ratio.numerator + '/' + ratio.denominator + '）'
 }
 
 onMounted(loadDetail)
@@ -228,18 +213,11 @@ const selectedCase = ref('')
 const endpoint = computed(() => {
   const query = new URLSearchParams({ limit: '30' })
   if (status.value) query.set('status', status.value)
-  return evaluationRunPath(props.summary.run_id) + '/cases?' + query
+  return evaluationRunPath(props.initialRun.run_id) + '/cases?' + query
 })
-const { rows, busy, error, page, nextCursor, refresh, turn } = useEvaluationPage<EvaluationCase>(
+const { rows, busy, error, page, nextCursor, refresh, reset, turn } = useCursorPage<EvaluationCase>(
   props.api,
   endpoint,
 )
-
-/**
- * 打开本批次的一条用例判定。
- * @param id - 已展示的用例编号。
- */
-function selectCase(id: string): void {
-  selectedCase.value = id
-}
+watch(endpoint, reset)
 </script>

@@ -2,16 +2,16 @@
   <section class="panel">
     <div class="section-heading">
       <h3>{{ isAdmin ? '企业提问记录' : '我的提问记录' }}</h3>
-      <el-button :loading="loading" @click="loadPage">刷新</el-button>
+      <el-button :loading="busy" @click="refresh">刷新</el-button>
     </div>
 
     <form class="toolbar trace-filters" @submit.prevent="applyFilters">
       <TenantOwnerSelect
         v-if="isAdmin"
+        v-model="selectedOwnerId"
         class="trace-owner"
-        :model-value="selectedOwnerId"
         :api="api"
-        @update:model-value="changeOwner"
+        @update:model-value="applyFilters"
       />
       <el-input
         v-model="keyword"
@@ -47,9 +47,9 @@
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
     <template v-else>
       <el-table
-        v-loading="loading"
+        v-loading="busy"
         class="desktop-traces"
-        :data="traceRows"
+        :data="rows"
         row-key="id"
         empty-text="没有符合条件的提问"
       >
@@ -89,9 +89,9 @@
           <template #default="{ row }">{{ traceTime(row.created_at) }}</template>
         </el-table-column>
       </el-table>
-      <div v-loading="loading" class="mobile-traces" :aria-busy="loading">
-        <ul v-if="traceRows.length">
-          <li v-for="trace in traceRows" :key="trace.id">
+      <div v-loading="busy" class="mobile-traces" :aria-busy="busy">
+        <ul v-if="rows.length">
+          <li v-for="trace in rows" :key="trace.id">
             <div class="trace-mobile-meta">
               <span>{{ traceKind(trace.kind) }}</span>
               <el-tag size="small" :type="stateTag(trace.state)">{{
@@ -111,32 +111,31 @@
             >
           </li>
         </ul>
-        <el-empty v-else-if="!loading" :image-size="48" description="没有符合条件的提问" />
+        <el-empty v-else-if="!busy" :image-size="48" description="没有符合条件的提问" />
       </div>
     </template>
 
     <nav class="trace-pagination" aria-label="提问列表分页">
       <span
-        >第 {{ pageCursors.length }} 页<template v-if="!loading && !error">
-          · 本页 {{ traceRows.length }} 条</template
+        >第 {{ page }} 页<template v-if="!busy && !error">
+          · 本页 {{ rows.length }} 条</template
         ></span
       >
-      <el-button :disabled="loading || pageCursors.length === 1" @click="previousPage"
-        >上一页</el-button
-      >
-      <el-button :disabled="loading || !nextCursor" @click="nextPage">下一页</el-button>
+      <el-button :disabled="busy || page === 1" @click="turn(false)">上一页</el-button>
+      <el-button :disabled="busy || !nextCursor" @click="turn(true)">下一页</el-button>
     </nav>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { formatStage, stateTag, stateText, traceKind, traceTime } from '../labels'
-import type { TracePage, TraceSummary } from '../types'
+import type { ApiReader, TraceSummary } from '../types'
+import { useCursorPage } from '../composables/useCursorPage'
 import TenantOwnerSelect from './TenantOwnerSelect.vue'
 
 const emit = defineEmits<{ (e: 'inspect', taskId: string, traceId: string | null): void }>()
-const props = defineProps<{ isAdmin: boolean; api: <T>(path: string) => Promise<T> }>()
+const props = defineProps<{ isAdmin: boolean; api: ApiReader }>()
 const searchPlaceholder = computed(() =>
   props.isAdmin ? '提问、发起人、任务 ID 或 Trace ID' : '提问、任务 ID 或 Trace ID',
 )
@@ -155,74 +154,25 @@ const selectedOwnerId = ref('all')
 const keyword = ref('')
 const taskKindFilter = ref('')
 const taskStateFilter = ref('')
-const traceRows = ref<TraceSummary[]>([])
-const pageCursors = ref([''])
-const nextCursor = ref<string | null>(null)
-const loading = ref(false)
-const error = ref('')
-let submittedKeyword = ''
-let requestSequence = 0
-
-/**
- * 获取游标所在页，丢弃过期请求的结果。
- */
-async function loadPage(): Promise<void> {
-  const requestId = ++requestSequence
+const submittedKeyword = ref('')
+const endpoint = computed(() => {
   const query = new URLSearchParams({ limit: '30' })
-  const cursor = pageCursors.value.at(-1)
-  if (cursor) query.set('cursor', cursor)
   if (props.isAdmin) query.set('owner_id', selectedOwnerId.value)
-  if (submittedKeyword) query.set('q', submittedKeyword)
+  if (submittedKeyword.value) query.set('q', submittedKeyword.value)
   if (taskKindFilter.value) query.set('kind', taskKindFilter.value)
   if (taskStateFilter.value) query.set('state', taskStateFilter.value)
-  error.value = ''
-  loading.value = true
-  traceRows.value = []
-  nextCursor.value = null
-  try {
-    const page = await props.api<TracePage>('/admin/traces?' + query)
-    if (requestId !== requestSequence) return
-    traceRows.value = page.items
-    nextCursor.value = page.next_cursor
-  } catch (cause) {
-    if (requestId === requestSequence)
-      error.value = cause instanceof Error ? cause.message : '读取轨迹失败'
-  } finally {
-    if (requestId === requestSequence) loading.value = false
-  }
-}
+  return '/admin/traces?' + query
+})
+const { rows, busy, error, page, nextCursor, refresh, reset, turn } = useCursorPage<TraceSummary>(
+  props.api,
+  endpoint,
+)
 
-/**
- * 选择发起人，清空时恢复全部用户并从首页查询。
- * @param ownerId - 下拉选项的用户编号或清空值。
- */
-function changeOwner(ownerId: unknown): void {
-  selectedOwnerId.value = typeof ownerId === 'string' && ownerId ? ownerId : 'all'
-  applyFilters()
-}
-
-/** 从第一页开始按当前条件查询。 */
+/** 提交搜索词并从第一页查询。 */
 function applyFilters(): void {
-  submittedKeyword = keyword.value.trim()
-  pageCursors.value = ['']
-  void loadPage()
+  submittedKeyword.value = keyword.value.trim()
+  reset()
 }
-
-/** 读取下一页提问。 */
-function nextPage(): void {
-  if (!nextCursor.value) return
-  pageCursors.value.push(nextCursor.value)
-  void loadPage()
-}
-
-/** 返回上一页提问。 */
-function previousPage(): void {
-  if (pageCursors.value.length === 1) return
-  pageCursors.value.pop()
-  void loadPage()
-}
-
-onMounted(loadPage)
 </script>
 
 <style scoped>

@@ -12,6 +12,7 @@ TRANSCRIPT = {"case_id": CASE["id"], "system_status": "COMPLETED", "report": "�
 
 def test_live_observations_distinguish_tool_outcomes_and_missing_usage():
     def run(**hooks):
+        hooks["observe_trace"]("trace1")
         observe = hooks["model_call_fn"]
         with ThreadPoolExecutor(max_workers=3) as executor:
             list(executor.map(lambda event: observe("research", event), [
@@ -19,7 +20,6 @@ def test_live_observations_distinguish_tool_outcomes_and_missing_usage():
                 {"outcome": "failed"},
                 {"prompt_tokens": 0, "completion_tokens": 0},
             ]))
-        assert hooks["initial_steering"] is None
         assert hooks["fetch_steering_fn"]() == []
         emit = hooks["emit_event_fn"]
         emit("[tool_execution_end] 首轮工具完成", 30)
@@ -27,10 +27,10 @@ def test_live_observations_distinguish_tool_outcomes_and_missing_usage():
         assert hooks["fetch_steering_fn"]() == []
         emit("[steering] 已接收 1 条补充干预指令", 40)
         return {
-            "report": "合成回答", "system_status": "COMPLETED", "trace_id": "trace1", "model_calls": 3,
+            "report": "合成回答", "system_status": "COMPLETED", "model_calls": 3,
             "subagents": [{"role": "sourcing", "type_name": "task1", "tools": [
-                {"name": "search_1688_wholesale", "status": "empty", "parameters": {"keyword": "新型号"}, "data_count": 0},
-                {"name": "search_amazon", "status": "error", "parameters": {"query_or_url": "新型号"}, "data_count": 0},
+                {"name": "search_1688_wholesale", "status": "empty", "dispatched": True, "parameters": {"keyword": "新型号"}, "data_count": 0},
+                {"name": "search_amazon", "status": "error", "dispatched": False, "parameters": {"query_or_url": "新型号"}, "data_count": 0},
                 {"name": "unknown"},
             ]}],
             "evidence_pool": [
@@ -39,7 +39,7 @@ def test_live_observations_distinguish_tool_outcomes_and_missing_usage():
             ],
         }
     result = AgentEvalHarness(execute=run).run(CASE)
-    assert result.mode == "live"
+    assert result.subagents_count == 1
     assert result.trace_id == "trace1"
     assert result.steering_applied
     assert result.evidence_ids == ["E1", "https://a.example/"]
@@ -87,7 +87,7 @@ def test_missing_tool_collection_differs_from_an_observed_empty_trace():
 
 def test_transcript_is_explicit_and_preserves_unknown_fields():
     run = replay_transcript(CASE, TRANSCRIPT)
-    assert run.mode == "transcript"
+    assert run.subagents_count is None
     assert run.report == TRANSCRIPT["report"]
     assert run.elapsed is None and run.evidence_ids is None
     assert run.token_usage["model_calls"] is None

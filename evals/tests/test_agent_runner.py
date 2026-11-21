@@ -29,17 +29,15 @@ def recording(tmp_path, observations, **overrides):
     return path
 
 
-def test_regrade_hard_failure_blocks_passing_average_and_scrubs_content(tmp_path, monkeypatch):
+def test_regrade_hard_failure_blocks_passing_average_and_scrubs_content(tmp_path):
     cases = [case(f"C{i}") for i in range(1, 6)]
     observations = [observation(c["id"], forbidden=i == 0) for i, c in enumerate(cases)]
     path = recording(tmp_path, observations, model_config={"model": "internal-model-label"})
-    monkeypatch.setattr(runner, "_sync_live_reports", lambda: pytest.fail("合成回放不触发远端传输"))
     report = runner.run_agent_evaluations(cases, replay_file=path, reports_dir=tmp_path)
     assert report["mode"] == "synthetic_trace_regrade"
-    assert report["pass_rate"] == 0.8
+    assert report["metrics"]["task_completion"]["rate"] == 0.8
     assert report["gate"]["passed"] is False
     assert report["gate"]["blocking_case_ids"] == ["C1"]
-    assert report["review_candidates"][0]["case_id"] == "C1"
     assert report["metrics"]["forbidden_executions"] == 1
     assert report["metrics"]["tool_selection_accuracy"] == {
         "numerator": 5, "denominator": 6, "rate": 0.8333, "unknown": 0,
@@ -118,7 +116,7 @@ def test_synthetic_case_cannot_reach_a_live_model(tmp_path, monkeypatch):
     fixed = case("FIXED", execution_mode="synthetic_trace_regrade", fixture_version=1)
     monkeypatch.setattr(runner, "AgentEvalHarness", lambda: pytest.fail("合成用例不得启动调研图"))
     with pytest.raises(ValueError, match="固定合成证据"):
-        runner.run_agent_evaluations([fixed], sync_phoenix=False, reports_dir=tmp_path)
+        runner.run_agent_evaluations([fixed], reports_dir=tmp_path)
 
 
 def test_case_step_projection_exposes_contract_without_free_text(tmp_path):
@@ -161,15 +159,20 @@ def test_pairing_excludes_definitions_missing_observations_and_different_runs(tm
     baseline = runner.run_agent_evaluations(cases, replay_file=path, reports_dir=tmp_path)
     next_cases = [case("C1", keyword="changed"), case("C2"), case("C3"), case("C5")]
     path = recording(tmp_path, [observation(c["id"]) for c in next_cases])
-    current = runner.run_agent_evaluations(next_cases, replay_file=path, reports_dir=tmp_path)
-    delta = runner.compare_reports(current, baseline)
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(baseline))
+    current = runner.run_agent_evaluations(next_cases, replay_file=path, reports_dir=tmp_path, compare_file=baseline_path)
+    delta = current["comparison"]
     assert delta["passed"]
     assert delta["changes"]["standard"]["fixed"] == ["C2"]
     assert delta["excluded"] == {"new": ["C5"], "baseline_only": ["C4"],
                                  "definition_changed": ["C1"], "unassessable": ["C3"]}
     assert delta["excluded_count"] == 4
     no_shared = {**baseline, "case_results": [baseline["case_results"][0]]}
-    assert not runner.compare_reports(current, no_shared)["passed"]
+    baseline_path.write_text(json.dumps(no_shared))
+    result = runner.run_agent_evaluations(next_cases, replay_file=path, reports_dir=tmp_path, compare_file=baseline_path)
+    assert not result["comparison"]["passed"]
     for field, new_value in (("mode", "live"), ("judges_sha256", "changed"), ("schema_version", 0)):
+        baseline_path.write_text(json.dumps({**baseline, field: new_value}))
         with pytest.raises(ValueError):
-            runner.compare_reports(current, {**baseline, field: new_value})
+            runner.run_agent_evaluations(next_cases, replay_file=path, reports_dir=tmp_path, compare_file=baseline_path)

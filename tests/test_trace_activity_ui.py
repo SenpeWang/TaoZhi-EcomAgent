@@ -8,7 +8,7 @@ def test_readable_trace_actions():
     root = Path(__file__).resolve().parents[1]
     script = """
 import assert from 'node:assert/strict'
-import { activityCategoryLabels } from './web/src/traceWaterfall.ts'
+import { activityCategoryLabels, spanFields } from './web/src/traceWaterfall.ts'
 import { activityAction, activityResult, actorInstanceLabels } from './web/src/traceActivity.ts'
 
 const actor = {kind: 'agent', span_id: '1000000000000000', display_name: '市场调研员'}
@@ -19,6 +19,15 @@ assert.equal(activityResult(base), '无匹配结果 · 返回 0 条')
 assert.equal(activityResult({...base, status: 'error', error_type: 'timeout',
   attributes: {'tool.status':'timeout', 'tool.result_count':0}}), '工具超时')
 assert.equal(activityAction({...base, attributes: {'tool.name':'internal_catalog'}}).target, 'internal_catalog')
+for (const [dispatched, status, expected] of [
+  [false, 'cancelled', '未派发 · 派发前已取消'], [false, 'timeout', '未派发 · 派发前已超时'],
+  [true, 'timeout', '已派发 · 工具超时'], [true, 'error', '已派发 · 工具执行失败'],
+]) {
+  const node = {...base, status:'error', error_type:status,
+    attributes:{'tool.dispatched':dispatched,'tool.status':status,'tool.result_count':0}}
+  assert.equal(activityResult(node),expected)
+  assert.equal(spanFields(node).find(item => item.key === 'tool.dispatched').value,dispatched ? '是' : '否')
+}
 const model = {...base, kind: 'LLM', attributes: {'llm.model_name': 'qa-model', 'llm.token_count.prompt': 0, 'llm.token_count.completion': 4}}
 assert.deepEqual(activityAction(model), {title:'调用模型', target:'qa-model'})
 assert.equal(activityResult(model), '输入 0 Token · 输出 4 Token')

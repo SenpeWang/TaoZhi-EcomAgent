@@ -202,13 +202,13 @@ function pages(user) {
   return workspaceNavigation(user, capabilities, 0, 0)
     .flatMap(group => group.items.map(item => item.page))
 }
-assert.ok(pages({ system_admin: true }).includes('轨迹中台'))
-assert.ok(pages({ system_admin: false, is_boss: true }).includes('轨迹中台'))
+assert.ok(pages({ role_level: 4 }).includes('轨迹中台'))
+assert.ok(pages({ role_level: 3, is_boss: true }).includes('轨迹中台'))
 const memberCapabilities = { system: false, permissions: false, review: false, write: false }
-const memberNavigation = workspaceNavigation({ system_admin: false }, memberCapabilities, 0, 0)
+const memberNavigation = workspaceNavigation({ role_level: 1 }, memberCapabilities, 0, 0)
 assert.ok(memberNavigation.some(group => group.items.some(item => item.page === '轨迹中台')))
 assert.deepEqual(pages(null), [])
-assert.deepEqual(pages({ system_admin: true, must_change: true }), ['个人中心'])
+assert.deepEqual(pages({ role_level: 4, must_change: true }), ['个人中心'])
 
 const started = '2026-01-01T08:00:00Z'
 const ended = '2026-01-01T08:00:01Z'
@@ -257,13 +257,14 @@ def test_evaluation_center_contracts_and_baseline_scope():
 import assert from 'node:assert/strict'
 import { requestApi } from './web/src/api.ts'
 import { workspaceNavigation } from './web/src/workspaceNavigation.ts'
-import { evaluationRunPath, evaluationSource, isBaselineCandidate } from './web/src/evaluations.ts'
+import { evaluationMeasures, evaluationRunPath, evaluationSource, formatEvaluationRatio, isBaselineCandidate } from './web/src/evaluations.ts'
 
 const pages = workspaceNavigation({id:'member'}, {}, 0, 0).flatMap(group => group.items)
 assert.ok(pages.find(item => item.page === '评测中心'))
 assert.deepEqual(workspaceNavigation({must_change:true}, {}, 0, 0)
   .flatMap(group => group.items.map(item => item.page)), ['个人中心'])
-const run = {run_id:'test-a', mode:'live',dataset_sha256:'1'.repeat(64),judges_sha256:'2'.repeat(64)}
+const run = {run_id:'test-a', mode:'live',dataset_sha256:'1'.repeat(64),judges_sha256:'2'.repeat(64),
+  git_sha:null,transcript_sha256:null,counterexamples_sha256:null,model_config_sha256:null}
 const replay = {...run, run_id:'replay', mode:'synthetic_trace_regrade', counterexamples_sha256:null}
 const negatives = {...replay, run_id:'negatives', counterexamples_sha256:'a'.repeat(64)}
 assert.equal(evaluationSource(run), '真实调研')
@@ -276,7 +277,7 @@ for (const other of [run,{...run, run_id:'other',mode:'synthetic_trace_regrade'}
                      {...run,run_id:'other',judges_sha256:'wrong'}]) {
   assert.equal(isBaselineCandidate(run,other),false)
 }
-const item = {case_id:'SYN-X', status:'unassessable'}
+const item = {case_id:'SYN-X', status:'unassessable',score:null}
 const path = evaluationRunPath(run.run_id)
 async function load(resource, data) {
   globalThis.fetch = async url => {
@@ -287,11 +288,35 @@ async function load(resource, data) {
 }
 assert.deepEqual((await load('/evaluations/runs?owner_id=all',{items:[run],next_cursor:'next'})).items,[run])
 await assert.rejects(load('/evaluations/runs', {items:[run]}), /评测记录响应异常/)
-await assert.rejects(load(path, {run:{...run,run_id:'other'},metrics:{},comparison:null}), /评测记录响应异常/)
-assert.equal((await load(path, {run, metrics:{}, comparison:null})).comparison,null)
-const details = {case:item,expected:null,observed:null,steps_complete:null,verdicts:[],trace_link:null}
+await assert.rejects(load('/evaluations/runs', {items:[{...run,transcript_sha256:123}],next_cursor:null}), /评测记录响应异常/)
+const empty = {numerator:0,denominator:0,rate:null}
+const zero = {numerator:0,denominator:2,rate:0}
+const half = {numerator:1,denominator:2,rate:0.5}
+const metrics = {required_tool_coverage:empty,parameter_accuracy:half,reference_fact_coverage:zero,
+  call_coverage_among_known:empty,measured_prompt_tokens:0,measured_completion_tokens:null}
+const detail = {run,metrics,comparison:null}
+assert.equal((await load(path, detail)).comparison,null)
+assert.equal(formatEvaluationRatio(empty),'无可判定样本')
+assert.equal(formatEvaluationRatio(zero),'0.0%（0/2）')
+assert.equal(formatEvaluationRatio(half),'50.0%（1/2）')
+await assert.rejects(load(path, {...detail,run:{...run,run_id:'other'}}), /评测记录响应异常/)
+for (const key of Object.keys(evaluationMeasures)) {
+  const missing = {...metrics}
+  delete missing[key]
+  await assert.rejects(load(path, {...detail,metrics:missing}), /评测记录响应异常/)
+  for (const invalid of [null, {...empty,rate:0}, {...zero,rate:null}, {...half,denominator:0}]) {
+    await assert.rejects(load(path, {...detail,metrics:{...metrics,[key]:invalid}}), /评测记录响应异常/)
+  }
+}
+const details = {case:item,expected:[],observed:null,steps_complete:null,verdicts:[],trace_link:null}
 const casePath = path + '/cases/SYN-X'
 assert.deepEqual(await load(casePath, details),details)
+await assert.rejects(load(path + '/cases', {items:[{...item,score:'1'}],next_cursor:null}), /评测记录响应异常/)
+for (const fields of [
+  {expected:null}, {observed:[{tool_name:'search_web',parameter_keys:'query'}]},
+  {verdicts:[{issues:[null]}]}, {verdicts:[{issues:[{reason:12}]}]},
+]) await assert.rejects(load(casePath, {...details,...fields}), /评测记录响应异常/)
+
 await assert.rejects(load(casePath, {...details,case:{...item,case_id:'OTHER'}}), /评测记录响应异常/)
 await assert.rejects(load(casePath, {...details,trace_link:{task_id:'task',trace_id:'invalid'}}), /评测记录响应异常/)
 await assert.rejects(load(path+'/comparison?baseline_id=test-b',{ changes:{} }), /评测记录响应异常/)

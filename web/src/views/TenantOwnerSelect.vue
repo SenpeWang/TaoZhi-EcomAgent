@@ -7,7 +7,7 @@
     remote
     clearable
     :remote-method="searchOwners"
-    @visible-change="openOwnerMenu"
+    @visible-change="(open: boolean) => open && searchOwners('')"
     @update:model-value="selectOwner"
   >
     <el-option label="全部用户（all）" value="all" />
@@ -35,9 +35,9 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { TraceOwner, TraceOwnerPage } from '../types'
+import type { ApiReader, CursorPage, TraceOwner } from '../types'
 
-const props = defineProps<{ modelValue: string; api: <T>(path: string) => Promise<T> }>()
+const props = defineProps<{ modelValue: string; api: ApiReader }>()
 const emit = defineEmits<{ (e: 'update:modelValue', value: string): void }>()
 const owners = ref<TraceOwner[]>([])
 const nextOwnerCursor = ref<string | null>(null)
@@ -46,9 +46,7 @@ const ownerError = ref('')
 let ownerQuery = ''
 let ownerRequestSequence = 0
 
-/**
- * 读取发起人选项的下一页，仅使用最新搜索词的结果。
- */
+/** 仅追加最新搜索词对应的成员。 */
 async function loadOwners(): Promise<void> {
   const requestId = ++ownerRequestSequence
   const query = new URLSearchParams({ limit: '50' })
@@ -57,7 +55,7 @@ async function loadOwners(): Promise<void> {
   ownerError.value = ''
   ownerLoading.value = true
   try {
-    const page = await props.api<TraceOwnerPage>('/admin/traces/owners?' + query)
+    const page = await props.api<CursorPage<TraceOwner>>('/admin/traces/owners?' + query)
     if (requestId !== ownerRequestSequence) return
     owners.value = [...owners.value, ...page.items]
     nextOwnerCursor.value = page.next_cursor
@@ -79,14 +77,6 @@ function searchOwners(input: string): void {
   owners.value = []
   nextOwnerCursor.value = null
   void loadOwners()
-}
-
-/**
- * 打开选择框时显示第一页成员。
- * @param open - 用户选择框是否展开。
- */
-function openOwnerMenu(open: boolean): void {
-  if (open) searchOwners('')
 }
 
 /**

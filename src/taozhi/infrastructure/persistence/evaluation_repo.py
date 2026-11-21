@@ -109,13 +109,6 @@ def insert_report(conn: Any, tenant_id: str, owner_id: str, report: dict, rows: 
         existing = run(conn, tenant_id, owner_id, run_id=report["run_id"])
         if existing is None or existing["report_sha256"] != report["report_sha256"]:
             raise ValueError("同一批次编号已经归属于其他发起人或对应不同内容")
-        if "provenance" in report["metrics"] and "provenance" not in existing["metrics"]:
-            conn.execute(
-                "UPDATE eval_runs SET metrics=metrics || %s "
-                "WHERE tenant_id=%s AND run_id=%s AND owner_id=%s AND report_sha256=%s",
-                (Jsonb({"provenance": report["metrics"]["provenance"]}), tenant_id, report["run_id"],
-                 owner_id, report["report_sha256"]),
-            )
         return False
     with conn.cursor() as cursor:
         cursor.executemany("""
@@ -125,7 +118,7 @@ def insert_report(conn: Any, tenant_id: str, owner_id: str, report: dict, rows: 
                     %(score)s,%(hard_failure)s,%(trace_id)s,%(expected)s,%(observed)s,%(steps_complete)s,%(verdicts)s)
         """, ({
             **row, "tenant_id": tenant_id, "run_id": report["run_id"],
-            "expected": Jsonb(row["expected"]) if row["expected"] is not None else None,
+            "expected": Jsonb(row["expected"]),
             "observed": Jsonb(row["observed"]) if row["observed"] is not None else None,
             "verdicts": Jsonb(row["verdicts"]),
         } for row in rows))
