@@ -38,6 +38,15 @@ const toolOutcomes: Record<string, string> = {
   timeout: '工具超时',
   cancelled: '工具已取消',
 }
+const retrievalDecisions: Record<string, string> = {
+  retry_weak_evidence: '首轮证据不足，进入补查',
+  retry_low_confidence: '重排置信度偏低，进入补查',
+  sufficient_evidence: '进入授权上下文汇集',
+  run_specialists: '转入专家核验',
+  no_authorized_evidence: '缺少可用授权证据，跳过专家核验',
+  external_processing_blocked: '未获外发许可，跳过专家核验',
+  no_finance_evidence: '缺少授权财务依据，跳过专家核验',
+}
 
 /**
  * 根据实际执行的节点与工具名称生成动作描述，并保留采集到的技术标识。
@@ -123,6 +132,15 @@ export function activityResult(entry: TraceActivity): string {
   }
   if (entry.kind === 'RETRIEVER' && typeof attrs['retrieval.result_count'] === 'number') {
     details.push('检索到 ' + attrs['retrieval.result_count'] + ' 条')
+  }
+  if (entry.name === 'pipeline.retrieval_retry') {
+    const searches = attrs['rag.retrieval_search_count']
+    if (searches === 1) details.push('未执行第二次检索')
+    if (searches === 2) details.push('已执行第二次检索')
+  }
+  const decision = attrs['rag.retrieval_decision']
+  if (typeof decision === 'string' && Object.hasOwn(retrievalDecisions, decision)) {
+    details.push(retrievalDecisions[decision])
   }
   if (entry.name === 'research.orchestrator') {
     switch (attrs['research.next_action']) {

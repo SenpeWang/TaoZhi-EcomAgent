@@ -4,7 +4,12 @@ from __future__ import annotations
 import ast
 import re
 from collections.abc import Iterable, Iterator
-from typing import Dict, Tuple
+from typing import Dict, Literal, Tuple
+
+RetrievalDecision = Literal[
+    "retry_weak_evidence", "retry_low_confidence", "sufficient_evidence",
+    "run_specialists", "no_authorized_evidence", "external_processing_blocked", "no_finance_evidence",
+]
 
 SPECIALIST_AGENTS: Dict[str, Tuple[str, str]] = {
     "product": ("商品规格分析师", "核对型号、尺寸、材料、批次和参数，不混用不同型号。"),
@@ -20,6 +25,12 @@ _NUM_RE = re.compile(r"(?<![A-Za-z])\d+(?:\.\d+)?")
 _RATIO_RE = re.compile(r"(\d+(?:\.\d+)?)\s*[:：]\s*(\d+(?:\.\d+)?)")
 _VOLT_AMP_RE = re.compile(r"(\d+(?:\.\d+)?)\s*[Vv]\s*(\d+(?:\.\d+)?)\s*[Aa]")
 _ARITH_UNIT_RE = re.compile(r"(?:个工作日|工作日|小时|元|块|折|成|天|台|件|%|W|w|g)")
+_FINANCE_TERMS = re.compile("财务|经营|成本|毛利|利润|收入|结算|分摊|账期|补贴|对账")
+
+
+def is_finance_evidence(item: dict) -> bool:
+    """判断授权片段是否包含财务或经营依据。"""
+    return bool(_FINANCE_TERMS.search(item["title"] + item["quote"]))
 
 
 def norm_text(s: object) -> str:

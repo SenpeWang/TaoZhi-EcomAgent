@@ -26,6 +26,25 @@
 
 API 通过 SSE 将持久化的任务事件交给浏览器，断线后可携带 `Last-Event-ID` 续读。轨迹中台从同一租户数据库读取 OpenTelemetry 执行节点，可以在任务结束后回看模型、工具、检索和上下文的调用关系。[任务事件接口](src/taozhi/server/routers/tasks.py) · [轨迹查询接口](src/taozhi/server/routers/traces.py)
 
+### 知识问答的执行路径
+
+一次知识提问最多分派给 3 位业务专家。首次检索证据不足，或启用自适应 HyDE 后精排置信度偏低时，工作流最多补查一次。两轮结果按倒数排名融合（RRF）保留至多 10 条文档证据，再汇合授权会话引用和实时业务快照。轨迹中台记录当次经过的步骤和分支原因。[图定义](src/taozhi/application/rag/workflow.py) · [角色与职责](src/taozhi/domain/rag_verification.py)
+
+```mermaid
+flowchart TD
+    P["分派专家角色"] --> R["首次检索授权资料"]
+    R -->|证据充分| E["准备证据与业务快照"]
+    R -->|需要补查| T["尝试改写查询或使用 HyDE"]
+    T --> E
+    E -->|允许专家处理| S["专家并行核验"]
+    S --> Q["复核引文并按权限流式输出"]
+    Q --> A["生成答复"]
+    E -->|缺少授权依据或限制外发| A
+    A --> F["复核权限并完成任务或送审"]
+```
+
+符合缓存条件的独立问答还可在进入图之前复用已核验答复，命中时会重新检查引用权限。实时业务查询、依赖上文的追问和明确要求只看授权原文的问题各自执行本次工作流。需要审核的任务在批准前不向提问者展示答复正文。[问答执行入口](src/taozhi/application/rag/execution.py)
+
 ## 快速开始
 
 下面从全新检出目录启动一个只监听本机的测试工作台，使用独立的 `ecom_test` 数据库和合成资料。示例环境为 Linux，需安装 Git、Python 3.10（含 `venv`）、Node.js 24（含 npm）和 Docker。这个示例只用 Docker 运行 PostgreSQL，API 和 Worker 从源码运行。

@@ -4,6 +4,19 @@ import numpy as np
 
 from taozhi.knowledge import embedding as ent_embedding
 from taozhi.knowledge import retriever as ent_retriever
+from taozhi.domain.ranking import fuse_evidence_rounds
+
+
+def test_retry_can_replace_weak_evidence_when_the_first_round_is_full():
+    """首轮满额时补查头部可进入最终引用，同块两轮命中只返回一份。"""
+    first = [{"chunk_id": f"first-{i}", "version": 1} for i in range(10)]
+    fresh = {"chunk_id": "new", "version": 2}
+    second = [fresh, first[-1], first[-1]]
+    merged = fuse_evidence_rounds(first, second, 10)
+    assert len(merged) == 10
+    assert merged[:3] == [first[-1], first[0], fresh]
+    assert first[-2] not in merged and merged.count(first[-1]) == 1
+    assert fuse_evidence_rounds(first, [], 10) == first
 
 
 class _Cfg:

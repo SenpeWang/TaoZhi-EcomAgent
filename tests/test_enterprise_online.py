@@ -746,10 +746,14 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
     assert all(s["parent_span_id"] in by_id for s in spans if s is not root)
     retrieval = next(s for s in spans if s["name"] == "pipeline.retrieval")
     assert retrieval["kind"] == "CHAIN"
+    assert retrieval["attributes"]["rag.retrieval_decision"] == "sufficient_evidence"
+    assert retrieval["attributes"]["rag.retrieval_search_count"] == 1
+    prepared = next(s for s in spans if s["name"] == "pipeline.prepare_evidence")
+    assert prepared["category"] == "CONTEXT" and prepared["attributes"]["rag.retrieval_decision"] == "run_specialists"
     tools = [s for s in spans if s["kind"] == "TOOL"]
-    retrieval_tools = [s for s in tools if s["parent_span_id"] == retrieval["span_id"]]
-    assert {s["attributes"]["tool.name"] for s in retrieval_tools} == {"stock", "orders"}
-    assert all(s["name"] == "business.lookup" and s["attributes"]["tool.status"] == "ok" for s in retrieval_tools)
+    business_tools = [s for s in tools if s["parent_span_id"] == prepared["span_id"]]
+    assert {s["attributes"]["tool.name"] for s in business_tools} == {"stock", "orders"}
+    assert all(s["name"] == "business.lookup" and s["attributes"]["tool.status"] == "ok" for s in business_tools)
     assert "SKU97" not in str(spans) and "ORDER97" not in str(spans)
     searches = [s for s in spans if s["kind"] == "RETRIEVER"]
     assert searches and all(s["name"] == "knowledge.search" and s["parent_span_id"] == retrieval["span_id"] for s in searches)
@@ -789,7 +793,7 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
     activity_path = f"{path}/{trace_id}/activities"
     contexts = staff.get(activity_path, params={"category": "CONTEXT"}).json()["items"]
     recalled, = [s for s in contexts if s["name"] == "context.recall_conversation"]
-    assert recalled["actor"]["span_id"] == retrieval["span_id"]
+    assert recalled["actor"]["span_id"] == prepared["span_id"]
     assembled = [s for s in contexts if s["name"] == "context.prepare_specialist"]
     assert assembled and all(s["category"] == "CONTEXT" and s["actor"]["kind"] == "agent" for s in assembled)
     assert all(s["attributes"]["context.evidence_count"] > 0 and s["attributes"]["context.output_chars"] > 0 for s in assembled)
@@ -1358,6 +1362,40 @@ def test_contextual_questions_bypass_shared_cache(monkeypatch, clients):
         task = clients["staff"].get(f"/api/tasks/{tid}").json()
         assert task["state"] == "completed"
         assert task["result"]["cache_hit"] is False
+
+
+def test_rag_cache_only_reuses_verified_answers_on_the_allowed_route(monkeypatch, clients):
+    """同一问题从无模型降级恢复后能重新核验，要求仅看原文时仍走受限路径。"""
+    import numpy as np
+    from taozhi import config
+    from taozhi.knowledge import semantic_cache
+
+    monkeypatch.setattr(semantic_cache, "embedding_available", lambda: True)
+    monkeypatch.setattr(semantic_cache, "encode_query", lambda query: np.ones((1, 8), dtype="float32"))
+    offline = config.get_settings().model_copy(update={"api_key": ""})
+    monkeypatch.setattr(config, "get_settings", lambda: offline)
+    staff = clients["staff"]
+
+    def ask(**options):
+        task = task_id(staff, "MC-500 的切幅是多少？", **options)
+        assert process_next_job()
+        detail = staff.get(f"/api/tasks/{task}").json()
+        assert detail["state"] == "completed", detail
+        return detail["result"]
+
+    fallback = ask()
+    assert fallback["citations"] and fallback["model_calls"] == 0 and fallback["missing"]
+
+    fake_model(monkeypatch)
+    verified = ask()
+    assert not verified["cache_hit"] and verified["model_calls"] > 0
+    assert any(role["count"] for role in verified["specialists"])
+    cached = ask()
+    assert cached["cache_hit"] and cached["answer"] == verified["answer"]
+
+    restricted = ask(allow_external=False)
+    assert restricted["external_blocked"] and not restricted["cache_hit"]
+    assert restricted["model_calls"] == 0 and "授权原文" in restricted["answer"]
 
 
 def test_migration_binds_old_bi_results_to_original_metrics(monkeypatch):

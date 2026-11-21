@@ -117,7 +117,7 @@ def process_question_job(job: dict[str, Any]) -> None:
     question = job["question"]
     payload = job["payload"]
     business = requested_business_resources(question, payload)
-    cache_allowed = not (
+    cache_allowed = payload.get("allow_external", True) and not (
         business
         or recalls_previous_evidence(question, job.get("conversation_id") or "")
         or refers_to_previous_question(question)
@@ -188,7 +188,7 @@ def process_question_job(job: dict[str, Any]) -> None:
         if status == "completed":
             job_repo.delete_checkpoint_threads(c, [thread_id])
 
-    if cache is not None and not state.get("hard_block") and not state.get("review") and state.get("answer"):
+    if cache is not None and status == "completed" and state["findings"] and not state["missing"]:
         try:
             cache.put(
                 job["tenant_id"],

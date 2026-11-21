@@ -71,6 +71,32 @@ def test_tool_pool_propagates_only_the_trace_and_cleans_it_on_error(monkeypatch)
         assert pool.submit(tracing.current_trace_id).result() == ""
 
 
+def test_retrieval_routes_export_only_declared_decisions_and_counts(monkeypatch):
+    from taozhi.application.common.task_guard import traced_node
+    from taozhi.application.services.trace_service import _KEY_ACTIVITY_STEPS, _span_display_name
+    from taozhi.domain.trace_activity import activity_category
+
+    rows = []
+    monkeypatch.setenv("TAOZHI_TRACING", "1")
+    monkeypatch.setattr(tracing, "submit_span", rows.append)
+    with tracing.job_trace("tenant", "job", 1, "task.ask"):
+        for name, decision, count in (
+            ("retrieval", "retry_low_confidence", 1),
+            ("retrieval_retry", "private-query", 2),
+            ("prepare_evidence", "external_processing_blocked", 2),
+        ):
+            traced_node(name, dict.copy)({"retrieval_decision": decision, "retrieval_search_count": count})
+
+    ended = {r["name"]: r["attributes"] for r in rows if r["status"] == "ok"}
+    assert ended["pipeline.retrieval"]["rag.retrieval_decision"] == "retry_low_confidence"
+    assert ended["pipeline.retrieval_retry"]["rag.retrieval_search_count"] == 2
+    assert ended["pipeline.prepare_evidence"]["rag.retrieval_decision"] == "external_processing_blocked"
+    assert "private-query" not in str(rows)
+    assert set(ended) - {"task.ask"} <= set(_KEY_ACTIVITY_STEPS)
+    assert _span_display_name("CHAIN", "pipeline.retrieval_retry", {}) == "尝试补查授权文档"
+    assert activity_category("CHAIN", "pipeline.prepare_evidence") == "CONTEXT"
+
+
 def test_running_and_failed_snapshots_only_store_operational_attributes(monkeypatch):
     rows = []
     monkeypatch.setattr(tracing, "submit_span", rows.append)

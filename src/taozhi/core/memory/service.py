@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
 from ...knowledge.db import fetch_all, fetch_one
@@ -40,6 +41,8 @@ def get_followup_context(
     question: str,
     input_level: int,
     conversation_id: str = "",
+    *,
+    before: tuple[datetime, str] | None = None,
 ) -> Tuple[List[Dict[str, Any]], List[Any]]:
     """同一会话内直接继承上文证据；无会话标识时退回关键词启发式（历史行为）。
 
@@ -49,24 +52,23 @@ def get_followup_context(
         question: 用户追问内容。
         input_level: 安全级别。
         conversation_id: 会话标识。
+        before: 当前提问的创建时间和任务编号，用于限制历史范围。
 
     Returns:
         Tuple[List[Dict[str, Any]], List[Any]]: 证据片段列表及来源标识列表。
     """
+    if not recalls_previous_evidence(question, conversation_id):
+        return [], []
+    filters = ["tenant_id=%s", "owner_id=%s", "kind='ask'", "state='completed'"]
+    params = [p.tenant_id, p.id]
     if conversation_id:
-        rows = fetch_all(
-            conn,
-            "SELECT result,sources,input_level FROM jobs WHERE tenant_id=%s AND owner_id=%s AND conversation_id=%s AND kind='ask' AND state='completed' ORDER BY created_at DESC LIMIT 3",
-            (p.tenant_id, p.id, conversation_id),
-        )
-    else:
-        if not recalls_previous_evidence(question, conversation_id):
-            return [], []
-        rows = fetch_all(
-            conn,
-            "SELECT result,sources,input_level FROM jobs WHERE tenant_id=%s AND owner_id=%s AND kind='ask' AND state='completed' ORDER BY created_at DESC LIMIT 3",
-            (p.tenant_id, p.id),
-        )
+        filters.append("conversation_id=%s")
+        params.append(conversation_id)
+    if before is not None:
+        filters.append("(created_at,id)<(%s,%s)")
+        params.extend(before)
+    rows = fetch_all(conn, "SELECT result,sources,input_level FROM jobs WHERE " + " AND ".join(filters)
+                     + " ORDER BY created_at DESC,id DESC LIMIT 3", tuple(params))
 
     for past in rows:
         if not past["result"] or past["input_level"] > input_level or not sources_valid(conn, p, past["sources"]):

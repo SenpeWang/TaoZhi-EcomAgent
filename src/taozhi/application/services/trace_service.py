@@ -27,7 +27,8 @@ _TRACE_OPERATIONS = {
     "worker.research": "选品调研流程",
     "worker.semantic_cache_hit": "复用已核验答案",
     "pipeline.planning": "识别问题与分派角色",
-    "pipeline.retrieval": "资料检索流程",
+    "pipeline.retrieval": "检索授权文档",
+    "pipeline.retrieval_retry": "尝试补查授权文档",
     "knowledge.search": "检索授权资料",
     "knowledge.cache_lookup": "查询问答缓存",
     "pipeline.specialists": "专业核验",
@@ -45,7 +46,7 @@ _TRACE_OPERATIONS = {
     **CHAIN_OPERATIONS["GUARDRAIL"],
 }
 _KEY_ACTIVITY_STEPS = (
-    "worker.semantic_cache_hit", "pipeline.planning", "pipeline.publication",
+    "worker.semantic_cache_hit", "pipeline.planning", "pipeline.retrieval", "pipeline.retrieval_retry", "pipeline.publication",
     "bi.bi_intent", "bi.bi_publish", "research.final_node", *CHAIN_CATEGORY_BY_NAME,
 )
 _TOOL_OUTCOMES = {

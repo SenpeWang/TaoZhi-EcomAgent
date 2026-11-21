@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .entity_extraction import extract_entities
 
+RRF_K = 60
+
 _FENCE_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
 _HISTORY_QUERY_RE = re.compile(r"什么时候|以前|旧版|历史|差异|区别|变更|调整|改了")
 _VERSION_TAG_RE = re.compile(r"(?<![A-Za-z0-9])V([0-9]{1,9}(?:\.[0-9]{1,9})*)(?![A-Za-z0-9])", re.IGNORECASE)
@@ -116,6 +118,23 @@ def split_document_chunks(
 def norm_chunk_key(text: str) -> str:
     """正文归一化指纹：去空白后取前 200 字，用于识别重复切片。"""
     return re.sub(r"\s+", "", text)[:200]
+
+
+def fuse_evidence_rounds(first: list[dict], second: list[dict], limit: int) -> list[dict]:
+    """按两轮名次的倒数和合并证据，同分优先首轮，保留原始引用与权限元数据。"""
+    scores: dict[str, float] = {}
+    documents: dict[str, dict] = {}
+    for ranked in (first, second):
+        seen = set()
+        for rank, document in enumerate(ranked, start=1):
+            chunk_id = document["chunk_id"]
+            if chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            documents.setdefault(chunk_id, document)
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (RRF_K + rank)
+    ranked_ids = sorted(scores, key=scores.__getitem__, reverse=True)
+    return [documents[chunk_id] for chunk_id in ranked_ids[:limit]]
 
 
 def dedup_chunks_by_text(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

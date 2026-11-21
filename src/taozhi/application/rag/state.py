@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from taozhi.domain.rag_verification import RetrievalDecision
+
 
 class State(TypedDict, total=False):
     """企业知识问答 LangGraph 状态契约。"""
@@ -12,6 +14,9 @@ class State(TypedDict, total=False):
     question: str
     selected_agents: list
     evidence: list
+    prior_question_id: str | None
+    retrieval_decision: RetrievalDecision
+    retrieval_search_count: int
     findings: list
     missing: list
     model_calls: int

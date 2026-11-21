@@ -72,6 +72,8 @@ const executionFields: Record<string, string> = {
   'state.answer_chars': '回答字符数',
   'state.model_calls': '流程记录的模型调用数',
   'state.hard_block': '触发阻断',
+  'rag.retrieval_decision': '检索路由代码',
+  'rag.retrieval_search_count': '已执行的文档检索次数',
   'context.evidence_count': '上下文证据条数',
   'context.observation_count': '工具观测条数',
   'context.tool_count': '可用工具数',
