@@ -16,7 +16,6 @@ interface MemoryFact {
 
 interface ResearchTaskResult {
   report?: string
-  reply?: string
   outline?: string[]
   subagents?: ResearchSubagent[]
   turn_type?: string
@@ -773,10 +772,7 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <div
-                  v-if="turn.draft || turn.result?.report || turn.result?.reply"
-                  class="response-markdown-body"
-                >
+                <div v-if="turn.draft || turn.result?.report" class="response-markdown-body">
                   <ul
                     v-if="turn.result?.subagents?.length"
                     class="research-roles"
@@ -787,26 +783,20 @@ onUnmounted(() => {
                     </li>
                   </ul>
                   <MarkdownReport
-                    :content="turn.result?.report || turn.result?.reply || turn.draft || ''"
+                    :content="turn.result?.report || turn.draft || ''"
                     :show-outline="!turn.draft"
                     :id-prefix="'rep-' + turn.id"
                   />
                 </div>
 
-                <div v-if="turn.result?.report || turn.result?.reply" class="response-actions-row">
-                  <button
-                    class="action-btn"
-                    @click="copyText(turn.result?.report || turn.result?.reply)"
-                  >
+                <div v-if="turn.result?.report" class="response-actions-row">
+                  <button class="action-btn" @click="copyText(turn.result?.report)">
                     复制全文
                   </button>
                   <button
                     class="action-btn"
                     @click="
-                      downloadReport(
-                        turn.result?.report || turn.result?.reply,
-                        turn.result?.keyword || turn.question,
-                      )
+                      downloadReport(turn.result?.report, turn.result?.keyword || turn.question)
                     "
                   >
                     导出 .md 报告

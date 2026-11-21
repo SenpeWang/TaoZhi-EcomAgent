@@ -60,6 +60,12 @@ const workspacePages = {
     iconPaths: ['M4 5h9M8 12h12M4 19h10', 'M4 3v4M8 10v4M4 17v4'],
     access: 'member',
   },
+  评测中心: {
+    group: '运行分析',
+    description: '查阅调研评测批次，对比基线并定位失败用例。',
+    iconPaths: ['M8 5H5v15h14V5h-3', 'M9 3h6v4H9z', 'M8 12l1 1 2-2M13 12h3M8 16h8'],
+    access: 'member',
+  },
   系统状态: {
     group: '运行分析',
     description: '查看数据库、后台任务服务与数据源的连接状态。',

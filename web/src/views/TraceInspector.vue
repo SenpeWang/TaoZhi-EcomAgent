@@ -109,13 +109,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { formatStage, stateTag, stateText, traceKind, traceTime } from '../labels'
-import type { TraceDetail } from '../types'
+import type { ApiReader, TraceDetail } from '../types'
 import TraceRunInspector from './TraceRunInspector.vue'
 
 const props = defineProps<{
   taskId: string
   initialTraceId: string | null
-  api: <T>(path: string) => Promise<T>
+  api: ApiReader
 }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 const detail = ref<TraceDetail | null>(null)

@@ -58,11 +58,12 @@ def _execute_guarded_mcp_tool(
         with node_span("research.authorize_tool", "CHAIN"):
             enforce_tool_allowed(tool_name, scope, task_tools=task.allowed_tools)
     except Denied as exc:
-        outcome = ToolOutcome(tool_name=tool_name, status="error", error_reason=exc.message)
+        outcome = ToolOutcome(tool_name=tool_name, status="error", dispatched=False, error_reason=exc.message)
         tools_records.append(
             {
                 "tool_name": tool_name,
                 "parameters": {"query_or_url": arg_value},
+                "dispatched": outcome.dispatched,
                 "status": "error",
                 "result_summary": exc.message,
                 "data_count": 0,
@@ -109,6 +110,7 @@ def _execute_guarded_mcp_tool(
         {
             "tool_name": tool_name,
             "parameters": kwargs,
+            "dispatched": outcome.dispatched,
             "status": outcome.status,
             "result_summary": summary_txt,
             "data_count": outcome.data_count,

@@ -47,7 +47,12 @@ const kindFields: Record<SpanKind, Record<string, string>> = {
     'llm.token_count.completion': '输出 Token',
     'llm.token_count.total': '总 Token',
   },
-  TOOL: { 'tool.name': '工具名称', 'tool.status': '工具结果状态', 'tool.result_count': '返回条数' },
+  TOOL: {
+    'tool.name': '工具名称',
+    'tool.dispatched': '已派发至工具',
+    'tool.status': '工具结果状态',
+    'tool.result_count': '返回条数',
+  },
   RETRIEVER: { 'retrieval.result_count': '检索命中数' },
   EMBEDDING: { 'embedding.model_name': '向量模型' },
   RERANKER: { 'reranker.model_name': '重排模型' },

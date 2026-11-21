@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "source": "synthetic",
+  "observations": [
+    {
+      "case_id": "AGENT-WEB-003",
+      "system_status": "COMPLETED",
+      "report": "全网市场调研以两份合成网页材料为依据。卖点方面，两份材料都提到开放式佩戴时能听见环境声音。痛点方面，一份材料提到长时间佩戴夹耳，另一份提到按键容易误触。该样本只支持列出这些反馈，无法估算它们在全部购买者中的比例。",
+      "tool_calls": [
+        {
+          "agent_role": "网页调研",
+          "tool_name": "search_web",
+          "parameters": {"query": "骨传导运动耳机 用户反馈"},
+          "sequence": 1,
+          "status": "ok",
+          "data_count": 2,
+          "dispatched": true
+        }
+      ]
+    }
+  ]
+}

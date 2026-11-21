@@ -76,6 +76,7 @@ class ToolOutcome:
 
     tool_name: str
     status: ToolStatus
+    dispatched: bool
     items: List[Dict[str, Any]] = field(default_factory=list)
     text_preview: str = ""
     data_count: int = 0
@@ -143,6 +144,7 @@ def normalize_tool_result(
         return ToolOutcome(
             tool_name=tool_name,
             status=status,
+            dispatched=True,
             items=items,
             text_preview=preview,
             data_count=len(items),
@@ -155,6 +157,7 @@ def normalize_tool_result(
             return ToolOutcome(
                 tool_name=tool_name,
                 status="error",
+                dispatched=True,
                 items=[raw],
                 text_preview=truncate_text(json.dumps(raw, ensure_ascii=False), max_bytes=preview_chars).content,
                 data_count=0,
@@ -167,13 +170,14 @@ def normalize_tool_result(
         return ToolOutcome(
             tool_name=tool_name,
             status=status,
+            dispatched=True,
             items=[raw] if status == "ok" else [],
             text_preview=preview,
             data_count=1 if status == "ok" else 0,
             elapsed=elapsed,
         )
 
-    return ToolOutcome(tool_name=tool_name, status="empty", elapsed=elapsed)
+    return ToolOutcome(tool_name=tool_name, status="empty", dispatched=True, elapsed=elapsed)
 
 
 def execute_tool_with_outcome(
@@ -199,13 +203,14 @@ def execute_tool_with_outcome(
         包含状态、结果摘要与耗时的 ToolOutcome。
     """
     if cancel_event is not None and cancel_event.is_set():
-        return ToolOutcome(tool_name=tool_name, status="cancelled", error_reason="任务已被取消，跳过工具执行")
+        return ToolOutcome(tool_name=tool_name, status="cancelled", dispatched=False, error_reason="任务已被取消，跳过工具执行")
 
     if remaining_seconds is not None and remaining_seconds <= 0:
-        return ToolOutcome(tool_name=tool_name, status="timeout", error_reason="全局剩余时间预算耗尽，跳过工具执行")
+        return ToolOutcome(tool_name=tool_name, status="timeout", dispatched=False, error_reason="全局剩余时间预算耗尽，跳过工具执行")
 
     call_kwargs = clamp_timeout_args(kwargs, remaining_seconds=remaining_seconds, inject_timeout=_accepts_timeout(fn))
     t0 = time.perf_counter()
+    dispatched = False
     try:
         if remaining_seconds is not None:
             wait_limit = max(0.5, float(remaining_seconds))
@@ -224,12 +229,15 @@ def execute_tool_with_outcome(
             finally:
                 if not fut.done():
                     fut.cancel()
+                dispatched = not fut.cancelled()
         else:
+            dispatched = True
             raw = fn(**call_kwargs)
     except (TimeoutError, FuturesTimeoutError, subprocess.TimeoutExpired, httpx.TimeoutException) as exc:
         return ToolOutcome(
             tool_name=tool_name,
             status="timeout",
+            dispatched=dispatched,
             elapsed=round(time.perf_counter() - t0, 2),
             error_reason=f"工具执行超时: {exc}",
         )
@@ -237,6 +245,7 @@ def execute_tool_with_outcome(
         return ToolOutcome(
             tool_name=tool_name,
             status="error",
+            dispatched=dispatched,
             elapsed=round(time.perf_counter() - t0, 2),
             error_reason=f"{type(exc).__name__}: {exc}",
         )
@@ -246,6 +255,7 @@ def execute_tool_with_outcome(
         return ToolOutcome(
             tool_name=tool_name,
             status="cancelled",
+            dispatched=dispatched,
             elapsed=elapsed,
             error_reason="工具执行期间收到任务取消请求",
         )

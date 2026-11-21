@@ -291,6 +291,14 @@
           @inspect="openTrace"
         />
 
+        <EvaluationCenter
+          v-else-if="currentPage === '评测中心' && !user.must_change"
+          :key="`${user.id}:${user.role_level}`"
+          :api="api"
+          :is-admin="isAdmin(user)"
+          @inspect="openTrace"
+        />
+
         <template v-else-if="currentPage === '知识问答'">
           <section class="question-grid">
             <div class="panel">
@@ -699,6 +707,7 @@ import PolicyMatrix from './views/PolicyMatrix.vue'
 import ResearchChatView from './views/ResearchChatView.vue'
 import TaskCenter from './views/TaskCenter.vue'
 import TaskTimeline from './views/TaskTimeline.vue'
+import EvaluationCenter from './views/EvaluationCenter.vue'
 import TraceCenter from './views/TraceCenter.vue'
 import TraceInspector from './views/TraceInspector.vue'
 import type {
@@ -1082,7 +1091,7 @@ async function navigate(name: string): Promise<void> {
     .find((item) => item.page === name)
   if (!destination) return
   currentPage.value = destination.page
-  if (name === '轨迹中台') return
+  if (name === '轨迹中台' || name === '评测中心') return
   if (name === '系统状态') {
     await action(async () => {
       runtimeStatus.value = await api<RuntimeStatus>('/system/status')

@@ -150,7 +150,8 @@ def _build_research_result_payload(
                     {
                         "name": t["tool_name"],
                         "description": t["result_summary"],
-                        "status": t.get("status", "ok"),
+                        "status": t.get("status"),
+                        "dispatched": t.get("dispatched"),
                         "data_count": t["data_count"],
                         "parameters": t["parameters"],
                     }
@@ -221,7 +222,6 @@ def _build_research_result_payload(
 
     return {
         "report": merged_state.get("report", ""),
-        "reply": merged_state.get("report", ""),
         "outline": merged_state.get("outline", []),
         "platforms": platforms_summary,
         "model_calls": hooks.model_calls,

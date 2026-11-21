@@ -192,7 +192,8 @@ def test_invalid_expiry_and_other_tenant_grant(clients):
     r=clients["boss"].post("/api/documents/test_doc_boss/grants",json={"user_id":u["staff"],"expires_at":"2020-01-01T00:00:00Z"})
     assert r.status_code==400
     assert clients["boss"].post("/api/documents/test_doc_boss/grants",json={"user_id":"foreign_user"}).status_code==400
-def test_cross_tenant_documents_tasks_and_tools(clients):
+@pytest.mark.parametrize("kind", ["ask", pytest.param("research", id="AGENT-ACCESS-018")])
+def test_cross_tenant_documents_tasks_and_tools(clients, kind):
     with database_connection() as c:
         c.execute("INSERT INTO tenants(id,code,name,mode) VALUES('foreign','other','另一企业','test')")
         nodes=setup.organization(c,"foreign","另一企业")
@@ -200,12 +201,12 @@ def test_cross_tenant_documents_tasks_and_tools(clients):
         c.execute("INSERT INTO users(id,tenant_id,username,display_name,password_hash,must_change) VALUES('foreign_user','foreign','owner','其他老板',%s,false)",(hash_password("123456","test"),))
         c.execute("INSERT INTO memberships VALUES('foreign','foreign_user',%s,'boss',true)",(nodes["公司"],))
         setup.add_doc(c,"foreign","foreign_user","foreign_doc","其他企业机密","跨企业秘密标记",nodes["公司"],"company",3)
-        p=load_principal(c,"foreign_user");job=create_job(c,p,"ask",nodes["公司"],{},"其他企业问题")
+        p=load_principal(c,"foreign_user");job=create_job(c,p,kind,nodes["公司"],{},"其他企业问题")
         foreign_trace = "f" * 32
         c.execute(
             "INSERT INTO task_spans(tenant_id,job_id,run_version,trace_id,span_id,name,kind,status,started_at) "
-            "VALUES('foreign',%s,1,%s,%s,'task.ask','CHAIN','running',now())",
-            (job["id"], foreign_trace, "a" * 16),
+            "VALUES('foreign',%s,1,%s,%s,%s,'CHAIN','running',now())",
+            (job["id"], foreign_trace, "a" * 16, f"task.{kind}"),
         )
     boss=clients["boss"]
     assert boss.get("/api/documents/foreign_doc").status_code==404
@@ -220,6 +221,17 @@ def test_cross_tenant_documents_tasks_and_tools(clients):
     assert admin.get("/api/admin/traces", params={"q": "其他企业问题"}).json()["items"] == []
     assert admin.get("/api/admin/traces", params={"owner_id": "foreign_user"}).json()["items"] == []
     assert admin.get("/api/admin/traces/owners", params={"q": "其他老板"}).json()["items"] == []
+    path = "/api/admin/traces"
+    staff = clients["staff"]
+    owners, _ = ids()
+    own = task_id(staff, "合成商品售后政策", kind=kind)
+    peer = task_id(clients["boss"], "合成商品包装规格", kind=kind)
+    assert {r["id"] for r in admin.get(path, params={"kind": kind, "owner_id": "all"}).json()["items"]} == {own, peer}
+    assert [r["id"] for r in admin.get(path, params={"owner_id": owners["boss"]}).json()["items"]] == [peer]
+    assert [r["id"] for r in staff.get(path).json()["items"]] == [own]
+    assert staff.get(path, params={"owner_id": owners["boss"]}).status_code == 403
+    assert staff.get(f"{path}/{peer}").status_code == 404
+    assert staff.get(f"{path}/{job['id']}").status_code == 404
 
 
 def test_trace_owner_scope_and_cursor(clients):
@@ -1477,3 +1489,116 @@ def test_pipeline_quote_and_arithmetic_derivation_guards():
     assert _numbers_supported("旧 5V2A 充电头功率仅 5 * 2 = 10W。", "不能用普通 5V2A 旧头", question="")
     assert not _numbers_supported("iPhone 16 支持 45W 快充。", policy_doc, question=question)
     assert not _numbers_supported("应退金额 = 299 - 39 - 12 = 199 元。", policy_doc, question=question)
+
+
+def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_path):
+    """报告导入、同租户发起人权限、两个批次的授权和跨租户隔离由真实入口验证。"""
+    from evals.agent_eval.contracts import REPORT_SCHEMA_VERSION
+    from evals.agent_eval.publish import publish_report
+    from evals.agent_eval.reporting import fingerprint, group_metrics
+
+    tenant = "tenant_test"
+    users, _ = ids()
+    url = "/api/evaluations/runs"
+    sample = {
+        "expectation_notes": [], "expected_tools": [], "forbidden_tools": [], "expected_parameters": [],
+        "steps": None, "steps_complete": None,
+        "case_id": "SYN-A", "case_sha256": "a" * 64, "suite": "regression", "status": "passed",
+        "score": 1.0, "hard_failure": False, "verdicts": [],
+    }
+    baseline = {
+        "schema_version": REPORT_SCHEMA_VERSION, "run_id": "baseline", "timestamp": "20261120_120000_000001",
+        "mode": "synthetic_trace_regrade", "dataset_sha256": "a" * 64, "judges_sha256": "b" * 64,
+        "gate": {"passed": True}, "transcript_sha256": "1" * 64,
+        "metrics": {**group_metrics([]), "selected": 2, "passed": 2},
+        "case_results": [sample, {**sample, "case_id": "SYN-B"}],
+    }
+
+    def publish(report, tenant_id, owner_id):
+        path = tmp_path / "run.json"
+        path.write_text(json.dumps(report), encoding="utf-8")
+        return publish_report(path, tenant_id, owner_id)
+
+    assert publish(baseline, tenant, users["boss"])
+    assert not publish(baseline, tenant, users["boss"])
+    with pytest.raises(ValueError):
+        publish(baseline, tenant, users["staff"])
+    with pytest.raises(ValueError):
+        publish({**baseline, "dataset_sha256": "0" * 64}, tenant, users["boss"])
+    with database_connection() as conn:
+        conn.execute("INSERT INTO tenants(id,code,name,mode) VALUES('eval_foreign','eval_foreign','合成企业','test')")
+        conn.execute("""INSERT INTO users(id,tenant_id,username,display_name,password_hash)
+                        VALUES('eval_foreign_user','eval_foreign','tester','员工','test')""")
+    with pytest.raises(ValueError):
+        publish(baseline, "eval_foreign", users["boss"])
+    assert publish({**baseline, "run_id": "foreign_report"}, "eval_foreign", "eval_foreign_user")
+    current = {
+        **baseline, "run_id": "candidate", "gate": {"passed": False},
+        "metrics": {**baseline["metrics"], "passed": 1, "failed": 1},
+        "transcript_sha256": "1" * 64, "counterexamples_sha256": "2" * 64, "model_config_sha256": "3" * 64,
+        "case_results": [{**sample, "status": "failed", "score": 0}, baseline["case_results"][1]],
+        "comparison": {"baseline_sha256": fingerprint(baseline)},
+    }
+    assert publish(current, tenant, users["staff"])
+    admin, staff = clients["admin"], clients["staff"]
+    listing = staff.get(url).json()["items"]
+    assert [item["run_id"] for item in listing] == ["candidate"]
+    for key in ("transcript_sha256", "counterexamples_sha256", "model_config_sha256"):
+        assert listing[0][key] == current[key]
+    assert admin.get(f"{url}/baseline").json()["run"]["counterexamples_sha256"] is None
+    assert not publish(current, tenant, users["staff"])
+    detail = staff.get(f"{url}/candidate").json()
+    assert detail["run"]["counterexamples_sha256"] == current["counterexamples_sha256"]
+    assert "provenance" not in detail["metrics"]
+    assert staff.get(url, params={"owner_id": "all"}).status_code == 403
+    assert staff.get(url, params={"owner_id": users["boss"]}).status_code == 403
+    assert [item["run_id"] for item in admin.get(url, params={"owner_id": users["boss"]}).json()["items"]] == ["baseline"]
+    page = admin.get(url, params={"owner_id": "all", "limit": 1}).json()
+    following = admin.get(url, params={"cursor": page["next_cursor"], "limit": 1}).json()
+    assert {page["items"][0]["run_id"], following["items"][0]["run_id"]} == {"baseline", "candidate"}
+    assert following["next_cursor"] is None
+    assert admin.get(f"{url}/foreign_report").status_code == 404
+    assert staff.get(f"{url}/baseline/cases/SYN-A").status_code == 404
+    assert staff.get(f"{url}/candidate").json()["comparison"] is None
+    assert staff.get(f"{url}/candidate/comparison", params={"baseline_id": "baseline"}).status_code == 404
+    assert admin.get(f"{url}/candidate/comparison", params={"baseline_id": "foreign_report"}).status_code == 404
+    compared = admin.get(f"{url}/candidate").json()["comparison"]
+    assert compared["changes"]["standard"]["regressed"] == ["SYN-A"]
+    assert admin.get(f"{url}/candidate/comparison", params={"baseline_id": "baseline"}).json() == compared
+    assert admin.get(f"{url}/candidate/comparison", params={"baseline_id": "candidate"}).status_code == 422
+    assert publish({**baseline, "run_id": "other_mode", "mode": "live", "transcript_sha256": None,
+                    "comparison": {"baseline_sha256": fingerprint(current)}}, tenant, users["staff"])
+    assert staff.get(f"{url}/other_mode").json()["comparison"] is None
+    assert staff.get(f"{url}/candidate/comparison", params={"baseline_id": "other_mode"}).status_code == 422
+    assert [item["case_id"] for item in staff.get(f"{url}/candidate/cases", params={"status": "failed"}).json()["items"]] == ["SYN-A"]
+    assert staff.get(f"{url}/candidate/cases/SYN-A").json()["observed"] is None
+    assert admin.get(url, params={"cursor": "invalid"}).status_code == 422
+    assert staff.post(url, json={"run_id": "untrusted"}).status_code == 405
+
+
+def test_live_evaluation_links_require_visible_business_task(clients, tmp_path):
+    """批次归属与业务轨迹归属各自鉴权。"""
+    from evals.agent_eval.contracts import REPORT_SCHEMA_VERSION
+    from evals.agent_eval.publish import publish_report
+    from evals.agent_eval.reporting import group_metrics
+
+    users, _ = ids()
+    task = task_id(clients["boss"], "合成业务问答")
+    trace = "d" * 32
+    with database_connection() as conn:
+        conn.execute("INSERT INTO task_spans(tenant_id,job_id,run_version,trace_id,span_id,name,kind,status,started_at) "
+                     "VALUES('tenant_test',%s,1,%s,%s,'task.ask','CHAIN','ok',now())", (task, trace, "a" * 16))
+    raw = {
+        "schema_version": REPORT_SCHEMA_VERSION, "run_id": "live_report", "timestamp": "20261120_120000_000001",
+        "mode": "live", "dataset_sha256": "a" * 64, "judges_sha256": "b" * 64,
+        "gate": {"passed": True}, "metrics": {**group_metrics([]), "selected": 1, "passed": 1},
+        "case_results": [{"case_id": "SYN-A", "case_sha256": "c" * 64, "suite": "benchmark", "status": "passed",
+                          "score": 1, "trace_id": trace, "hard_failure": False, "verdicts": [], "expectation_notes": [], "expected_tools": [],
+                          "forbidden_tools": [], "expected_parameters": [], "steps": [], "steps_complete": True}],
+    }
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    assert publish_report(path, "tenant_test", users["staff"])
+    url = "/api/evaluations/runs/live_report/cases/SYN-A"
+    assert clients["staff"].get(url).json()["trace_link"] is None
+    assert clients["admin"].get(url).json()["trace_link"] == {"task_id": task, "trace_id": trace}

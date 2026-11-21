@@ -1,0 +1,800 @@
+{
+  "schema_version": 1,
+  "source": "synthetic",
+  "cases": [
+    {
+      "id": "AGENT-MOQ-011",
+      "category": "tier_pricing",
+      "name": "按起订量与数量档位选购",
+      "prompt": "只查 1688。采购 100 件 SYN-C65，请从满足起订量的供货方案中选最低价，分别写出单价、货款和运费口径。",
+      "keyword": "SYN-C65",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "allowed_tools": [
+        "search_1688_wholesale"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": {
+              "identifier": "SYN-C65"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 2
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "supplier",
+          "any_of": [
+            "选择甲",
+            "选甲",
+            "甲可成交"
+          ],
+          "evidence_ids": [
+            "SYN-C65-A"
+          ]
+        },
+        {
+          "id": "unit",
+          "any_of": [
+            "20 元/件",
+            "每件 20 元",
+            "20元/件"
+          ],
+          "evidence_ids": [
+            "SYN-C65-A"
+          ]
+        },
+        {
+          "id": "amount",
+          "any_of": [
+            "2,000 元",
+            "2000 元",
+            "2000元"
+          ],
+          "evidence_ids": [
+            "SYN-C65-A"
+          ]
+        },
+        {
+          "id": "freight",
+          "any_of": [
+            "运费待确认",
+            "运费未知",
+            "未含运费"
+          ],
+          "evidence_ids": [
+            "SYN-C65-A"
+          ]
+        },
+        {
+          "id": "rejected",
+          "any_of": [
+            "200 件起订",
+            "起订量为 200",
+            "起订量 200"
+          ],
+          "evidence_ids": [
+            "SYN-C65-B"
+          ]
+        }
+      ],
+      "forbidden_claims": [
+        "(?:成交单价|最低可成交价)\\s*(?:为|是)?\\s*16\\s*元"
+      ],
+      "required_sections": [],
+      "min_chars": 1
+    },
+    {
+      "id": "AGENT-FX-012",
+      "category": "currency_comparison",
+      "name": "跨平台比价与利润口径",
+      "prompt": "比较 SYN-H20 同款单件的 1688 货源价和 Amazon 美元零售价，按 1 美元兑 7 元折算，报告人民币价差及利润估算所缺的费用。",
+      "keyword": "SYN-H20",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "allowed_tools": [
+        "search_1688_wholesale",
+        "search_amazon"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": {
+              "identifier": "SYN-H20"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 1
+        },
+        {
+          "tool_name": "search_amazon",
+          "parameters": {
+            "query": {
+              "identifier": "SYN-H20"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 1
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "domestic",
+          "any_of": [
+            "货源价 28 元",
+            "货源价为28元"
+          ],
+          "evidence_ids": [
+            "SYN-H20-CN"
+          ]
+        },
+        {
+          "id": "retail",
+          "any_of": [
+            "8 美元",
+            "8美元"
+          ],
+          "evidence_ids": [
+            "SYN-H20-US"
+          ]
+        },
+        {
+          "id": "converted",
+          "any_of": [
+            "56 元",
+            "56元"
+          ],
+          "evidence_ids": [
+            "SYN-H20-US"
+          ]
+        },
+        {
+          "id": "spread",
+          "any_of": [
+            "价差 28 元",
+            "相差28元"
+          ],
+          "evidence_ids": [
+            "SYN-H20-CN",
+            "SYN-H20-US"
+          ]
+        },
+        {
+          "id": "costs",
+          "any_of": [
+            "费用未知",
+            "未计费用",
+            "无法确定净利润"
+          ]
+        }
+      ],
+      "forbidden_claims": [
+        "(?:^|[。；，：\\n])\\s*(?:但|因此|所以)?(?:每件|本单)?(?:净赚|确定净利润为)\\s*28\\s*元"
+      ],
+      "required_sections": [],
+      "min_chars": 1
+    },
+    {
+      "id": "AGENT-SCOPE-013",
+      "category": "web_intelligence",
+      "name": "限定网页来源的用户反馈",
+      "prompt": "只检索网页上的 SYN-E10 用户口碑，请给出两条不同的反馈，并为每条反馈标明来源。",
+      "keyword": "SYN-E10",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "allowed_tools": [
+        "search_web",
+        "fetch_web_page"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_web",
+          "parameters": {
+            "query": {
+              "identifier": "SYN-E10"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 2
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "comfort",
+          "any_of": [
+            "佩戴夹耳",
+            "夹耳感"
+          ],
+          "evidence_ids": [
+            "SYN-E10-COMFORT"
+          ]
+        },
+        {
+          "id": "button",
+          "any_of": [
+            "按键易误触",
+            "容易误触按键"
+          ],
+          "evidence_ids": [
+            "SYN-E10-BUTTON"
+          ]
+        }
+      ],
+      "required_sections": [],
+      "min_chars": 1,
+      "critical": true
+    },
+    {
+      "id": "AGENT-EMPTY-014",
+      "category": "empty_result",
+      "name": "成功查询后的零条匹配",
+      "prompt": "只在 1688 查询 SYN-D40 的现货报价。查不到时请如实说明。",
+      "keyword": "SYN-D40",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "allowed_tools": [
+        "search_1688_wholesale"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": {
+              "identifier": "SYN-D40"
+            }
+          },
+          "status": "empty",
+          "min_data_count": 0
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "gap",
+          "any_of": [
+            "本次未查到可核实报价",
+            "本次没有找到报价",
+            "暂无可核实报价"
+          ]
+        }
+      ],
+      "forbidden_claims": [
+        "(?:^|[。；，：\\n])\\s*(?:因此|所以|说明)?(?:该商品已停产|商品已停产|该商品不存在|平台接口故障|现货单价(?:为)?\\s*\\d+(?:\\.\\d+)?\\s*元)"
+      ],
+      "required_sections": [],
+      "min_chars": 1
+    },
+    {
+      "id": "AGENT-TIMEOUT-015",
+      "category": "partial_source_failure",
+      "name": "单侧渠道超时的证据保留",
+      "prompt": "查询 SYN-D41 在 1688 和 Amazon 的单件售价。请指出哪些渠道取得了报价，以及能否计算价差。",
+      "keyword": "SYN-D41",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "challenge",
+      "allowed_tools": [
+        "search_1688_wholesale",
+        "search_amazon"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": {
+              "identifier": "SYN-D41"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 1
+        },
+        {
+          "tool_name": "search_amazon",
+          "parameters": {
+            "query": {
+              "identifier": "SYN-D41"
+            }
+          },
+          "status": "timeout",
+          "min_data_count": 0
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "domestic",
+          "any_of": [
+            "36 元/件",
+            "单价 36 元",
+            "36元/件"
+          ],
+          "evidence_ids": [
+            "SYN-D41-CN"
+          ]
+        },
+        {
+          "id": "timeout",
+          "any_of": [
+            "Amazon 查询超时",
+            "海外渠道超时",
+            "Amazon 超时"
+          ]
+        },
+        {
+          "id": "gap",
+          "any_of": [
+            "无法计算价差",
+            "价差待核实"
+          ]
+        }
+      ],
+      "forbidden_claims": [
+        "(?:海外零售价为|Amazon 售价为)\\s*\\d+(?:\\.\\d+)?\\s*(?:美元|元)"
+      ],
+      "required_sections": [],
+      "min_chars": 1
+    },
+    {
+      "id": "AGENT-MODEL-016",
+      "category": "model_disambiguation",
+      "name": "同系列型号的引用归属",
+      "prompt": "根据网页资料确认 SYN-P8 标准版是否支持无线充。搜索摘要只列系列名，请打开并引用对应版本的详情页。",
+      "keyword": "SYN-P8",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "allowed_tools": [
+        "search_web",
+        "fetch_web_page"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_web",
+          "parameters": {
+            "query": {
+              "identifier": "SYN-P8"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 2
+        },
+        {
+          "tool_name": "fetch_web_page",
+          "parameters": {
+            "url": "https://research.invalid/p8/standard"
+          },
+          "status": "ok",
+          "min_data_count": 1
+        },
+        {
+          "tool_name": "fetch_web_page",
+          "parameters": {
+            "url": "https://research.invalid/p8/pro"
+          },
+          "status": "ok",
+          "min_data_count": 1,
+          "optional": true
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "standard",
+          "any_of": [
+            "标准版不支持无线充",
+            "标准版没有无线充功能"
+          ],
+          "evidence_ids": [
+            "SYN-P8-STD"
+          ]
+        }
+      ],
+      "required_sections": [],
+      "min_chars": 1,
+      "tool_order": [
+        [
+          "search_web",
+          "fetch_web_page"
+        ]
+      ]
+    },
+    {
+      "id": "AGENT-SWITCH-017",
+      "category": "dynamic_steering",
+      "name": "工具返回后切换目标型号",
+      "prompt": "只在 1688 查询 SYN-K1 的单件报价。",
+      "keyword": "SYN-K1",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "challenge",
+      "allowed_tools": [
+        "search_1688_wholesale"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": {
+              "identifier": "SYN-K1"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 1
+        },
+        {
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": {
+              "identifier": "SYN-K2"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 1
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "new_quote",
+          "any_of": [
+            "SYN-K2 单价 31 元",
+            "SYN-K2 为31元",
+            "SYN-K2 报价31元"
+          ],
+          "evidence_ids": [
+            "SYN-K2-PRICE"
+          ]
+        }
+      ],
+      "forbidden_claims": [
+        "(?:SYN-K1|(?<![0-9])19\\s*元)"
+      ],
+      "required_sections": [],
+      "min_chars": 1,
+      "steering": [
+        "改查 SYN-K2，只报新型号，不再展示旧型号的价格。"
+      ],
+      "steering_keyword": "SYN-K2",
+      "steering_boundary": {
+        "before": 0,
+        "after": 1
+      }
+    },
+    {
+      "id": "AGENT-PACK-019",
+      "category": "pack_unit",
+      "name": "整盒采购的单位换算",
+      "prompt": "只查 1688 的 SYN-L6 耳机收纳包，按整盒发货规则备齐 50 件。最少买几盒、实得几件、货款多少？",
+      "keyword": "SYN-L6",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "allowed_tools": [
+        "search_1688_wholesale"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": {
+              "identifier": "SYN-L6"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 1
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "box_count",
+          "any_of": [
+            "9 盒",
+            "9盒",
+            "九盒"
+          ],
+          "evidence_ids": [
+            "SYN-L6-PACK"
+          ]
+        },
+        {
+          "id": "quantity",
+          "any_of": [
+            "54 件",
+            "54件",
+            "五十四件"
+          ],
+          "evidence_ids": [
+            "SYN-L6-PACK"
+          ]
+        },
+        {
+          "id": "subtotal",
+          "any_of": [
+            "324 元",
+            "324元"
+          ],
+          "evidence_ids": [
+            "SYN-L6-PACK"
+          ]
+        }
+      ],
+      "forbidden_claims": [
+        "(?:只需|购买|采购)\\s*8\\s*盒"
+      ],
+      "required_sections": [],
+      "min_chars": 1
+    },
+    {
+      "id": "AGENT-DATE-020",
+      "category": "effective_date",
+      "name": "按指定交易日期选择售后政策",
+      "prompt": "核查 2026 年 11 月 10 日购买的 SYN-R6，其配件按当时的公开政策可保修多久？请查清新旧政策的生效日期。",
+      "keyword": "SYN-R6",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "allowed_tools": [
+        "search_web",
+        "fetch_web_page"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_web",
+          "parameters": {
+            "query": {
+              "identifier": "SYN-R6"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 2
+        },
+        {
+          "tool_name": "fetch_web_page",
+          "parameters": {
+            "url": "https://research.invalid/r6/current"
+          },
+          "status": "ok",
+          "min_data_count": 1
+        },
+        {
+          "tool_name": "fetch_web_page",
+          "parameters": {
+            "url": "https://research.invalid/r6/archive"
+          },
+          "status": "ok",
+          "min_data_count": 1,
+          "optional": true
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "term",
+          "any_of": [
+            "保修 12 个月",
+            "保修12个月",
+            "保修期为一年"
+          ],
+          "evidence_ids": [
+            "SYN-R6-CURRENT"
+          ]
+        },
+        {
+          "id": "valid_from",
+          "any_of": [
+            "2026-11-01",
+            "2026 年 11 月 1 日"
+          ],
+          "evidence_ids": [
+            "SYN-R6-CURRENT"
+          ]
+        }
+      ],
+      "required_sections": [],
+      "min_chars": 1,
+      "tool_order": [
+        [
+          "search_web",
+          "fetch_web_page"
+        ]
+      ]
+    },
+    {
+      "id": "AGENT-CONFLICT-021",
+      "category": "source_conflict",
+      "name": "同型号规格冲突与不确定性披露",
+      "prompt": "查 SYN-F18 移动电源的额定输出功率。若两个公开页面对同一版本说法相反，请列明双方的数据与来源，并说明能否确定。",
+      "keyword": "SYN-F18",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "challenge",
+      "allowed_tools": [
+        "search_web",
+        "fetch_web_page"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_web",
+          "parameters": {
+            "query": {
+              "identifier": "SYN-F18"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 2
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "source_a",
+          "any_of": [
+            "18 W",
+            "18W",
+            "18 瓦"
+          ],
+          "evidence_ids": [
+            "SYN-F18-A"
+          ]
+        },
+        {
+          "id": "source_b",
+          "any_of": [
+            "20 W",
+            "20W",
+            "20 瓦"
+          ],
+          "evidence_ids": [
+            "SYN-F18-B"
+          ]
+        },
+        {
+          "id": "uncertain",
+          "any_of": [
+            "无法确定",
+            "有待核实",
+            "需要进一步核实"
+          ]
+        }
+      ],
+      "forbidden_claims": [
+        "(?:已证实|已确定|确定额定功率为)\\s*(?:18|20)\\s*(?:W|瓦)"
+      ],
+      "required_sections": [],
+      "min_chars": 1
+    },
+    {
+      "id": "AGENT-RATE-022",
+      "category": "sample_denominator",
+      "name": "区分抽样反馈比例与退货率",
+      "prompt": "只用网页资料分析 SYN-B12。计算样本中提及断连的比例，说明能否推算整体退货率。",
+      "keyword": "SYN-B12",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "allowed_tools": [
+        "search_web",
+        "fetch_web_page"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_web",
+          "parameters": {
+            "query": {
+              "identifier": "SYN-B12"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 1
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "ratio",
+          "any_of": [
+            "25%",
+            "四分之一"
+          ],
+          "evidence_ids": [
+            "SYN-B12-SAMPLE"
+          ]
+        },
+        {
+          "id": "base",
+          "any_of": [
+            "12 条",
+            "12条",
+            "十二条"
+          ],
+          "evidence_ids": [
+            "SYN-B12-SAMPLE"
+          ]
+        },
+        {
+          "id": "scope",
+          "any_of": [
+            "无法推算整体退货率",
+            "退货率未知",
+            "缺少订单与退货数据"
+          ],
+          "evidence_ids": [
+            "SYN-B12-SAMPLE"
+          ]
+        }
+      ],
+      "forbidden_claims": [
+        "(?:整体退货率为|可确定退货率为)\\s*25%"
+      ],
+      "required_sections": [],
+      "min_chars": 1
+    },
+    {
+      "id": "AGENT-STOCK-023",
+      "category": "zero_value",
+      "name": "有结果但库存数值为零",
+      "prompt": "在 1688 查询 SYN-Z5 现货。指出有没有找到商品、当前能否发货以及页面是否给出了补货日期。",
+      "keyword": "SYN-Z5",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "allowed_tools": [
+        "search_1688_wholesale"
+      ],
+      "tool_expectations": [
+        {
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": {
+              "identifier": "SYN-Z5"
+            }
+          },
+          "status": "ok",
+          "min_data_count": 1
+        }
+      ],
+      "reference_facts": [
+        {
+          "id": "matched",
+          "any_of": [
+            "已找到商品",
+            "已查到商品",
+            "找到商品页"
+          ],
+          "evidence_ids": [
+            "SYN-Z5-STOCK"
+          ]
+        },
+        {
+          "id": "zero",
+          "any_of": [
+            "库存 0 件",
+            "库存为零",
+            "库存为0"
+          ],
+          "evidence_ids": [
+            "SYN-Z5-STOCK"
+          ]
+        },
+        {
+          "id": "restock",
+          "any_of": [
+            "补货日期未知",
+            "未公布补货日期",
+            "未提供补货日期"
+          ],
+          "evidence_ids": [
+            "SYN-Z5-STOCK"
+          ]
+        }
+      ],
+      "forbidden_claims": [
+        "(?:未找到该商品|商品已下架|明天即可发货)"
+      ],
+      "required_sections": [],
+      "min_chars": 1
+    }
+  ]
+}

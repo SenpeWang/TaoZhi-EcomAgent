@@ -35,7 +35,7 @@ def safe_attributes(attrs: Mapping | None) -> dict:
             clean[key] = redact(value)
         elif key in _NUMERIC and type(value) in (int, float) and 0 <= value <= 2**63 - 1 and math.isfinite(value):
             clean[key] = value
-        elif key == "state.hard_block" and isinstance(value, bool):
+        elif key in {"state.hard_block", "tool.dispatched"} and isinstance(value, bool):
             clean[key] = value
         elif key == "research.next_action" and value in ("dispatch_subagents", "synthesizer", "final_node"):
             clean[key] = value

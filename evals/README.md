@@ -11,10 +11,10 @@ evals/
 │   ├── run.py                   独立评测执行器（原 run_evals.py 已彻底迁入此处）
 │   └── 测评记录.md              知识文档 RAG 评测基线、改动对比与归因档案
 ├── agent_eval/                  ★电商真·自主多智能体（Supervisor Loop）质效评测体系
-│   ├── harness.py               单臂会话沙箱与链路追踪
-│   ├── judges.py                4 大声明式判定器（工具契约/交付大纲/去伪/动态干预）
-│   ├── cases.py                 10 大全场景基准测试用例集
-│   └── runner.py                CLI 批跑器（测试完成自动同步至 Phoenix）
+│   ├── harness.py               调研图执行采集与合成轨迹重评
+│   ├── judges.py                执行状态、工具轨迹、交付、事实证据与干预判定
+│   ├── cases.py                 调研基准用例
+│   └── runner.py                CLI 批跑、报告、版本对照与门禁
 ├── dataset/                     独立评测数据包：规格 → 确定性生成 → 幂等灌库（见其 README）
 ├── datasets/                    数据集（随代码进 Git，可追溯、可 diff）
 │   ├── golden_adversarial.json  18 例对抗集（全自动规则判定）
@@ -27,7 +27,7 @@ evals/
 └── tests/                       评估代码自身的单元测试
 ```
 
-## 三层评估
+## RAG 三层评估
 
 | 层 | 评什么 | 判定方式 | 数据来源 |
 |---|---|---|---|
@@ -42,6 +42,41 @@ behavior 层按类别覆盖三组专项：**robust**（同一事实的五种问�
 唯一口径 = 独立数据包：预期文档按文档 id 解析、身份按 spec 登录，语料由 `seed.py`
 灌入 PG/ES（跑评测前先灌库，见下）。
 
+## Agent 调研评测
+
+使用仓库中的合成记录可验证从工具判定到发布门禁的全过程。默认回放包括既有的网页调研边界样本和 12 个固定证据场景，分别输出报告。回放不发起模型或商品检索请求。
+
+```bash
+make evals-agent-replay
+```
+
+命令会打印报告路径。报告按用例列出工具契约、交付结果、首要故障类别及能确认的执行步骤。样本数、可判定分母、Token 覆盖与挑战集结果单列。实际调研使用 `make evals-agent`。固定证据的样本通过 `--dataset synthetic --replay` 运行。运行产物保存在 Git 忽略的 `evals/reports/`。[Agent 指标与报告对照](BENCHMARK.md#13-agent-调研评测)
+
+### 查看工作台评测结果
+
+评测中心归档第 3 版 Agent 报告，早期格式需要重新运行评测生成报告。已部署的工作台需应用 `020_evaluation_center` 迁移。运维可在连接该工作台数据库的受信环境中指定租户和发起人，把已生成的报告归档。重复导入相同内容和归属的批次是幂等的。
+
+```bash
+PYTHONPATH=src python -m evals.agent_eval.publish "$REPORT_PATH" --tenant-id "$TENANT_ID" --owner-id "$OWNER_ID"
+```
+
+进入「运行分析 → 评测中心」，打开批次并按失败状态筛选用例，可查看期望的工具、实际工具步骤、判定维度及故障类型。对照基线需选择同模式、同判定器版本的另一批次。真实执行只有在关联到获准查看的业务任务时才可打开轨迹中台。合成回放展示各步观测，参数只显示字段名。CLI 生成新报告时可附加 `--publish "$TENANT_ID" "$OWNER_ID"` 同步归档，门禁失败的批次也可查看。
+
+### 复现合成正例与反例
+
+```bash
+PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json
+PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json --counterexamples evals/datasets/agent_research_counterexamples.json --compare "$BASELINE_REPORT"
+```
+
+第二条命令的 `BASELINE_REPORT` 取第一条打印的报告路径。反例保留输入、版本与其余观测，只修改一个执行步骤或答案，门禁将按设计返回非零退出码。两批均归档后，在评测中心选择「合成反例复核」批次，并与「合成回放」批次对照，即可查看每个用例由通过变为失败的原因。批次详情会展示报告中可用的回放记录、反例集和模型配置的 SHA-256 摘要，供复核时确认版本。
+
+| 工作 | 入口与输出 |
+|---|---|
+| 重评指定样本 | `PYTHONPATH=src python3 -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_web_replay.json`。附加 `--compare <旧报告路径>` 可得到配对的修复、回归和排除项 |
+| 人工盲审 | `PYTHONPATH=src python3 -m evals.agent_eval.review --replay evals/datasets/agent_web_replay.json` 生成独立人工标注表。显式使用 `--model-review` 可对同一合成样本运行模型裁判。`--agreement <人工表> <模型表>` 核对有效配对与分歧 |
+| 线上问题回灌 | `PYTHONPATH=src python3 -m evals.agent_eval.feedback <活动页.json> ...` 读取通过工作台权限获取的同租户活动页，按诊断代码和处理结果输出去重计数。选择候选、重建合成证据，再用真实业务入口检验修复 |
+
 ## 运行
 
 ```bash
@@ -50,7 +85,7 @@ behavior 层按类别覆盖三组专项：**robust**（同一事实的五种问�
 make evals-quick      # 检索 + 对抗，约 5 分钟
 make evals-full       # 三层全跑（180 例逐题 judge；对比基线 + 门禁，不过则退出码 1）
 make evals-baseline   # 三层全跑后锁定为基线
-make evals-agent      # 多智能体自治调研评测（10大用例全跑，完成后自动同步至 Phoenix）
+make evals-agent      # 执行 10 个真实调研用例并保存评分报告
 make evals-tests      # 评估代码自身的单元测试（不需要在线服务）
 make evals-sync       # 评估集 + 最新报告 -> Phoenix（旁路；Phoenix 离线只跳过）
 make evals-pipeline   # evals-full 之后自动同步；门禁不过也同步，失败样例要可见
@@ -79,8 +114,8 @@ make evals-follow        # 跟随跑批进度逐例推（另一个终端，评�
 make evals-pipeline      # 三层评估后自动同步
 
 # 直接调用（Phoenix 客户端在独立 venv，项目 .venv 里没有）
-ECOM_PHOENIX_URL=http://127.0.0.1:6006 \
-  ~/.local/share/ecom-agent/phoenix-venv/bin/python evals/sync_phoenix.py --all
+PYTHONPATH=src ~/.local/share/ecom-agent/phoenix-venv/bin/python -m evals.sync_phoenix --all
+PYTHONPATH=src ~/.local/share/ecom-agent/phoenix-venv/bin/python -m evals.sync_phoenix --agent "$REPORT_PATH"
 ```
 
 | 入口 | 去向 | 内容 |
@@ -88,6 +123,7 @@ ECOM_PHOENIX_URL=http://127.0.0.1:6006 \
 | `--dataset` | Phoenix **Datasets** | 180 例：input=问题/身份/多轮，output=预期行为/金标准文档/必备事实/禁披露，metadata=类别/难度/风险 |
 | `--report` | Phoenix **Experiment** | 逐例 run（答案 + 引用标题/chunk_id/**引用正文**）+ evaluation（answer_pass / faithfulness_decl / answer_relevant / abstain / retrieval.*） |
 | `--follow` | Phoenix **Experiment**（同一次跑、边跑边写） | 同上，只是按"每完成一例"推送而不是整份报告 |
+| `--agent REPORT` | Phoenix **Experiment** | 手动导出一份当前版本的真实调研报告，保留通过、失败、不可判定三种结果 |
 
 **实时观看**：`evals/rag_eval/run.py` 每完成一例就往 `evals/reports/live.jsonl` 追加一行
 （检索层一行、行为层一行，末行 `end`）。`sync_phoenix.py --follow` 只读这个文件，
@@ -166,6 +202,8 @@ judge 分数要作门禁依据，先过校准（`evals/calibrate.py`，kappa ≥
 
 ## 新增用例
 
-一律进独立数据包：改 spec → `generate` → `seed` → 跑评测。字段、金丝雀、判定规则、
+调研合成用例由已版本化的工具证据、参考事实和定向反例组成。轨迹访问权限单独通过带登录身份的 HTTP 接口验证。[Agent 数据集设计与验收](agent_eval/数据集设计.md)
+
+RAG 用例进入独立数据包：改 spec → `generate` → `seed` → 跑评测。字段、金丝雀、判定规则、
 权限夹具的约束见 [`dataset/README.md`](dataset/README.md)（数据包说明书）与
 BENCHMARK 第 10 节（数据契约），不在本文件复述。

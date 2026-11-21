@@ -18,6 +18,8 @@
 | 业务数据 | orders / after_sales / products / skus / stock / channels | 11789 / 607 / 8 / 15 / — / 5 |
 | 框架/系统 | alembic_version / legacy_archive / checkpoints / checkpoint_blobs / checkpoint_writes / checkpoint_migrations | 1 / — / — / — / — / — |
 
+迁移 `020_evaluation_center` 在上述历史库快照的基础上增加两张评测表。`eval_runs` 按租户、发起人保存批次版本、指标和门禁结果。`eval_case_results` 以租户、批次、用例为联合主键保存逐例判定、预期和受控工具步骤。批次与明细在同一事务中入库，工具和模型的原始业务输入不进入这两张表。[迁移脚本](migrations/versions/020_evaluation_center.py)
+
 ---
 
 ## 一、身份与组织（6 张）

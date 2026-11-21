@@ -5,7 +5,8 @@ from taozhi.domain.roles import is_system_admin
 import re
 from datetime import datetime, timedelta
 
-from taozhi.domain.access import RESTRICTED_QUESTION
+from taozhi.application.common.pagination import decode_time_cursor
+from taozhi.domain.access import RESTRICTED_QUESTION, visible_owner_id
 from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
@@ -66,15 +67,6 @@ _KNOWN_FAILURE_STAGES = {
 }
 
 
-def _visible_owner(p: Principal, requested: str | None = None) -> str | None:
-    """从会话身份确定可查发起人，管理员可以选择本租户全部账号。"""
-    if is_system_admin(p.role_level):
-        return None if requested in (None, "all") else requested
-    if requested is not None and requested != p.id:
-        raise Denied("只能查看本人发起的轨迹")
-    return p.id
-
-
 def list_owners(p: Principal, *, query: str, cursor: str | None, limit: int) -> dict:
     """为管理员的发起人选择框提供分页账号目录。"""
     if not is_system_admin(p.role_level):
@@ -82,20 +74,6 @@ def list_owners(p: Principal, *, query: str, cursor: str | None, limit: int) -> 
     with database_connection() as conn:
         rows = trace_repo.list_owners(conn, p.tenant_id, query=query.strip(), after=cursor, limit=limit + 1)
     return {"items": rows[:limit], "next_cursor": rows[limit - 1]["username"] if len(rows) > limit else None}
-
-
-def _decode_cursor(cursor: str | None) -> tuple[datetime, str] | None:
-    """将分页边界还原为带时区的时间戳与唯一键。"""
-    if cursor is None:
-        return None
-    timestamp, _, task_id = cursor.partition("|")
-    try:
-        created_at = datetime.fromisoformat(timestamp)
-        if created_at.tzinfo is None or not re.fullmatch(r"[a-zA-Z0-9_-]{1,128}", task_id):
-            raise ValueError
-    except (ValueError, OverflowError) as err:
-        raise Denied("轨迹分页游标无效", "INVALID_CURSOR", 422) from err
-    return created_at, task_id
 
 
 def _display_stage(stage: str, status: str) -> str:
@@ -132,8 +110,8 @@ def list_traces(
     owner_id: str | None = None,
 ) -> dict:
     """按可见发起人、检索条件及稳定游标读取提问。"""
-    visible_owner = _visible_owner(p, owner_id)
-    before = _decode_cursor(cursor)
+    visible_owner = visible_owner_id(p, owner_id)
+    before = decode_time_cursor(cursor)
     query = query.strip()
     batch_size = max(limit + 1, 50) if query and not is_system_admin(p.role_level) else limit + 1
     rows = []
@@ -166,7 +144,7 @@ def get_trace(
 ) -> dict:
     """按任务读取状态事件，支持运行中增量拉取。"""
     with database_connection() as conn:
-        row = trace_repo.get_trace(conn, p.tenant_id, task_id, owner_id=_visible_owner(p))
+        row = trace_repo.get_trace(conn, p.tenant_id, task_id, owner_id=visible_owner_id(p))
         if row is None:
             raise Denied("轨迹不存在", "NOT_FOUND", 404)
         question_visible = is_system_admin(p.role_level) or (row["state"] != "legacy" and sources_valid(conn, p, row["sources"]))
@@ -204,7 +182,7 @@ def list_runs(p: Principal, task_id: str, *, cursor: str | None, trace_id: str |
             raise Denied("链路分页游标无效", "INVALID_CURSOR", 422)
         before = int(match[1]), match[2]
     with database_connection() as conn:
-        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=_visible_owner(p))
+        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=visible_owner_id(p))
         if job is None:
             raise Denied("轨迹不存在", "NOT_FOUND", 404)
         rows = trace_repo.list_span_runs(conn, p.tenant_id, task_id, before=before, trace_id=trace_id, limit=limit + 1)
@@ -245,7 +223,7 @@ def _display_span(row: dict, job: dict) -> dict:
 def list_spans(p: Principal, task_id: str, trace_id: str, *, kind: str | None, after_id: int, limit: int) -> dict:
     """在任务归属范围内，按精确链路编号和节点类型读取采集记录。"""
     with database_connection() as conn:
-        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=_visible_owner(p), trace_id=trace_id)
+        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=visible_owner_id(p), trace_id=trace_id)
         if job is None:
             raise Denied("执行轨迹不存在", "NOT_FOUND", 404)
         rows = trace_repo.list_spans(conn, p.tenant_id, task_id, trace_id, kind=kind, after_id=after_id, limit=limit + 1)
@@ -259,7 +237,7 @@ def list_spans(p: Principal, task_id: str, trace_id: str, *, kind: str | None, a
 
 def _activity_cursor(cursor: str | None) -> tuple[datetime, int] | None:
     """校验活动游标中的数据库主键，拒绝超出 bigint 范围的边界。"""
-    boundary = _decode_cursor(cursor)
+    boundary = decode_time_cursor(cursor)
     if boundary is None:
         return None
     started_at, row_id = boundary
@@ -287,7 +265,7 @@ def list_activities(
     """按精确的链路与执行版本展示实际操作，并在筛选后保留跨页执行者。"""
     after = _activity_cursor(cursor)
     with database_connection() as conn:
-        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=_visible_owner(p), trace_id=trace_id)
+        job = trace_repo.get_span_job(conn, p.tenant_id, task_id, owner_id=visible_owner_id(p), trace_id=trace_id)
         if job is None:
             raise Denied("执行轨迹不存在", "NOT_FOUND", 404)
         rows = trace_repo.list_activities(
