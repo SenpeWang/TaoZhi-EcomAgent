@@ -139,11 +139,11 @@ const candidates = ref<EvaluationRun[]>([])
 const nextCursor = ref<string | null>(null)
 const choiceBusy = ref(false)
 const choiceError = ref(false)
-let loadedChoices = false
+const loadedChoices = ref(false)
 
 /** 从当前账号可见的批次中查找同一执行模式及判定器版本的基线。 */
 async function loadChoices(): Promise<void> {
-  if (choiceBusy.value || (loadedChoices && !nextCursor.value)) return
+  if (choiceBusy.value || (loadedChoices.value && !nextCursor.value)) return
   choiceBusy.value = true
   choiceError.value = false
   const query = new URLSearchParams({ mode: props.run.mode, limit: '50' })
@@ -153,7 +153,7 @@ async function loadChoices(): Promise<void> {
     const page = await props.api<CursorPage<EvaluationRun>>('/evaluations/runs?' + query)
     candidates.value.push(...page.items.filter((item) => isBaselineCandidate(props.run, item)))
     nextCursor.value = page.next_cursor
-    loadedChoices = true
+    loadedChoices.value = true
   } catch {
     choiceError.value = true
   } finally {
