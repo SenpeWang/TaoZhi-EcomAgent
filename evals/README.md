@@ -44,13 +44,32 @@ behavior 层按类别覆盖三组专项：**robust**（同一事实的五种问�
 
 ## Agent 调研评测
 
-使用仓库中的合成记录可验证从工具判定到发布门禁的全过程。示例选取既有 AGENT-WEB-003，覆盖“只查网页，不得派发比价工具”。回放不发起模型或商品检索请求。
+使用仓库中的合成记录可验证从工具判定到发布门禁的全过程。默认回放包括既有的网页调研边界样本和 12 个固定证据场景，分别输出报告。回放不发起模型或商品检索请求。
 
 ```bash
 make evals-agent-replay
 ```
 
-命令会打印报告路径。报告按用例列出工具契约、交付结果、首要故障类别及能确认的执行步骤。样本数、可判定分母、Token 覆盖与挑战集结果单列。实际调研使用 `make evals-agent`。合成重评和实际运行分别归档，运行产物均保存在 Git 忽略的 `evals/reports/`。[Agent 指标与报告对照](BENCHMARK.md#13-agent-调研评测)
+命令会打印报告路径。报告按用例列出工具契约、交付结果、首要故障类别及能确认的执行步骤。样本数、可判定分母、Token 覆盖与挑战集结果单列。实际调研使用 `make evals-agent`。固定证据的样本通过 `--dataset synthetic --replay` 运行。运行产物保存在 Git 忽略的 `evals/reports/`。[Agent 指标与报告对照](BENCHMARK.md#13-agent-调研评测)
+
+### 查看工作台评测结果
+
+已部署的工作台需应用 `020_evaluation_center` 迁移。运维可在连接该工作台数据库的受信环境中指定租户和发起人，把已生成的报告归档。重复导入相同内容和归属的批次是幂等的。
+
+```bash
+PYTHONPATH=src python -m evals.agent_eval.publish "$REPORT_PATH" --tenant-id "$TENANT_ID" --owner-id "$OWNER_ID"
+```
+
+进入「运行分析 → 评测中心」，打开批次并按失败状态筛选用例，可查看期望的工具、实际工具步骤、判定维度及故障类型。对照基线需选择同模式、同判定器版本的另一批次。真实执行只有在关联到获准查看的业务任务时才可打开轨迹中台。合成回放展示各步观测，参数只显示字段名。CLI 生成新报告时可附加 `--publish "$TENANT_ID" "$OWNER_ID"` 同步归档，门禁失败的批次也可查看。
+
+### 复现合成正例与反例
+
+```bash
+PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json
+PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json --counterexamples evals/datasets/agent_research_counterexamples.json --compare "$BASELINE_REPORT"
+```
+
+第二条命令的 `BASELINE_REPORT` 取第一条打印的报告路径。反例保留输入、版本与其余观测，只修改一个执行步骤或答案；门禁将按设计返回非零退出码。两批均归档后，可在页面上查看每个用例由通过变为失败的具体原因。
 
 | 工作 | 入口与输出 |
 |---|---|
@@ -182,7 +201,7 @@ judge 分数要作门禁依据，先过校准（`evals/calibrate.py`，kappa ≥
 
 ## 新增用例
 
-Agent 调研的首批扩充方案列出了 8 个候选用例的合成证据、工具契约、参考答案与验收口径。[Agent 数据集设计评审稿](agent_eval/数据集设计.md)
+调研合成用例由已版本化的工具证据、参考事实和定向反例组成。轨迹访问权限单独通过带登录身份的 HTTP 接口验证。[Agent 数据集设计与验收](agent_eval/数据集设计.md)
 
 RAG 用例进入独立数据包：改 spec → `generate` → `seed` → 跑评测。字段、金丝雀、判定规则、
 权限夹具的约束见 [`dataset/README.md`](dataset/README.md)（数据包说明书）与

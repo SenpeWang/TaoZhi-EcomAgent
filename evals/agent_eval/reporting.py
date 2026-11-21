@@ -8,10 +8,11 @@ import re
 from collections import Counter
 from statistics import mean, median
 
+from taozhi.domain.evaluation_comparison import pair_case_results
 from taozhi.domain.research import ALL_RESEARCH_TOOLS, StopReason
 
 from .harness import AgentRunResult
-from .judges import JudgeVerdict
+from .judges import JudgeVerdict, matches_any_arguments
 
 FAILURE_LABELS = {
     "missing_observation": "缺少可判定的观测",
@@ -35,6 +36,30 @@ COUNTERS = (
     "parameter_unknown", "selection_hits", "selection_total", "selection_unknown",
     "forbidden_executions", "forbidden_attempts", "fact_hits", "fact_total", "fact_unknown",
 )
+
+TOOL_PARAMETERS = {"query", "keyword", "url", "limit", "max_chars", "timeout"}
+TOOL_OUTCOMES = {"ok", "empty", "timeout", "error", "cancelled"}
+
+
+def _public_tool_steps(result: AgentRunResult | None, rules: list[dict]) -> list[dict] | None:
+    """按采集到的顺序输出受控工具信息，不暴露调用实参和供应商响应。"""
+    if result is None or (not result.tool_calls and not result.tool_trace_complete):
+        return None
+    steps = []
+    for call in result.tool_calls:
+        tool_name = call["tool_name"]
+        parameters = call.get("parameters")
+        constraints = [rule["parameters"] for rule in rules if rule["tool_name"] == tool_name and rule.get("parameters")]
+        steps.append({
+            "step": call.get("sequence"),
+            "tool_name": tool_name if tool_name in ALL_RESEARCH_TOOLS else "unknown",
+            "status": call["status"] if call.get("status") in TOOL_OUTCOMES else None,
+            "dispatched": call.get("dispatched"),
+            "data_count": call.get("data_count"),
+            "parameter_keys": sorted(TOOL_PARAMETERS.intersection(parameters)) if isinstance(parameters, dict) else None,
+            "parameters_match": matches_any_arguments(parameters, constraints) if call.get("dispatched") is True else None,
+        })
+    return steps
 
 
 def fingerprint(value: object) -> str:
@@ -95,6 +120,13 @@ def case_record(case: dict, result: AgentRunResult | None, verdicts: list[JudgeV
     models = result.model_names if result else []
     stop = result.stop_reason if result else None
     terminal = result.system_status if result else None
+    rules = case.get("tool_expectations", [])
+    required = set(case.get("required_tools", []))
+    required.update(rule["tool_name"] for rule in rules if not rule.get("optional"))
+    required.update(tool for edge in case.get("tool_order", []) for tool in edge)
+    forbidden = set(case.get("forbidden_tools", []))
+    if "allowed_tools" in case:
+        forbidden.update(set(ALL_RESEARCH_TOOLS) - set(case["allowed_tools"]))
     return {
         "case_id": case["id"], "case_sha256": fingerprint(case), "name": case["name"],
         "category": case.get("category"), "suite": case.get("suite", "benchmark"),
@@ -107,6 +139,14 @@ def case_record(case: dict, result: AgentRunResult | None, verdicts: list[JudgeV
         "trace_id": trace if trace and re.fullmatch(r"[0-9a-f]{32}", trace) else None,
         "subagents_count": len(result.subagents) if result else None,
         "tool_calls_count": len(result.tool_calls) if result else None,
+        "expected_tools": sorted(required),
+        "forbidden_tools": sorted(forbidden),
+        "expected_parameters": [
+            {"tool_name": rule["tool_name"], "keys": sorted(TOOL_PARAMETERS.intersection(rule["parameters"]))}
+            for rule in rules if rule.get("parameters")
+        ],
+        "steps": _public_tool_steps(result, rules),
+        "steps_complete": result.tool_trace_complete if result else None,
         "token_usage": {key: usage.get(key) for key in ("model_calls", "measured_calls", "prompt_tokens", "completion_tokens")},
         "verdicts": checks,
     }
@@ -218,32 +258,4 @@ def compare_reports(current: dict, baseline: dict) -> dict:
     """只配对同来源、同裁判、同用例版本的观察，挑战集退化单列。"""
     validate_baseline(baseline, schema_version=current["schema_version"], mode=current["mode"],
                       judges_sha256=current["judges_sha256"])
-    previous = {row["case_id"]: row for row in baseline["case_results"]}
-    changes = {group: {"stable_passed": [], "stable_failed": [], "fixed": [], "regressed": []}
-               for group in ("standard", "challenge")}
-    excluded = {"new": [], "baseline_only": [], "definition_changed": [], "unassessable": []}
-    records = current["case_results"]
-    for row in records:
-        case_id = row["case_id"]
-        other = previous.pop(case_id, None)
-        if other is None:
-            excluded["new"].append(case_id)
-        elif other["case_sha256"] != row["case_sha256"]:
-            excluded["definition_changed"].append(case_id)
-        elif "unassessable" in (other["status"], row["status"]):
-            excluded["unassessable"].append(case_id)
-        else:
-            if row["status"] == other["status"]:
-                change = "stable_" + row["status"]
-            else:
-                change = "fixed" if row["status"] == "passed" else "regressed"
-            group = "challenge" if row["suite"] == "challenge" else "standard"
-            changes[group][change].append(case_id)
-    excluded["baseline_only"] = sorted(previous)
-    count = {group: sum(len(ids) for ids in results.values()) for group, results in changes.items()}
-    comparable = count["standard"] > 0 if any(row["suite"] != "challenge" for row in records) else count["challenge"] > 0
-    return {
-        "baseline_sha256": fingerprint(baseline), "paired_counts": count, "changes": changes,
-        "excluded_count": sum(len(ids) for ids in excluded.values()), "excluded": excluded,
-        "comparable": comparable, "passed": comparable and not changes["standard"]["regressed"],
-    }
+    return {"baseline_sha256": fingerprint(baseline), **pair_case_results(current["case_results"], baseline["case_results"])}

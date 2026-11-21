@@ -65,6 +65,10 @@ def _arguments_match(parameters: dict | None, constraints: dict) -> bool | None:
         if isinstance(expected, dict) and set(expected) == {"contains"}:
             if not isinstance(actual, str) or expected["contains"] not in actual:
                 return False
+        elif isinstance(expected, dict) and set(expected) == {"identifier"}:
+            pattern = r"(?<![A-Za-z0-9_-])" + re.escape(expected["identifier"]) + r"(?![A-Za-z0-9_-])"
+            if not isinstance(actual, str) or not re.search(pattern, actual, flags=re.IGNORECASE | re.ASCII):
+                return False
         elif actual != expected or type(actual) is not type(expected):
             return False
     return True
@@ -90,6 +94,13 @@ def _contract_issues(rule: dict, call: dict) -> list[dict]:
         kind = "tool_data" if count is not None else "missing_observation"
         problems.append(_issue(kind, f"{name} 的结果条数未达到标注下限或未采集", name, call))
     return problems
+
+
+def matches_any_arguments(parameters: dict | None, alternatives: list[dict]) -> bool | None:
+    """对同一工具的多种合法入参做三态判定，供判定与展示共用。"""
+    if not alternatives or parameters is None:
+        return None
+    return any(_arguments_match(parameters, rule) for rule in alternatives)
 
 
 def _before(first: dict, second: dict) -> bool | None:
@@ -148,7 +159,7 @@ class ToolExecutionJudge:
         for rule in tool_expectations or ():
             self.rules.setdefault(rule["tool_name"], []).append(rule)
         self.order = tool_order or []
-        self.required.update(self.rules)
+        self.required.update(name for name, rules in self.rules.items() if any(not r.get("optional") for r in rules))
         self.required.update(tool for edge in self.order for tool in edge)
         self.min_data_count = min_data_count
 
@@ -171,27 +182,34 @@ class ToolExecutionJudge:
             observed.setdefault(name, []).append(call)
             constraints = [rule["parameters"] for rule in self.rules.get(name, []) if rule.get("parameters")]
             if constraints:
-                matches = [_arguments_match(call.get("parameters"), spec) for spec in constraints]
-                if True in matches:
+                match = matches_any_arguments(call.get("parameters"), constraints)
+                if match is True:
                     parameter_hits += 1
                     parameter_total += 1
-                elif None in matches:
+                elif match is None:
                     parameter_unknown += 1
                     issues.append(_issue("missing_observation", f"{name} 未采集调用参数", name, call))
                 else:
                     parameter_total += 1
                     issues.append(_issue("tool_arguments", f"{name} 的调用参数与所有标注不符", name, call))
 
-        for name in sorted(self.required):
+        for name in sorted(self.required | self.rules.keys()):
             calls = observed.get(name, [])
             if not calls:
+                if name not in self.required:
+                    continue
                 kind = "missing_observation" if name in uncertain or not complete else "tool_missing"
                 required_unknown += int(kind == "missing_observation")
                 issues.append(_issue(kind, f"缺少必须调用的工具执行记录 {name}", name))
                 continue
             rules = self.rules.get(name, [])
             for rule in rules:
-                candidates = [_contract_issues(rule, call) for call in calls]
+                applicable = calls
+                if rule.get("optional") and rule.get("parameters"):
+                    applicable = [call for call in calls if _arguments_match(call.get("parameters"), rule["parameters"])]
+                candidates = [_contract_issues(rule, call) for call in applicable]
+                if not candidates:
+                    continue
                 if not all(candidates):
                     continue
                 possible = [errors for errors in candidates if all(e["failure_type"] == "missing_observation" for e in errors)]
@@ -216,7 +234,7 @@ class ToolExecutionJudge:
                     kind = "missing_observation" if None in precedes or first in uncertain or not complete else "tool_order"
                     issues.append(_issue(kind, f"未证实 {first} 先于 {second} 执行", second, later))
 
-        if not self.required and self.boundary is None and self.min_data_count > 0:
+        if not self.required and not self.rules and self.boundary is None and self.min_data_count > 0:
             counts = [call.get("data_count") for calls in observed.values() for call in calls
                       if call.get("status") in (None, "ok")]
             if sum(n for n in counts if n is not None) < self.min_data_count:
@@ -278,18 +296,49 @@ class AntiHallucinationJudge:
 
 
 class SteeringJudge:
-    """仅在已注入的指令上检查标注的采纳关键词。"""
+    """检查干预指令的交付结果，以及有序观测中工具调用是否随指令切换。"""
 
-    def __init__(self, steering_keyword: str) -> None:
+    def __init__(self, steering_keyword: str, phases: dict[str, dict] | None = None) -> None:
         self.steering_keyword = steering_keyword
+        self.phases = phases or {}
+
+    def _boundary_issues(self, result: AgentRunResult) -> list[dict]:
+        boundary = result.steering_after_sequence
+        if boundary is None or not result.tool_trace_complete:
+            return [_issue("missing_observation", "缺少干预时点或完整的工具轨迹")]
+        issues = []
+        for phase, rule in self.phases.items():
+            matched = False
+            uncertain = False
+            for call in result.tool_calls:
+                if call["tool_name"] != rule["tool_name"] or _dispatch(call) is False:
+                    continue
+                same_args = _arguments_match(call.get("parameters"), rule.get("parameters", {}))
+                if same_args is False:
+                    continue
+                sequence = call.get("sequence")
+                if same_args is None or _dispatch(call) is None or sequence is None:
+                    uncertain = True
+                elif (sequence <= boundary) == (phase == "before"):
+                    matched = True
+                else:
+                    issues.append(_issue("steering", "工具参数与指令到达时点不符", rule["tool_name"], call))
+            if uncertain:
+                issues.append(_issue("missing_observation", "无法核实干预前后调用的顺序或参数", rule["tool_name"]))
+            elif not matched:
+                issues.append(_issue("steering", "对应阶段没有按干预契约执行工具", rule["tool_name"]))
+        return issues
 
     def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
         issues = []
         if not self.steering_keyword or not result.steering_applied:
             issues.append(_issue("missing_observation", "缺少干预关键词或指令注入记录"))
-        elif self.steering_keyword not in (result.report or ""):
-            issues.append(_issue("steering", "报告未覆盖标注的干预要求"))
-        return _verdict("SteeringJudge", "trajectory", issues, "报告包含已注入指令的标注关键词")
+        else:
+            if self.steering_keyword not in (result.report or ""):
+                issues.append(_issue("steering", "报告未覆盖标注的干预要求"))
+            if self.phases:
+                issues.extend(self._boundary_issues(result))
+        return _verdict("SteeringJudge", "trajectory", issues, "报告与干预契约相符")
 
 
 def _fact_matches(value: str, paragraph: str) -> bool:
@@ -370,5 +419,6 @@ def evaluate_case(case: dict, result: AgentRunResult) -> list[JudgeVerdict]:
     if case.get("reference_facts") or case.get("forbidden_claims"):
         verdicts.append(ReferenceFactJudge(case.get("reference_facts", []), case.get("forbidden_claims", [])).evaluate(result))
     if case.get("steering_keyword"):
-        verdicts.append(SteeringJudge(case["steering_keyword"]).evaluate(result))
+        phases = {phase: case["tool_expectations"][index] for phase, index in case.get("steering_boundary", {}).items()}
+        verdicts.append(SteeringJudge(case["steering_keyword"], phases).evaluate(result))
     return verdicts

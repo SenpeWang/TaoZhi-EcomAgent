@@ -6,40 +6,13 @@
     </div>
 
     <form class="toolbar trace-filters" @submit.prevent="applyFilters">
-      <el-select
+      <TenantOwnerSelect
         v-if="isAdmin"
-        :model-value="selectedOwnerId"
         class="trace-owner"
-        aria-label="按发起人筛选"
-        placeholder="搜索姓名或账号"
-        filterable
-        remote
-        clearable
-        :remote-method="searchOwners"
-        @visible-change="openOwnerMenu"
+        :model-value="selectedOwnerId"
+        :api="api"
         @update:model-value="changeOwner"
-      >
-        <el-option label="全部用户（all）" value="all" />
-        <el-option
-          v-for="owner in owners"
-          :key="owner.id"
-          :label="
-            owner.display_name ? owner.display_name + '（' + owner.username + '）' : owner.username
-          "
-          :value="owner.id"
-        />
-        <template v-if="ownerLoading || ownerError || nextOwnerCursor || !owners.length" #footer>
-          <span v-if="ownerLoading" role="status">正在加载用户…</span>
-          <div v-else-if="ownerError" class="owner-retry">
-            <span role="alert">{{ ownerError }}</span>
-            <el-button text type="primary" @click="loadOwners">重试</el-button>
-          </div>
-          <el-button v-else-if="nextOwnerCursor" text type="primary" @click="loadOwners"
-            >加载更多用户</el-button
-          >
-          <span v-else>没有匹配的用户</span>
-        </template>
-      </el-select>
+      />
       <el-input
         v-model="keyword"
         class="trace-search"
@@ -159,7 +132,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { formatStage, stateTag, stateText, traceKind, traceTime } from '../labels'
-import type { TraceOwner, TraceOwnerPage, TracePage, TraceSummary } from '../types'
+import type { TracePage, TraceSummary } from '../types'
+import TenantOwnerSelect from './TenantOwnerSelect.vue'
 
 const emit = defineEmits<{ (e: 'inspect', taskId: string, traceId: string | null): void }>()
 const props = defineProps<{ isAdmin: boolean; api: <T>(path: string) => Promise<T> }>()
@@ -177,12 +151,6 @@ const states = [
   'legacy',
 ]
 const selectedOwnerId = ref('all')
-const owners = ref<TraceOwner[]>([])
-const nextOwnerCursor = ref<string | null>(null)
-const ownerLoading = ref(false)
-const ownerError = ref('')
-let ownerQuery = ''
-let ownerRequestSequence = 0
 
 const keyword = ref('')
 const taskKindFilter = ref('')
@@ -222,50 +190,6 @@ async function loadPage(): Promise<void> {
   } finally {
     if (requestId === requestSequence) loading.value = false
   }
-}
-
-/**
- * 读取发起人选项的下一页，仅使用最新搜索词的结果。
- */
-async function loadOwners(): Promise<void> {
-  if (!props.isAdmin) return
-  const requestId = ++ownerRequestSequence
-  const query = new URLSearchParams({ limit: '50' })
-  if (ownerQuery) query.set('q', ownerQuery)
-  if (nextOwnerCursor.value) query.set('cursor', nextOwnerCursor.value)
-  ownerError.value = ''
-  ownerLoading.value = true
-  try {
-    const page = await props.api<TraceOwnerPage>('/admin/traces/owners?' + query)
-    if (requestId !== ownerRequestSequence) return
-    owners.value = [...owners.value, ...page.items]
-    nextOwnerCursor.value = page.next_cursor
-  } catch (cause) {
-    if (requestId === ownerRequestSequence) {
-      ownerError.value = cause instanceof Error ? cause.message : '读取用户列表失败'
-    }
-  } finally {
-    if (requestId === ownerRequestSequence) ownerLoading.value = false
-  }
-}
-
-/**
- * 从当前租户的成员目录按姓名或账号重新搜索。
- * @param input - 管理员输入的姓名或账号。
- */
-function searchOwners(input: string): void {
-  ownerQuery = input.trim().slice(0, 200)
-  owners.value = []
-  nextOwnerCursor.value = null
-  void loadOwners()
-}
-
-/**
- * 打开选择框时显示第一页成员。
- * @param open - 用户选择框是否展开。
- */
-function openOwnerMenu(open: boolean): void {
-  if (open) searchOwners('')
 }
 
 /**
@@ -317,12 +241,6 @@ onMounted(loadPage)
 }
 .trace-filters .trace-owner {
   width: 210px;
-}
-.owner-retry {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
 }
 .trace-question {
   display: -webkit-box;

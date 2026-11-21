@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "source": "synthetic",
+  "counterexamples": [
+    {
+      "case_id": "AGENT-MOQ-011",
+      "fixture_version": 1,
+      "name": "将达不到起订门槛的报价当作成交价",
+      "expected_failure": "forbidden_claim",
+      "edit": {
+        "path": [
+          "report"
+        ],
+        "value": "选择甲，100 件购买时成交单价为 16 元，货款 1,600 元，运费待确认。[SYN-C65-A]\n\n乙需 200 件起订。[SYN-C65-B]"
+      }
+    },
+    {
+      "case_id": "AGENT-FX-012",
+      "fixture_version": 1,
+      "name": "将毛价差断言为已实现净利润",
+      "expected_failure": "forbidden_claim",
+      "edit": {
+        "path": [
+          "report"
+        ],
+        "value": "1688 货源价 28 元，Amazon 零售价 8 美元，折合 56 元，单件价差 28 元。[SYN-H20-CN][SYN-H20-US]\n\n费用未知，但每件净赚 28 元。"
+      }
+    },
+    {
+      "case_id": "AGENT-SCOPE-013",
+      "fixture_version": 1,
+      "name": "完成网页调研后额外执行了 Amazon 查询",
+      "expected_failure": "tool_forbidden",
+      "edit": {
+        "path": [
+          "tool_calls"
+        ],
+        "value": [
+          {
+            "sequence": 1,
+            "tool_name": "search_web",
+            "parameters": {
+              "query": "SYN-E10"
+            },
+            "status": "ok",
+            "data_count": 2,
+            "items": [
+              {
+                "evidence_id": "SYN-E10-COMFORT",
+                "text": "试用记录 A：佩戴 45 分钟后耳廓感到夹压。",
+                "url": "https://research.invalid/e10/comfort"
+              },
+              {
+                "evidence_id": "SYN-E10-BUTTON",
+                "text": "试用记录 B：调整耳机时常碰到按键。",
+                "url": "https://research.invalid/e10/button"
+              }
+            ],
+            "dispatched": true
+          },
+          {
+            "sequence": 2,
+            "tool_name": "search_amazon",
+            "parameters": {
+              "query": "SYN-E10"
+            },
+            "status": "empty",
+            "data_count": 0,
+            "items": [],
+            "dispatched": true
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "AGENT-EMPTY-014",
+      "fixture_version": 1,
+      "name": "从合法空结果断言商品不存在",
+      "expected_failure": "forbidden_claim",
+      "edit": {
+        "path": [
+          "report"
+        ],
+        "value": "本次未查到可核实报价。该商品不存在。"
+      }
+    },
+    {
+      "case_id": "AGENT-TIMEOUT-015",
+      "fixture_version": 1,
+      "name": "将上游超时登记为成功零条",
+      "expected_failure": "tool_status",
+      "edit": {
+        "path": [
+          "tool_calls",
+          1,
+          "status"
+        ],
+        "value": "empty"
+      }
+    },
+    {
+      "case_id": "AGENT-MODEL-016",
+      "fixture_version": 1,
+      "name": "结论正确却引用了另一型号的说明书",
+      "expected_failure": "evidence_citation",
+      "edit": {
+        "path": [
+          "report"
+        ],
+        "value": "SYN-P8 标准版不支持无线充。[SYN-P8-PRO]"
+      }
+    },
+    {
+      "case_id": "AGENT-SWITCH-017",
+      "fixture_version": 1,
+      "name": "最终型号和报价正确，但第二次取价发生在用户指令之前",
+      "expected_failure": "steering",
+      "edit": {
+        "path": [
+          "steering_after_sequence"
+        ],
+        "value": 2
+      }
+    },
+    {
+      "case_id": "AGENT-PACK-019",
+      "fixture_version": 1,
+      "name": "将整盒数向下取整造成采购数量不足",
+      "expected_failure": "forbidden_claim",
+      "edit": {
+        "path": [
+          "report"
+        ],
+        "value": "只需 8 盒，实得 48 件，货款 288 元。[SYN-L6-PACK]"
+      }
+    },
+    {
+      "case_id": "AGENT-DATE-020",
+      "fixture_version": 1,
+      "name": "按过期政策回答指定日期的保修期限",
+      "expected_failure": "reference_fact",
+      "edit": {
+        "path": [
+          "report"
+        ],
+        "value": "本次购买适用历史政策，保修 6 个月。[SYN-R6-OLD]"
+      }
+    },
+    {
+      "case_id": "AGENT-CONFLICT-021",
+      "fixture_version": 1,
+      "name": "忽略冲突并直接确认更高读数",
+      "expected_failure": "forbidden_claim",
+      "edit": {
+        "path": [
+          "report"
+        ],
+        "value": "资料甲写明 18 W。[SYN-F18-A]\n\n资料乙记载 20 W。[SYN-F18-B]\n\n已确定额定功率为 20 W。"
+      }
+    },
+    {
+      "case_id": "AGENT-RATE-022",
+      "fixture_version": 1,
+      "name": "把反馈样本中的故障占比当作全量退货率",
+      "expected_failure": "forbidden_claim",
+      "edit": {
+        "path": [
+          "report"
+        ],
+        "value": "12 条反馈中 3 条提及断连，样本占比 25%。整体退货率为 25%。[SYN-B12-SAMPLE]"
+      }
+    },
+    {
+      "case_id": "AGENT-STOCK-023",
+      "fixture_version": 1,
+      "name": "把有一条在架记录、库存为零误记为没找到商品",
+      "expected_failure": "tool_status",
+      "edit": {
+        "path": [
+          "tool_calls",
+          0,
+          "status"
+        ],
+        "value": "empty"
+      }
+    }
+  ]
+}

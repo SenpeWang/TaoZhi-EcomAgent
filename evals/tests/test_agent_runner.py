@@ -114,6 +114,28 @@ def test_cli_regrade_never_runs_graph(tmp_path, monkeypatch):
     assert runner.main(["--replay", str(path), "--output-dir", str(tmp_path)]) == 1
 
 
+def test_synthetic_case_cannot_reach_a_live_model(tmp_path, monkeypatch):
+    fixed = case("FIXED", execution_mode="synthetic_trace_regrade", fixture_version=1)
+    monkeypatch.setattr(runner, "AgentEvalHarness", lambda: pytest.fail("合成用例不得启动调研图"))
+    with pytest.raises(ValueError, match="固定合成证据"):
+        runner.run_agent_evaluations([fixed], sync_phoenix=False, reports_dir=tmp_path)
+
+
+def test_case_step_projection_exposes_contract_without_free_text(tmp_path):
+    sample = case("C1", tool_expectations=[{"tool_name": "search_web", "parameters": {"query": {"contains": "合成"}}}])
+    raw = observation("C1")
+    raw["tool_calls"][0]["parameters"]["内部联系方式"] = "不可发布"
+    report = runner.run_agent_evaluations([sample], replay_file=recording(tmp_path, [raw]), reports_dir=tmp_path)
+    row = report["case_results"][0]
+    assert row["expected_tools"] == ["search_web"]
+    assert row["expected_parameters"] == [{"tool_name": "search_web", "keys": ["query"]}]
+    assert row["steps"] == [{"step": 1, "tool_name": "search_web", "status": "ok",
+                             "dispatched": True, "data_count": 1, "parameter_keys": ["query"], "parameters_match": False}]
+    assert row["steps_complete"] and row["status"] == "failed"
+    serialized = json.dumps(report, ensure_ascii=False)
+    assert all(private not in serialized for private in ("内部联系方式", "不可发布", "敏感查询原文"))
+
+
 def test_standard_regression_independently_blocks_and_challenge_is_separate(tmp_path):
     cases = [case(f"C{i}") for i in range(1, 6)] + [case("C6", suite="challenge")]
     base_observations = [observation(c["id"]) for c in cases]

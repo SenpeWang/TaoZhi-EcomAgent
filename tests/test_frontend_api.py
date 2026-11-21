@@ -249,3 +249,49 @@ assert.equal(runDuration({ ...run, status: 'interrupted', ended_at: null }, Date
         input=source, cwd=PROJECT, capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_evaluation_center_contracts_and_baseline_scope():
+    """通过实际请求函数检验评测详情标识、回放缺测、受控轨迹链接和基线范围。"""
+    source = """
+import assert from 'node:assert/strict'
+import { requestApi } from './web/src/api.ts'
+import { workspaceNavigation } from './web/src/workspaceNavigation.ts'
+import { evaluationRunPath, isBaselineCandidate } from './web/src/evaluations.ts'
+
+const pages = workspaceNavigation({id:'member'}, {}, 0, 0).flatMap(group => group.items)
+assert.ok(pages.find(item => item.page === '评测中心'))
+assert.deepEqual(workspaceNavigation({must_change:true}, {}, 0, 0)
+  .flatMap(group => group.items.map(item => item.page)), ['个人中心'])
+const run = {run_id:'test-a', mode:'live',dataset_sha256:'1'.repeat(64),judges_sha256:'2'.repeat(64)}
+assert.equal(evaluationRunPath('test/a'), '/evaluations/runs/test%2Fa')
+assert.ok(isBaselineCandidate(run,{...run,run_id:'test-b'}))
+for (const other of [run,{...run, run_id:'other',mode:'synthetic_trace_regrade'},
+                     {...run,run_id:'other',judges_sha256:'wrong'}]) {
+  assert.equal(isBaselineCandidate(run,other),false)
+}
+const item = {case_id:'SYN-X', status:'unassessable'}
+const path = evaluationRunPath(run.run_id)
+async function load(resource, data) {
+  globalThis.fetch = async url => {
+    assert.equal(url,'/api' + resource)
+    return Response.json(data)
+  }
+  return requestApi(resource,'demo',() => {})
+}
+assert.deepEqual((await load('/evaluations/runs?owner_id=all',{items:[run],next_cursor:'next'})).items,[run])
+await assert.rejects(load('/evaluations/runs', {items:[run]}), /评测记录响应异常/)
+await assert.rejects(load(path, {run:{...run,run_id:'other'},metrics:{},comparison:null}), /评测记录响应异常/)
+assert.equal((await load(path, {run, metrics:{}, comparison:null})).comparison,null)
+const details = {case:item,expected:null,observed:null,steps_complete:null,verdicts:[],trace_link:null}
+const casePath = path + '/cases/SYN-X'
+assert.deepEqual(await load(casePath, details),details)
+await assert.rejects(load(casePath, {...details,case:{...item,case_id:'OTHER'}}), /评测记录响应异常/)
+await assert.rejects(load(casePath, {...details,trace_link:{task_id:'task',trace_id:'invalid'}}), /评测记录响应异常/)
+await assert.rejects(load(path+'/comparison?baseline_id=test-b',{ changes:{} }), /评测记录响应异常/)
+"""
+    result = subprocess.run(
+        [_node(), "--experimental-strip-types", "--input-type=module"],
+        input=source, cwd=PROJECT, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr

@@ -64,7 +64,8 @@ def _sync_live_reports() -> None:
 
 def run_agent_evaluations(cases: list[dict], sync_phoenix: bool = True, *,
                           replay_file: Path | None = None, reports_dir: Path | None = None,
-                          catalog: list[dict] | None = None, compare_file: Path | None = None) -> dict:
+                          catalog: list[dict] | None = None, compare_file: Path | None = None,
+                          counterexamples_file: Path | None = None, publish_to: tuple[str, str] | None = None) -> dict:
     """通过同一组判定器评估实际运行或已有记录，将来源写入独立报告。"""
     dataset = cases if catalog is None else catalog
     validate_cases(dataset)
@@ -75,6 +76,10 @@ def run_agent_evaluations(cases: list[dict], sync_phoenix: bool = True, *,
         raise ValueError("运行用例包含重复或未登记的定义")
     root = Path(reports_dir or REPORTS_DIR)
     mode = "live" if replay_file is None else "synthetic_trace_regrade"
+    if counterexamples_file is not None and replay_file is None:
+        raise ValueError("反例变更只能应用到合成回放")
+    if replay_file is None and any(case.get("execution_mode") == "synthetic_trace_regrade" for case in cases):
+        raise ValueError("所选用例依赖固定合成证据，请指定 --replay")
     schema_version = 2
     judges_sha256 = hashlib.sha256(Path(__file__).with_name("judges.py").read_bytes()).hexdigest()
     baseline = None
@@ -87,6 +92,27 @@ def run_agent_evaluations(cases: list[dict], sync_phoenix: bool = True, *,
         harness = AgentEvalHarness()
     else:
         captured, source = read_synthetic_replay(Path(replay_file), set(indices))
+        if counterexamples_file is not None:
+            from .counterexamples import apply_counterexample
+
+            payload = Path(counterexamples_file).read_bytes()
+            envelope = json.loads(payload)
+            if (not isinstance(envelope, dict) or envelope.get("source") != "synthetic"
+                    or type(envelope.get("schema_version")) is not int or envelope["schema_version"] != 1
+                    or not isinstance(envelope.get("counterexamples"), list)):
+                raise ValueError("反例文件格式无效")
+            selected_ids = {case["id"] for case in cases}
+            variants = set()
+            for variant in envelope["counterexamples"]:
+                cid = variant.get("case_id") if isinstance(variant, dict) else None
+                if not isinstance(cid, str) or cid not in captured or cid in variants:
+                    raise ValueError("反例缺少对应的合成观测或用例编号重复")
+                variants.add(cid)
+                if cid in selected_ids:
+                    captured[cid] = apply_counterexample(captured[cid], variant)
+            if not selected_ids.issubset(variants):
+                raise ValueError("所选用例不全都有对应的反例")
+            source["counterexamples_sha256"] = hashlib.sha256(payload).hexdigest()
         root = root / mode
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
@@ -138,6 +164,11 @@ def run_agent_evaluations(cases: list[dict], sync_phoenix: bool = True, *,
     temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     temporary.replace(report_path)
     print(f"门禁{'通过' if report['gate']['passed'] else '未通过'}，评测报告 {report_path}")
+    if publish_to is not None:
+        from .publish import publish_report
+
+        publish_report(report_path, *publish_to)
+        print(f"评测中心已收录批次 {run_id}")
     if sync_phoenix and replay_file is None and root.resolve() == REPORTS_DIR.resolve():
         try:
             _sync_live_reports()
@@ -150,18 +181,30 @@ def main(argv: list[str] | None = None) -> int:
     """缺少记录、硬失败和统计回归使用非零退出码。"""
     parser = argparse.ArgumentParser(description="调研 Agent 评测与合成轨迹重评")
     parser.add_argument("--case", help="只评估指定用例，缺少其录制会记为未判定")
+    parser.add_argument("--dataset", choices=["synthetic"], help="只运行固定合成证据用例，须同时提供 --replay")
     parser.add_argument("--replay", type=Path, metavar="PATH", help="读取合成 JSON 执行记录进行重评")
     parser.add_argument("--compare", type=Path, metavar="REPORT", help="与同来源、同裁判的已有 Agent 报告逐例比较")
+    parser.add_argument("--counterexamples", type=Path, metavar="PATH", help="在合成回放上重现指定反例，每次只改一项观测")
+    parser.add_argument("--publish", nargs=2, metavar=("TENANT_ID", "OWNER_ID"), help="在已配置的工作台数据库归档本次结果")
     parser.add_argument("--output-dir", type=Path, help="报告目录，合成重评另存于其子目录")
     parser.add_argument("--no-sync", action="store_true", help="跳过真实运行报告的 Phoenix 同步")
     args = parser.parse_args(argv)
-    selected = [case for case in AGENT_BENCHMARK_CASES if args.case is None or case["id"] == args.case]
+    if args.dataset and args.replay is None:
+        parser.error("合成数据集需要 --replay 执行记录")
+    selected = AGENT_BENCHMARK_CASES
+    if args.case:
+        selected = [case for case in selected if case["id"] == args.case]
+    if args.dataset:
+        selected = [case for case in selected if case.get("execution_mode") == "synthetic_trace_regrade"]
+    elif args.replay is None and args.case is None:
+        selected = [case for case in selected if case.get("execution_mode") != "synthetic_trace_regrade"]
     if not selected:
         parser.error("未找到指定用例")
     try:
         report = run_agent_evaluations(selected, sync_phoenix=not args.no_sync, replay_file=args.replay,
                                        reports_dir=args.output_dir, catalog=AGENT_BENCHMARK_CASES,
-                                       compare_file=args.compare)
+                                       compare_file=args.compare, counterexamples_file=args.counterexamples,
+                                       publish_to=tuple(args.publish) if args.publish else None)
     except (OSError, UnicodeError, json.JSONDecodeError):
         parser.error("无法读取评测文件或写入报告")
     except ValueError as exc:

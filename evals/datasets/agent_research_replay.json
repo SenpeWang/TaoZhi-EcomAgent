@@ -1,0 +1,476 @@
+{
+  "schema_version": 1,
+  "source": "synthetic",
+  "observations": [
+    {
+      "case_id": "AGENT-MOQ-011",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "选择甲，100 件达到第二档，单价 20 元/件，货款 2,000 元，运费待确认。[SYN-C65-A]\n\n乙需 200 件起订，当前订单不满足。[SYN-C65-B]",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": "SYN-C65"
+          },
+          "status": "ok",
+          "data_count": 2,
+          "items": [
+            {
+              "evidence_id": "SYN-C65-A",
+              "text": "合成供货方甲。SYN-C65，1–99 件每件 24 元，100 件及以上每件 20 元。运费另计，金额未提供。"
+            },
+            {
+              "evidence_id": "SYN-C65-B",
+              "text": "合成供货方乙。SYN-C65，每件 16 元，最低订单量 200 件。"
+            }
+          ],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": [
+        "SYN-C65-A",
+        "SYN-C65-B"
+      ]
+    },
+    {
+      "case_id": "AGENT-FX-012",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "1688 货源价 28 元，Amazon 零售价 8 美元，按 1 美元兑 7 元折合 56 元，单件价差 28 元。[SYN-H20-CN][SYN-H20-US]\n\n平台费、税费、物流费用未知，无法确定净利润。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": "SYN-H20"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-H20-CN",
+              "text": "SYN-H20 单件货源价 28 CNY，不含物流。"
+            }
+          ],
+          "dispatched": true
+        },
+        {
+          "sequence": 2,
+          "tool_name": "search_amazon",
+          "parameters": {
+            "query": "SYN-H20"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-H20-US",
+              "text": "SYN-H20, one unit, retail price USD 8. No fee breakdown."
+            }
+          ],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": [
+        "SYN-H20-CN",
+        "SYN-H20-US"
+      ]
+    },
+    {
+      "case_id": "AGENT-SCOPE-013",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "一位用户反映长时间佩戴夹耳。[SYN-E10-COMFORT]\n\n另一位用户反映按键易误触。[SYN-E10-BUTTON]",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "SYN-E10"
+          },
+          "status": "ok",
+          "data_count": 2,
+          "items": [
+            {
+              "evidence_id": "SYN-E10-COMFORT",
+              "text": "试用记录 A：佩戴 45 分钟后耳廓感到夹压。",
+              "url": "https://research.invalid/e10/comfort"
+            },
+            {
+              "evidence_id": "SYN-E10-BUTTON",
+              "text": "试用记录 B：调整耳机时常碰到按键。",
+              "url": "https://research.invalid/e10/button"
+            }
+          ],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": [
+        "SYN-E10-COMFORT",
+        "SYN-E10-BUTTON"
+      ]
+    },
+    {
+      "case_id": "AGENT-EMPTY-014",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "本次未查到可核实报价。查询成功，匹配条目为零，无法据此判断是否停产。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": "SYN-D40"
+          },
+          "status": "empty",
+          "data_count": 0,
+          "items": [],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": []
+    },
+    {
+      "case_id": "AGENT-TIMEOUT-015",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "1688 已取得 36 元/件报价。[SYN-D41-CN]\n\nAmazon 查询超时，未取得海外售价，无法计算价差。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": "SYN-D41"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-D41-CN",
+              "text": "SYN-D41 单件批发价 CNY 36。"
+            }
+          ],
+          "dispatched": true
+        },
+        {
+          "sequence": 2,
+          "tool_name": "search_amazon",
+          "parameters": {
+            "query": "SYN-D41"
+          },
+          "status": "timeout",
+          "data_count": 0,
+          "items": [],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": [
+        "SYN-D41-CN"
+      ]
+    },
+    {
+      "case_id": "AGENT-MODEL-016",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "SYN-P8 标准版不支持无线充。[SYN-P8-STD]",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "SYN-P8"
+          },
+          "status": "ok",
+          "data_count": 2,
+          "items": [
+            {
+              "evidence_id": "SYN-P8-LIST-1",
+              "text": "SYN-P8 系列说明索引：标准版使用手册。",
+              "url": "https://research.invalid/p8/standard"
+            },
+            {
+              "evidence_id": "SYN-P8-LIST-2",
+              "text": "SYN-P8 系列说明索引：Pro 版使用手册。",
+              "url": "https://research.invalid/p8/pro"
+            }
+          ],
+          "dispatched": true
+        },
+        {
+          "sequence": 2,
+          "tool_name": "fetch_web_page",
+          "parameters": {
+            "url": "https://research.invalid/p8/standard"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-P8-STD",
+              "text": "标准版仅支持有线充电，不支持无线充电。",
+              "url": "https://research.invalid/p8/standard"
+            }
+          ],
+          "dispatched": true
+        },
+        {
+          "sequence": 3,
+          "tool_name": "fetch_web_page",
+          "parameters": {
+            "url": "https://research.invalid/p8/pro"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-P8-PRO",
+              "text": "Pro 版支持无线充电。",
+              "url": "https://research.invalid/p8/pro"
+            }
+          ],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": [
+        "SYN-P8-LIST-1",
+        "SYN-P8-LIST-2",
+        "SYN-P8-STD",
+        "SYN-P8-PRO"
+      ]
+    },
+    {
+      "case_id": "AGENT-SWITCH-017",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "SYN-K2 单价 31 元。[SYN-K2-PRICE]",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": "SYN-K1"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-K1-PRICE",
+              "text": "型号 SYN-K1 的公开单件报价为 19 元。"
+            }
+          ],
+          "dispatched": true
+        },
+        {
+          "sequence": 2,
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": "SYN-K2"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-K2-PRICE",
+              "text": "型号 SYN-K2 的公开单件报价为 31 元。"
+            }
+          ],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": [
+        "SYN-K1-PRICE",
+        "SYN-K2-PRICE"
+      ],
+      "steering_applied": true,
+      "steering_after_sequence": 1
+    },
+    {
+      "case_id": "AGENT-PACK-019",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "每盒 6 件，只能整盒发货。至少买 9 盒，实得 54 件，货款 324 元。[SYN-L6-PACK]",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": "SYN-L6"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-L6-PACK",
+              "text": "SYN-L6 六件装，每盒 36 元。整盒起订，不拆售。标价未含运费。"
+            }
+          ],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": [
+        "SYN-L6-PACK"
+      ]
+    },
+    {
+      "case_id": "AGENT-DATE-020",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "本次购买日期在 2026-11-01 及之后，适用现行政策，配件保修 12 个月。[SYN-R6-CURRENT]",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "SYN-R6"
+          },
+          "status": "ok",
+          "data_count": 2,
+          "items": [
+            {
+              "evidence_id": "SYN-R6-INDEX1",
+              "text": "SYN-R6 配件保修政策（历史版本）。",
+              "url": "https://research.invalid/r6/archive"
+            },
+            {
+              "evidence_id": "SYN-R6-INDEX2",
+              "text": "SYN-R6 配件保修政策（当前版本）。",
+              "url": "https://research.invalid/r6/current"
+            }
+          ],
+          "dispatched": true
+        },
+        {
+          "sequence": 2,
+          "tool_name": "fetch_web_page",
+          "parameters": {
+            "url": "https://research.invalid/r6/current"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-R6-CURRENT",
+              "text": "2026-11-01 起购买的 SYN-R6 配件按购买日期计算，保修期 12 个月。",
+              "url": "https://research.invalid/r6/current"
+            }
+          ],
+          "dispatched": true
+        },
+        {
+          "sequence": 3,
+          "tool_name": "fetch_web_page",
+          "parameters": {
+            "url": "https://research.invalid/r6/archive"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-R6-OLD",
+              "text": "截至 2026-10-31 购买的 SYN-R6 配件保修期为 6 个月。",
+              "url": "https://research.invalid/r6/archive"
+            }
+          ],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": [
+        "SYN-R6-INDEX1",
+        "SYN-R6-INDEX2",
+        "SYN-R6-CURRENT",
+        "SYN-R6-OLD"
+      ]
+    },
+    {
+      "case_id": "AGENT-CONFLICT-021",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "公开规格页甲写明 18 W。[SYN-F18-A]\n\n同一版本的公开规格页乙记载 20 W。[SYN-F18-B]\n\n缺少能裁定冲突的权威勘误，实际额定功率无法确定。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "SYN-F18"
+          },
+          "status": "ok",
+          "data_count": 2,
+          "items": [
+            {
+              "evidence_id": "SYN-F18-A",
+              "text": "SYN-F18 第一版，额定输出功率 18 W。",
+              "url": "https://research.invalid/f18/a"
+            },
+            {
+              "evidence_id": "SYN-F18-B",
+              "text": "SYN-F18 第一版，额定输出功率 20 W。",
+              "url": "https://research.invalid/f18/b"
+            }
+          ],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": [
+        "SYN-F18-A",
+        "SYN-F18-B"
+      ]
+    },
+    {
+      "case_id": "AGENT-RATE-022",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "12 条有效反馈中有 3 条提及断连，样本占比为 25%。该材料缺少订单与退货数据，无法推算整体退货率。[SYN-B12-SAMPLE]",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "SYN-B12"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-B12-SAMPLE",
+              "text": "抽取 SYN-B12 的 12 条有效使用反馈，其中 3 条提及断连。材料未记录订单量和退货量。",
+              "url": "https://research.invalid/b12/feedback"
+            }
+          ],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": [
+        "SYN-B12-SAMPLE"
+      ]
+    },
+    {
+      "case_id": "AGENT-STOCK-023",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "已找到商品，页面显示库存 0 件，当前无现货可发。未公布补货日期。[SYN-Z5-STOCK]",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_1688_wholesale",
+          "parameters": {
+            "keyword": "SYN-Z5"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "items": [
+            {
+              "evidence_id": "SYN-Z5-STOCK",
+              "text": "SYN-Z5 商品在架，当前可售库存 0 件。预计补货日期栏为空。"
+            }
+          ],
+          "dispatched": true
+        }
+      ],
+      "evidence_ids": [
+        "SYN-Z5-STOCK"
+      ]
+    }
+  ]
+}

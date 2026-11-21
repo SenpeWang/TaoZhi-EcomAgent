@@ -36,6 +36,7 @@ class AgentRunResult:
     stop_reason: str | None = None
     tool_trace_complete: bool = True
     model_names: list[str] = field(default_factory=list)
+    steering_after_sequence: int | None = None
 
 
 def execute_autonomous_agents(*, observe_trace: Callable[[str], None], **kwargs: Any) -> dict:
@@ -163,6 +164,8 @@ class AgentEvalHarness:
         self.execute = execute
 
     def run(self, case: dict, initial_steering: list[str] | None = None) -> AgentRunResult:
+        if case.get("execution_mode") == "synthetic_trace_regrade":
+            raise ValueError("此用例需要合成执行记录，请使用回放入口")
         case_id = case["id"]
         prompt = case["prompt"]
         keyword = case.get("keyword") or prompt
@@ -238,6 +241,10 @@ def replay_transcript(case: dict, transcript: dict) -> AgentRunResult:
     """校验并重评分合成执行记录，整个入口独立于模型、工具、数据库和追踪 SDK。"""
     if not isinstance(transcript, dict) or transcript.get("case_id") != case["id"]:
         raise ValueError("记录中的 case_id 必须匹配待评分用例")
+    if "fixture_version" in case and (
+        type(transcript.get("fixture_version")) is not int or transcript["fixture_version"] != case["fixture_version"]
+    ):
+        raise ValueError("记录与用例的合成证据版本不匹配")
     status = transcript.get("system_status")
     report = transcript.get("report")
     if not isinstance(status, str) or not status.strip() or not isinstance(report, str):
@@ -272,6 +279,11 @@ def replay_transcript(case: dict, transcript: dict) -> AgentRunResult:
     complete = transcript.get("tool_trace_complete", True)
     if type(steering) is not bool or type(complete) is not bool:
         raise ValueError("steering_applied 与 tool_trace_complete 必须是布尔值")
+    boundary = transcript.get("steering_after_sequence")
+    if boundary is not None and (
+        not steering or not _nonnegative_integer(boundary) or (boundary != 0 and boundary not in sequences)
+    ):
+        raise ValueError("干预边界须关联到指令到达前的最后一次调用序号，启动前指令使用 0")
     trace_id = transcript.get("trace_id", "")
     model_names = transcript.get("model_names", [])
     if not isinstance(model_names, list) or not all(isinstance(name, str) and name.strip() for name in model_names):
@@ -285,4 +297,5 @@ def replay_transcript(case: dict, transcript: dict) -> AgentRunResult:
         trace_id=trace_id, system_status=status, steering_applied=steering, error=error,
         mode="transcript", evidence_ids=ids, token_usage=_transcript_usage(transcript.get("token_usage")),
         stop_reason=stop_reason, tool_trace_complete=complete, model_names=sorted(set(model_names)),
+        steering_after_sequence=boundary,
     )

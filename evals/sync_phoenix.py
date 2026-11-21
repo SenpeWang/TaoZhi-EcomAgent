@@ -545,6 +545,8 @@ def sync_agent_eval(client, url: str, force: bool, dry_run: bool) -> None:
     agent_dataset_name = "taozhi-agent-eval-benchmark"
     examples = []
     for c in AGENT_BENCHMARK_CASES:
+        if c.get("execution_mode") == "synthetic_trace_regrade":
+            continue
         examples.append({
             "input": {
                 "prompt": c["prompt"],
@@ -565,7 +567,7 @@ def sync_agent_eval(client, url: str, force: bool, dry_run: bool) -> None:
 
     ds, known = _existing_case_ids(client, agent_dataset_name)
     if dry_run:
-        print(f"[agent-dataset] 待同步用例 {sum(c['id'] not in known for c in AGENT_BENCHMARK_CASES)} 个")
+        print(f"[agent-dataset] 待同步用例 {sum(e['metadata']['case_id'] not in known for e in examples)} 个")
         return
     if ds is None:
         print(f"[agent-dataset] 新建：{agent_dataset_name}（{len(examples)} 例）")

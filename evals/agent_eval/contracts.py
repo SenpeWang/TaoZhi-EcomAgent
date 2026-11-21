@@ -10,7 +10,7 @@ CASE_FIELDS = {
     "id", "category", "name", "prompt", "keyword", "suite", "critical",
     "required_tools", "forbidden_tools", "allowed_tools", "tool_expectations", "tool_order",
     "reference_facts", "forbidden_claims", "required_sections", "min_chars", "min_data_count",
-    "steering", "steering_keyword",
+    "steering", "steering_keyword", "steering_boundary", "execution_mode", "fixture_version",
 }
 
 
@@ -36,11 +36,24 @@ def _validate_tools(case: dict) -> None:
     expectations = case.get("tool_expectations", [])
     if not isinstance(expectations, list):
         raise ValueError("tool_expectations 需要数组")
+    if "steering_boundary" in case:
+        boundary = case["steering_boundary"]
+        if not case.get("steering") or not isinstance(boundary, dict) or boundary.keys() != {"before", "after"}:
+            raise ValueError("干预边界需同时声明指令以及前后工具期望的索引")
+        if any(type(i) is not int or not 0 <= i < len(expectations) for i in boundary.values()):
+            raise ValueError("干预边界超出工具期望数组")
+        before, after = (expectations[boundary[key]] for key in ("before", "after"))
+        if not all(isinstance(rule, dict) for rule in (before, after)) or (
+            before.get("tool_name") == after.get("tool_name") and before.get("parameters") == after.get("parameters")
+        ):
+            raise ValueError("干预边界必须能按工具或参数区分指令前后的调用")
     for expectation in expectations:
         if not isinstance(expectation, dict) or expectation.get("tool_name") not in available:
             raise ValueError("工具期望缺少允许的 tool_name")
-        if expectation.keys() - {"tool_name", "parameters", "status", "min_data_count"}:
+        if expectation.keys() - {"tool_name", "parameters", "status", "min_data_count", "optional"}:
             raise ValueError("工具期望中存在未识别字段")
+        if type(expectation.get("optional", False)) is not bool:
+            raise ValueError("可选工具期望的 optional 须为布尔值")
         if "status" in expectation and expectation["status"] not in {"ok", "empty", "error", "timeout", "cancelled"}:
             raise ValueError("无法识别预期工具状态")
         minimum = expectation.get("min_data_count", 0)
@@ -52,10 +65,13 @@ def _validate_tools(case: dict) -> None:
         for key, condition in parameters.items():
             if not isinstance(key, str) or not key.strip():
                 raise ValueError("参数名不能为空")
-            if isinstance(condition, dict) and (
-                condition.keys() != {"contains"} or not isinstance(condition["contains"], str) or not condition["contains"]
-            ):
-                raise ValueError("字符串包含匹配需要非空 contains，其余参数直接使用期望值")
+            if isinstance(condition, dict):
+                if condition.keys() == {"identifier"}:
+                    value = condition["identifier"]
+                    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*", value):
+                        raise ValueError("identifier 需要完整型号标识")
+                elif condition.keys() != {"contains"} or not isinstance(condition["contains"], str) or not condition["contains"]:
+                    raise ValueError("工具参数的文字匹配需指定非空 contains 或完整 identifier")
 
     order = case.get("tool_order", [])
     if not isinstance(order, list):
@@ -110,6 +126,10 @@ def validate_cases(cases: list[dict]) -> None:
                 raise ValueError("存在未登记的字段或尚未支持的判定条件")
             if case.get("suite", "benchmark") not in {"benchmark", "golden", "regression", "challenge"}:
                 raise ValueError("未知的用例分组")
+            if "execution_mode" in case and case["execution_mode"] != "synthetic_trace_regrade":
+                raise ValueError("未知的限定执行模式")
+            if "fixture_version" in case and (type(case["fixture_version"]) is not int or case["fixture_version"] < 1):
+                raise ValueError("合成夹具版本必须是正整数")
             if not all(isinstance(case.get(key), str) and case[key].strip() for key in ("name", "prompt")):
                 raise ValueError("用例需要名称和用户输入")
             if "critical" in case and type(case["critical"]) is not bool:

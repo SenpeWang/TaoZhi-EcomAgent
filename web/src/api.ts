@@ -103,6 +103,102 @@ function validActivityActor(actor: unknown): boolean {
 }
 
 /**
+ * 校验评测结果的身份、分页边界和可展示内容，避免将另一条用例的详情显示在当前批次。
+ * @param resource - 去除筛选参数的 API 路径。
+ * @param data - 已解析的业务响应。
+ * @throws 响应与所请求的评测资源不一致时抛出中文异常。
+ */
+function validateEvaluationResponse(resource: string, data: JsonRecord): void {
+  const [, , , runId, child, caseId] = resource.split('/')
+  const invalid = new Error('评测记录响应异常，请刷新后重试')
+  if (!runId || (child === 'cases' && !caseId)) {
+    if (
+      !Array.isArray(data.items) ||
+      (data.next_cursor !== null && typeof data.next_cursor !== 'string')
+    )
+      throw invalid
+    for (const item of data.items) {
+      if (!isRecord(item)) throw invalid
+      if (runId) {
+        if (
+          typeof item.case_id !== 'string' ||
+          !['passed', 'failed', 'unassessable'].includes(String(item.status))
+        )
+          throw invalid
+      } else if (
+        typeof item.run_id !== 'string' ||
+        !['live', 'synthetic_trace_regrade'].includes(String(item.mode)) ||
+        typeof item.dataset_sha256 !== 'string' ||
+        typeof item.judges_sha256 !== 'string'
+      )
+        throw invalid
+    }
+    return
+  }
+  if (caseId) {
+    if (
+      !isRecord(data.case) ||
+      typeof data.case.case_id !== 'string' ||
+      encodeURIComponent(data.case.case_id) !== caseId ||
+      !(
+        data.expected === null ||
+        (Array.isArray(data.expected) && data.expected.every((item) => typeof item === 'string'))
+      ) ||
+      !(
+        data.observed === null ||
+        (Array.isArray(data.observed) && data.observed.every(isRecord))
+      ) ||
+      !Array.isArray(data.verdicts) ||
+      !data.verdicts.every((item) => isRecord(item) && Array.isArray(item.issues)) ||
+      !(
+        data.trace_link === null ||
+        (isRecord(data.trace_link) &&
+          typeof data.trace_link.task_id === 'string' &&
+          data.trace_link.task_id.length > 0 &&
+          typeof data.trace_link.trace_id === 'string' &&
+          /^[0-9a-f]{32}$/.test(data.trace_link.trace_id))
+      )
+    )
+      throw invalid
+    return
+  }
+  if (
+    !child &&
+    (!isRecord(data.run) ||
+      typeof data.run.run_id !== 'string' ||
+      encodeURIComponent(data.run.run_id) !== runId ||
+      !isRecord(data.metrics))
+  )
+    throw invalid
+  const comparison = child === 'comparison' ? data : data.comparison
+  if (!child && comparison === null) return
+  if (
+    !isRecord(comparison) ||
+    !isRecord(comparison.paired_counts) ||
+    !isRecord(comparison.changes) ||
+    !isRecord(comparison.excluded)
+  )
+    throw invalid
+  for (const key of ['standard', 'challenge']) {
+    const changes = comparison.changes[key]
+    if (
+      !isRecord(changes) ||
+      !['regressed', 'fixed', 'stable_passed', 'stable_failed'].every((change) =>
+        Array.isArray(changes[change]),
+      )
+    )
+      throw invalid
+  }
+  const excluded = comparison.excluded
+  if (
+    !['new', 'baseline_only', 'definition_changed', 'unassessable'].every((key) =>
+      Array.isArray(excluded[key]),
+    )
+  )
+    throw invalid
+}
+
+/**
  * 校验集合及身份响应的基础结构，畸形响应不得被当作当前身份。
  * @param path - 同源 API 路径。
  * @param data - 未知 JSON 对象；不会用于决定后端授权。
@@ -111,6 +207,13 @@ function validActivityActor(actor: unknown): boolean {
  */
 function validateResponse(path: string, data: JsonRecord, method: string): void {
   const resource = path.split('?', 1)[0]
+  if (
+    method === 'GET' &&
+    (resource === '/evaluations/runs' || resource.startsWith('/evaluations/runs/'))
+  ) {
+    validateEvaluationResponse(resource, data)
+    return
+  }
   const collection =
     method === 'GET' &&
     ([
