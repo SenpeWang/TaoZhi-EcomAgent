@@ -43,7 +43,7 @@
 ```mermaid
 flowchart TB
     subgraph Client["前端工作台（Vue 3 · TypeScript · Element Plus · ECharts）"]
-        UI["LoginPortal · DocumentManager · PolicyMatrix · BiView · ResearchChatView · TaskTimeline · AccountCenter"]
+        UI["LoginPortal · DocumentManager · PolicyMatrix · BiView · ResearchChatView · TaskTimeline · TraceCenter · AccountCenter"]
     end
 
     subgraph Interface["接口与异步执行层（src/taozhi/server/ · schemas/）"]
@@ -52,7 +52,8 @@ flowchart TB
     end
 
     subgraph App["应用编排层（application/ · orchestration/ · core/agent/）"]
-        Services["应用服务层<br>admin_service · document_service · task_service"]
+        Services["账号、资料与任务服务<br>任务提交、查询、取消、重试与审核"]
+        Dashboard["工作台概览与经营看板查询"]
         KB["企业知识库 & ChatBI<br>LangGraph 确定性 DAG · DecisionEngine (Choice)"]
         Research["自治市场调研中枢<br>lead_orchestrator ⇄ subagent_worker ➔ synthesizer"]
         Session["AgentSession（Piagent 组合根）<br>隔离沙箱 · 租户长效记忆 · 防注入净化 · MCP 工具适配"]
@@ -68,13 +69,15 @@ flowchart TB
         Kafka[("Apache Kafka 4.1.2<br>KRaft 任务事件总线")]
         MinIO[("MinIO<br>租户隔离对象存储")]
         Embed["Embedding / Rerank 服务<br>bge-small-zh-v1.5 + bge-reranker-v2-m3"]
-        LLM["LLM 网关（多 Key 容灾分级路由）<br>& Phoenix OTel 追踪"]
+        LLM["LLM 网关与模型调用追踪"]
     end
 
     UI <-->|REST / SSE| API
-    API --> Services
-    Worker --> Services
-    Services --> KB & Research
+    API --> Services & Dashboard
+    API -->|调研会话与中途干预| Research
+    Worker -->|资料解析| Services
+    Worker --> KB & Research
+    Dashboard --> PG
     Research --> Session
     KB & Research & Services --> Rules
     Services & KB & Research --> PG & ES & Kafka & MinIO & Embed & LLM
@@ -225,13 +228,14 @@ TaoZhi-EcomAgent/
 │   │   ├── memory/               # 租户物理隔离长效记忆库
 │   │   └── tools/                # Web / 1688 / Amazon 原子工具与归一化结果封装
 │   ├── application/
-│   │   ├── services/             # 业务用例（admin_service / document_service / task_service）
-│   │   ├── rag/                  # 企业问答与 ChatBI 确定性工作流（state / intent / specialists / workflow）
-│   │   └── research/             # 自治多智能体调研闭环（planner / subagents / reporter / hooks / graph）
+│   │   ├── services/             # 账号、资料和任务生命周期，流式输出与轨迹查询
+│   │   ├── rag/                  # 问答执行、混合检索与专家核验
+│   │   ├── bi/                   # 受控指标问数、工作台概览与经营看板查询
+│   │   └── research/             # 调研执行、会话、中途干预与多智能体工作流
 │   ├── orchestration/            # 确定性控制器（controller）与离散决策引擎（decision）
 │   ├── schemas/                  # Pydantic 接口请求 DTO
 │   ├── server/                   # FastAPI 装配（api.py）、鉴权（auth.py）、分领域路由（routers/）与 Worker
-│   └── observability/            # OpenTelemetry Span 埋点与 Arize Phoenix 导出器
+│   └── observability/            # 在线任务的 OpenTelemetry 采集、中文诊断与异步写入
 ├── web/                          # Vue 3 + TypeScript 前端工作台（src/views/ · src/composables/）
 ├── evals/                        # 独立科学评测体系（RAG 三层评测 · 多智能体评测 · 数据集 · 基线）
 └── tests/                        # 离线单元、架构分层守卫与企业权限/安全回归测试

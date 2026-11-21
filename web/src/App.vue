@@ -215,7 +215,7 @@
                   :key="document.id"
                   type="button"
                   class="document-card"
-                  @click="openDoc(document.id)"
+                  @click="documentManager?.openDocument(document.id)"
                 >
                   <span class="level-pill" :class="`level-${document.level}`">{{
                     levelText(document.level)
@@ -389,19 +389,6 @@
           @reload="load"
         />
 
-        <DocumentManager
-          v-else-if="currentPage === '知识文档'"
-          v-model:search="search"
-          :documents="documents"
-          :can-write="capabilities.write"
-          :can-manage-permissions="capabilities.permissions"
-          @reload="load"
-          @open-permission-id="permissionIdOpen = true"
-          @open-request-access="accessOpen = true"
-          @new-doc="newDoc"
-          @open-doc="openDoc"
-        />
-
         <PolicyMatrix
           v-else-if="currentPage === '权限审批'"
           mode="approvals"
@@ -517,6 +504,19 @@
           @change-password="changePassword"
           @sign-out="signOut"
         />
+        <DocumentManager
+          v-if="!user.must_change"
+          :key="user.id"
+          ref="documentManager"
+          :library-visible="currentPage === '知识文档'"
+          :api="api"
+          :refresh-workspace="load"
+          :documents="documents"
+          :organizations="organizations"
+          :root-organization-id="rootOrganizationId"
+          :users="users"
+          :user="user"
+        />
       </main>
     </div>
   </div>
@@ -535,7 +535,7 @@
       )
     "
     @inspect="openTrace"
-    @open-doc="openDoc"
+    @open-doc="documentManager?.openDocument($event)"
     @review="reviewTask"
     @cancel="cancelTask"
     @retry="retryTask"
@@ -550,223 +550,6 @@
     :api="api"
     @close="inspectedTrace = null"
   />
-
-  <el-dialog v-model="docOpen" :title="detail?.title || '文档详情'" width="760px">
-    <template v-if="detail">
-      <div class="detail-meta">
-        <span class="org-chip">
-          {{ detail.scope === 'company' ? '全企业' : detail.node_name || detail.node_id }}
-        </span>
-        <span class="level-pill" :class="`level-${detail.level}`">
-          {{ levelText(detail.level) }}
-        </span>
-        <el-tag size="small" :type="stateTag(detail.state)">{{ stateText(detail.state) }}</el-tag>
-        <span>版本 V{{ detail.current_version }}</span>
-        <span>权限版本 #{{ detail.acl_version }}</span>
-      </div>
-      <el-alert v-if="detail.error" type="error" :title="detail.error" :closable="false" />
-      <pre v-if="detail.body" class="document-body">{{ detail.body }}</pre>
-      <el-empty v-else description="当前仅可查看文档基本信息，暂未获准阅读正文" />
-      <div class="dialog-actions">
-        <el-link
-          v-if="detail.can_download"
-          :href="'/api/documents/' + detail.id + '/download'"
-          target="_blank"
-          type="primary"
-        >
-          下载原文件
-        </el-link>
-        <el-button v-if="detail.can_write" @click="editDoc">编辑文档</el-button>
-        <el-button v-if="capabilities.permissions" @click="showPolicy">权限与密级</el-button>
-        <el-button v-if="capabilities.permissions" @click="showGrant">人员授权</el-button>
-        <el-button v-if="detail.body" @click="showVersions">历史版本</el-button>
-        <el-button v-if="detail.can_write" type="danger" plain @click="deleteDoc">
-          删除文档
-        </el-button>
-      </div>
-    </template>
-  </el-dialog>
-
-  <el-dialog v-model="docEdit" :title="docForm.id ? '编辑文档' : '上传 / 新建文档'" width="680px">
-    <div class="dialog-lead">
-      新增或修改文档后将进入审核流程，审核通过后可供相应权限成员检索查阅。
-    </div>
-    <el-form label-position="top">
-      <el-form-item label="文档标题">
-        <el-input v-model="docForm.title" placeholder="请输入文档标题" />
-      </el-form-item>
-      <div v-if="!docForm.id" class="form-columns">
-        <el-form-item label="可见范围">
-          <el-select v-model="docForm.scope">
-            <el-option v-if="user?.is_boss || capabilities.system" label="全企业" value="company" />
-            <el-option label="指定部门" value="org" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="docForm.scope === 'org'" label="所属部门">
-          <el-select v-model="docForm.node_id">
-            <el-option
-              v-for="organization in organizations"
-              :key="organization.id"
-              :label="organization.name"
-              :value="organization.id"
-            />
-          </el-select>
-        </el-form-item>
-      </div>
-      <div v-if="!docForm.id" class="form-columns">
-        <el-form-item label="文档密级">
-          <el-select v-model="docForm.level">
-            <el-option label="公开 (L1)" :value="1" />
-            <el-option label="内部 (L2)" :value="2" />
-            <el-option label="机密 (L3)" :value="3" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="上传本地文件（支持 Markdown / TXT / Word / PDF）">
-          <input type="file" @change="picked" />
-        </el-form-item>
-      </div>
-      <el-form-item v-if="!selectedFile" label="文档正文">
-        <el-input
-          v-model="docForm.body"
-          type="textarea"
-          :rows="8"
-          placeholder="请输入文档正文，或选择本地文件上传"
-        />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="docEdit = false">取消</el-button>
-      <el-button type="primary" :loading="busy" @click="saveDoc">保存提交</el-button>
-    </template>
-  </el-dialog>
-
-  <el-dialog v-model="policyOpen" title="修改文档权限与密级" width="540px">
-    <div class="dialog-lead">
-      修改文档密级、可见部门范围或 AI 使用授权需提交企业负责人审批通过后生效。
-    </div>
-    <el-form label-position="top">
-      <div class="form-columns">
-        <el-form-item label="可见范围">
-          <el-select v-model="policyForm.scope">
-            <el-option label="全企业" value="company" />
-            <el-option label="指定部门" value="org" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="文档密级">
-          <el-select v-model="policyForm.level">
-            <el-option label="公开 (L1)" :value="1" />
-            <el-option label="内部 (L2)" :value="2" />
-            <el-option label="机密 (L3)" :value="3" />
-          </el-select>
-        </el-form-item>
-      </div>
-      <el-form-item v-if="policyForm.scope === 'org'" label="所属部门">
-        <el-select v-model="policyForm.node_id">
-          <el-option
-            v-for="organization in organizations"
-            :key="organization.id"
-            :label="organization.name"
-            :value="organization.id"
-          />
-        </el-select>
-      </el-form-item>
-      <el-checkbox v-model="policyForm.ai_allowed">允许授权人员用于 AI 问答分析</el-checkbox>
-      <el-checkbox v-model="policyForm.download_allowed">允许具备权限的成员下载原文件</el-checkbox>
-    </el-form>
-    <template #footer>
-      <el-button @click="policyOpen = false">取消</el-button>
-      <el-button type="primary" :loading="busy" @click="savePolicy">提交审批</el-button>
-    </template>
-  </el-dialog>
-
-  <el-dialog v-model="grantOpen" title="文档人员授权管理" width="600px">
-    <div v-if="currentGrants.length" class="subagents-roster-box" style="margin-top: 0">
-      <div class="roster-header">
-        <strong>当前有效授权</strong>
-      </div>
-      <div v-for="g in currentGrants" :key="g.user_id" class="scope-card">
-        <span>{{ g.display_name }}</span>
-        <strong>
-          {{ g.effect === 'deny' ? '禁止访问' : '允许阅读' }}
-          {{ g.can_download ? ' · 可下载' : '' }}
-          {{ g.expires_at ? ' · 有效期至 ' + g.expires_at : '' }}
-        </strong>
-      </div>
-    </div>
-    <el-form label-position="top">
-      <el-form-item label="选择成员">
-        <el-select v-model="grantForm.user_id" filterable placeholder="请选择企业成员">
-          <el-option
-            v-for="u in users"
-            :key="u.id"
-            :label="`${u.display_name} (${u.username})`"
-            :value="u.id"
-          />
-        </el-select>
-      </el-form-item>
-      <div class="form-columns">
-        <el-form-item label="授权类型">
-          <el-select v-model="grantForm.effect">
-            <el-option label="允许阅读" value="allow" />
-            <el-option label="禁止访问" value="deny" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="有效期至（可选）">
-          <el-date-picker
-            v-model="grantForm.expires_at"
-            type="datetime"
-            style="width: 100%"
-            placeholder="留空表示长期有效"
-          />
-        </el-form-item>
-      </div>
-      <el-checkbox v-model="grantForm.can_download">允许下载原文件</el-checkbox>
-      <el-checkbox v-model="grantForm.revoke">收回该成员的文档授权</el-checkbox>
-    </el-form>
-    <template #footer>
-      <el-button @click="grantOpen = false">取消</el-button>
-      <el-button type="primary" :loading="busy" @click="saveGrant">提交审批</el-button>
-    </template>
-  </el-dialog>
-
-  <el-dialog v-model="historyOpen" title="历史版本记录" width="660px">
-    <el-collapse>
-      <el-collapse-item
-        v-for="v in history"
-        :key="v.version"
-        :title="`V${v.version} · ${v.title} (${v.created_at})`"
-      >
-        <pre class="quote-body">{{ v.body }}</pre>
-      </el-collapse-item>
-    </el-collapse>
-  </el-dialog>
-
-  <el-dialog v-model="accessOpen" title="申请文档阅读权限" width="440px">
-    <div class="dialog-lead">
-      输入管理员或同事提供的文档 ID 后可直接发起阅读授权申请，申请将流转至对应负责人审批。
-    </div>
-    <el-form label-position="top">
-      <el-form-item label="文档 ID">
-        <el-input v-model="accessId" placeholder="请输入文档 ID" />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="accessOpen = false">取消</el-button>
-      <el-button type="primary" :loading="busy" @click="requestAccess">提交申请</el-button>
-    </template>
-  </el-dialog>
-
-  <el-dialog v-model="permissionIdOpen" title="按文档 ID 管理权限" width="440px">
-    <el-form label-position="top">
-      <el-form-item label="文档 ID">
-        <el-input v-model="permissionId" placeholder="请输入文档 ID" />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="permissionIdOpen = false">取消</el-button>
-      <el-button type="primary" :loading="busy" @click="manageById">查询配置</el-button>
-    </template>
-  </el-dialog>
 
   <el-dialog v-model="accountOpen" title="新建成员账号" width="540px">
     <div class="dialog-lead">创建成员账号后，系统将同步提交初始部门分配或管理员角色审批申请。</div>
@@ -902,8 +685,9 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { requestApi } from './api'
+import { useWorkspaceAction } from './composables/useWorkspaceAction'
 import { openTaskEventStream } from './composables/useTaskStream'
-import { levelText, stateTag, stateText } from './labels'
+import { levelText, stateText } from './labels'
 import robotUrl from './assets/robot.svg'
 import { workspaceNavigation, workspacePages, type WorkspacePage } from './workspaceNavigation'
 import AccountCenter from './views/AccountCenter.vue'
@@ -923,9 +707,6 @@ import type {
   CreatedResource,
   Dashboard,
   DocumentListItem,
-  DocumentRecord,
-  DocumentVersion,
-  Grant,
   Items,
   LoginResponse,
   Organization,
@@ -945,8 +726,8 @@ const workspaceInfo = ref<WorkspaceInfo>({
 })
 const user = ref<User | null>(null)
 const currentPage = ref<WorkspacePage>('工作概览')
-const busy = ref(false)
-const search = ref('')
+const { busy, action } = useWorkspaceAction()
+const documentManager = ref<InstanceType<typeof DocumentManager> | null>(null)
 const organizations = ref<Organization[]>([])
 const documents = ref<DocumentListItem[]>([])
 const tasks = ref<Task[]>([])
@@ -969,46 +750,6 @@ let workspaceRequest = 0
 
 const loginForm = reactive({ username: '', password: '' })
 const askForm = reactive({ question: '', node_id: '', input_level: 1, allow_external: false })
-
-const docOpen = ref(false)
-const detail = ref<DocumentRecord | null>(null)
-const docEdit = ref(false)
-const docForm = reactive({
-  id: '',
-  title: '',
-  body: '',
-  scope: 'org',
-  node_id: '',
-  level: 2,
-  version: 1,
-})
-const selectedFile = ref<File | null>(null)
-
-const policyOpen = ref(false)
-const policyForm = reactive({
-  scope: 'org',
-  node_id: '',
-  level: 2,
-  ai_allowed: false,
-  download_allowed: false,
-})
-
-const grantOpen = ref(false)
-const currentGrants = ref<Grant[]>([])
-const grantForm = reactive({
-  user_id: '',
-  effect: 'allow',
-  can_download: false,
-  expires_at: '',
-  revoke: false,
-})
-
-const historyOpen = ref(false)
-const history = ref<DocumentVersion[]>([])
-const accessOpen = ref(false)
-const accessId = ref('')
-const permissionIdOpen = ref(false)
-const permissionId = ref('')
 
 const inspectedTrace = ref<{ taskId: string; traceId: string | null } | null>(null)
 const taskOpen = ref(false)
@@ -1215,36 +956,15 @@ function clearSession(): void {
   users.value = []
   audits.value = []
   runtimeStatus.value = null
-  detail.value = null
   activeTask.value = null
   dashboard.value = emptyDashboard
   currentPage.value = '工作概览'
-  search.value = ''
   askForm.question = ''
   askForm.node_id = ''
   loginForm.password = ''
-  docForm.id = docForm.title = docForm.body = ''
-  selectedFile.value = null
-  history.value = []
-  currentGrants.value = []
-  accessId.value = permissionId.value = ''
   accountForm.password = resetForm.new_password = ''
   taskDraft.value = ''
-  for (const dialog of [
-    docOpen,
-    taskOpen,
-    docEdit,
-    policyOpen,
-    grantOpen,
-    historyOpen,
-    accessOpen,
-    permissionIdOpen,
-    accountOpen,
-    memberOpen,
-    resetOpen,
-    orgOpen,
-  ])
-    dialog.value = false
+  for (const dialog of [taskOpen, accountOpen, memberOpen, resetOpen, orgOpen]) dialog.value = false
 }
 
 /**
@@ -1268,30 +988,6 @@ async function api<T>(path: string, method = 'GET', payload?: unknown): Promise<
 }
 
 /**
- * 将未知异常安全提取为中文错误提示文本。
- * @param e - 捕获到的异常对象。
- * @returns 面向用户的中文错误提示。
- */
-function readError(e: unknown): string {
-  return e instanceof Error ? e.message : '操作未完成，请稍后重试'
-}
-
-/**
- * 包装异步操作，统一维护加载锁与中文异常提示。
- * @param fn - 需要执行的业务操作。
- */
-async function action(fn: () => Promise<void>): Promise<void> {
-  busy.value = true
-  try {
-    await fn()
-  } catch (e: unknown) {
-    if (!(e instanceof DOMException && e.name === 'AbortError')) ElMessage.error(readError(e))
-  } finally {
-    busy.value = false
-  }
-}
-
-/**
  * 并行刷新当前账号权限范围内的数据快照。
  */
 async function load(): Promise<void> {
@@ -1301,12 +997,11 @@ async function load(): Promise<void> {
     return
   }
   const request = ++workspaceRequest
-  const query = search.value ? '?q=' + encodeURIComponent(search.value) : ''
   const [overview, organizationPage, documentPage, taskPage, approvalPage, userPage] =
     await Promise.all([
       api<Dashboard>('/dashboard'),
       api<Items<Organization>>('/organizations'),
-      api<Items<DocumentListItem>>('/documents' + query),
+      api<Items<DocumentListItem>>('/documents'),
       api<Items<Task>>('/tasks'),
       capabilities.value.permissions
         ? api<Items<Approval>>('/approvals')
@@ -1562,192 +1257,6 @@ async function steerTask(taskId: string, message: string): Promise<void> {
 }
 
 /**
- * 查看授权文档详情。
- * @param id - 文档 ID。
- */
-async function openDoc(id: string): Promise<void> {
-  await action(async () => {
-    detail.value = await api<DocumentRecord>('/documents/' + id)
-    docOpen.value = true
-  })
-}
-
-/**
- * 初始化新建文档表单。
- */
-function newDoc(): void {
-  Object.assign(docForm, {
-    id: '',
-    title: '',
-    body: '',
-    scope: user.value?.system_admin && !user.value?.is_boss ? 'company' : 'org',
-    node_id:
-      user.value?.system_admin && !user.value?.is_boss
-        ? rootOrganizationId.value
-        : user.value?.memberships[0]?.node_id || rootOrganizationId.value,
-    level: user.value?.system_admin && !user.value?.is_boss ? 1 : 2,
-    version: 1,
-  })
-  selectedFile.value = null
-  docEdit.value = true
-}
-
-/**
- * 载入现有文档版本准备编辑。
- */
-function editDoc(): void {
-  if (!detail.value) return
-  Object.assign(docForm, {
-    id: detail.value.id,
-    title: detail.value.title,
-    body: detail.value.body,
-    scope: detail.value.scope,
-    node_id: detail.value.node_id,
-    level: detail.value.level,
-    version: detail.value.current_version,
-  })
-  selectedFile.value = null
-  docEdit.value = true
-}
-
-/**
- * 保存新建文档或更新版本。
- */
-async function saveDoc(): Promise<void> {
-  await action(async () => {
-    if (docForm.id) {
-      await api('/documents/' + docForm.id, 'PUT', {
-        title: docForm.title,
-        body: docForm.body,
-        version: docForm.version,
-      })
-    } else if (selectedFile.value) {
-      const form = new FormData()
-      form.append('file', selectedFile.value)
-      for (const k of ['title', 'scope', 'node_id', 'level'] as const) {
-        form.append(k, String(docForm[k]))
-      }
-      await api('/documents/upload', 'POST', form)
-    } else {
-      await api('/documents', 'POST', {
-        title: docForm.title,
-        body: docForm.body,
-        node_id: docForm.scope === 'company' ? rootOrganizationId.value : docForm.node_id,
-        scope: docForm.scope,
-        level: docForm.level,
-      })
-    }
-    docEdit.value = false
-    docOpen.value = false
-    ElMessage.success('文档已保存，等待审核发布')
-    await load()
-  })
-}
-
-/**
- * 读取选择的文件对象。
- * @param e - 文件选择器事件。
- */
-function picked(e: Event): void {
-  selectedFile.value = (e.target as HTMLInputElement).files?.[0] || null
-}
-
-/**
- * 确认后删除当前文档。
- */
-async function deleteDoc(): Promise<void> {
-  if (!detail.value) return
-  await action(async () => {
-    await ElMessageBox.confirm('删除后，引用该文档的历史答案将受限展示，确认删除？', '删除文档', {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-    await api('/documents/' + detail.value!.id, 'DELETE')
-    docOpen.value = false
-    ElMessage.success('文档已删除')
-    await load()
-  })
-}
-
-/**
- * 打开文档权限与密级设置弹窗。
- */
-function showPolicy(): void {
-  if (!detail.value) return
-  Object.assign(policyForm, {
-    scope: detail.value.scope,
-    node_id: detail.value.node_id,
-    level: detail.value.level,
-    ai_allowed: detail.value.ai_allowed,
-    download_allowed: detail.value.download_allowed,
-  })
-  policyOpen.value = true
-}
-
-/**
- * 提交文档权限调整申请。
- */
-async function savePolicy(): Promise<void> {
-  await action(async () => {
-    await api('/documents/' + detail.value!.id + '/policy', 'POST', {
-      ...policyForm,
-      node_id: policyForm.scope === 'company' ? rootOrganizationId.value : policyForm.node_id,
-    })
-    policyOpen.value = false
-    ElMessage.success('权限变更已提交，等待企业负责人审批')
-    await load()
-  })
-}
-
-/**
- * 打开单文档人员授权窗口。
- */
-async function showGrant(): Promise<void> {
-  currentGrants.value = []
-  await action(async () => {
-    currentGrants.value = (
-      await api<Items<Grant>>('/documents/' + detail.value!.id + '/grants')
-    ).items
-  })
-  Object.assign(grantForm, {
-    user_id: '',
-    effect: 'allow',
-    can_download: false,
-    expires_at: '',
-    revoke: false,
-  })
-  grantOpen.value = true
-}
-
-/**
- * 提交单文档人员授权申请。
- */
-async function saveGrant(): Promise<void> {
-  await action(async () => {
-    await api('/documents/' + detail.value!.id + '/grants', 'POST', {
-      ...grantForm,
-      expires_at: grantForm.expires_at ? new Date(grantForm.expires_at).toISOString() : null,
-    })
-    grantOpen.value = false
-    ElMessage.success('授权申请已提交审批')
-    await load()
-  })
-}
-
-/**
- * 加载获准查阅的历史版本列表。
- */
-async function showVersions(): Promise<void> {
-  await action(async () => {
-    history.value = (
-      await api<Items<DocumentVersion>>('/documents/' + detail.value!.id + '/versions')
-    ).items
-    historyOpen.value = true
-  })
-}
-
-/**
  * 审批或驳回待处理申请。
  * @param row - 审批记录。
  * @param approve - 是否通过。
@@ -1933,30 +1442,6 @@ async function saveOrg(): Promise<void> {
 }
 
 /**
- * 按文档 ID 提交阅读权限申请。
- */
-async function requestAccess(): Promise<void> {
-  await action(async () => {
-    await api('/documents/' + encodeURIComponent(accessId.value) + '/request-access', 'POST')
-    accessOpen.value = false
-    ElMessage.success('访问申请已提交')
-  })
-}
-
-/**
- * 管理员按文档 ID 查询并配置权限策略。
- */
-async function manageById(): Promise<void> {
-  await action(async () => {
-    detail.value = await api<DocumentRecord>(
-      '/documents/' + encodeURIComponent(permissionId.value) + '/permission-status',
-    )
-    permissionIdOpen.value = false
-    showPolicy()
-  })
-}
-
-/**
  * 个人修改登录密码并强制重新登录。
  * @param payload - 包含当前密码与新密码的变更载荷。
  * @param payload.current_password - 当前登录密码。
@@ -1995,18 +1480,6 @@ onMounted(async () => {
         const selected = activeTask.value
         const snapshot = await api<Task>('/tasks/' + selected.id)
         if (taskOpen.value && activeTask.value === selected) activeTask.value = snapshot
-      }
-      if (docOpen.value && detail.value) {
-        const selected = detail.value
-        try {
-          const snapshot = await api<DocumentRecord>('/documents/' + selected.id)
-          if (docOpen.value && detail.value === selected) detail.value = snapshot
-        } catch {
-          if (detail.value === selected) {
-            docOpen.value = false
-            detail.value = null
-          }
-        }
       }
     } catch {}
   }, 2500)

@@ -17,20 +17,20 @@
 | `src/taozhi/` | 淘智 (TaoZhi) 智能体工程核心根包 |
 | `src/taozhi/domain/` | 领域层：核心实体、权限规则、口令策略、注入防线、排序切片与数学/引文校验（零外部框架） |
 | `src/taozhi/infrastructure/` | 基础设施层：数据库仓储、向量库、MCP 服务与任务队列适配 |
-| `src/taozhi/infrastructure/persistence/` | 持久化仓储：租户、组织、审批、文档、指标、任务与访问控制 SQL 仓储 |
+| `src/taozhi/infrastructure/persistence/` | 租户、组织、审批、文档、指标、任务和访问控制的 SQL 仓储，以及工作流的 PostgreSQL 检查点 |
 | `src/taozhi/infrastructure/mcp/` | 电商与情报类标准 MCP 协议服务端（tools/list & tools/call）与智能体客户端适配器 |
-| `src/taozhi/observability/` | 可观测性横切能力：Phoenix Trace 与 OpenTelemetry Span 埋点 |
+| `src/taozhi/observability/` | 在线任务的 OpenTelemetry 采集、中文诊断和 Span 批量投递 |
 | `src/taozhi/ai/` | 大模型客户端、用量统计与结构化输出解析 |
 | `src/taozhi/core/` | 核心引擎与底层基础设施 |
 | `src/taozhi/core/agent/` | 智能体运行时核心：Piagent `AgentSession` 会话组合根、隔离沙箱（Scratch / Artifacts）与工作区通信协议 |
 | `src/taozhi/core/tools/` | 原子工具集与统一结构化 ToolOutcome / 行边界截断工具 |
 | `src/taozhi/core/memory/` | 租户物理隔离长效记忆库与上下文检索服务 |
 | `src/taozhi/application/` | 应用层：业务用例服务、RAG 问答工作流与多智能体自主调研执行图 |
-| `src/taozhi/application/bi/` | ChatBI 受控问数 LangGraph 状态机（指标意图识别、语义层查询与结果发布） |
+| `src/taozhi/application/bi/` | 指标意图识别、受控问数工作流、工作台概览与经营看板查询 |
 | `src/taozhi/application/common/` | 应用层公共任务守卫、Token 用量聚合与 OpenTelemetry 节点埋点 |
-| `src/taozhi/application/rag/` | 企业知识问答 LangGraph 状态机（多专家意图路由、混合检索、协同核验与合规发布） |
-| `src/taozhi/application/research/` | 自治多智能体调研系统（运行时钩子、主协调器、并行子智能体与研报合成） |
-| `src/taozhi/application/services/` | 应用服务层：账号审批、文档生命周期、问答/调研调度与经营看板用例 |
+| `src/taozhi/application/rag/` | 问答任务执行入口，按问题选择知识检索或受控问数，校验来源并保存结果 |
+| `src/taozhi/application/research/` | 调研任务执行、会话查询与中途干预，包含协调器、并行子智能体和研报合成 |
+| `src/taozhi/application/services/` | 账号审批、文档与任务生命周期、流式输出、工具调用和轨迹查询 |
 | `src/taozhi/orchestration/` | 编排辅助层：知识问答确定性控制器与离散决策引擎 |
 | `src/taozhi/schemas/` | 接口 DTO 层：Pydantic 请求验证模型（认证、管理、文档、任务与工具） |
 | `src/taozhi/server/` | 接口适配层：FastAPI 应用装配、Session/CSRF 认证与 Worker 租约守护进程 |
@@ -52,7 +52,7 @@
 | `web/src/` | Vue 页面、类型、样式与 API 调用 |
 | `web/src/assets/` | 静态图片与品牌图标资源 |
 | `web/src/composables/` | 前端共享响应式组合式逻辑（如 `useTaskStream` 统一 SSE 任务进度订阅） |
-| `web/src/views/` | BI 看板与问数等业务页面组件 |
+| `web/src/views/` | 资料管理与权限表单、经营看板、智能体调研和轨迹分析等业务视图 |
 
 ## 根文件
 
