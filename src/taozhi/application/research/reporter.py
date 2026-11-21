@@ -29,6 +29,8 @@ def _evidence_report(keyword: str, evidence: list[EvidenceRecord], error_type: s
         yield "\n\n本次暂无可用实测证据。"
     for ev in evidence:
         yield f"\n\n### {agent_display_name(ev['role'])}（{ev.get('status')}）\n{ev.get('summary', '')}"
+        if ev.get("channel") != "clock" and ev.get("time_references"):
+            yield "\n\n时间参照：" + "、".join(ev["time_references"])
 
 
 def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
@@ -56,6 +58,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
                 "key_metrics": ev.get("key_metrics"),
                 "gaps_or_errors": ev.get("gaps_or_errors"),
                 "tool_counts": ev.get("tool_counts"),
+                "time_references": ev.get("time_references", []),
             }
             for ev in active_ev
         ]
@@ -76,7 +79,8 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
             "【严格准则】：\n"
             "1. 一切价格、起订量、销量、差评与工厂/商品线索必须严格来自上述黑板证据，绝不允许编造未出现的数字；\n"
             "2. 若某渠道 status 为 empty/error 或 gaps_or_errors 非空，必须在报告对应章节客观说明数据缺失原因与可替代方案，严禁粉饰或凭空补齐；\n"
-            "3. 结合用户诉求给出可落地的差异化与风险提示。"
+            "3. time_references 仅表示读取系统时间的时刻；用户只询问时间时，直接回答带时区的读数。\n"
+            "4. 结合用户诉求给出可落地的差异化与风险提示。"
         )
 
         if span is not None:
@@ -151,6 +155,10 @@ def final_persistence_node(state: AutonomousAgentState) -> Dict[str, Any]:
     keyword = state.get("keyword") or ""
     tenant_id = state.get("tenant_id") or "default"
     report = state.get("report") or ""
+    final_status = "TIMEOUT" if state.get("stop_reason") == StopReason.TIMEOUT.value and not report else "COMPLETED"
+    evidence = active_evidence(state)
+    if evidence and all(ev.get("channel") == "clock" for ev in evidence):
+        return {"system_status": final_status}
     outline = state.get("outline") or []
     try:
         mem = get_memory_store(tenant_id=tenant_id)
@@ -161,5 +169,4 @@ def final_persistence_node(state: AutonomousAgentState) -> Dict[str, Any]:
     except Exception as exc:
         record_diagnostic("storage.memory", "skipped", exc)
 
-    final_status = "TIMEOUT" if state.get("stop_reason") == StopReason.TIMEOUT.value and not report else "COMPLETED"
     return {"system_status": final_status}

@@ -18,6 +18,7 @@ export const diagnosticOutcomeLabels: Record<TraceDiagnostic['outcome'], string>
 }
 
 const toolActions: Record<string, string> = {
+  get_current_time: '读取当前时间',
   search_web: '搜索公开网页',
   fetch_web_page: '读取网页正文',
   search_1688_wholesale: '查询 1688 批发报价',

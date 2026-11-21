@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from taozhi.domain.research import SOURCE_TOOLS
+
 from .contracts import required_tool_names
 
 if TYPE_CHECKING:
@@ -221,11 +223,11 @@ class ToolExecutionJudge:
                     issues.append(_issue(kind, f"未证实 {first} 先于 {second} 执行", second, later))
 
         if not self.required and not self.rules and self.min_data_count > 0:
-            counts = [call.get("data_count") for calls in observed.values() for call in calls
+            counts = [call.get("data_count") for source in SOURCE_TOOLS for call in observed.get(source, ())
                       if call.get("status") in (None, "ok")]
             if sum(n for n in counts if n is not None) < self.min_data_count:
-                kind = "missing_observation" if None in counts or uncertain or not complete else "tool_data"
-                issues.append(_issue(kind, "工具有效数据条数不足"))
+                kind = "missing_observation" if None in counts or uncertain.intersection(SOURCE_TOOLS) or not complete else "tool_data"
+                issues.append(_issue(kind, "调研来源的有效数据条数不足"))
 
         unique_issues = []
         for issue in issues:

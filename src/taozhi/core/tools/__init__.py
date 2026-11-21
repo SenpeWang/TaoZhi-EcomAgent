@@ -6,6 +6,7 @@ from .search_web import search_web, extract_search_keyword
 from .search_1688 import search_1688_wholesale
 from .search_amazon import search_amazon
 from .web_scraper import fetch_web_page
+from .current_time import get_current_time
 
 __all__ = [
     "ToolOutcome",
@@ -18,4 +19,5 @@ __all__ = [
     "search_1688_wholesale",
     "search_amazon",
     "fetch_web_page",
+    "get_current_time",
 ]

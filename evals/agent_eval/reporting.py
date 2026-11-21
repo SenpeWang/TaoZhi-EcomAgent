@@ -37,7 +37,7 @@ COUNTERS = (
     "forbidden_executions", "forbidden_attempts", "fact_hits", "fact_total", "fact_unknown",
 )
 
-TOOL_PARAMETERS = {"query", "keyword", "url", "limit", "max_chars", "timeout"}
+TOOL_PARAMETERS = {"query", "keyword", "url", "limit", "max_chars", "timeout", "timezone"}
 TOOL_OUTCOMES = {"ok", "empty", "timeout", "error", "cancelled"}
 
 

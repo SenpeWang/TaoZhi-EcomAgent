@@ -211,7 +211,7 @@ def _build_research_result_payload(
         emit_progress(hooks, f"[system] 任务已按用户取消请求提前终止 (耗时 {total_elapsed}s)", 100)
     else:
         for ev in active_ev:
-            if ev.get("status") == "ok" and ev.get("summary"):
+            if ev.get("channel") != "clock" and ev.get("status") == "ok" and ev.get("summary"):
                 session.record_fact(
                     subject=keyword,
                     predicate=agent_display_name(str(ev.get("role") or "调研洞察")),

@@ -16,6 +16,13 @@ def call(name, **fields):
 
 
 class ToolContractTests(unittest.TestCase):
+    def test_clock_reading_does_not_satisfy_market_data_minimum(self):
+        judge = ToolExecutionJudge(min_data_count=2)
+        clock = call("get_current_time", status="ok", data_count=1)
+        search = call("search_web", status="ok", data_count=1)
+        self.assertEqual(judge.evaluate(run_result([clock, search])).failure_type, "tool_data")
+        self.assertTrue(judge.evaluate(run_result([clock, {**search, "data_count": 2}])).passed)
+
     def test_each_required_source_must_provide_data(self):
         judge = ToolExecutionJudge(required_tools=["search_web", "search_amazon"])
         res = run_result([call("search_web", status="ok", data_count=11),

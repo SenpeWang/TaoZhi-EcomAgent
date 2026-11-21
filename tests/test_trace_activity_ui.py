@@ -15,6 +15,8 @@ const actor = {kind: 'agent', span_id: '1000000000000000', display_name: '市场
 const base = {actor, kind: 'TOOL', name: 'mcp.call_tool', display_name: 'search_web', status: 'ok', error_type: null,
   attributes: {'tool.name': 'search_web', 'tool.status': 'empty', 'tool.result_count': 0}}
 assert.deepEqual(activityAction(base), {title: '搜索公开网页', target: 'search_web'})
+assert.deepEqual(activityAction({...base, attributes: {'tool.name':'get_current_time'}}),
+  {title: '读取当前时间', target: 'get_current_time'})
 assert.equal(activityResult(base), '无匹配结果 · 返回 0 条')
 assert.equal(activityResult({...base, status: 'error', error_type: 'timeout',
   attributes: {'tool.status':'timeout', 'tool.result_count':0}}), '工具超时')

@@ -6,6 +6,7 @@ import json
 import pytest
 
 from evals.agent_eval import runner
+from evals.agent_eval.publish import project_report
 
 
 def case(case_id, **changes):
@@ -132,6 +133,22 @@ def test_case_step_projection_exposes_contract_without_free_text(tmp_path):
     assert row["steps_complete"] and row["status"] == "failed"
     serialized = json.dumps(report, ensure_ascii=False)
     assert all(private not in serialized for private in ("内部联系方式", "不可发布", "敏感查询原文"))
+
+
+@pytest.mark.parametrize(("observed_zone", "matches"), [("America/New_York", True), ("Asia/Shanghai", False)])
+def test_clock_parameter_matches_in_replay_and_published_steps(tmp_path, observed_zone, matches):
+    clock = "get_current_time"
+    sample = case("CLOCK", required_tools=[clock], tool_expectations=[
+        {"tool_name": clock, "parameters": {"timezone": "America/New_York"}, "status": "ok"}])
+    raw = observation("CLOCK")
+    raw["tool_calls"] = [{"tool_name": clock, "parameters": {"timezone": observed_zone}, "status": "ok",
+                          "dispatched": True, "data_count": 1, "sequence": 1}]
+    report = runner.run_agent_evaluations([sample], replay_file=recording(tmp_path, [raw]), reports_dir=tmp_path)
+    _, rows = project_report(report)
+    step, = rows[0]["observed"]
+    assert step["tool_name"] == clock and step["parameter_keys"] == ["timezone"]
+    assert step["parameters_match"] is matches and report["gate"]["passed"] is matches
+    assert report["case_results"][0]["tool_calls_count"] == 1
 
 
 def test_standard_regression_independently_blocks_and_challenge_is_separate(tmp_path):

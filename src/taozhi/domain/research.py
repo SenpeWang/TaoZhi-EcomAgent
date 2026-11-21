@@ -19,7 +19,9 @@ from .errors import Denied
 
 WEB_TOOLS: Tuple[str, ...] = ("search_web", "fetch_web_page")
 SOURCING_TOOLS: Tuple[str, ...] = ("search_1688_wholesale", "search_amazon")
-ALL_RESEARCH_TOOLS: Tuple[str, ...] = WEB_TOOLS + SOURCING_TOOLS
+SOURCE_TOOLS: Tuple[str, ...] = WEB_TOOLS + SOURCING_TOOLS
+CLOCK_TOOL = "get_current_time"
+ALL_RESEARCH_TOOLS: Tuple[str, ...] = SOURCE_TOOLS + (CLOCK_TOOL,)
 
 _SOURCING_PATTERN = re.compile(
     r"工厂|出厂|批发|1688|货源|起订|供应商|供货|打样|工艺|亚马逊|amazon|跨境|比价|毛利|套利|全景|全面|底价",
@@ -121,7 +123,7 @@ def classify_research_scope(
         allowed = ALL_RESEARCH_TOOLS
         forbidden: Tuple[str, ...] = ()
     else:
-        allowed = WEB_TOOLS
+        allowed = WEB_TOOLS + (CLOCK_TOOL,)
         forbidden = SOURCING_TOOLS
 
     return ResearchScope(
@@ -188,8 +190,8 @@ def authorize_subagent_tasks(
         if blocked_tools:
             rejected.append(f"子任务 [{agent_display_name(task.role)}] 请求的越界工具 {','.join(blocked_tools)} 已被领域守卫移除")
 
-        if not legal_tools:
-            rejected.append(f"子任务 [{agent_display_name(task.role)}] 无合法可用工具（当前允许: {','.join(scope.allowed_tools)}），整单驳回")
+        if not legal_tools or (blocked_tools and not any(tool in SOURCE_TOOLS for tool in legal_tools)):
+            rejected.append(f"子任务 [{agent_display_name(task.role)}] 缺少完成目标所需的合法工具（当前允许: {','.join(scope.allowed_tools)}），整单驳回")
             continue
 
         if len(authorized) >= max_parallel:

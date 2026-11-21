@@ -22,7 +22,9 @@ def test_live_observations_distinguish_tool_outcomes_and_missing_usage():
             ]))
         assert hooks["fetch_steering_fn"]() == []
         emit = hooks["emit_event_fn"]
-        emit("[tool_execution_end] 首轮工具完成", 30)
+        emit("[tool_execution_end] [市场情报分析师] get_current_time 完成", 30)
+        assert hooks["fetch_steering_fn"]() == []
+        emit("[tool_execution_end] [1688 采购分析师] search_1688_wholesale 采集完成", 35)
         assert hooks["fetch_steering_fn"]() == ["只查新型号"]
         assert hooks["fetch_steering_fn"]() == []
         emit("[steering] 已接收 1 条补充干预指令", 40)
@@ -52,7 +54,7 @@ def test_live_observations_distinguish_tool_outcomes_and_missing_usage():
 
 def test_parallel_workers_do_not_invent_global_order_or_acknowledgement():
     def run(**hooks):
-        hooks["emit_event_fn"]("[tool_execution_end] 完成", 40)
+        hooks["emit_event_fn"]("[tool_execution_end] [市场情报分析师] search_web 采集完成", 40)
         assert hooks["fetch_steering_fn"]() == CASE["steering"]
         return {"subagents": [
             {"tools": [{"name": "fetch_web_page", "parameters": {"url": "https://a.example/"}}]},

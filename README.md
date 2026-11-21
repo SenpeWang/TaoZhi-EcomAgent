@@ -16,6 +16,8 @@
 | Agent 评测中心 | 在「运行分析」查看已归档的评测批次，比较基线、检查失败用例的预期与实际步骤。管理员可筛选本租户发起人，成员可查看本人的批次。[评测与入库](evals/README.md#agent-调研评测) |
 | 资料治理 | 上传、解析、审核和发布资料，按组织、密级和个人授权控制访问。读权限、下载权限与外部模型处理权限分别判定。 |
 
+调研 Agent 可调用内置 MCP 工具 `get_current_time` 读取当前时间。默认时区为 `Asia/Shanghai`，也可传入 `{"timezone":"Europe/London"}` 等 IANA 时区。结果包含 `current_time`（带 UTC 偏移的 ISO 8601 时间）和 `timezone`。
+
 ## 系统架构
 
 [![淘智任务运行架构，展示浏览器、API、PostgreSQL、后台 Worker、Kafka 与 OpenTelemetry 的数据流](web/src/assets/system-architecture.svg)](web/src/assets/system-architecture.svg)

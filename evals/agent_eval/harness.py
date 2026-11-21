@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import math
+import re
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from uuid import uuid4
+
+from taozhi.domain.research import SOURCE_TOOLS
 
 
 def _unknown_usage() -> dict:
@@ -44,7 +47,7 @@ def _run_research(*, observe_trace: Callable[[str], None], **kwargs: Any) -> dic
 
 
 class _RunObservation:
-    """收集并行节点的用量，在首个工具完成且协调器再次轮询时交付干预。"""
+    """收集并行节点的用量，在首个调研来源工具完成后交付干预。"""
 
     def __init__(self, steering: list[str]) -> None:
         self._lock = threading.Lock()
@@ -64,7 +67,8 @@ class _RunObservation:
 
     def observe_progress(self, stage: str, progress: int) -> None:
         with self._lock:
-            if stage.startswith("[tool_execution_end]"):
+            completion = re.match(r"^\[tool_execution_end\] \[[^\]]+\] (\w+)\b", stage)
+            if completion and completion[1] in SOURCE_TOOLS:
                 self.tool_finished = True
             if stage.startswith("[steering]") and self.delivered:
                 self.received = True
