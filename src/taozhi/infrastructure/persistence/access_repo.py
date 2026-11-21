@@ -16,6 +16,12 @@ from taozhi.domain.roles import derive_role_level
 from taozhi.knowledge.db import as_jsonb, fetch_all, fetch_one
 
 
+def get_tenant_epoch(conn: Any, tenant_id: str) -> int:
+    """读取租户权限/资料变更代际号（tenants.epoch），用于跨进程失效内存语义缓存。"""
+    row = fetch_one(conn, "SELECT epoch FROM tenants WHERE id=%s", (tenant_id,))
+    return int((row or {}).get("epoch") or 1)
+
+
 def load_principal(conn: Any, user_id: str) -> Principal:
     """从数据库加载在职用户主体及其生效组织树和角色任职。
 

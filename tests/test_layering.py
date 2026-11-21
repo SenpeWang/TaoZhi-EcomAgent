@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import ast
+import subprocess
+import sys
 from pathlib import Path
 from typing import Generator, Optional, Tuple
 
@@ -247,6 +249,26 @@ def test_application_does_not_import_fastapi_or_schemas():
                 if n.module.split(".")[0] in forbidden_roots or n.module.startswith("taozhi.schemas"):
                     violations.append(f"{p.relative_to(ROOT)}:{lineno} 引入 {n.module}")
     assert not violations, "应用层违规依赖 Web/DTO：\n" + "\n".join(violations)
+
+
+def test_http_startup_does_not_load_task_execution():
+    """在新解释器装配真实 HTTP 路由，避免普通请求预加载工作流或全文检索引擎。"""
+    script = """
+import sys
+import taozhi.server.api
+
+execution_modules = {
+    'taozhi.application.bi.workflow',
+    'taozhi.application.rag.execution',
+    'taozhi.application.rag.workflow',
+    'taozhi.application.research.execution',
+    'taozhi.application.research.graph',
+    'taozhi.knowledge.retriever',
+}
+loaded = execution_modules.intersection(sys.modules)
+assert not loaded, f'HTTP 装配加载了执行模块 {sorted(loaded)}'
+"""
+    subprocess.run([sys.executable, "-c", script], cwd=ROOT.parent, check=True)
 
 
 def test_legacy_monolith_files_stay_deleted():

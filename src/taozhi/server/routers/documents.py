@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import ValidationError
 
@@ -16,9 +16,9 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 
 @router.get("")
-def documents(p=Depends(identity)):
-    """列出当前用户有权阅读的非删除文档清单。"""
-    return {"items": document_service.list_documents(p)}
+def documents(p=Depends(identity), q: str = Query("", max_length=200, pattern=r"^[^\x00]*$")):
+    """按标题查询当前用户有权阅读的文档。"""
+    return {"items": document_service.list_documents(p, title_query=q.strip())}
 
 
 @router.post("", status_code=201)

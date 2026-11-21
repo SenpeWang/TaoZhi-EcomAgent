@@ -395,9 +395,8 @@ def test_process_research_job_reads_budgets_from_settings():
     """测试 process_research_job 从 get_settings() 读取 llm_timeout 与调研预算（避免 Config 缺属性报错）。"""
     from types import SimpleNamespace
     from contextlib import contextmanager
-    from taozhi.application.services.task_service import process_research_job
+    from taozhi.application.research.execution import process_research_job
 
-    fake_cfg = SimpleNamespace(dsn="postgresql://unused")
     fake_settings = SimpleNamespace(
         llm_timeout=95,
         research_max_turns=4,
@@ -412,7 +411,7 @@ def test_process_research_job_reads_budgets_from_settings():
         yield fake_conn
 
     @contextmanager
-    def _fake_saver(_dsn):
+    def _fake_saver():
         saver = MagicMock()
         yield saver
 
@@ -430,17 +429,16 @@ def test_process_research_job_reads_budgets_from_settings():
         "payload": {"keyword": "蓝牙耳机"},
     }
     with (
-        patch("taozhi.application.services.task_service.load_config", return_value=fake_cfg),
-        patch("taozhi.application.services.task_service.get_settings", return_value=fake_settings),
-        patch("taozhi.application.services.task_service.database_connection", _fake_db),
+        patch("taozhi.application.research.execution.get_settings", return_value=fake_settings),
+        patch("taozhi.application.research.execution.database_connection", _fake_db),
         patch(
-            "taozhi.application.services.task_service.job_repo.get_job_by_id",
+            "taozhi.application.research.execution.job_repo.get_job_by_id",
             return_value={"state": "running", "run_version": 1, "cancel_requested": False,
                           "owner_id": "user_1", "owner_version": 1, "payload": job["payload"]},
         ),
-        patch("taozhi.application.services.task_service.load_principal", return_value=SimpleNamespace(version=1)),
-        patch("taozhi.application.services.task_service._postgres_checkpointer", _fake_saver),
-        patch("taozhi.application.services.task_service.execute_autonomous_agents", side_effect=_fake_execute),
+        patch("taozhi.application.research.execution.load_principal", return_value=SimpleNamespace(version=1)),
+        patch("taozhi.application.research.execution.postgres_checkpointer", _fake_saver),
+        patch("taozhi.application.research.execution.execute_autonomous_agents", side_effect=_fake_execute),
     ):
         process_research_job(job)
 

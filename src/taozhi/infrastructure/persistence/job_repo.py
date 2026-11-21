@@ -34,6 +34,14 @@ def get_job_by_id(conn: Any, job_id: str, *, for_update: bool = False) -> dict |
     return fetch_one(conn, f"SELECT * FROM jobs WHERE id=%s{suffix}", (job_id,))
 
 
+def lock_running_job(conn: Any, job_id: str, run_version: int) -> dict:
+    """发布结果前锁定任务，拒绝已取消、已结束或被新一轮执行替换的写入。"""
+    job = get_job_by_id(conn, job_id, for_update=True)
+    if not job or job["state"] != "running" or job["run_version"] != run_version or job["cancel_requested"]:
+        raise Denied("任务执行版本已失效", "STALE", 409)
+    return job
+
+
 def list_ask_and_research_jobs(conn: Any, tenant_id: str, limit: int = 500, kind: str = "") -> list[dict]:
     """按时间倒序列出问答与调研任务（分别保底拉取，防止调研任务被大量历史问答挤出）。"""
     if kind in ("ask", "research"):

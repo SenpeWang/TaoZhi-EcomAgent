@@ -8,7 +8,8 @@ import time
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
 
-from taozhi.application.services import task_output, task_service
+from taozhi.application.research import conversations
+from taozhi.application.services import task_output, task_service, tool_service
 from taozhi.domain.errors import Denied
 from taozhi.schemas.common import Decision
 from taozhi.schemas.task import Question, SteerInput, Tool
@@ -45,19 +46,19 @@ def tasks(kind: str = Query(default=""), p=Depends(identity)):
 @router.get("/research/conversations")
 def research_conversations(p=Depends(identity)):
     """列出个人协同调研多轮对话会话清单。"""
-    return {"items": task_service.list_research_conversations(p)}
+    return {"items": conversations.list_research_conversations(p)}
 
 
 @router.get("/research/conversation/{conversation_id}")
 def research_conversation(conversation_id: str, p=Depends(identity)):
     """加载单个协同调研会话的历史轮次、摘要及记忆事实。"""
-    return task_service.get_research_conversation(p, conversation_id)
+    return conversations.get_research_conversation(p, conversation_id)
 
 
 @router.delete("/research/conversation/{conversation_id}")
 def delete_research_conversation(conversation_id: str, p=Depends(identity)):
     """删除个人协同调研会话及关联任务与事件流水。"""
-    return task_service.delete_research_conversation(p, conversation_id)
+    return conversations.delete_research_conversation(p, conversation_id)
 
 
 @router.get("/tasks/{task_id}")
@@ -75,7 +76,7 @@ def cancel(task_id: str, p=Depends(identity)):
 @router.post("/tasks/{task_id}/steer")
 def steer(task_id: str, payload: SteerInput, p=Depends(identity)):
     """向进行中的协同调研任务下发幂等动态干预指令。"""
-    return task_service.steer_task(p, task_id, text=payload.input, request_id=payload.request_id)
+    return conversations.steer_task(p, task_id, text=payload.input, request_id=payload.request_id)
 
 
 @router.post("/tasks/{task_id}/retry")
@@ -151,4 +152,4 @@ async def events(
 @router.post("/tools")
 def tool(payload: Tool, p=Depends(identity)):
     """前端直接调用的受控业务查询或文档检索工具端点。"""
-    return task_service.execute_tool(p, name=payload.name, query=payload.query, identifier=payload.identifier)
+    return tool_service.execute_tool(p, name=payload.name, query=payload.query, identifier=payload.identifier)

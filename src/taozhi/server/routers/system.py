@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from taozhi.application.services import admin_service, document_service, task_service
+from taozhi.application.bi.dashboard import get_bi_dashboard, get_dashboard_summary
+from taozhi.application.services import admin_service, document_service
 from taozhi.server.auth import identity
 
 router = APIRouter(prefix="/api", tags=["system"])
@@ -36,13 +37,13 @@ def audit_list(p=Depends(identity)):
 @router.get("/dashboard")
 def dashboard(p=Depends(identity)):
     """返回工作台首页聚合统计。"""
-    return task_service.get_dashboard_summary(p)
+    return get_dashboard_summary(p)
 
 
 @router.get("/bi/dashboard")
 def bi_dashboard(days: int = Query(30, ge=7, le=365), p=Depends(identity)):
     """数据中台经营看板：全部指标源自语义层受控执行。"""
-    return task_service.get_bi_dashboard(p, days)
+    return get_bi_dashboard(p, days)
 
 
 @router.get("/knowledge-map")

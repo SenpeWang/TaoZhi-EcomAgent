@@ -36,10 +36,10 @@ _MIME_EXT_MAP = {
 }
 
 
-def list_documents(p: Principal) -> list[dict[str, Any]]:
+def list_documents(p: Principal, *, title_query: str = "") -> list[dict[str, Any]]:
     """列出当前用户有权阅读的未删除资料清单。"""
     with database_connection() as c:
-        rows = document_repo.list_active_documents(c, p)
+        rows = document_repo.list_active_documents(c, p, title_query)
         result = []
         for document in rows:
             grant = document["user_grant"]

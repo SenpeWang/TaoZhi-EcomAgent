@@ -17,13 +17,14 @@ _DOCUMENTS_WITH_USER_GRANT = (
 )
 
 
-def list_active_documents(conn: Any, p: Principal) -> list[dict]:
-    """列出租户下未删除文档与本用户的有效授权，供列表统一判定读写和下载权限。"""
-    return fetch_all(
-        conn,
-        _DOCUMENTS_WITH_USER_GRANT + " AND d.state<>'deleted' ORDER BY d.updated_at DESC LIMIT 2000",
-        (p.id, p.tenant_id),
-    )
+def list_active_documents(conn: Any, p: Principal, title_query: str) -> list[dict]:
+    """筛选标题包含查询文本的未删除资料，同时取回该用户的有效授权。"""
+    query = _DOCUMENTS_WITH_USER_GRANT + " AND d.state<>'deleted'"
+    params = (p.id, p.tenant_id)
+    if title_query:
+        query += " AND strpos(lower(d.title), lower(%s)) > 0"
+        params += (title_query,)
+    return fetch_all(conn, query + " ORDER BY d.updated_at DESC, d.id LIMIT 2000", params)
 
 
 def readable_published_documents(conn: Any, p: Principal, doc_id_prefix: str | None = None) -> dict[str, dict]:

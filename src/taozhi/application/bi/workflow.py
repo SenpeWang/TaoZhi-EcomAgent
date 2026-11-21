@@ -1,6 +1,8 @@
 """ChatBI 受控问数 LangGraph 工作流组装。"""
 from __future__ import annotations
 
+from typing import Any
+
 from taozhi.application.common.task_guard import empty_token_usage, traced_node, validate_task_execution
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import can_read_metric
@@ -119,3 +121,24 @@ def build_bi_workflow(checkpointer):
     builder.add_edge("data_query", "bi_publish")
     builder.add_edge("bi_publish", END)
     return builder.compile(checkpointer=checkpointer)
+
+
+def build_bi_result(state: dict[str, Any]) -> dict[str, Any]:
+    """将 ChatBI 问数工作流终态组装为前端可消费的结果负载。"""
+    dr = state.get("data_result") or {}
+    result: dict[str, Any] = dict(
+        answer=state["answer"],
+        citations=[],
+        specialists=[{"name": "指标语义层（受控 SQL）", "count": 1}] if (dr and not dr.get("denied")) else [],
+        missing=[],
+        hard_block=bool(state.get("hard_block")),
+        external_blocked=False,
+        model_calls=0,
+        usage=[],
+        cache_hit=False,
+        token_usage=state.get("token_usage") or empty_token_usage(),
+        degraded={},
+    )
+    if dr and not dr.get("denied"):
+        result["data"] = dr
+    return result

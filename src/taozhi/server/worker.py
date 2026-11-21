@@ -10,7 +10,8 @@ from contextlib import nullcontext
 from opentelemetry import context as otel_context
 
 from taozhi.application.services.document_service import process_ingestion_job
-from taozhi.application.services.task_service import process_question_job, process_research_job
+from taozhi.application.rag.execution import process_question_job
+from taozhi.application.research.execution import process_research_job
 from taozhi.config import load_config
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence import document_repo, job_repo

@@ -12,7 +12,7 @@ from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import load_principal, can_read
 from taozhi.server.worker import process_next_job
 from taozhi.application.common.task_guard import validate_task_execution
-from taozhi.application.services.task_service import process_question_job
+from taozhi.application.rag.execution import process_question_job
 from taozhi.infrastructure.persistence.job_repo import claim_next_job, create_job
 from taozhi.infrastructure.persistence.span_repo import write_spans
 import importlib.util
@@ -71,6 +71,25 @@ def test_chinese_info_login_cookie(clients):
     r=c.post("/api/auth/login",json={"username":"staff","password":"123456"})
     assert "HttpOnly" in r.headers["set-cookie"] and "SameSite=strict" in r.headers["set-cookie"]
     assert c.get("/").status_code==200 and 'lang="zh-CN"' in c.get("/").text
+
+
+def test_document_title_search_filters_before_returning_authorized_results(clients):
+    """标题可按大小写和字面标点检索，搜索结果继续遵守文档可见范围。"""
+    with database_connection() as conn:
+        conn.execute("UPDATE documents SET title=%s WHERE id=%s", ("春季 SKU%_ 目录", "test_doc_company"))
+        conn.execute("UPDATE documents SET title=%s WHERE id=%s", ("春季 SKU12 目录", "test_doc_team"))
+        conn.execute("UPDATE documents SET title=%s WHERE id=%s", ("内部 SKU%_ 成本", "test_doc_boss"))
+
+    def matches(role, query):
+        response = clients[role].get("/api/documents", params={"q": query})
+        assert response.status_code == 200
+        return {document["id"] for document in response.json()["items"]}
+
+    assert matches("staff", " sku%_ ") == {"test_doc_company"}
+    assert matches("boss", "%_") == {"test_doc_company", "test_doc_boss"}
+    assert matches("staff", "无匹配标题") == set()
+
+
 @pytest.mark.parametrize("name,yes,no",[
  ("staff",["test_doc_company","test_doc_team"],["test_doc_leader","test_doc_procurement","test_doc_boss"]),
  ("leader",["test_doc_company","test_doc_team","test_doc_leader"],["test_doc_procurement","test_doc_boss"]),
@@ -1313,10 +1332,10 @@ def test_docx_header_footer_and_pdf_upload_ingestion_and_search(clients):
 
 def test_contextual_questions_bypass_shared_cache(monkeypatch, clients):
     """相同问题切换订单、商品或会话，以及无会话号的追问，都实际执行各自的工作流。"""
-    from taozhi.application.services import task_service
+    from taozhi.application.rag import execution
 
     fake_model(monkeypatch)
-    monkeypatch.setattr(task_service, "get_semantic_cache", lambda: pytest.fail("上下文问答访问了共享缓存"))
+    monkeypatch.setattr(execution, "get_semantic_cache", lambda: pytest.fail("上下文问答访问了共享缓存"))
     for question, payload in [
         ("查询状态", {"order_id": "order_1"}), ("查询状态", {"order_id": "order_2"}),
         ("查询状态", {"sku_id": "sku_1"}), ("查询状态", {"conversation_id": "conversation_a"}),
@@ -1362,7 +1381,7 @@ def test_migration_binds_old_bi_results_to_original_metrics(monkeypatch):
 def test_metric_results_follow_current_grants(monkeypatch, clients):
     """问数完成后，任务详情、历史列表和复审均复核指标的授权与发布状态。"""
     from taozhi.application.bi import workflow
-    from taozhi.application.services import task_service
+    from taozhi.application.rag import execution
 
     users, nodes = ids()
     with database_connection() as c:
@@ -1375,7 +1394,7 @@ def test_metric_results_follow_current_grants(monkeypatch, clients):
             VALUES('tenant_test','sales_metric',%s,'allow',%s)
         """, (users["staff"], users["boss"]))
     monkeypatch.setattr(workflow.metrics_mod, "execute_metric", lambda *args: (["金额"], [[123]], {"unit": "元"}))
-    monkeypatch.setattr(task_service, "get_semantic_cache", lambda: pytest.fail("实时指标访问了问答缓存"))
+    monkeypatch.setattr(execution, "get_semantic_cache", lambda: pytest.fail("实时指标访问了问答缓存"))
     staff = clients["staff"]
     complete = task_id(staff, "测试销售额是多少")
     assert process_next_job()

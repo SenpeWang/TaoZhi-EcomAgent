@@ -6,7 +6,9 @@ from unittest.mock import MagicMock, patch
 
 from langgraph.checkpoint.memory import MemorySaver
 
-from taozhi.application.bi import BiState, build_bi_workflow, detect_data_intent
+from taozhi.application.bi.intent import detect_data_intent
+from taozhi.application.bi.state import BiState
+from taozhi.application.bi.workflow import build_bi_workflow
 from taozhi.application.rag.state import State as RagState
 from taozhi.application.rag.workflow import build_rag_workflow
 
