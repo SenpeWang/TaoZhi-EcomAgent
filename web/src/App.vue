@@ -285,9 +285,9 @@
 
         <TraceCenter
           v-else-if="currentPage === '轨迹中台' && !user.must_change"
-          :key="`${user.id}:${user.system_admin}`"
+          :key="`${user.id}:${user.role_level}`"
           :api="api"
-          :is-admin="user.system_admin"
+          :is-admin="isAdmin(user)"
           @inspect="openTrace"
         />
 
@@ -531,7 +531,7 @@
         !user.must_change &&
         activeTask &&
         ['ask', 'research'].includes(activeTask.kind) &&
-        (user.system_admin || activeTask.owner_id === user.id),
+        (isAdmin(user) || activeTask.owner_id === user.id),
       )
     "
     @inspect="openTrace"
@@ -690,6 +690,7 @@ import { openTaskEventStream } from './composables/useTaskStream'
 import { levelText, stateText } from './labels'
 import robotUrl from './assets/robot.svg'
 import { workspaceNavigation, workspacePages, type WorkspacePage } from './workspaceNavigation'
+import { isAdmin, type ManagedUser } from './types'
 import AccountCenter from './views/AccountCenter.vue'
 import BiView from './views/BiView.vue'
 import DocumentManager from './views/DocumentManager.vue'
@@ -732,7 +733,7 @@ const organizations = ref<Organization[]>([])
 const documents = ref<DocumentListItem[]>([])
 const tasks = ref<Task[]>([])
 const approvals = ref<Approval[]>([])
-const users = ref<User[]>([])
+const users = ref<ManagedUser[]>([])
 const audits = ref<AuditEvent[]>([])
 const runtimeStatus = ref<RuntimeStatus | null>(null)
 const emptyDashboard: Dashboard = {
@@ -872,7 +873,7 @@ const userInitial = computed(computeUserInitial)
 function computeUserTone(): string {
   if (user.value?.is_boss) return 'tone-exec'
   if (user.value?.is_leader) return 'tone-lead'
-  if (user.value?.system_admin) return 'tone-admin'
+  if (isAdmin(user.value)) return 'tone-admin'
   return 'tone-member'
 }
 const userToneClass = computed(computeUserTone)
@@ -930,7 +931,7 @@ const clearanceShortText = computed(
  * @param row - 账号对象。
  * @returns 角色摘要文案。
  */
-function displayRoles(row: User): string {
+function displayRoles(row: ManagedUser): string {
   const items: string[] = []
   if (row.is_boss) items.push('企业负责人')
   else if (row.is_leader) items.push('部门主管')

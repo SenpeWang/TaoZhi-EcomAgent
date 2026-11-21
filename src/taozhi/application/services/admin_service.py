@@ -1,5 +1,6 @@
 """账号、组织架构、审批工作流、系统状态与审计应用服务。"""
 from __future__ import annotations
+from taozhi.domain.roles import is_system_admin
 
 import json
 import logging
@@ -133,14 +134,14 @@ def request_organization_change(p: Principal, node_id: str, changes: dict[str, A
 
 def list_visible_users(p: Principal) -> list[dict[str, Any]]:
     """按管理权限范围列出租户下可见用户及组织任职。"""
-    if not (p.system_admin or p.boss or p.leader):
+    if not (is_system_admin(p.role_level) or p.boss or p.leader):
         return [p.public()]
     with database_connection() as c:
         rows = admin_repo.list_users_in_tenant(c, p.tenant_id)
         visible = []
         for u in rows:
             membership = admin_repo.list_user_memberships(c, p.tenant_id, u["id"])
-            if p.system_admin or p.boss or any(p.manages(m["node_id"]) for m in membership):
+            if is_system_admin(p.role_level) or p.boss or any(p.manages(m["node_id"]) for m in membership):
                 visible.append(dict(**public_user(u), memberships=membership))
         return visible
 
@@ -252,7 +253,7 @@ def list_approvals_for_principal(p: Principal) -> list[dict[str, Any]]:
             if not (
                 responsible
                 or a["requested_by"] == p.id
-                or (p.system_admin and a["kind"] in ("membership", "user", "org"))
+                or (is_system_admin(p.role_level) and a["kind"] in ("membership", "user", "org"))
             ):
                 continue
             d = document_repo.find_document_any(c, p.tenant_id, a["target_id"])
@@ -418,13 +419,13 @@ def get_health_status() -> dict[str, str]:
 
 def list_audit_events_for_principal(p: Principal) -> list[dict[str, Any]]:
     """按角色密级与组织管理范围过滤安全审计日志。"""
-    if not (p.system_admin or p.boss or p.leader):
+    if not (is_system_admin(p.role_level) or p.boss or p.leader):
         raise Denied()
     with database_connection() as c:
         rows = admin_repo.list_audit_events(c, p.tenant_id)
         return [
             r
             for r in rows
-            if (r["system"] and (p.system_admin or p.boss))
+            if (r["system"] and (is_system_admin(p.role_level) or p.boss))
             or (not r["system"] and p.grade(r["node_id"]) >= r["level"] and p.manages(r["node_id"]))
         ]

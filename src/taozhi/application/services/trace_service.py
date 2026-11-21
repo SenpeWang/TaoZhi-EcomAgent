@@ -1,5 +1,6 @@
 """按当前成员或管理员选择的发起人查看提问及执行轨迹。"""
 from __future__ import annotations
+from taozhi.domain.roles import is_system_admin
 
 import re
 from datetime import datetime, timedelta
@@ -67,7 +68,7 @@ _KNOWN_FAILURE_STAGES = {
 
 def _visible_owner(p: Principal, requested: str | None = None) -> str | None:
     """从会话身份确定可查发起人，管理员可以选择本租户全部账号。"""
-    if p.system_admin:
+    if is_system_admin(p.role_level):
         return None if requested in (None, "all") else requested
     if requested is not None and requested != p.id:
         raise Denied("只能查看本人发起的轨迹")
@@ -76,7 +77,7 @@ def _visible_owner(p: Principal, requested: str | None = None) -> str | None:
 
 def list_owners(p: Principal, *, query: str, cursor: str | None, limit: int) -> dict:
     """为管理员的发起人选择框提供分页账号目录。"""
-    if not p.system_admin:
+    if not is_system_admin(p.role_level):
         raise Denied("选择其他发起人需要系统管理员身份")
     with database_connection() as conn:
         rows = trace_repo.list_owners(conn, p.tenant_id, query=query.strip(), after=cursor, limit=limit + 1)
@@ -134,19 +135,19 @@ def list_traces(
     visible_owner = _visible_owner(p, owner_id)
     before = _decode_cursor(cursor)
     query = query.strip()
-    batch_size = max(limit + 1, 50) if query and not p.system_admin else limit + 1
+    batch_size = max(limit + 1, 50) if query and not is_system_admin(p.role_level) else limit + 1
     rows = []
     with database_connection() as conn:
         while len(rows) <= limit:
             batch = trace_repo.list_traces(
                 conn, p.tenant_id, owner_id=visible_owner, kind=kind, state=state, query=query,
-                before=before, limit=batch_size, include_sources=not p.system_admin,
+                before=before, limit=batch_size, include_sources=not is_system_admin(p.role_level),
             )
-            validity = {} if p.system_admin else batch_sources_validity(
+            validity = {} if is_system_admin(p.role_level) else batch_sources_validity(
                 conn, p, [row for row in batch if row["state"] != "legacy"]
             )
             for row in batch:
-                question_visible = p.system_admin or (row["state"] != "legacy" and validity[row["id"]])
+                question_visible = is_system_admin(p.role_level) or (row["state"] != "legacy" and validity[row["id"]])
                 if question_visible or row["matches_metadata"]:
                     rows.append(_display_trace(row, question_visible))
             if len(batch) < batch_size:
@@ -168,7 +169,7 @@ def get_trace(
         row = trace_repo.get_trace(conn, p.tenant_id, task_id, owner_id=_visible_owner(p))
         if row is None:
             raise Denied("轨迹不存在", "NOT_FOUND", 404)
-        question_visible = p.system_admin or (row["state"] != "legacy" and sources_valid(conn, p, row["sources"]))
+        question_visible = is_system_admin(p.role_level) or (row["state"] != "legacy" and sources_valid(conn, p, row["sources"]))
         events = trace_repo.list_events(conn, p.tenant_id, task_id, after_event_id, event_limit + 1)
     return {
         "trace": _display_trace(row, question_visible),

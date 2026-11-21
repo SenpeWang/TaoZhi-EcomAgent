@@ -49,3 +49,15 @@ def derive_role_level(system_admin: bool, memberships: Iterable[dict[str, Any]])
         (get_role_level(str(m.get("role") or "")) for m in memberships),
         default=ROLE_LEVEL_STAFF,
     )
+
+
+def is_system_admin(level: int) -> bool:
+    """判断角色层级是否达到系统管理员。
+
+    Args:
+        level: 主体层级数值。
+
+    Returns:
+        达到管理员层级返回 True。
+    """
+    return level >= ROLE_LEVEL_ADMIN

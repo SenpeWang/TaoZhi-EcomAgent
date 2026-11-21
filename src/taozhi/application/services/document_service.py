@@ -1,5 +1,6 @@
 """资料上传、解析入库、版本编辑、权限策略与知识地图应用服务。"""
 from __future__ import annotations
+from taozhi.domain.roles import is_system_admin
 
 import logging
 from datetime import datetime, timezone
@@ -56,7 +57,7 @@ def list_documents(p: Principal, *, title_query: str = "") -> list[dict[str, Any
                 node_name=p.nodes.get(document["node_id"], {}).get("name", ""),
                 can_write=evaluate_write_permission(p, document, grant),
                 can_download=evaluate_download_permission(p, document, grant),
-                can_policy=p.boss or p.system_admin or p.manages(document["node_id"]),
+                can_policy=p.boss or is_system_admin(p.role_level) or p.manages(document["node_id"]),
             )
             result.append(item)
         return result
@@ -81,7 +82,7 @@ def create_document_draft(
     allowed = (
         p.boss
         or (p.manages(node_id) and scope != "company" and level <= 2)
-        or (p.system_admin and scope == "company" and level == 1)
+        or (is_system_admin(p.role_level) and scope == "company" and level == 1)
     )
     if not allowed:
         raise Denied("不能在该范围创建资料")
@@ -234,7 +235,7 @@ def request_policy_change(p: Principal, doc_id: str, data: dict[str, Any]) -> di
     """发起文档密级/归属/AI 与下载策略变更审批。"""
     with database_connection() as c:
         d = get_document(c, p, doc_id)
-        if not (p.boss or p.system_admin or p.manages(d["node_id"])):
+        if not (p.boss or is_system_admin(p.role_level) or p.manages(d["node_id"])):
             raise Denied()
         if data.get("node_id", d["node_id"]) not in p.nodes:
             raise Denied("组织无效", "INVALID", 400)
@@ -268,7 +269,7 @@ def list_grants(p: Principal, doc_id: str) -> list[dict[str, Any]]:
     """查询文档显式特例授权明细。"""
     with database_connection() as c:
         d = get_document(c, p, doc_id)
-        if not (p.boss or p.system_admin or p.manages(d["node_id"])):
+        if not (p.boss or is_system_admin(p.role_level) or p.manages(d["node_id"])):
             raise Denied()
         return document_repo.list_document_grants(c, p.tenant_id, d["id"])
 
@@ -286,7 +287,7 @@ def request_grant_change(
         raise Denied("授权到期时间须为未来时间", "INVALID_EXPIRY", 400)
     with database_connection() as c:
         d = get_document(c, p, doc_id)
-        if not (p.boss or p.system_admin or p.manages(d["node_id"])):
+        if not (p.boss or is_system_admin(p.role_level) or p.manages(d["node_id"])):
             raise Denied()
         if not admin_repo.get_user(c, p.tenant_id, user_id, active_only=True):
             raise Denied("授权人员无效", "INVALID", 400)

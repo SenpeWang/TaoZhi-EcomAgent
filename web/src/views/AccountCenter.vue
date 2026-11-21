@@ -15,7 +15,7 @@
             <p class="account-handle">账号：{{ user.username }} · {{ tenantName }}</p>
             <div class="account-badge-row">
               <span class="clearance-badge" :class="clearanceTone">{{ clearanceLabel }}</span>
-              <span v-if="user.system_admin" class="role-chip role-admin">系统管理员</span>
+              <span v-if="isAdmin(user)" class="role-chip role-admin">系统管理员</span>
             </div>
           </div>
         </div>
@@ -175,7 +175,7 @@
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { roleName } from '../labels'
-import type { User } from '../types'
+import { isAdmin, type User } from '../types'
 
 const props = defineProps<{
   user: User
@@ -200,7 +200,7 @@ const avatarInitial = computed((): string => {
 const clearanceTone = computed((): string => {
   if (props.user.is_boss) return 'tone-exec'
   if (props.user.is_leader) return 'tone-lead'
-  if (props.user.system_admin) return 'tone-admin'
+  if (isAdmin(props.user)) return 'tone-admin'
   return 'tone-member'
 })
 

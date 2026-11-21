@@ -308,7 +308,9 @@ import { onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { levelText, stateTag, stateText } from '../labels'
 import { useWorkspaceAction } from '../composables/useWorkspaceAction'
+import { isAdmin } from '../types'
 import type {
+  ManagedUser,
   DocumentListItem,
   DocumentRecord,
   DocumentVersion,
@@ -325,7 +327,7 @@ const props = defineProps<{
   documents: DocumentListItem[]
   organizations: Organization[]
   rootOrganizationId: string
-  users: User[]
+  users: ManagedUser[]
   user: User
 }>()
 
@@ -467,7 +469,7 @@ async function openDocument(id: string): Promise<void> {
  */
 function newDoc(): void {
   closeDocument()
-  const companyDefault = props.user.system_admin && !props.user.is_boss
+  const companyDefault = isAdmin(props.user) && !props.user.is_boss
   Object.assign(docForm, {
     id: '',
     title: '',

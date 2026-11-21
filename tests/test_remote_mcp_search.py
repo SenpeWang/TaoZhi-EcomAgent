@@ -1,6 +1,7 @@
 """公开 MCP 检索客户端与搜索降级链路的单元测试。"""
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 
@@ -97,8 +98,7 @@ def test_search_web_via_mcp_handles_error_result(monkeypatch):
 
 def test_duckduckgo_anti_bot_returns_empty(monkeypatch):
     """DuckDuckGo 返回 202 反爬页时返回空列表，不再抛 ValueError。"""
-    import taozhi.core.tools.search_web  # noqa: F401
-    sw = sys.modules["taozhi.core.tools.search_web"]
+    sw = importlib.import_module("taozhi.core.tools.search_web")
 
     class _AntiBot(_Client):
         def post(self, url, data=None, **_kw):
@@ -110,8 +110,7 @@ def test_duckduckgo_anti_bot_returns_empty(monkeypatch):
 
 def test_search_web_prefers_mcp_results(monkeypatch):
     """MCP 返回结果时直接采用，不再调用后续通道。"""
-    import taozhi.core.tools.search_web  # noqa: F401
-    sw = sys.modules["taozhi.core.tools.search_web"]
+    sw = importlib.import_module("taozhi.core.tools.search_web")
 
     monkeypatch.setattr(sw, "search_web_via_mcp", lambda *_a, **_k: [{"title": "t", "snippet": "s", "url": "https://x", "source": "exa-mcp"}])
     items = sw.search_web("手机支架", limit=3)

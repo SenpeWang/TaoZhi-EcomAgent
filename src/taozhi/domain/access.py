@@ -1,5 +1,6 @@
 """领域权限判定纯规则（无数据库连接，仅基于主体与文档元数据计算）。"""
 from __future__ import annotations
+from .roles import is_system_admin
 
 from typing import Optional
 
@@ -91,7 +92,7 @@ def evaluate_write_permission(p: Principal, doc: dict, grant: Optional[dict] = N
     return (
         p.boss
         or (p.manages(doc.get("node_id")) and doc.get("level", 1) <= 2 and doc.get("scope") != "company")
-        or (p.system_admin and doc.get("scope") == "company" and doc.get("level") == 1)
+        or (is_system_admin(p.role_level) and doc.get("scope") == "company" and doc.get("level") == 1)
     )
 
 

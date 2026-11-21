@@ -5,6 +5,18 @@ export interface Capabilities {
   review: boolean
   permissions: boolean
 }
+/** 系统管理员起始角色层级。 */
+export const ADMIN_ROLE_LEVEL = 4
+
+/**
+ * 判断用户是否具备系统管理员层级。
+ * @param user - 含角色层级的用户对象。
+ * @returns 达到管理员层级时返回 true。
+ */
+export function isAdmin(user: { role_level?: number } | null | undefined): boolean {
+  return (user?.role_level ?? 0) >= ADMIN_ROLE_LEVEL
+}
+
 export interface Membership {
   node_id: string
   role: string
@@ -14,7 +26,7 @@ export interface User {
   id: string
   username: string
   display_name: string
-  system_admin: boolean
+  role_level: number
   is_boss: boolean
   is_leader: boolean
   roles: string[]
@@ -22,6 +34,19 @@ export interface User {
   memberships: Membership[]
   capabilities: Capabilities
   active?: boolean
+}
+export interface ManagedUser {
+  id: string
+  username: string
+  display_name: string
+  system_admin?: boolean
+  active?: boolean
+  must_change?: boolean
+  version?: number
+  is_boss?: boolean
+  is_leader?: boolean
+  roles?: string[]
+  memberships?: Membership[]
 }
 export interface QuickAccount {
   username: string

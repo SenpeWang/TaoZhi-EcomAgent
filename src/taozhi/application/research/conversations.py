@@ -1,5 +1,6 @@
 """市场调研的会话查询、记忆展示、中途干预和删除。"""
 from __future__ import annotations
+from taozhi.domain.roles import is_system_admin
 
 import logging
 import secrets
@@ -93,7 +94,7 @@ def steer_task(p: Principal, task_id: str, *, text: str, request_id: str = "") -
             raise Denied("任务不存在或没有访问权限", "NOT_FOUND", 404)
         if r["state"] not in ("queued", "running"):
             raise Denied("只能对进行中的任务追加干预指令", "CONFLICT", 409)
-        if not (r["owner_id"] == p.id or p.boss or p.system_admin):
+        if not (r["owner_id"] == p.id or p.boss or is_system_admin(p.role_level)):
             raise Denied("无权干预该任务", "FORBIDDEN", 403)
         existing_items = ((r.get("payload") or {}).get("steering_inputs")) or []
         if any(isinstance(item, dict) and str(item.get("id") or "") == steer_id for item in existing_items):

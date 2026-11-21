@@ -1,5 +1,6 @@
 """持久化访问控制与来源实时核验仓储：承接基于数据库连接的权限、来源有效性与审计落库。"""
 from __future__ import annotations
+from taozhi.domain.roles import is_system_admin
 
 from datetime import datetime, timezone
 from typing import Any
@@ -60,7 +61,7 @@ def load_principal(conn: Any, user_id: str) -> Principal:
 
 def require_system(p: Principal) -> None:
     """校验当前主体是否为系统管理员或公司老板。"""
-    if not (p.system_admin or p.boss):
+    if not (is_system_admin(p.role_level) or p.boss):
         raise Denied("此操作需要管理员或老板身份")
 
 

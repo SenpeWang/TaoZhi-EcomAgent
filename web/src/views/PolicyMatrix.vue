@@ -249,13 +249,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { roleName } from '../labels'
-import type { Approval, Organization, OrganizationTree, User } from '../types'
+import type { ManagedUser, Approval, Organization, OrganizationTree, User } from '../types'
 
 const props = defineProps<{
   mode: 'approvals' | 'org'
   approvals: Approval[]
   tree: OrganizationTree[]
-  users: User[]
+  users: ManagedUser[]
 }>()
 
 const emit = defineEmits<{
@@ -350,14 +350,14 @@ const orgNodeCount = computed(
  * 根据关键词与状态过滤企业账号目录。
  * @returns 符合筛选条件的账号列表。
  */
-function filterUsersList(): User[] {
+function filterUsersList(): ManagedUser[] {
   const q = searchQuery.value.trim().toLowerCase()
-  const out: User[] = []
+  const out: ManagedUser[] = []
   for (const u of props.users) {
     if (userStatusFilter.value === 'active' && !u.active) continue
     if (userStatusFilter.value === 'disabled' && u.active) continue
     if (q) {
-      const orgText = u.memberships
+      const orgText = (u.memberships ?? [])
         .map(
           /**
            * 拼接组织节点名称用于本地检索。
@@ -381,7 +381,7 @@ const filteredUsers = computed(filterUsersList)
  * @param row - 账号对象。
  * @returns 大写头像首字。
  */
-function memberInitial(row: User): string {
+function memberInitial(row: ManagedUser): string {
   const clean = (row.display_name || row.username || 'U').trim()
   return clean ? clean.slice(0, 1).toUpperCase() : 'U'
 }
@@ -391,7 +391,7 @@ function memberInitial(row: User): string {
  * @param row - 账号对象。
  * @returns 配色类名。
  */
-function memberTone(row: User): string {
+function memberTone(row: ManagedUser): string {
   if (row.is_boss) return 'tone-exec'
   if (row.is_leader) return 'tone-lead'
   if (row.system_admin) return 'tone-admin'
@@ -404,7 +404,7 @@ function memberTone(row: User): string {
  * @returns 展示标签与语义类型数组。
  */
 function displayRoles(
-  row: User,
+  row: ManagedUser,
 ): { text: string; type: 'primary' | 'success' | 'warning' | 'info' }[] {
   const tags: { text: string; type: 'primary' | 'success' | 'warning' | 'info' }[] = []
   if (row.is_boss) tags.push({ text: '企业负责人', type: 'primary' })

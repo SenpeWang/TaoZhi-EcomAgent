@@ -1,5 +1,6 @@
 """任务提交、查询、取消、重试和人工审核。"""
 from __future__ import annotations
+from taozhi.domain.roles import is_system_admin
 
 from typing import Any
 
@@ -80,7 +81,7 @@ def retry_task(p: Principal, task_id: str) -> dict[str, Any]:
         r = job_repo.get_job(c, p.tenant_id, task_id, for_update=True)
         if not r:
             raise Denied("任务不存在或没有访问权限", "NOT_FOUND", 404)
-        if not (r["owner_id"] == p.id or p.boss or p.system_admin):
+        if not (r["owner_id"] == p.id or p.boss or is_system_admin(p.role_level)):
             raise Denied("无权操作此任务", "FORBIDDEN", 403)
         if r["state"] == "running":
             raise Denied("任务正在执行中，无需重复发起", "CONFLICT", 409)

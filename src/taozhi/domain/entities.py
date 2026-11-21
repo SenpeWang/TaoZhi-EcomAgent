@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from .roles import ROLE_LEVEL_ADMIN
+from .roles import is_system_admin
 
 
 @dataclass
@@ -47,11 +47,6 @@ class Principal:
         return any(m["role"] == "leader" for m in self.memberships)
 
     @property
-    def system_admin(self) -> bool:
-        """是否系统管理员（由角色层级派生，等级达到管理员即为真）。"""
-        return self.role_level >= ROLE_LEVEL_ADMIN
-
-    @property
     def root(self) -> str:
         """返回所属租户公司根节点 ID。"""
         return next((n["id"] for n in self.nodes.values() if n["kind"] == "company"), "")
@@ -77,19 +72,18 @@ class Principal:
     def public(self) -> dict:
         """生成可安全返回前端的公开主体视图。"""
         labels = []
-        if self.system_admin:
+        if is_system_admin(self.role_level):
             labels.append("管理员")
         if self.boss:
             labels.append("老板")
         elif self.leader:
             labels.append("组长")
-        elif self.memberships or not self.system_admin:
+        elif self.memberships or not is_system_admin(self.role_level):
             labels.append("员工")
         return dict(
             id=self.id,
             username=self.username,
             display_name=self.display_name,
-            system_admin=self.system_admin,
             role_level=self.role_level,
             is_boss=self.boss,
             is_leader=self.leader,
@@ -98,9 +92,9 @@ class Principal:
             version=self.version,
             memberships=[dict(**m, name=self.nodes.get(m["node_id"], {}).get("name", "")) for m in self.memberships],
             capabilities=dict(
-                system=self.system_admin or self.boss,
-                write=self.system_admin or self.leader or self.boss,
+                system=is_system_admin(self.role_level) or self.boss,
+                write=is_system_admin(self.role_level) or self.leader or self.boss,
                 review=self.leader or self.boss,
-                permissions=self.system_admin or self.leader or self.boss,
+                permissions=is_system_admin(self.role_level) or self.leader or self.boss,
             ),
         )

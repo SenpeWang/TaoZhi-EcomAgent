@@ -236,9 +236,8 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
         (member) =>
           isRecord(member) && typeof member.node_id === 'string' && typeof member.role === 'string',
       ) ||
-      !['is_boss', 'is_leader', 'system_admin', 'must_change'].every(
-        (key) => typeof identity[key] === 'boolean',
-      ) ||
+      !['is_boss', 'is_leader', 'must_change'].every((key) => typeof identity[key] === 'boolean') ||
+      typeof identity.role_level !== 'number' ||
       !isRecord(capabilities) ||
       !['system', 'write', 'review', 'permissions'].every(
         (key) => typeof capabilities[key] === 'boolean',
