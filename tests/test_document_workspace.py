@@ -80,10 +80,14 @@ const app = renderer.createApp(compiled.exports.default, {
 })
 const tags = new Set(descriptor.template.content.match(/\bel-[\w-]+/g))
 for (const tag of tags) {
-  app.component(tag, { inheritAttrs: false, setup(_, { attrs, slots }) {
-    return () => tag === 'el-dialog' && !attrs.modelValue
-      ? null : h(tag, attrs, slots.default?.())
-  } })
+  app.component(tag, {
+    inheritAttrs: false,
+    props: tag === 'el-dialog' ? { modelValue: Boolean } : {},
+    setup(props, { attrs, slots }) {
+      return () => tag === 'el-dialog' && !props.modelValue
+        ? null : h(tag, attrs, slots.default?.())
+    },
+  })
 }
 const workspace = app.mount(root)
 try {
