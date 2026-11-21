@@ -7,7 +7,7 @@ from taozhi.application.common.task_guard import empty_token_usage, merge_token_
 from taozhi.config import load_config
 from taozhi.core.memory.service import get_followup_context
 from taozhi.core.tools.search_web import extract_search_keyword
-from taozhi.domain.rag_verification import norm_text
+from taozhi.domain.rag_verification import cited_paragraphs
 from taozhi.domain.text_guard import detect_injection
 from taozhi.infrastructure.persistence.access_repo import sources_valid
 from taozhi.infrastructure.persistence.job_repo import last_conversation_question, list_recent_completed_ask
@@ -15,6 +15,7 @@ from taozhi.knowledge.business import lookup
 from taozhi.knowledge.db import database_connection
 from taozhi.knowledge.retriever import build_hyde_vector, search_documents
 from taozhi.orchestration.controller import DeterministicController
+from taozhi.observability.tracing import node_span
 from .intent import plan_node
 from .specialists import domain_node, quality_node
 from .state import State
@@ -63,7 +64,10 @@ def retrieval_node(state: State) -> dict:
                             seen_ids.add(s["chunk_id"])
                     evidence = evidence[:10]
 
-        recalled, recalled_sources = get_followup_context(c, p, state["question"], job["input_level"], job.get("conversation_id") or "")
+        with node_span("context.recall_conversation", "CHAIN") as span:
+            recalled, recalled_sources = get_followup_context(c, p, state["question"], job["input_level"], job.get("conversation_id") or "")
+            if span is not None:
+                span.set_attribute("context.evidence_count", len(recalled))
         if recalled:
             seen = {e["chunk_id"] for e in evidence}
             evidence = [e for e in recalled if e["chunk_id"] not in seen and not detect_injection(e["quote"])[0]] + evidence
@@ -134,23 +138,7 @@ def publish_node(state: State) -> dict:
     if state["hard_block"]:
         answer = "当前没有足够的授权资料，无法给出事实结论：相关内容可能未标注、待确认，或您当前无权查看。请补充资料，或联系负责人申请访问权限。"
     elif state["findings"]:
-        want_source = bool(re.search(r"来源|出处|哪份|文档|条款|引用|依据", state.get("question") or ""))
-        seen_claims = set()
-        parts = []
-        evs = state.get("evidence") or []
-        for f in state["findings"]:
-            key = norm_text(f["claim"])
-            if key in seen_claims:
-                continue
-            seen_claims.add(key)
-            idx = int(f["evidence_index"])
-            cite_tag = f" [{idx + 1}]"
-            if want_source and 0 <= idx < len(evs):
-                title_txt = str(evs[idx].get("title") or "").strip()
-                if title_txt and title_txt not in f["claim"]:
-                    cite_tag = f"（来源：《{title_txt}》）[{idx + 1}]"
-            parts.append(f"{f['claim']}{cite_tag}")
-        answer = "\n\n".join(parts)
+        answer = "".join(cited_paragraphs(state["question"], state["evidence"], state["findings"]))
     elif state["external_blocked"]:
         answer = "当前资料未获外部 AI 处理许可，以下为授权原文，请人工核验。\n\n" + "\n\n".join(
             e["quote"][:500] + f" [{i + 1}]" for i, e in enumerate(state["evidence"][:5])

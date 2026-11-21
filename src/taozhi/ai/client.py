@@ -32,6 +32,7 @@ from .router import (
     get_circuit_registry,
 )
 from .usage import extract_usage
+from .text_stream import OutputDeliveryError, stream_answer
 
 Message = Union[str, BaseMessage, Dict[str, str]]
 _LOG = logging.getLogger(__name__)
@@ -192,6 +193,9 @@ class LLMClient:
         max_tokens: Optional[int] = None,
         _empty_retry: int = 0,
         allow_overseas: Optional[bool] = None,
+        *,
+        on_delta: Optional[Callable[[str], None]] = None,
+        on_reset: Optional[Callable[[], None]] = None,
     ) -> str:
         """执行对话请求：优先选用健康商汤通道，失效时立即熔断并故障转移。
 
@@ -203,10 +207,14 @@ class LLMClient:
             max_tokens: 最大生成 Token 数（显式传入时按调用方上限控制，不再被强拉高至 2048）。
             _empty_retry: 空回复内部重试计数器。
             allow_overseas: 可选覆盖是否允许转移至商汤海外版。
+            on_delta: 从模型实时读取并交付可展示的正文。
+            on_reset: 已输出文字的通道中断时撤回该次尝试的草稿。
 
         Returns:
             str: 模型生成的答复文本。
         """
+        if (on_delta is None) != (on_reset is None):
+            raise ValueError("流式正文和草稿重置回调须同时提供")
         messages = self._to_messages(prompt)
         if system:
             messages = [SystemMessage(content=system)] + messages
@@ -251,14 +259,20 @@ class LLMClient:
                         }
                         with node_span("llm.chat", "LLM", model_attributes) as span:
                             model_client = self._client_for_endpoint(endpoint)
-                            result = model_client.bind(
+                            bound = model_client.bind(
                                 temperature=sampling_temperature, max_tokens=output_token_limit,
-                            ).invoke(messages)
+                            )
+                            if on_delta is not None and on_reset is not None:
+                                result = stream_answer(bound.stream(messages, stream_usage=True), on_delta, on_reset)
+                            else:
+                                result = bound.invoke(messages)
                             usage = extract_usage(result)
                             if span is not None:
                                 span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_PROMPT, usage["prompt_tokens"])
                                 span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_COMPLETION, usage["completion_tokens"])
                                 span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_TOTAL, usage["total_tokens"])
+                    except OutputDeliveryError:
+                        raise
                     except Exception as exc:
                         latency_ms = int((time.perf_counter() - attempt_started_at) * 1000)
                         reason, cooldown = self._registry.classify_error(exc, self.settings)
@@ -299,7 +313,7 @@ class LLMClient:
             raise RuntimeError("所有商汤模型通道均不可用")
 
         text = result.content if isinstance(result.content, str) else str(result.content)
-        text = clean_model_output(text)
+        text = text.strip() if on_delta is not None else clean_model_output(text)
 
         if (not text and _empty_retry < self.settings.llm_empty_retries
                 and output_token_limit < self.settings.llm_output_cap):
@@ -311,6 +325,8 @@ class LLMClient:
                 max_tokens=min(self.settings.llm_output_cap, output_token_limit * 3),
                 _empty_retry=_empty_retry + 1,
                 allow_overseas=allow_overseas,
+                on_delta=on_delta,
+                on_reset=on_reset,
             )
         return text
 

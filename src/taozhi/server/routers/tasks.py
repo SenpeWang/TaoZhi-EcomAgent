@@ -8,7 +8,7 @@ import time
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
 
-from taozhi.application.services import task_service
+from taozhi.application.services import task_output, task_service
 from taozhi.domain.errors import Denied
 from taozhi.schemas.common import Decision
 from taozhi.schemas.task import Question, SteerInput, Tool
@@ -91,41 +91,61 @@ def review(task_id: str, payload: Decision, p=Depends(identity)):
 
 
 @router.get("/tasks/{task_id}/events")
-async def events(task_id: str, request: Request, after: int = Query(0, ge=0), p=Depends(identity)):
-    """以 SSE 流推送任务执行阶段进展，并在终态后通知客户端回源拉取权限过滤结果。"""
-    await asyncio.to_thread(task_service.get_task, p, task_id)
+async def events(
+    task_id: str, request: Request, after: int = Query(0, ge=0, le=2**63 - 1),
+    last_event_id: int | None = Header(None, alias="Last-Event-ID", ge=0, le=2**63 - 1), p=Depends(identity),
+):
+    """按稳定游标实时投递阶段和正文，支持浏览器重连后续读及终态回源。"""
+    start = max(after, last_event_id or 0)
+    initial = await asyncio.to_thread(task_output.read_stream_page, p, task_id, start, draft_visible=start > 0)
+
+    def frame(event: str, data: dict) -> str:
+        event_id = f"id: {data['id']}\n" if isinstance(data.get("id"), int) else ""
+        name = "" if event == "stage" else f"event: {event}\n"
+        return f"{event_id}{name}data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     async def stream():
-        cursor = after
-        current = p
-        last_reauth = time.monotonic()
-        for _ in range(1200):
+        page = initial
+        displayed = start > 0
+        resuming = last_event_id is not None and start > 0
+        previous_version = page.run_version
+        checked_at = time.monotonic()
+        while True:
             if await request.is_disconnected():
                 return
-            try:
-                now = time.monotonic()
-                if now - last_reauth >= 5.0:
-                    current = await asyncio.to_thread(identity, request)
-                    last_reauth = now
-                allowed, rows, terminal = await asyncio.to_thread(task_service.poll_task_events, current, task_id, cursor)
-                if not allowed:
-                    return
-                for row in rows:
-                    cursor = row["id"]
-                    yield f"id: {cursor}\ndata: {json.dumps(row, ensure_ascii=False)}\n\n"
-                if terminal is not None:
-                    current = await asyncio.to_thread(identity, request)
-                    allowed, _, _ = await asyncio.to_thread(task_service.poll_task_events, current, task_id, cursor)
-                    if not allowed:
-                        return
-                    yield f"event: done\ndata: {json.dumps(terminal, default=str, ensure_ascii=False)}\n\n"
-                    return
-            except Denied:
+            if displayed and (previous_version != page.run_version or not page.output_allowed):
+                yield frame("result_reset", {"run_version": page.run_version})
+                displayed = False
+            previous_version = page.run_version
+            for event, record in page.events:
+                if event == "result_delta":
+                    displayed = True
+                elif event == "result_reset":
+                    displayed = False
+                yield frame(event, record)
+            if page.terminal is not None:
+                yield frame("done", page.terminal)
                 return
-            yield ": 心跳\n\n"
-            await asyncio.sleep(1)
+            if not page.has_more:
+                if resuming:
+                    if page.output_allowed:
+                        yield frame("result_resume", {"run_version": page.run_version})
+                    resuming = False
+                yield ": heartbeat\n\n"
+                await asyncio.sleep(0.5)
+            try:
+                current = await asyncio.to_thread(identity, request)
+                check_idle = time.monotonic() - checked_at >= 5
+                page = await asyncio.to_thread(task_output.read_stream_page, current, task_id, page.cursor,
+                                               draft_visible=displayed, check_idle=check_idle)
+                if check_idle or page.events:
+                    checked_at = time.monotonic()
+            except Denied:
+                yield frame("result_reset", {"run_version": previous_version})
+                yield frame("done", {"id": task_id, "run_version": previous_version})
+                return
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 @router.post("/tools")

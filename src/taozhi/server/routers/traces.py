@@ -6,7 +6,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query
 
 from taozhi.application.services import trace_service
-from taozhi.schemas.trace import SpanKind, TraceActivityPage, TraceDetail, TraceKind, TraceOwnerPage, TracePage, TraceRunPage, TraceSpanPage, TraceState
+from taozhi.domain.trace_activity import ActivityCategory, SpanKind
+from taozhi.schemas.trace import TraceActivityPage, TraceDetail, TraceKind, TraceOwnerPage, TracePage, TraceRunPage, TraceSpanPage, TraceState
 from taozhi.server.auth import identity
 
 router = APIRouter(prefix="/api/admin/traces", tags=["traces"])
@@ -78,10 +79,10 @@ def trace_spans(
 def trace_activities(
     task_id: TaskId,
     trace_id: Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")],
-    kind: SpanKind | None = None,
+    category: ActivityCategory | None = None,
     cursor: str | None = Query(None, min_length=1, max_length=64),
     limit: int = Query(100, ge=1, le=500),
     p=Depends(identity),
 ):
-    """按开始时间读取关键行动，可按节点类型查看该链路的具体执行者。"""
-    return trace_service.list_activities(p, task_id, trace_id, kind=kind, cursor=cursor, limit=limit)
+    """按开始时间读取关键行动，可按行动类别查看该链路的具体执行者。"""
+    return trace_service.list_activities(p, task_id, trace_id, category=category, cursor=cursor, limit=limit)

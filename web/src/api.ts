@@ -20,21 +20,18 @@ const spanKinds = new Set([
   'CHAIN',
   'INTERNAL',
 ])
+const activityCategories = new Set([...spanKinds, 'CONTEXT', 'GUARDRAIL'])
 
 /**
  * 校验本条链路的节点分类计数。
  * @param value - 服务端返回的全量分类计数。
- * @returns 是否仅包含已知的节点类型与非负整数。
+ * @param kinds - 当前维度可返回的分类。
+ * @returns 是否仅包含已知的类型与非负整数。
  */
-function validKindCounts(value: unknown): boolean {
+function validKindCounts(value: unknown, kinds: Set<string>): boolean {
   if (!isRecord(value)) return false
   for (const [kind, count] of Object.entries(value)) {
-    if (
-      !spanKinds.has(kind) ||
-      typeof count !== 'number' ||
-      !Number.isSafeInteger(count) ||
-      count < 0
-    )
+    if (!kinds.has(kind) || typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0)
       return false
   }
   return true
@@ -115,6 +112,7 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
     if (!Array.isArray(data.items)) throw new Error('调用链列表响应异常，请刷新后重试')
     const query = new URLSearchParams(path.split('?')[1])
     const requestedKind = query.get('kind')
+    const requestedCategory = query.get('category')
     const requestedTraceId = query.get('trace_id')
     for (const item of data.items) {
       if (
@@ -128,7 +126,8 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
         (runList &&
           ((requestedTraceId !== null && item.trace_id !== requestedTraceId) ||
             !Number.isInteger(item.run_version) ||
-            !validKindCounts(item.kind_counts) ||
+            !validKindCounts(item.kind_counts, spanKinds) ||
+            !validKindCounts(item.category_counts, activityCategories) ||
             !Number.isInteger(item.span_count) ||
             !Number.isInteger(item.failed_count) ||
             !Number.isInteger(item.input_tokens) ||
@@ -141,6 +140,11 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
             typeof item.display_name !== 'string' ||
             typeof item.kind !== 'string' ||
             !spanKinds.has(item.kind) ||
+            typeof item.category !== 'string' ||
+            !activityCategories.has(item.category) ||
+            (item.category !== item.kind &&
+              !(item.kind === 'CHAIN' && ['CONTEXT', 'GUARDRAIL'].includes(item.category))) ||
+            (requestedCategory !== null && item.category !== requestedCategory) ||
             (requestedKind !== null && item.kind !== requestedKind) ||
             !isRecord(item.attributes) ||
             (item.parent_span_id !== null && typeof item.parent_span_id !== 'string') ||

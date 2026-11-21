@@ -21,6 +21,8 @@ _NUMERIC = {
     SpanAttributes.LLM_TOKEN_COUNT_PROMPT, SpanAttributes.LLM_TOKEN_COUNT_COMPLETION,
     SpanAttributes.LLM_TOKEN_COUNT_TOTAL, "retrieval.result_count", "tool.result_count",
     "state.evidence", "state.findings", "state.missing", "state.business",
+    "context.evidence_count", "context.observation_count", "context.tool_count",
+    "context.input_chars", "context.output_chars",
     "state.answer_chars", "state.model_calls", "research.dispatched_count",
 }
 

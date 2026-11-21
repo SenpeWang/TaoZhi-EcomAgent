@@ -249,6 +249,7 @@
                     style="max-width: 260px"
                   />
                 </div>
+                <p v-if="m.text" class="plain-answer">{{ m.text }}</p>
               </template>
               <template v-else-if="m.denied">
                 <div class="denied-card">
@@ -308,7 +309,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import * as echarts from 'echarts/core'
@@ -440,6 +441,7 @@ const quickQuestions = [
 ]
 let charts: echarts.ECharts[] = []
 let closeStream: (() => void) | null = null
+const viewLifetime = new AbortController()
 
 const activeDays = computed(() => board.value?.days || periodDays.value)
 
@@ -917,7 +919,11 @@ async function ask(q: string): Promise<void> {
   draft.value = ''
   asking.value = true
   messages.value.push({ role: 'user', text: question })
-  const pending: Message = { role: 'system', pending: true, stage: '正在匹配企业经营指标' }
+  const pending = reactive<Message>({
+    role: 'system',
+    pending: true,
+    stage: '正在匹配企业经营指标',
+  })
   messages.value.push(pending)
   await scrollBottom()
   try {
@@ -925,31 +931,8 @@ async function ask(q: string): Promise<void> {
       question,
       input_level: 1,
     })
-    closeStream?.()
-    closeStream = openTaskEventStream(r.id, {
-      /**
-       * 接收进度事件：更新待处理消息的阶段与进度。
-       * @param row - 服务端推送的任务进度条目。
-       */
-      onMessage: (row) => {
-        if (row.stage) pending.stage = row.stage
-        if (typeof row.progress === 'number') pending.progress = row.progress
-      },
-      /**
-       * 监听终态事件：清理句柄并拉取结果。
-       */
-      onDone: () => {
-        closeStream = null
-        void finish(r.id, pending)
-      },
-      /**
-       * SSE 断连兜底：清空句柄并转入轮询拉取终态。
-       */
-      onError: () => {
-        closeStream = null
-        void finish(r.id, pending)
-      },
-    })
+    if (viewLifetime.signal.aborted) return
+    followTask(r.id, pending)
   } catch (e: unknown) {
     asking.value = false
     messages.value.pop()
@@ -958,6 +941,46 @@ async function ask(q: string): Promise<void> {
     messages.value.push({ role: 'system', text: msg })
   }
   await scrollBottom()
+}
+
+/**
+ * 打开问数或问答任务的流式订阅。
+ * @param taskId - 当前问数任务编号。
+ * @param pending - 界面中等待完成的消息。
+ */
+function followTask(taskId: string, pending: Message): void {
+  closeStream?.()
+  closeStream = openTaskEventStream(taskId, {
+    /**
+     * 接收进度事件：更新待处理消息的阶段与进度。
+     * @param row - 服务端推送的任务进度条目。
+     */
+    onMessage: (row) => {
+      if (row.stage) pending.stage = row.stage
+      if (typeof row.progress === 'number') pending.progress = row.progress
+    },
+    /**
+     * 展示问答智能体已核验的结论。
+     * @param text - 此次执行的实时正文。
+     */
+    onResult: (text) => {
+      pending.text = text
+    },
+    /**
+     * 监听终态事件：清理句柄并拉取结果。
+     */
+    onDone: () => {
+      closeStream = null
+      void finish(taskId, pending)
+    },
+    /**
+     * SSE 断连兜底：清空句柄并转入轮询拉取终态。
+     */
+    onError: () => {
+      closeStream = null
+      void finish(taskId, pending)
+    },
+  })
 }
 
 /**
@@ -978,11 +1001,18 @@ async function finish(taskId: string, pending: Message): Promise<void> {
        * @returns 服务端最新任务对象。
        */
       fetchTask: () => props.api<BiTaskResult>('/tasks/' + taskId),
-      terminalStates: ['completed', 'review', 'failed', 'cancelled'],
+      signal: viewLifetime.signal,
+      terminalStates: ['completed', 'review', 'failed', 'cancelled', 'rejected'],
       maxAttempts: 30,
       intervalMs: 2000,
     })
-    const res = job?.result
+    if (viewLifetime.signal.aborted) return
+    if (!job) throw new Error('查询连接已中断')
+    if (job.state === 'running' || job.state === 'queued') {
+      followTask(taskId, pending)
+      return
+    }
+    const res = job.result
     if (res?.data && !res.data.denied && res.data.columns?.length) {
       messages.value.splice(messages.value.indexOf(pending), 1, {
         role: 'system',
@@ -1012,7 +1042,7 @@ async function finish(taskId: string, pending: Message): Promise<void> {
       text: detail + '，请稍后重试。',
     })
   } finally {
-    asking.value = false
+    if (!viewLifetime.signal.aborted && !closeStream) asking.value = false
     await scrollBottom()
   }
 }
@@ -1036,10 +1066,11 @@ function onResize(): void {
 
 onMounted(async () => {
   await loadBoard()
-  window.addEventListener('resize', onResize)
+  if (!viewLifetime.signal.aborted) window.addEventListener('resize', onResize)
 })
 
 onUnmounted(() => {
+  viewLifetime.abort()
   window.removeEventListener('resize', onResize)
   closeStream?.()
   charts.forEach((c) => c.dispose())

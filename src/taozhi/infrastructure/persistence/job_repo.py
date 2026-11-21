@@ -139,18 +139,56 @@ def create_job(
     return job
 
 
-def list_task_events(conn: Any, tenant_id: str, job_id: str, after_id: int | None = None) -> list[dict]:
-    """读取任务执行事件流：传 after_id 时返回游标后的增量事件，否则返回含时间戳的全量历史。"""
-    if after_id is not None:
-        return fetch_all(
-            conn,
-            "SELECT id,stage,progress,status FROM task_events WHERE tenant_id=%s AND job_id=%s AND id>%s ORDER BY id",
-            (tenant_id, job_id, after_id),
-        )
+def list_task_events(conn: Any, tenant_id: str, job_id: str) -> list[dict]:
+    """读取任务的阶段历史，正文由受权的 SSE 单独投递。"""
     return fetch_all(
         conn,
-        "SELECT id,stage,progress,status,created_at FROM task_events WHERE tenant_id=%s AND job_id=%s ORDER BY id ASC",
+        "SELECT id,stage,progress,status,created_at FROM task_events "
+        "WHERE tenant_id=%s AND job_id=%s AND event_type='stage' ORDER BY id",
         (tenant_id, job_id),
+    )
+
+
+def get_stream_page(conn: Any, tenant_id: str, task_id: str, after_id: int, limit: int) -> dict | None:
+    """在同一条只读语句的快照内选择任务版本和下一批事件，无需阻塞 Worker 写入。"""
+    return fetch_one(
+        conn, """
+        SELECT j.id,j.tenant_id,j.node_id,j.input_level,j.owner_id,j.owner_version,j.run_version,j.state,j.stage,j.progress,j.error,
+            j.cancel_requested,j.sources,COALESCE(j.payload->'require_review','false'::jsonb) AS require_review,
+            (j.lease_until > now()) AS lease_valid,
+            (SELECT jsonb_agg(to_jsonb(page) ORDER BY page.id) FROM (
+                SELECT id,run_version,event_type,stage,progress,status,output_text FROM task_events
+                WHERE tenant_id=j.tenant_id AND job_id=j.id AND run_version=j.run_version AND id>%s
+                ORDER BY id LIMIT %s
+            ) page) AS events
+        FROM jobs j WHERE j.tenant_id=%s AND j.id=%s""",
+        (after_id, limit, tenant_id, task_id),
+    )
+
+
+def write_running_output(conn: Any, job_id: str, run_version: int, text: str | None, sources: list[dict]) -> None:
+    """仅锁定有效执行做短事务写入，以相同提交顺序登记正文、来源以及清稿事件。"""
+    job = fetch_one(conn, """
+        SELECT j.id,j.tenant_id,j.run_version,j.progress,j.sources FROM jobs j
+        JOIN users u ON u.id=j.owner_id AND u.tenant_id=j.tenant_id AND u.active AND u.version=j.owner_version
+        JOIN tenants t ON t.id=j.tenant_id AND t.enabled
+        WHERE j.id=%s AND j.run_version=%s AND j.state='running' AND j.lease_until>clock_timestamp() AND NOT j.cancel_requested
+          AND (j.payload->'require_review') IS DISTINCT FROM 'true'::jsonb FOR UPDATE OF j
+    """, (job_id, run_version))
+    if not job:
+        return
+    scope = (job["tenant_id"], job["id"], job["run_version"])
+    if sources and sources != job["sources"]:
+        conn.execute("UPDATE jobs SET sources=%s WHERE id=%s", (as_jsonb(sources), job_id))
+    if text is None:
+        conn.execute(
+            "DELETE FROM task_events WHERE tenant_id=%s AND job_id=%s AND run_version=%s AND event_type='result_delta'",
+            scope,
+        )
+    conn.execute(
+        "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status,event_type,output_text) "
+        "VALUES(%s,%s,%s,'',%s,'running',%s,%s)",
+        (*scope, job["progress"], "result_reset" if text is None else "result_delta", text),
     )
 
 
@@ -247,7 +285,7 @@ def _claim_locked_job(conn: Any, job_id: str, worker_id: str, lease_seconds: int
     job = fetch_one(
         conn,
         "UPDATE jobs SET stage=CASE WHEN state='running' THEN '执行租约到期，已重新认领' ELSE '已开始执行' END,"
-        "state='running',progress=0,run_version=run_version+1,attempts=attempts+1,worker_id=%s,"
+        "state='running',progress=0,sources='[]',run_version=run_version+1,attempts=attempts+1,worker_id=%s,"
         "lease_until=now()+(%s*interval '1 second'),started_at=COALESCE(started_at,now()),error='' "
         "WHERE id=%s RETURNING *",
         (worker_id, lease_seconds, job_id),
@@ -431,12 +469,13 @@ def list_research_conversation_summaries(conn: Any, tenant_id: str, owner_id: st
     """按会话分组列出市场调研对话概览。"""
     return fetch_all(
         conn,
-        "SELECT conversation_id, min(created_at) as started_at, max(created_at) as last_active, "
-        "count(*) as turns, (array_agg(question ORDER BY created_at ASC))[1] as title, "
-        "(array_agg(payload ORDER BY created_at ASC))[1] as first_payload, "
-        "(array_agg(state ORDER BY created_at DESC))[1] as latest_state "
+        "WITH summaries AS (SELECT conversation_id,min(created_at) AS started_at,max(created_at) AS last_active, "
+        "count(*) AS turns,(array_agg(id ORDER BY created_at,id))[1] AS id, "
+        "(array_agg(state ORDER BY created_at DESC,id DESC))[1] AS latest_state "
         "FROM jobs WHERE tenant_id=%s AND owner_id=%s AND kind='research' AND conversation_id!='' "
-        "GROUP BY conversation_id ORDER BY last_active DESC LIMIT 100",
+        "GROUP BY conversation_id ORDER BY last_active DESC LIMIT 100) "
+        "SELECT summaries.*,j.question AS title,j.payload AS first_payload,j.state AS first_state,j.sources "
+        "FROM summaries JOIN jobs j USING (id) ORDER BY last_active DESC",
         (tenant_id, owner_id),
     )
 
@@ -445,7 +484,7 @@ def list_research_conversation_turns(conn: Any, tenant_id: str, owner_id: str, c
     """按创建时间顺序读取单个调研会话下的全部轮次。"""
     return fetch_all(
         conn,
-        "SELECT * FROM jobs WHERE tenant_id=%s AND owner_id=%s AND kind='research' AND conversation_id=%s ORDER BY created_at ASC",
+        "SELECT * FROM jobs WHERE tenant_id=%s AND owner_id=%s AND kind='research' AND conversation_id=%s ORDER BY created_at,id",
         (tenant_id, owner_id, conversation_id),
     )
 
@@ -518,7 +557,7 @@ def requeue_job(conn: Any, tenant_id: str, job_id: str, new_ver: int) -> None:
     """
     conn.execute(
         "UPDATE jobs SET state='queued',stage='工作流重新排队调度中...',progress=0,error='',cancel_requested=false,"
-        "run_version=%s,started_at=NULL,finished_at=NULL,lease_until=NULL,worker_id=NULL,result=NULL WHERE id=%s",
+        "run_version=%s,started_at=NULL,finished_at=NULL,lease_until=NULL,worker_id=NULL,result=NULL,sources='[]' WHERE id=%s",
         (new_ver, job_id),
     )
     conn.execute(
@@ -586,7 +625,7 @@ def present_job(
         events = [
             dict(
                 id=r["id"],
-                stage=r["stage"] if is_privileged_viewer else redact(str(r["stage"])),
+                stage=(r["stage"] if is_privileged_viewer else redact(str(r["stage"]))) if valid else "任务状态已更新",
                 progress=r["progress"],
                 status=r["status"],
                 created_at=r["created_at"].isoformat() if r.get("created_at") else None,
@@ -598,11 +637,11 @@ def present_job(
         question=(job["question"] if is_privileged_viewer else redact(job["question"])) if valid else RESTRICTED_QUESTION,
         kind=job["kind"],
         state=job["state"],
-        stage=job["stage"],
+        stage=job["stage"] if valid else "任务状态已更新",
         progress=job["progress"],
         created_at=job["created_at"],
         finished_at=job["finished_at"],
-        error=job["error"],
+        error=job["error"] if valid else "",
         input_level=job["input_level"],
         node_id=job["node_id"],
         owner_id=job["owner_id"],

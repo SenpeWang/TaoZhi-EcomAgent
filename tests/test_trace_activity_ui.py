@@ -8,6 +8,7 @@ def test_readable_trace_actions():
     root = Path(__file__).resolve().parents[1]
     script = """
 import assert from 'node:assert/strict'
+import { activityCategoryLabels } from './web/src/traceWaterfall.ts'
 import { activityAction, activityResult, actorInstanceLabels } from './web/src/traceActivity.ts'
 
 const actor = {kind: 'agent', span_id: '1000000000000000', display_name: '市场调研员'}
@@ -24,6 +25,13 @@ assert.equal(activityResult(model), '输入 0 Token · 输出 4 Token')
 assert.equal(activityResult({...model, attributes: {}}), '')
 assert.equal(activityResult({...model, status:'error', error_type:'TimeoutError', attributes:{}}), 'TimeoutError')
 assert.equal(activityResult({...base, kind:'RETRIEVER', attributes:{'retrieval.result_count':0}}), '检索到 0 条')
+assert.equal(activityCategoryLabels.TOOL, '工具调用')
+assert.equal(activityCategoryLabels.CONTEXT, '上下文处理')
+const context = { ...base, category: 'CONTEXT', kind: 'CHAIN', name: 'context.prepare_report',
+  display_name: '组装报告证据上下文', attributes: {'context.evidence_count': 0, 'context.output_chars': 320} }
+assert.equal(activityAction(context).title, '组装报告证据上下文')
+assert.equal(activityResult(context), '0 份证据 · 320 字符')
+assert.equal(activityResult({...context, attributes:{'context.input_chars':2000,'context.output_chars':1500}}), '2000 → 1500 字符')
 const coordinator = {...base, kind:'AGENT', name:'research.orchestrator', attributes:{}}
 assert.equal(activityResult(coordinator), '')
 for (const [action, expected] of [['dispatch_subagents','已派发 2 项子任务'], ['synthesizer','转入报告撰写'], ['final_node','进入归档']]) {

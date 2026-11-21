@@ -407,6 +407,8 @@ def test_research_activities_order_and_actor_across_pages(clients):
     model = span(7, 3, 7, "LLM", "llm.chat", {
         "llm.model_name": "research-model", "llm.token_count.total": 12, "prompt": "保密提示词",
     })
+    prepared = span(11, 3, 5, "CHAIN", "context.prepare_subagent", {"context.observation_count": 1})
+    authorized = span(12, 3, 6, "CHAIN", "research.authorize_tool")
     # 其他链路有相同的父编号；断链节点只能显示自身的调用，不能借用另一条链路的角色。
     partial_workflow = span(10, 9, 8, "CHAIN", "worker.research")
     orphan = span(8, 10, 9, "LLM", "llm.chat", {"llm.model_name": "standalone-model"})
@@ -414,7 +416,7 @@ def test_research_activities_order_and_actor_across_pages(clients):
         "agent.name": "research.synthesizer",
     }), "trace_id": sibling_trace}
     # 模拟异步写入乱序，同时写入两次在同一微秒开始的工具调用。
-    write_spans([other_actor, model, search, empty, orphan, partial_workflow, wrapper, agent, coordinator, root])
+    write_spans([other_actor, model, search, empty, prepared, authorized, orphan, partial_workflow, wrapper, agent, coordinator, root])
 
     page = admin.get(path, params={"limit": 2}).json()
     activities = list(page["items"])
@@ -427,27 +429,46 @@ def test_research_activities_order_and_actor_across_pages(clients):
         activities.extend(page["items"])
     assert page["observed_at"] and cursors
     assert [row["span_id"] for row in activities] == [
-        s["span_id"] for s in (coordinator, agent, search, empty, model, orphan)
+        s["span_id"] for s in (coordinator, agent, search, empty, prepared, authorized, model, orphan)
     ]
     actors = {row["span_id"]: row["actor"] for row in activities}
     expected_agent = {"kind": "agent", "span_id": agent["span_id"], "display_name": "市场情报分析师"}
     assert actors[coordinator["span_id"]]["span_id"] == coordinator["span_id"]
-    assert all(actors[s["span_id"]] == expected_agent for s in (agent, search, empty, model))
+    assert all(actors[s["span_id"]] == expected_agent for s in (agent, search, empty, prepared, authorized, model))
     assert actors[orphan["span_id"]] is None
     assert "保密工具参数" not in str(activities) and "保密提示词" not in str(activities)
 
-    first = staff.get(path, params={"kind": "TOOL", "limit": 1}).json()
+    runs = admin.get(f"/api/admin/traces/{job_id}/runs", params={"trace_id": trace_id}).json()["items"]
+    [run] = runs
+    raw_rows = admin.get(path.removesuffix("activities") + "spans", params={"kind": "CHAIN"}).json()["items"]
+    assert {row["span_id"]: row["category"] for row in raw_rows} == {
+        root["span_id"]: "CHAIN", partial_workflow["span_id"]: "CHAIN",
+        prepared["span_id"]: "CONTEXT", authorized["span_id"]: "GUARDRAIL",
+    }
+    historical = admin.get(path.replace(trace_id, sibling_trace), params={"category": "CONTEXT"}).json()
+    assert historical["items"] == [] and historical["next_cursor"] is None
+    assert run["kind_counts"]["CHAIN"] == 4
+    assert {key: run["category_counts"][key] for key in ("CHAIN", "CONTEXT", "GUARDRAIL")} == {
+        "CHAIN": 2, "CONTEXT": 1, "GUARDRAIL": 1,
+    }
+    for category, expected in (("CONTEXT", [prepared]), ("GUARDRAIL", [authorized]), ("CHAIN", [root, partial_workflow])):
+        selected = staff.get(path, params={"category": category}).json()["items"]
+        assert [(row["span_id"], row["category"], row["kind"]) for row in selected] == [
+            (s["span_id"], category, "CHAIN") for s in expected
+        ]
+
+    first = staff.get(path, params={"category": "TOOL", "limit": 1}).json()
     assert len(first["items"]) == 1 and first["next_cursor"]
-    second = staff.get(path, params={"kind": "TOOL", "limit": 1, "cursor": first["next_cursor"]}).json()
+    second = staff.get(path, params={"category": "TOOL", "limit": 1, "cursor": first["next_cursor"]}).json()
     assert second["next_cursor"] is None
     for row, recorded in zip(first["items"] + second["items"], (search, empty), strict=True):
-        assert (row["kind"], row["span_id"], row["status"], row["duration_ms"]) == ("TOOL", recorded["span_id"], "ok", 2)
+        assert (row["category"], row["span_id"], row["status"], row["duration_ms"]) == ("TOOL", recorded["span_id"], "ok", 2)
         assert row["actor"] == expected_agent
         assert row["attributes"]["tool.status"] == recorded["attributes"]["tool.status"]
         assert row["attributes"]["tool.result_count"] == recorded["attributes"]["tool.result_count"]
         assert row["display_name"] == recorded["attributes"]["tool.name"]
     # 将同一接口的原始响应体交给浏览器使用的契约校验和时间线格式化函数。
-    tool_page = staff.get(path, params={"kind": "TOOL"})
+    tool_page = staff.get(path, params={"category": "TOOL"})
     display = subprocess.run(
         ["node", "--experimental-strip-types", "--input-type=module", "--eval", """
 import assert from 'node:assert/strict'
@@ -473,9 +494,9 @@ console.log(JSON.stringify(page.items.map(entry => [
     recorded_model = next(row for row in activities if row["span_id"] == model["span_id"])
     assert recorded_model["display_name"] == "research-model"
     assert recorded_model["attributes"]["llm.token_count.total"] == 12
-    assert [row["span_id"] for row in admin.get(path, params={"kind": "INTERNAL"}).json()["items"]] == [wrapper["span_id"]]
+    assert [row["span_id"] for row in admin.get(path, params={"category": "INTERNAL"}).json()["items"]] == [wrapper["span_id"]]
     assert staff.get(path, params={"cursor": "invalid"}).status_code == 422
-    assert admin.get(path, params={"kind": "unknown"}).status_code == 422
+    assert admin.get(path, params={"category": "unknown"}).status_code == 422
     assert TestClient(app).get(path).status_code == 401
     assert clients["boss"].get(path, params={"cursor": first["next_cursor"]}).status_code == 404
     other_job = task_id(staff, "相同账号的另一条提问")
@@ -663,7 +684,13 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
         assert call["attributes"]["llm.token_count.completion"] == 7
     assert {"product", "supply"} <= specialist_roles
     activity_path = f"{path}/{trace_id}/activities"
-    called_tools = staff.get(activity_path, params={"kind": "TOOL"}).json()["items"]
+    contexts = staff.get(activity_path, params={"category": "CONTEXT"}).json()["items"]
+    recalled, = [s for s in contexts if s["name"] == "context.recall_conversation"]
+    assert recalled["actor"]["span_id"] == retrieval["span_id"]
+    assembled = [s for s in contexts if s["name"] == "context.prepare_specialist"]
+    assert assembled and all(s["category"] == "CONTEXT" and s["actor"]["kind"] == "agent" for s in assembled)
+    assert all(s["attributes"]["context.evidence_count"] > 0 and s["attributes"]["context.output_chars"] > 0 for s in assembled)
+    called_tools = staff.get(activity_path, params={"category": "TOOL"}).json()["items"]
     assert {row["span_id"] for row in called_tools} == {tool["span_id"] for tool in tools}
     for row in called_tools:
         # 来源复核也会独立调用业务工具，同名工具应归属各自实际的调用方。
@@ -678,7 +705,7 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
         assert row["actor"] == {
             "kind": "agent" if agent else "workflow", "span_id": actor["span_id"], "display_name": actor["display_name"],
         }
-    called_models = admin.get(activity_path, params={"kind": "LLM"}).json()["items"]
+    called_models = admin.get(activity_path, params={"category": "LLM"}).json()["items"]
     assert {row["span_id"] for row in called_models} == {call["span_id"] for call in models}
     for row in called_models:
         specialist = by_id[row["parent_span_id"]]
@@ -800,6 +827,120 @@ def test_trace_lifecycle_tracks_attempts_and_rejects_stale_callbacks(clients):
         (0, "queued", 0), (old, "running", 0), (new, "running", 0),
         (new, "running", 30), (new, "running", 30), (new, "running", 30), (new, "cancelled", 100),
     ]
+
+
+def test_report_output_before_completion_resets_and_resumes(clients):
+    """读到运行中的正文，模型回退移除旧稿，浏览器按 Last-Event-ID 精确接续。"""
+    from taozhi.application.services.task_output import publish_report_delta, read_stream_page
+    from taozhi.infrastructure.persistence.job_repo import claim_job_by_id, complete_job
+    from taozhi.server.routers.tasks import events
+    from unittest.mock import AsyncMock
+    import asyncio
+
+    staff = clients["staff"]
+    task = task_id(staff, "报告正文流", kind="research")
+    job = claim_job_by_id(task, "research-worker")
+    version = job["run_version"]
+    with database_connection() as conn:
+        owner = load_principal(conn, job["owner_id"])
+    publish_report_delta(task, version, "已放弃的候选")
+    first = read_stream_page(owner, task, 0, draft_visible=False)
+    assert first.terminal is None
+    assert first.events[-1][0] == "result_delta" and first.events[-1][1]["text"] == "已放弃的候选"
+    publish_report_delta(task, version, None)
+    publish_report_delta(task, version, "# 市场报告\n")
+    resumed = read_stream_page(owner, task, first.cursor, draft_visible=True)
+    assert [kind for kind, _ in resumed.events] == ["result_reset", "result_delta"]
+    assert resumed.events[1][1] == {"id": resumed.cursor, "run_version": version, "text": "# 市场报告\n"}
+
+    async def reconnect_while_running():
+        request = AsyncMock()
+        request.is_disconnected.return_value = False
+        response = await events(task, request, after=0, last_event_id=resumed.cursor, p=owner)
+        try:
+            return await anext(response.body_iterator)
+        finally:
+            await response.body_iterator.aclose()
+
+    resume = asyncio.run(reconnect_while_running())
+    assert resume.startswith("event: result_resume\n") and json.loads(resume.split("data: ")[1]) == {"run_version": version}
+    publish_report_delta(task, version, "第二段")
+    with database_connection() as conn:
+        complete_job(conn, tenant_id=owner.tenant_id, job_id=task, run_version=version, state="completed",
+                     stage="完成", result={"report": "# 市场报告\n第二段"}, sources=[])
+    path = f"/api/tasks/{task}/events"
+    stream = staff.get(path, headers={"Last-Event-ID": str(resumed.cursor)})
+    assert stream.status_code == 200 and stream.headers["x-accel-buffering"] == "no"
+    body = stream.text
+    assert body.count("event: result_delta") == 1 and "第二段" in body and "市场报告" not in body
+    assert body.index("event: result_delta") < body.index("event: done")
+    replay = staff.get(path).text
+    assert "已放弃的候选" not in replay and replay.count("event: result_delta") == 2
+    assert staff.get(path, headers={"Last-Event-ID": "-1"}).status_code == 422
+    assert "第二段" not in str(staff.get(f"/api/tasks/{task}").json()["events"])
+
+
+def test_live_output_obeys_source_grant_review_and_worker_generation(clients):
+    """撤权、审核、失败和重试隔离草稿；过期 Worker 无法继续追加。"""
+    from taozhi.application.services.task_output import publish_answer_delta, read_stream_page
+    from taozhi.infrastructure.persistence.job_repo import claim_job_by_id
+
+    staff = clients["staff"]
+    task = task_id(staff)
+    job = claim_job_by_id(task, "first-worker")
+    version = job["run_version"]
+    with database_connection() as conn:
+        owner = load_principal(conn, job["owner_id"])
+        doc = next(d for d in fetch_all(conn, "SELECT * FROM documents WHERE state='published'") if can_read(conn, owner, d))
+    sources = [{"kind": "document", "document_id": doc["id"], "version": doc["current_version"],
+                "acl_version": doc["acl_version"], "tenant_id": owner.tenant_id}]
+    publish_answer_delta(task, version, "已核验引用正文", sources)
+    page = read_stream_page(owner, task, 0, draft_visible=False)
+    assert page.output_allowed and page.events[-1][1]["text"] == "已核验引用正文"
+    with database_connection() as conn:
+        conn.execute("UPDATE documents SET acl_version=acl_version+1 WHERE id=%s", (doc["id"],))
+    revoked = read_stream_page(owner, task, page.cursor, draft_visible=True)
+    assert not revoked.output_allowed and not revoked.events
+    with database_connection() as conn:
+        conn.execute("UPDATE jobs SET state='failed' WHERE id=%s", (task,))
+    stream = staff.get(f"/api/tasks/{task}/events", headers={"Last-Event-ID": str(page.cursor)}).text
+    assert "event: result_reset" in stream and "event: done" in stream
+    assert "已核验引用正文" not in staff.get(f"/api/tasks/{task}/events").text
+    assert staff.post(f"/api/tasks/{task}/retry").status_code == 200
+    next_job = claim_job_by_id(task, "second-worker")
+    publish_answer_delta(task, version, "迟到旧草稿", [])
+    with database_connection() as conn:
+        conn.execute("UPDATE jobs SET payload=payload || '{\"require_review\": true}'::jsonb WHERE id=%s", (task,))
+    publish_answer_delta(task, next_job["run_version"], "待审核正文", [])
+    retried = read_stream_page(owner, task, 0, draft_visible=False)
+    assert not retried.output_allowed and all(kind == "stage" for kind, _ in retried.events)
+    with database_connection() as conn:
+        stored = fetch_all(conn, "SELECT output_text FROM task_events WHERE job_id=%s AND event_type='result_delta'", (task,))
+    assert stored == [{"output_text": "已核验引用正文"}]
+
+
+def test_research_history_derives_facts_only_from_visible_turns(clients):
+    """同一会话内隐藏轮次的结果不得通过会话摘要、阶段日志及记忆事实旁路泄露。"""
+    staff = clients["staff"]
+    conv = "visible_history"
+    first = task_id(staff, "公开主题", kind="research", conversation_id=conv)
+    hidden = task_id(staff, "保密主题", kind="research", conversation_id=conv)
+    with database_connection() as conn:
+        for task, summary, sources in ((first, "本轮可见事实", []), (hidden, "保密洞察", [{"document_id": "已撤权"}])):
+            result = {"context_summary": summary, "keyword": "测试主题", "evidence_pool": [
+                {"status": "ok", "role": "research.sourcing", "summary": summary},
+            ]}
+            conn.execute("UPDATE jobs SET state='completed',stage=%s,result=%s,sources=%s WHERE id=%s",
+                         (summary, as_jsonb(result), as_jsonb(sources), task))
+    reply = staff.get(f"/api/research/conversation/{conv}")
+    assert reply.status_code == 200, reply.text
+    body = reply.json()
+    assert body["context_summary"] == "" and [f["object"] for f in body["memory_facts"]] == ["本轮可见事实"]
+    assert all(secret not in reply.text for secret in ("保密洞察", "保密主题"))
+    with database_connection() as conn:
+        conn.execute("UPDATE jobs SET sources=%s WHERE id=%s", (as_jsonb([{"document_id": "已撤权"}]), first))
+    assert "公开主题" not in staff.get("/api/research/conversations").text
+    assert "公开主题" not in staff.get(f"/api/research/conversation/{conv}").text
 
 
 def test_cancellation_and_permission_change(monkeypatch,clients):

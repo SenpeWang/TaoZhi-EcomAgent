@@ -260,6 +260,8 @@ def execute_autonomous_agents(
     fetch_steering_fn: Optional[Callable[[], List[Any]]] = None,
     require_checkpointer: bool = False,
     model_call_fn: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    result_delta_fn: Optional[Callable[[str], None]] = None,
+    result_reset_fn: Optional[Callable[[], None]] = None,
 ) -> Dict[str, Any]:
     """在 AgentSession 与检查点保护下启动电商市场自主协同调研系统。
 
@@ -281,17 +283,22 @@ def execute_autonomous_agents(
         fetch_steering_fn: 轮询拉取新追加动态干预指令的回调。
         require_checkpointer: 为 True 时未传入持久化 checkpointer 将快速失败。
         model_call_fn: 可选的逐次模型调用计量回调，独立运行时可省略。
+        result_delta_fn: 收取报告分析师运行中生成的可见正文。
+        result_reset_fn: 撤回未成功的端点尝试已输出的草稿。
 
     Returns:
         包含终审 Markdown 研报、平台分布、子智能体审计轨迹及路由记录的结果字典。
     """
     if require_checkpointer and checkpointer is None:
         raise ValueError("启用持久化或中断恢复时必须传入非空 checkpointer（如 PostgresSaver）")
+    if (result_delta_fn is None) != (result_reset_fn is None):
+        raise ValueError("报告正文和草稿重置回调须同时提供")
 
     hook_run_id = f"run_{uuid.uuid4().hex[:12]}"
     hooks = RuntimeHooks(
         check_cancel_fn=check_cancel_fn, fetch_steering_fn=fetch_steering_fn,
         emit_fn=emit_event_fn, model_call_fn=model_call_fn,
+        result_delta_fn=result_delta_fn, result_reset_fn=result_reset_fn,
     )
     session = AgentSession(
         conversation_id=conversation_id or job_id or hook_run_id,

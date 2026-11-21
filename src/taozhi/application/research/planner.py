@@ -27,6 +27,7 @@ from taozhi.domain.research import (
 from taozhi.domain.text_guard import sanitize
 from taozhi.infrastructure.mcp.adapter import McpClientAdapter
 from taozhi.infrastructure.mcp.server import default_mcp_server
+from taozhi.observability.tracing import node_span
 from .hooks import (
     RuntimeHooks,
     attach_route_delta,
@@ -266,18 +267,23 @@ def lead_orchestrator_node(state: AutonomousAgentState) -> Dict[str, Any]:
         return attach_steering_delta(res, steering_delta, steering_id_delta)
 
     mcp_specs = McpClientAdapter(server=default_mcp_server).list_tool_specs(scope.allowed_tools)
-    prompt = _build_orchestrator_prompt(
-        keyword=keyword,
-        query=query,
-        newly_arrived=newly_arrived,
-        all_inbox=all_inbox,
-        notices=list(state.get("guard_notices") or []),
-        mcp_specs=mcp_specs,
-        remaining_turns=max(0, budget.max_turns - turn),
-        remaining_sec=max(0.0, budget.timeout_seconds - elapsed_seconds),
-        max_parallel_subagents=budget.max_parallel_subagents,
-        active_ev=active_ev,
-    )
+    with node_span("context.prepare_coordinator", "CHAIN", {
+        "context.evidence_count": len(active_ev), "context.tool_count": len(mcp_specs),
+    }) as span:
+        prompt = _build_orchestrator_prompt(
+            keyword=keyword,
+            query=query,
+            newly_arrived=newly_arrived,
+            all_inbox=all_inbox,
+            notices=list(state.get("guard_notices") or []),
+            mcp_specs=mcp_specs,
+            remaining_turns=max(0, budget.max_turns - turn),
+            remaining_sec=max(0.0, budget.timeout_seconds - elapsed_seconds),
+            max_parallel_subagents=budget.max_parallel_subagents,
+            active_ev=active_ev,
+        )
+        if span is not None:
+            span.set_attribute("context.output_chars", len(prompt))
     parsed, route_events, last_ep = _decide_orchestrator_action(
         state=state,
         hooks=hooks,

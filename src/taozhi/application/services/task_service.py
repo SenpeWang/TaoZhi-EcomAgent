@@ -13,10 +13,10 @@ from taozhi.application.bi import build_bi_workflow, detect_data_intent
 from taozhi.application.common.task_guard import empty_token_usage, validate_task_execution
 from taozhi.application.rag.workflow import build_rag_workflow
 from taozhi.application.research.graph import build_autonomous_agent_graph, execute_autonomous_agents
-from taozhi.application.services import document_service
+from taozhi.application.services import document_service, task_output
 from taozhi.config import get_settings, load_config
-from taozhi.core.memory.service import get_memory_store
-from taozhi.domain.access import can_review, can_task
+from taozhi.domain.access import RESTRICTED_QUESTION, can_review, can_task
+from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
@@ -213,27 +213,16 @@ def review_task(p: Principal, task_id: str, *, approve: bool, comment: str) -> d
     return {"message": "答案已发布" if approve else "答案未通过审核"}
 
 
-def poll_task_events(p: Principal, task_id: str, after_id: int) -> tuple[bool, list[dict[str, Any]], dict[str, Any] | None]:
-    """读取单次轮询周期内的增量任务事件与终态摘要，供 SSE 端点推送。"""
-    with database_connection() as c:
-        job = job_repo.get_job(c, p.tenant_id, task_id)
-        if not job or not can_task(p, job):
-            return False, [], None
-        rows = job_repo.list_task_events(c, p.tenant_id, task_id, after_id=after_id)
-        terminal = None
-        if job["state"] in ("completed", "review", "failed", "cancelled", "rejected"):
-            terminal = {k: job[k] for k in ("id", "state", "stage", "progress", "error")}
-        return True, rows, terminal
-
-
 def list_research_conversations(p: Principal) -> list[dict[str, Any]]:
     """列出用户个人的多轮市场调研会话摘要清单。"""
     with database_connection() as c:
         rows = job_repo.list_research_conversation_summaries(c, p.tenant_id, p.id)
+        valid = batch_sources_validity(c, p, rows)
         return [
             {
                 "conversation_id": r["conversation_id"],
-                "title": (r["first_payload"] or {}).get("keyword") or r["title"],
+                "title": ((r["first_payload"] or {}).get("keyword") or r["title"])
+                if valid[r["id"]] and r["first_state"] != "legacy" else RESTRICTED_QUESTION,
                 "turns": r["turns"],
                 "started_at": r["started_at"].isoformat() if r["started_at"] else "",
                 "last_active": r["last_active"].isoformat() if r["last_active"] else "",
@@ -250,26 +239,28 @@ def get_research_conversation(p: Principal, conversation_id: str) -> dict[str, A
         if not rows:
             return {"conversation_id": conversation_id, "turns": [], "context_summary": "", "memory_facts": []}
         turns = []
+        facts = {}
         for r in rows:
             pj = job_repo.present_job(c, p, r, True)
-            evts = job_repo.list_task_events(c, p.tenant_id, r["id"])
-            pj["thinking_logs"] = [e["stage"] for e in evts if e.get("stage")]
+            pj["thinking_logs"] = [e["stage"] for e in pj["events"] if e.get("stage")]
+            visible_result = pj["result"] or {}
             calc_elapsed = (
                 round((r["finished_at"] - r["started_at"]).total_seconds(), 1)
                 if r.get("finished_at") and r.get("started_at")
                 else 0
             )
-            pj["elapsed"] = (r.get("result") or {}).get("elapsed") or calc_elapsed
+            pj["elapsed"] = visible_result.get("elapsed") or calc_elapsed
+            if pj["state"] == "completed":
+                subject = visible_result.get("keyword") or pj["question"]
+                for item in visible_result.get("evidence_pool") or []:
+                    if item.get("status") == "ok" and item.get("summary"):
+                        role = agent_display_name(str(item.get("role") or "调研洞察"))
+                        summary = str(item["summary"])[:300]
+                        facts[(subject, role)] = {"subject": subject, "predicate": role, "object": summary if p.boss else redact(summary)}
             turns.append(pj)
-        latest_res = rows[-1].get("result") or {}
-        kw = (rows[0].get("payload") or {}).get("keyword") or rows[0]["question"]
-    raw_facts = get_memory_store(tenant_id=p.tenant_id).query_facts(subject=kw)[:20]
-    facts = []
-    for f in raw_facts:
-        f_copy = dict(f)
-        if not getattr(p, "boss", False) and not getattr(p, "root", False) and isinstance(f_copy.get("object"), str):
-            f_copy["object"] = redact(f_copy["object"])
-        facts.append(f_copy)
+        latest_res = turns[-1]["result"] or {}
+        first = turns[0]
+        kw = first["question"] if first["restricted"] else (rows[0].get("payload") or {}).get("keyword") or first["question"]
     return {
         "conversation_id": conversation_id,
         "keyword": kw,
@@ -277,7 +268,7 @@ def get_research_conversation(p: Principal, conversation_id: str) -> dict[str, A
         "context_summary": latest_res.get("context_summary", ""),
         "context_tokens": latest_res.get("context_tokens", 0),
         "is_compacted": latest_res.get("is_compacted", False),
-        "memory_facts": facts,
+        "memory_facts": list(facts.values())[-20:],
     }
 
 
@@ -467,8 +458,8 @@ def _try_answer_from_semantic_cache(job: dict[str, Any], cache: Any, queue_wait_
             tenant_id=p.tenant_id,
             job_id=job["id"],
             run_version=job["run_version"],
-            state="completed",
-            stage="已完成（命中语义缓存）",
+            state="review" if row["payload"].get("require_review") else "completed",
+            stage="等待业务负责人审核" if row["payload"].get("require_review") else "已完成（命中语义缓存）",
             result=result,
             sources=cached["sources"],
             input_level=job["input_level"],
@@ -588,7 +579,8 @@ def process_question_job(job: dict[str, Any]) -> None:
         if is_bi:
             citations = []
             result = _build_bi_result(state=state, queue_wait_ms=queue_wait_ms, e2e_ms=e2e_ms, trace_id=trace_id)
-            status, stage = "completed", "已完成"
+            status = "review" if row["payload"].get("require_review") else "completed"
+            stage = "等待业务负责人审核" if status == "review" else "已完成"
         else:
             citations = [{k: e[k] for k in ("document_id", "version", "title", "quote", "page", "chunk_id")} for e in state["evidence"]]
             result = _build_question_result(
@@ -669,6 +661,8 @@ def process_research_job(job: dict[str, Any]) -> None:
             checkpointer=saver,
             require_checkpointer=True,
             emit_event_fn=emit,
+            result_delta_fn=lambda text: task_output.publish_report_delta(job["id"], job["run_version"], text),
+            result_reset_fn=lambda: task_output.publish_report_delta(job["id"], job["run_version"], None),
             model_call_fn=record_model_call,
             initial_steering=initial_steering,
             timeout_seconds=max(240.0, float(settings.llm_timeout or 90.0) * 2.5),
@@ -687,13 +681,16 @@ def process_research_job(job: dict[str, Any]) -> None:
         row = job_repo.get_job_by_id(c, job["id"], for_update=True)
         if not row or row["state"] != "running" or row["run_version"] != job["run_version"] or row["cancel_requested"]:
             raise Denied("任务执行版本已失效", "STALE", 409)
+        owner = load_principal(c, row["owner_id"])
+        if owner.version != row["owner_version"]:
+            raise Denied("人员权限已变化，请重新提交", "PERMISSION_CHANGED", 409)
         job_repo.complete_job(
             c,
             tenant_id=job["tenant_id"],
             job_id=job["id"],
             run_version=job["run_version"],
-            state="completed",
-            stage=stage_title,
+            state="review" if row["payload"].get("require_review") else "completed",
+            stage="等待业务负责人审核" if row["payload"].get("require_review") else stage_title,
             result=result,
             sources=[],
         )

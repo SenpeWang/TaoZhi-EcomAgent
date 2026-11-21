@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from taozhi.domain.trace_activity import ActivityCategory, SpanKind
+
 
 TraceKind = Literal["ask", "research"]
 TraceState = Literal["queued", "running", "review", "completed", "cancelled", "failed", "rejected", "legacy"]
@@ -71,7 +73,6 @@ class TraceDetail(BaseModel):
 
 
 SpanStatus = Literal["running", "ok", "error", "interrupted"]
-SpanKind = Literal["CHAIN", "AGENT", "LLM", "TOOL", "RETRIEVER", "EMBEDDING", "RERANKER", "INTERNAL"]
 
 
 class TraceRun(BaseModel):
@@ -84,6 +85,7 @@ class TraceRun(BaseModel):
     status: SpanStatus
     span_count: int
     kind_counts: dict[SpanKind, int]
+    category_counts: dict[ActivityCategory, int]
     failed_count: int
     input_tokens: int
     output_tokens: int
@@ -105,6 +107,7 @@ class TraceSpan(BaseModel):
     name: str
     display_name: str
     kind: SpanKind
+    category: ActivityCategory
     started_at: datetime
     ended_at: datetime | None
     duration_ms: int | None

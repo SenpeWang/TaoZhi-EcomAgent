@@ -24,6 +24,8 @@ class RuntimeHooks:
     _progress: int = 0
     model_call_fn: Optional[Callable[[str, Dict[str, Any]], None]] = None
     model_calls: int = 0
+    result_delta_fn: Optional[Callable[[str], None]] = None
+    result_reset_fn: Optional[Callable[[], None]] = None
 
     def model_call_observer(self, role: str) -> Callable[[Dict[str, Any]], None]:
         """绑定本次节点角色，供并行子任务分别登记端点调用。"""

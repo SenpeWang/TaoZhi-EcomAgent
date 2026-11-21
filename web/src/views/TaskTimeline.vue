@@ -8,6 +8,7 @@ import MarkdownReport from './MarkdownReport.vue'
 const props = defineProps<{
   modelValue: boolean
   task: Task | null
+  draft: string
   canInspect: boolean
 }>()
 
@@ -81,6 +82,21 @@ function onSteer() {
         :percentage="task.progress"
         :status="task.state === 'completed' ? 'success' : undefined"
       />
+
+      <section
+        v-if="
+          draft && !task.result && !task.restricted && ['running', 'queued'].includes(task.state)
+        "
+        class="answer-body"
+      >
+        <h3>{{ task.kind === 'research' ? '正在生成调研报告' : '正在生成回答' }}</h3>
+        <MarkdownReport
+          :content="draft"
+          :id-prefix="'draft-' + task.id"
+          :show-outline="false"
+          compact
+        />
+      </section>
 
       <div v-if="task.events?.length" class="workflow-events-box">
         <div class="events-box-header">
@@ -240,7 +256,11 @@ function onSteer() {
 
       <el-empty v-else-if="task.state === 'review'" description="待负责人审核后发布结果" />
 
-      <div v-if="task.state === 'running'" class="mid-flight-steering-box" style="margin-top: 18px">
+      <div
+        v-if="task.state === 'running' && task.kind === 'research'"
+        class="mid-flight-steering-box"
+        style="margin-top: 18px"
+      >
         <el-input
           v-model="steerInput"
           placeholder="发送补充要求（例如：优先筛选浙江产地供应商）"

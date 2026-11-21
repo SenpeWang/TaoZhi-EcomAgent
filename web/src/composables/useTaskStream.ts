@@ -4,11 +4,13 @@ export interface TaskStreamEventRow {
   stage?: string
   progress?: number
   status?: string
+  run_version?: number
 }
 
 /** 统一任务 SSE 订阅回调契约 */
 export interface TaskStreamHandlers {
   onMessage: (row: TaskStreamEventRow) => void
+  onResult?: (text: string) => void
   onDone?: (payload: { id?: string }) => void
   onError?: () => void
 }
@@ -19,6 +21,7 @@ export interface TaskPollingOptions<T extends { state: string }> {
   terminalStates?: readonly string[]
   maxAttempts?: number
   intervalMs?: number
+  signal?: AbortSignal
   onTick?: (task: T) => void
   onError?: (err: unknown) => void
 }
@@ -42,12 +45,14 @@ export async function pollTaskUntilTerminal<T extends { state: string }>(
   const intervalMs = options.intervalMs ?? 2000
   let latest: T | null = null
 
-  for (let i = 0; i < maxAttempts; i++) {
+  for (let i = 0; i < maxAttempts && !options.signal?.aborted; i++) {
     if (i > 0) {
       await new Promise((resolve) => setTimeout(resolve, intervalMs))
     }
     try {
+      if (options.signal?.aborted) return null
       latest = await options.fetchTask()
+      if (options.signal?.aborted) return null
       options.onTick?.(latest)
       if (terminalStates.includes(latest.state)) {
         return latest
@@ -60,59 +65,124 @@ export async function pollTaskUntilTerminal<T extends { state: string }>(
 }
 
 /**
- * 订阅指定任务的 Server-Sent Events 进度流，并提供显式关闭句柄。
- * @param taskId - 待监听任务唯一标识。
- * @param handlers - 消息、终态与异常降级回调函数集。
- * @returns 可立即关闭底层 EventSource 的清理函数。
+ * 解析任务流的 JSON 对象，忽略格式损坏的单条消息。
+ * @param event - 进度或结果事件。
+ * @returns 已解码的事件载荷。
+ */
+function eventData(event: Event): Record<string, unknown> | null {
+  try {
+    const data: unknown = JSON.parse((event as MessageEvent<string>).data)
+    return typeof data === 'object' && data !== null && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 订阅任务的进度和正文增量，按执行版本隔离草稿，用事件编号去重。
+ * @param taskId - 待监听的任务编号。
+ * @param handlers - 更新进度、正文、终态和异常的回调。
+ * @returns 停止接收任务事件的清理函数。
  */
 export function openTaskEventStream(taskId: string, handlers: TaskStreamHandlers): () => void {
   const source = new EventSource(`/api/tasks/${encodeURIComponent(taskId)}/events`)
   let closed = false
+  let runVersion = 0
+  let lastDeltaId = 0
+  let draft = ''
 
-  /**
-   * 关闭底层 EventSource 连接并确保幂等。
-   */
-  const close = (): void => {
-    if (closed) return
+  /** 关闭订阅并释放已缓冲的正文。 */
+  function close(): void {
     closed = true
+    draft = ''
     source.close()
   }
 
   /**
-   * 解析并转发阶段进展 JSON 消息。
-   * @param ev - SSE 原生消息事件。
+   * 切换执行版本时清空前一次尝试的草稿，丢弃迟到的旧版本事件。
+   * @param version - 事件携带的执行版本。
+   * @returns 当前订阅是否可以接收本条事件。
    */
-  source.onmessage = (ev: MessageEvent): void => {
-    try {
-      const row = JSON.parse(String(ev.data)) as TaskStreamEventRow
-      handlers.onMessage(row)
-    } catch {
+  function selectRun(version: unknown): boolean {
+    if (
+      closed ||
+      typeof version !== 'number' ||
+      !Number.isSafeInteger(version) ||
+      version < 0 ||
+      version < runVersion
+    )
+      return false
+    if (runVersion !== version) {
+      runVersion = version
+      draft = ''
+      lastDeltaId = 0
+      handlers.onResult?.('')
+    }
+    return true
+  }
+
+  /**
+   * 将阶段消息交给当前执行的订阅者。
+   * @param event - 原生 SSE 阶段消息。
+   */
+  source.onmessage = (event) => {
+    const row = eventData(event)
+    if (!row || !selectRun(row.run_version) || typeof row.stage !== 'string') return
+    handlers.onMessage({
+      id: typeof row.id === 'number' ? row.id : undefined,
+      stage: row.stage,
+      progress: typeof row.progress === 'number' ? row.progress : undefined,
+      status: typeof row.status === 'string' ? row.status : undefined,
+      run_version: runVersion,
+    })
+  }
+  source.addEventListener('result_delta', (event) => {
+    const row = eventData(event)
+    if (
+      !row ||
+      !selectRun(row.run_version) ||
+      typeof row.text !== 'string' ||
+      typeof row.id !== 'number' ||
+      !Number.isSafeInteger(row.id) ||
+      row.id <= lastDeltaId
+    )
       return
-    }
-  }
-
-  /**
-   * 监听服务端终态 done 信标并关闭连接。
-   * @param ev - 终态自定义事件。
-   */
-  source.addEventListener('done', (ev: Event): void => {
-    close()
-    let parsed: { id?: string } = {}
-    try {
-      parsed = JSON.parse(String((ev as MessageEvent).data || '{}')) as { id?: string }
-    } catch {
-      parsed = {}
-    }
-    handlers.onDone?.(parsed)
+    lastDeltaId = row.id
+    draft += row.text
+    handlers.onResult?.(draft)
   })
-
-  /**
-   * 监听通道断开，交给上层回落轮询。
-   */
-  source.onerror = (): void => {
+  source.addEventListener('result_reset', (event) => {
+    const row = eventData(event)
+    if (!row || !selectRun(row.run_version)) return
+    if (typeof row.id === 'number') {
+      if (row.id <= lastDeltaId) return
+      lastDeltaId = row.id
+    }
+    draft = ''
+    handlers.onResult?.('')
+  })
+  source.addEventListener('result_resume', (event) => {
+    const row = eventData(event)
+    if (!closed && draft && row?.run_version === runVersion) handlers.onResult?.(draft)
+  })
+  source.addEventListener('done', (event) => {
+    if (closed) return
+    const row = eventData(event)
     close()
-    handlers.onError?.()
+    handlers.onResult?.('')
+    handlers.onDone?.({ id: typeof row?.id === 'string' ? row.id : taskId })
+  })
+  /** 断线时隐藏草稿，保留续传所需的缓冲区。 */
+  source.onerror = () => {
+    if (closed) return
+    handlers.onResult?.('')
+    // 临时断线由浏览器携带 Last-Event-ID 续传，永久关闭才回源。
+    if (source.readyState === EventSource.CLOSED) {
+      close()
+      handlers.onError?.()
+    }
   }
-
   return close
 }

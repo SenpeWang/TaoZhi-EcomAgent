@@ -62,22 +62,26 @@
     <p v-if="view === 'spans'" class="trace-id">
       Trace ID <code>{{ selectedRun.trace_id }}</code>
     </p>
-    <div v-if="view === 'activities'" class="activity-toolbar">
-      <label for="inspected-activity-kind">查看行动</label>
-      <select id="inspected-activity-kind" :value="selectedKind" @change="changeActivityKind">
-        <option value="">关键行动</option>
-        <option
-          v-for="(label, kind) in spanKindLabels"
-          :key="kind"
-          :value="kind"
-          :disabled="!selectedRun.kind_counts[kind]"
+    <fieldset v-if="view === 'activities'" class="kind-filters">
+      <legend>行动类型</legend>
+      <div>
+        <button type="button" :aria-pressed="selectedCategory === ''" @click="chooseCategory('')">
+          关键行动
+        </button>
+        <button
+          v-for="(label, category) in activityCategoryLabels"
+          :key="category"
+          type="button"
+          :aria-pressed="selectedCategory === category"
+          :disabled="!selectedRun.category_counts[category]"
+          @click="chooseCategory(category)"
         >
-          {{ label }}（{{ selectedRun.kind_counts[kind] ?? 0 }}）
-        </option>
-      </select>
-    </div>
+          {{ label }} <span>{{ selectedRun.category_counts[category] ?? 0 }}</span>
+        </button>
+      </div>
+    </fieldset>
     <fieldset v-else class="kind-filters" :disabled="loading">
-      <legend>节点类型</legend>
+      <legend>OpenInference 节点类型</legend>
       <div>
         <button type="button" :aria-pressed="selectedKind === ''" @click="chooseKind('')">
           全部 <span>{{ selectedRun.span_count }}</span>
@@ -134,8 +138,15 @@
 <script setup lang="ts">
 import { onUnmounted, ref, shallowRef, toRef, watch } from 'vue'
 import { traceTime } from '../labels'
-import { formatDuration, runDuration, spanKindLabels, spanStatusLabels } from '../traceWaterfall'
+import {
+  activityCategoryLabels,
+  formatDuration,
+  runDuration,
+  spanKindLabels,
+  spanStatusLabels,
+} from '../traceWaterfall'
 import type {
+  ActivityCategory,
   SpanKind,
   TraceActivity,
   TraceDetail,
@@ -160,6 +171,7 @@ const availableRuns = shallowRef<TraceRun[]>([])
 const selectedRun = shallowRef<TraceRun | null>(null)
 const runPageCursors = ref<(string | null)[]>([null])
 const nextRunCursor = ref<string | null>(null)
+const selectedCategory = ref<ActivityCategory | ''>('')
 const selectedKind = ref<SpanKind | ''>('')
 const view = ref<RunView>('activities')
 const activities = shallowRef<TraceActivity[]>([])
@@ -212,7 +224,9 @@ async function readEntries<T extends TraceSpan>(
   do {
     const query = new URLSearchParams({ limit: '100' })
     if (cursor) query.set('cursor', cursor)
-    if (selectedKind.value) query.set('kind', selectedKind.value)
+    if (view.value === 'activities' && selectedCategory.value)
+      query.set('category', selectedCategory.value)
+    if (view.value === 'spans' && selectedKind.value) query.set('kind', selectedKind.value)
     const page = await props.api<TraceSpanPage<T>>(endpoint + '?' + query)
     if (requestSequence !== requestId) return null
     for (const span of page.items) merged.set(span.span_id, span)
@@ -281,7 +295,10 @@ async function load(
     if (requestSequence !== requestId) return
     const changed = target?.trace_id !== selectedRun.value?.trace_id
     if (action === 'page' || action === 'select') pinnedTraceId = target?.trace_id ?? null
-    if (changed) selectedKind.value = ''
+    if (changed) {
+      selectedKind.value = ''
+      selectedCategory.value = ''
+    }
     if (changed || action === 'filter') clearEntries()
     selectedRun.value = target
     emit('recording', target?.status === 'running')
@@ -319,16 +336,19 @@ function chooseKind(kind: SpanKind | ''): void {
 function chooseView(mode: RunView): void {
   if (view.value === mode) return
   view.value = mode
+  selectedCategory.value = ''
   selectedKind.value = ''
   void load('filter')
 }
 
 /**
- * 使用行动筛选框选中的节点类型。
- * @param event - 筛选框的选择事件。
+ * 按运行时行动类别筛选当前链路，从第一页重新加载。
+ * @param category - 已采集操作的类别，空字符串表示关键行动。
  */
-function changeActivityKind(event: Event): void {
-  chooseKind((event.target as HTMLSelectElement).value as SpanKind | '')
+function chooseCategory(category: ActivityCategory | ''): void {
+  if (selectedCategory.value === category) return
+  selectedCategory.value = category
+  void load('filter')
 }
 
 /** 用任务详情的最新快照同步运行，避免与翻页请求重叠。 */
@@ -374,21 +394,18 @@ onUnmounted(stop)
 </script>
 
 <style scoped>
-.run-toolbar,
-.activity-toolbar {
+.run-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin: 4px 0 10px;
 }
-.run-toolbar label,
-.activity-toolbar label {
+.run-toolbar label {
   font-size: 13px;
   font-weight: 600;
 }
-.run-toolbar select,
-.activity-toolbar select {
+.run-toolbar select {
   max-width: 100%;
   border: 1px solid var(--tz-border);
   border-radius: 5px;

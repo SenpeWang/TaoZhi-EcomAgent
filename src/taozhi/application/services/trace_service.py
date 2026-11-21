@@ -9,6 +9,7 @@ from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
+from taozhi.domain.trace_activity import CHAIN_CATEGORY_BY_NAME, CHAIN_OPERATIONS, activity_category
 from taozhi.infrastructure.persistence import trace_repo
 from taozhi.infrastructure.persistence.access_repo import batch_sources_validity, sources_valid
 from taozhi.knowledge.db import database_connection
@@ -27,7 +28,6 @@ _TRACE_OPERATIONS = {
     "knowledge.search": "检索授权资料",
     "knowledge.cache_lookup": "查询问答缓存",
     "pipeline.specialists": "专业核验",
-    "pipeline.quality": "校验事实与引用",
     "pipeline.publication": "生成答复",
     "bi.bi_intent": "识别经营指标",
     "bi.data_query": "查询经营数据",
@@ -37,11 +37,13 @@ _TRACE_OPERATIONS = {
     "embedding.query": "生成查询向量",
     "embedding.passages": "生成文档向量",
     "reranker.rerank": "重排检索结果",
+    **CHAIN_OPERATIONS["CONTEXT"],
+    **CHAIN_OPERATIONS["GUARDRAIL"],
 }
 # 在直接调用之外，默认保留能够解释执行走向或最终交付的业务步骤。
 _KEY_ACTIVITY_STEPS = (
-    "worker.semantic_cache_hit", "pipeline.planning", "pipeline.quality", "pipeline.publication",
-    "bi.bi_intent", "bi.bi_publish", "research.final_node",
+    "worker.semantic_cache_hit", "pipeline.planning", "pipeline.publication",
+    "bi.bi_intent", "bi.bi_publish", "research.final_node", *CHAIN_CATEGORY_BY_NAME,
 )
 _TOOL_OUTCOMES = {
     "timeout": "工具调用超时",
@@ -232,6 +234,7 @@ def _display_span(row: dict, job: dict) -> dict:
     return {
         **{key: row[key] for key in fields},
         "status": _span_status(row["status"], job, job["span_version"]),
+        "category": activity_category(row["kind"], row["name"]),
         "attributes": attributes,
         "display_name": _span_display_name(row["kind"], row["name"], attributes),
     }
@@ -277,7 +280,7 @@ def _activity_actor(row: dict) -> dict | None:
 
 
 def list_activities(
-    p: Principal, task_id: str, trace_id: str, *, kind: str | None, cursor: str | None, limit: int,
+    p: Principal, task_id: str, trace_id: str, *, category: str | None, cursor: str | None, limit: int,
 ) -> dict:
     """按精确的链路与执行版本展示实际操作，并在筛选后保留跨页执行者。"""
     after = _activity_cursor(cursor)
@@ -286,7 +289,7 @@ def list_activities(
         if job is None:
             raise Denied("执行轨迹不存在", "NOT_FOUND", 404)
         rows = trace_repo.list_activities(
-            conn, p.tenant_id, task_id, trace_id, job["span_version"], kind=kind,
+            conn, p.tenant_id, task_id, trace_id, job["span_version"], category=category,
             key_steps=_KEY_ACTIVITY_STEPS, after=after, limit=limit + 1,
         )
     page = rows[:limit]

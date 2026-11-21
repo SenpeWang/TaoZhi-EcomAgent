@@ -1,4 +1,4 @@
-import type { SpanKind, SpanStatus, TraceRun, TraceSpan } from './types'
+import type { ActivityCategory, SpanKind, SpanStatus, TraceRun, TraceSpan } from './types'
 
 export const spanStatusLabels: Record<SpanStatus, string> = {
   running: '执行中',
@@ -14,8 +14,21 @@ export const spanKindLabels: Record<SpanKind, string> = {
   EMBEDDING: '向量化',
   RERANKER: '重排',
   AGENT: '智能体',
-  CHAIN: '流程编排',
+  CHAIN: '链路节点',
   INTERNAL: '内部操作',
+}
+
+export const activityCategoryLabels: Record<ActivityCategory, string> = {
+  TOOL: spanKindLabels.TOOL,
+  CONTEXT: '上下文处理',
+  LLM: spanKindLabels.LLM,
+  AGENT: spanKindLabels.AGENT,
+  CHAIN: '流程编排',
+  RETRIEVER: spanKindLabels.RETRIEVER,
+  EMBEDDING: spanKindLabels.EMBEDDING,
+  RERANKER: spanKindLabels.RERANKER,
+  GUARDRAIL: '权限与校验',
+  INTERNAL: spanKindLabels.INTERNAL,
 }
 
 const identityAttributes: Partial<Record<SpanKind, string>> = {
@@ -54,6 +67,11 @@ const executionFields: Record<string, string> = {
   'state.answer_chars': '回答字符数',
   'state.model_calls': '流程记录的模型调用数',
   'state.hard_block': '触发阻断',
+  'context.evidence_count': '上下文证据条数',
+  'context.observation_count': '工具观测条数',
+  'context.tool_count': '可用工具数',
+  'context.input_chars': '处理前字符数',
+  'context.output_chars': '处理后字符数',
   'otel.span.kind': 'OTel SpanKind',
 }
 

@@ -529,6 +529,7 @@
   <TaskTimeline
     v-model="taskOpen"
     :task="activeTask"
+    :draft="taskDraft"
     :can-inspect="
       Boolean(
         user &&
@@ -903,7 +904,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { requestApi } from './api'
 import { openTaskEventStream } from './composables/useTaskStream'
@@ -1014,6 +1015,8 @@ const permissionId = ref('')
 const inspectedTrace = ref<{ taskId: string; traceId: string | null } | null>(null)
 const taskOpen = ref(false)
 const activeTask = ref<Task | null>(null)
+const taskDraft = ref('')
+let taskSelection = 0
 
 const accountOpen = ref(false)
 const accountForm = reactive({
@@ -1216,6 +1219,7 @@ function displayRoles(row: User): string {
  * 清空客户端所有业务状态，确保退出或改密后不残留会话信息。
  */
 function clearSession(): void {
+  taskSelection++
   user.value = null
   inspectedTrace.value = null
   organizations.value = []
@@ -1381,69 +1385,71 @@ async function submitQuestion(): Promise<void> {
     return
   }
   askForm.input_level = currentUserLevel.value
+  const selection = ++taskSelection
   await action(async () => {
     const r = await api<CreatedResource>('/tasks', 'POST', askForm)
-    activeTask.value = await api<Task>('/tasks/' + r.id)
-    taskOpen.value = true
-    streamTask(r.id)
+    await showTask(r.id, selection)
     ElMessage.success('任务已提交')
     await load()
   })
 }
 
-let closeTaskStream: (() => void) | null = null
-
-/**
- * 订阅指定任务的服务端 SSE 进度流，连接异常时静默降级为轮询。
- * @param id - 任务 ID。
- */
-function streamTask(id: string): void {
-  closeTaskStream?.()
-  closeTaskStream = openTaskEventStream(id, {
-    /**
-     * 处理实时阶段推送。
-     * @param row - 服务端推送的任务进展条目。
-     */
-    onMessage: (row) => {
-      if (!activeTask.value || activeTask.value.id !== id) return
-      if (row.stage) activeTask.value.stage = row.stage
-      if (typeof row.progress === 'number') activeTask.value.progress = row.progress
-      if (!activeTask.value.events) activeTask.value.events = []
-      const exists = activeTask.value.events.some((e) => e.stage === row.stage)
-      if (row.stage && !exists) {
-        activeTask.value.events.push({
-          id: row.id || Date.now(),
-          stage: row.stage,
-          progress: row.progress || 0,
-          status: row.status || 'running',
-        })
-      }
-    },
-    /**
-     * 监听终态事件并全量刷新任务结论。
-     * @param done - 结束事件携带的任务标识。
-     */
-    onDone: (done) => {
-      closeTaskStream = null
-      const doneId = done.id
-      if (doneId && activeTask.value?.id === doneId) {
-        api<Task>('/tasks/' + doneId).then(
-          /**
-           * 回写终态任务明细。
-           * @param t - 最新任务对象。
-           */
-          (t: Task) => {
-            if (activeTask.value?.id === doneId) activeTask.value = t
-          },
-        )
-      }
-    },
-    /** 连接异常时清空句柄，保留轮询兜底刷新。 */
-    onError: () => {
-      closeTaskStream = null
-    },
-  })
-}
+// 统一从详情弹窗的当前任务订阅，覆盖新提问、已运行任务和重试。
+watch(
+  () =>
+    taskOpen.value &&
+    activeTask.value &&
+    !activeTask.value.restricted &&
+    ['queued', 'running'].includes(activeTask.value.state)
+      ? activeTask.value.id
+      : null,
+  (taskId, _, onCleanup) => {
+    taskDraft.value = ''
+    if (!taskId) return
+    let selected = true
+    const close = openTaskEventStream(taskId, {
+      /**
+       * 合并当前任务的阶段记录。
+       * @param row - 按事件编号去重的阶段消息。
+       */
+      onMessage: (row) => {
+        const task = activeTask.value
+        if (!selected || task?.id !== taskId || !row.stage) return
+        task.stage = row.stage
+        if (typeof row.progress === 'number') task.progress = row.progress
+        task.events ??= []
+        if (row.id !== undefined && !task.events.some((event) => event.id === row.id)) {
+          task.events.push({
+            id: row.id,
+            stage: row.stage,
+            progress: row.progress ?? 0,
+            status: row.status ?? 'running',
+          })
+        }
+      },
+      /**
+       * 更新任务详情中的正文。
+       * @param text - 当前执行可展示的全文草稿。
+       */
+      onResult: (text) => {
+        if (selected) taskDraft.value = text
+      },
+      /** 以服务端发布的终态结果替换草稿。 */
+      onDone: () => {
+        void api<Task>('/tasks/' + taskId)
+          .then((task) => {
+            if (selected && activeTask.value?.id === taskId) activeTask.value = task
+          })
+          .catch(() => {})
+      },
+    })
+    onCleanup(() => {
+      selected = false
+      taskDraft.value = ''
+      close()
+    })
+  },
+)
 
 /**
  * 从任务或调研对话打开该任务的执行轨迹。按 Trace ID 搜索时保留命中的执行。
@@ -1459,10 +1465,20 @@ function openTrace(taskId: string, traceId: string | null = null): void {
  * @param id - 任务 ID。
  */
 async function openTask(id: string): Promise<void> {
-  await action(async () => {
-    activeTask.value = await api<Task>('/tasks/' + id)
-    taskOpen.value = true
-  })
+  const selection = ++taskSelection
+  await action(() => showTask(id, selection))
+}
+
+/**
+ * 仅展示最近选择的任务，避免切换任务或登出后的旧响应覆盖界面。
+ * @param id - 所选任务编号。
+ * @param selection - 本次选择的顺序编号。
+ */
+async function showTask(id: string, selection: number): Promise<void> {
+  const snapshot = await api<Task>('/tasks/' + id)
+  if (selection !== taskSelection || !user.value) return
+  activeTask.value = snapshot
+  taskOpen.value = true
 }
 
 /**
@@ -1507,6 +1523,7 @@ async function retryTask(taskId?: string): Promise<void> {
   if (!tid) return
   await action(async () => {
     await api('/tasks/' + tid + '/retry', 'POST')
+    if (taskOpen.value && activeTask.value?.id === tid) await openTask(tid)
     ElMessage.success('已重新发起任务')
     await load()
   })
@@ -1520,7 +1537,7 @@ async function retryTask(taskId?: string): Promise<void> {
 async function steerTask(taskId: string, message: string): Promise<void> {
   if (!taskId || !message.trim()) return
   await action(async () => {
-    await api('/tasks/' + taskId + '/steer', 'POST', { message: message.trim() })
+    await api('/tasks/' + taskId + '/steer', 'POST', { input: message.trim() })
     ElMessage.success('补充要求已发送')
     await load()
   })
@@ -1957,7 +1974,9 @@ onMounted(async () => {
     if (!user.value || user.value.must_change) return
     try {
       if (taskOpen.value && activeTask.value) {
-        activeTask.value = await api<Task>('/tasks/' + activeTask.value.id)
+        const selected = activeTask.value
+        const snapshot = await api<Task>('/tasks/' + selected.id)
+        if (taskOpen.value && activeTask.value === selected) activeTask.value = snapshot
       }
       if (docOpen.value && detail.value) {
         try {
@@ -1973,6 +1992,5 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearInterval(timer)
-  closeTaskStream?.()
 })
 </script>

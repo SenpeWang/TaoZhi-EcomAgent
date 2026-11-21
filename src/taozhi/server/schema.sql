@@ -99,7 +99,11 @@ CREATE TABLE jobs (
 CREATE TABLE task_events (
  id bigserial PRIMARY KEY, tenant_id text NOT NULL, job_id text NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
  run_version bigint NOT NULL, stage text NOT NULL, progress integer NOT NULL, status text NOT NULL,
- created_at timestamptz NOT NULL DEFAULT now()
+ created_at timestamptz NOT NULL DEFAULT now(), event_type text NOT NULL DEFAULT 'stage', output_text text,
+ CONSTRAINT task_events_output_check CHECK (
+   (event_type IN ('stage','result_reset') AND output_text IS NULL)
+   OR (event_type='result_delta' AND output_text IS NOT NULL AND output_text<>'')
+ )
 );
 CREATE TABLE task_reviews (
  id bigserial PRIMARY KEY, tenant_id text NOT NULL, job_id text NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,

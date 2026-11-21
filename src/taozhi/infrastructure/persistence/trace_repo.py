@@ -5,9 +5,13 @@ import re
 from datetime import datetime
 from typing import Any
 
+from psycopg.types.json import Jsonb
+
+from taozhi.domain.trace_activity import CHAIN_CATEGORY_BY_NAME
 from taozhi.knowledge.db import fetch_all, fetch_one
 
 
+_ACTIVITY_CATEGORY = "CASE WHEN kind='CHAIN' THEN COALESCE((%s::jsonb)->>name,kind) ELSE kind END"
 _TRACE_COLUMNS = """
     j.id, j.kind, j.question, j.state, j.stage, j.progress, j.owner_id,
     u.username, u.display_name, n.name AS node_name, j.attempts,
@@ -135,8 +139,8 @@ def list_span_runs(
             SELECT tenant_id,job_id,run_version,trace_id FROM task_spans
             WHERE {' AND '.join(filters)}
             GROUP BY tenant_id,job_id,run_version,trace_id ORDER BY run_version DESC,trace_id DESC LIMIT %s
-        ), by_kind AS (
-            SELECT run_version,trace_id,kind, COUNT(*) AS nodes, MIN(started_at) AS started_at,
+        ), by_category AS (
+            SELECT run_version,trace_id,kind,{_ACTIVITY_CATEGORY} AS category, COUNT(*) AS nodes, MIN(started_at) AS started_at,
                 MAX(ended_at) FILTER (WHERE parent_span_id IS NULL) AS root_end,
                 MAX(status) FILTER (WHERE parent_span_id IS NULL) AS root_status,
                 COUNT(*) FILTER (WHERE status='error') AS errors,
@@ -145,14 +149,18 @@ def list_span_runs(
                 SUM(TRUNC((attributes->>'llm.token_count.completion')::numeric)) FILTER
                     (WHERE kind='LLM' AND jsonb_typeof(attributes->'llm.token_count.completion')='number') AS completion_tokens
             FROM page JOIN task_spans USING (tenant_id,job_id,run_version,trace_id)
-            GROUP BY run_version,trace_id,kind
+            GROUP BY run_version,trace_id,kind,category
+        ), totals AS (
+            SELECT by_category.*,SUM(nodes) OVER (PARTITION BY run_version,trace_id,kind) AS kind_nodes
+            FROM by_category
         )
         SELECT run_version,trace_id,MIN(started_at) AS started_at,MAX(root_end) AS ended_at,
-            MAX(root_status) AS status,SUM(nodes) AS span_count,jsonb_object_agg(kind,nodes) AS kind_counts,
+            MAX(root_status) AS status,SUM(nodes) AS span_count,jsonb_object_agg(kind,kind_nodes) AS kind_counts,
+            jsonb_object_agg(category,nodes) AS category_counts,
             SUM(errors) AS failed_count,COALESCE(SUM(prompt_tokens),0) AS input_tokens,
             COALESCE(SUM(completion_tokens),0) AS output_tokens
-        FROM by_kind GROUP BY run_version,trace_id ORDER BY run_version DESC,trace_id DESC
-    """, (*params, limit))
+        FROM totals GROUP BY run_version,trace_id ORDER BY run_version DESC,trace_id DESC
+    """, (*params, limit, Jsonb(CHAIN_CATEGORY_BY_NAME)))
 
 
 def list_spans(
@@ -171,14 +179,14 @@ def list_spans(
 
 def list_activities(
     conn: Any, tenant_id: str, task_id: str, trace_id: str, run_version: int, *,
-    kind: str | None, key_steps: tuple[str, ...], after: tuple[datetime, int] | None, limit: int,
+    category: str | None, key_steps: tuple[str, ...], after: tuple[datetime, int] | None, limit: int,
 ) -> list[dict]:
     """按实际开始时刻取一页，并在同一快照中从完整父链解析每条活动的执行者。"""
     filters = ["tenant_id=%s", "job_id=%s", "trace_id=%s", "run_version=%s"]
     params: list[Any] = [tenant_id, task_id, trace_id, run_version]
-    if kind:
-        filters.append("kind=%s")
-        params.append(kind)
+    if category:
+        filters.append(f"({_ACTIVITY_CATEGORY})=%s")
+        params.extend([Jsonb(CHAIN_CATEGORY_BY_NAME), category])
     else:
         filters.append("(kind IN ('AGENT','TOOL','LLM','RETRIEVER','EMBEDDING','RERANKER') "
                        "OR (kind='CHAIN' AND name=ANY(%s)))")
@@ -224,6 +232,6 @@ def list_events(conn: Any, tenant_id: str, task_id: str, after_id: int, limit: i
     return fetch_all(
         conn,
         "SELECT id, run_version, stage, progress, status, created_at FROM task_events "
-        "WHERE tenant_id=%s AND job_id=%s AND id>%s ORDER BY id LIMIT %s",
+        "WHERE tenant_id=%s AND job_id=%s AND event_type='stage' AND id>%s ORDER BY id LIMIT %s",
         (tenant_id, task_id, after_id, limit),
     )

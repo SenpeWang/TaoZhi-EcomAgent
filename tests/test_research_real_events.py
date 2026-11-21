@@ -5,7 +5,7 @@ import ast
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessageChunk
 
 from taozhi.ai.client import LLMClient
 from taozhi.application.research.graph import execute_autonomous_agents
@@ -106,10 +106,16 @@ def test_pipeline_a_events_emitted_during_research():
 
     mock_llm.chat_json.side_effect = fake_chat_json
     report_model = MagicMock()
-    report_model.bind.return_value.invoke.return_value = AIMessage(
-        content="# 测试保温杯市场调研报告\n\n## 1. 市场概览\n需求旺盛。",
-        usage_metadata={"input_tokens": 15, "output_tokens": 4, "total_tokens": 19},
-    )
+    deltas = []
+    def report_stream(*args, **kwargs):
+        assert kwargs == {"stream_usage": True}
+        yield AIMessageChunk(content="<thi")
+        yield AIMessageChunk(content="nk>内部草稿</th")
+        yield AIMessageChunk(content="ink># 测试保温杯市场调研报告")
+        assert deltas == ["# 测试保温杯市场调研报告"]
+        yield AIMessageChunk(content=[{"type": "reasoning", "reasoning": "内部草稿"}, {"type": "text", "text": "\n\n## 1. 市场概览\n需求旺盛。"}])
+        yield AIMessageChunk(content="", usage_metadata={"input_tokens": 15, "output_tokens": 4, "total_tokens": 19})
+    report_model.bind.return_value.stream.side_effect = report_stream
     spans = []
 
     with (
@@ -119,11 +125,13 @@ def test_pipeline_a_events_emitted_during_research():
         patch("taozhi.application.research.subagents.LLMClient", return_value=mock_llm),
         patch.object(LLMClient, "_client_for_endpoint", return_value=report_model),
     ):
-        with patch("taozhi.infrastructure.mcp.server.search_web", return_value=[{"title": "保温杯测评", "snippet": "主流69元"}]):
+        with patch("taozhi.infrastructure.mcp.server.search_web", return_value=[{"title": "保温杯测评", "snippet": "主流69元" + "x" * 2000}]):
             result = execute_autonomous_agents(
                 keyword="测试保温杯",
                 job_id="research_1",
                 emit_event_fn=mock_emit,
+                result_delta_fn=deltas.append,
+                result_reset_fn=deltas.clear,
                 conversation_id="test_conv_events",
             )
 
@@ -149,12 +157,28 @@ def test_pipeline_a_events_emitted_during_research():
     assert model["attributes"]["llm.token_count.total"] == 19
     assert report_agent["attributes"]["agent.name"] == "research.synthesizer"
     assert report_agent["attributes"]["subagent_id"] == result_agents["research.synthesizer"]["id"]
-    assert "需求旺盛" not in str(spans)
+    by_name = {}
+    for recorded in completed.values():
+        by_name.setdefault(recorded["name"], []).append(recorded)
+    preparation = sorted(by_name["context.prepare_subagent"], key=lambda s: s["started_at"])
+    assert [s["attributes"]["context.observation_count"] for s in preparation] == [0, 1]
+    assert all(s["parent_span_id"] == branch["span_id"] for s in preparation)
+    trim, = by_name["context.trim_observation"]
+    assert trim["parent_span_id"] == branch["span_id"]
+    assert trim["attributes"]["context.input_chars"] > trim["attributes"]["context.output_chars"] == 1500
+    permission, = by_name["research.authorize_tool"]
+    assert permission["parent_span_id"] == branch["span_id"] and permission["ended_at"] <= tool["started_at"]
+    assert {s["attributes"]["context.evidence_count"] for s in by_name["context.prepare_coordinator"]} == {0, 1}
+    report_context, = by_name["context.prepare_report"]
+    assert report_context["parent_span_id"] == report_agent["span_id"] and report_context["ended_at"] <= model["started_at"]
+    assert report_context["attributes"]["context.evidence_count"] == 1
+    assert "需求旺盛" not in str(spans) and "主流69元" not in str(spans)
     assert completed[branch["parent_span_id"]]["name"] == "worker.research"
     root = next(s for s in completed.values() if s["parent_span_id"] is None)
     assert root["name"] == "task.research"
     assert {s["trace_id"] for s in spans} == {result["trace_id"]}
     assert len(captured_stages) >= 4
+    assert "".join(deltas) == result["report"] == "# 测试保温杯市场调研报告\n\n## 1. 市场概览\n需求旺盛。"
     agent_starts = [s for s in captured_stages if s.startswith("[agent_start]")]
     assert len(agent_starts) >= 1
     assert "调研协调员" in agent_starts[0]

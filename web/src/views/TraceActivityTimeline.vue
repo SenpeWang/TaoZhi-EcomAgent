@@ -4,6 +4,7 @@
       <tr>
         <th scope="col">开始时间</th>
         <th scope="col">执行者</th>
+        <th scope="col">行动类型</th>
         <th scope="col">动作与结果</th>
         <th scope="col">状态与耗时</th>
       </tr>
@@ -27,12 +28,12 @@
             实例 {{ instanceLabels.get(entry.actor.span_id) }}
           </small>
         </td>
+        <td class="activity-category">
+          <span :data-category="entry.category">{{ activityCategoryLabels[entry.category] }}</span>
+        </td>
         <td class="activity-action">
           <strong>{{ action.title }}</strong>
-          <span v-if="action.target" class="activity-target"
-            ><span v-if="entry.kind === 'TOOL' && action.title !== '调用工具'">工具 </span
-            ><code>{{ action.target }}</code></span
-          >
+          <code v-if="action.target" class="activity-target">{{ action.target }}</code>
           <small v-if="result">{{ result }}</small>
         </td>
         <td class="activity-status">
@@ -48,7 +49,7 @@
 import { computed } from 'vue'
 import { traceTime } from '../labels'
 import { activityAction, activityResult, actorInstanceLabels } from '../traceActivity'
-import { formatDuration, spanStatusLabels } from '../traceWaterfall'
+import { activityCategoryLabels, formatDuration, spanStatusLabels } from '../traceWaterfall'
 import type { TraceActivity } from '../types'
 
 const props = defineProps<{ activities: TraceActivity[]; observedAt: number }>()
@@ -127,6 +128,25 @@ const rows = computed(timelineRows)
 .activity-action {
   overflow-wrap: anywhere;
 }
+.activity-category span {
+  display: inline-block;
+  white-space: nowrap;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--tz-surface-muted);
+  color: var(--tz-ink-secondary);
+}
+.activity-category [data-category='TOOL'],
+.activity-category [data-category='LLM'] {
+  color: var(--tz-primary);
+  background: var(--tz-primary-soft);
+}
+.activity-category [data-category='CONTEXT'] {
+  color: var(--tz-success);
+  background: var(--tz-success-soft);
+}
 .activity-target {
   color: var(--tz-primary);
   font-size: 12px;
@@ -181,7 +201,7 @@ const rows = computed(timelineRows)
   }
   .activity-status {
     grid-column: 2;
-    grid-row: 1 / 4;
+    grid-row: 1 / 5;
   }
 }
 </style>

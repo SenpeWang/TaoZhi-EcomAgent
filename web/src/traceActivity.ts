@@ -73,6 +73,20 @@ export function activityResult(entry: TraceActivity): string {
       details.push('返回 ' + count + ' 条')
     }
   }
+  if (entry.category === 'CONTEXT') {
+    for (const [key, label] of [
+      ['context.evidence_count', '份证据'],
+      ['context.observation_count', '条观测'],
+      ['context.tool_count', '项可用工具'],
+    ]) {
+      const count = attrs[key]
+      if (typeof count === 'number') details.push(count + ' ' + label)
+    }
+    const input = attrs['context.input_chars']
+    const output = attrs['context.output_chars']
+    if (typeof output === 'number')
+      details.push(typeof input === 'number' ? input + ' → ' + output + ' 字符' : output + ' 字符')
+  }
   if (entry.kind === 'LLM') {
     const prompt = attrs['llm.token_count.prompt']
     const completion = attrs['llm.token_count.completion']

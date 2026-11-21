@@ -32,7 +32,7 @@
       <div v-for="row in visibleRows" :key="row.span.span_id">
         <div
           class="chart-grid span-row"
-          :data-kind="row.span.kind"
+          :data-category="row.span.category"
           :class="{ selected: selectedSpanId === row.span.span_id }"
         >
           <div
@@ -61,7 +61,7 @@
             >
               <strong>{{ row.span.display_name }}</strong>
               <small :class="{ 'span-error': row.span.status === 'error' }"
-                ><b class="node-kind">{{ spanKindLabels[row.span.kind] }}</b> ·
+                ><b class="node-kind">{{ activityCategoryLabels[row.span.category] }}</b> ·
                 {{ spanStatusLabels[row.span.status]
                 }}<template v-if="spanSecondaryName(row.span)">
                   · {{ spanSecondaryName(row.span) }}</template
@@ -89,6 +89,8 @@
           <dd>
             <code>{{ row.span.name }}</code>
           </dd>
+          <dt>OpenInference 类型</dt>
+          <dd>{{ row.span.kind }}</dd>
           <dt>Span ID</dt>
           <dd>
             <code>{{ row.span.span_id }}</code>
@@ -128,7 +130,7 @@ import {
   formatDuration,
   spanFields,
   spanSecondaryName,
-  spanKindLabels,
+  activityCategoryLabels,
   spanStatusLabels,
   type SpanView,
 } from '../traceWaterfall'
@@ -285,28 +287,34 @@ function timestamp(value: string): string {
 .duration {
   text-align: right;
 }
-.span-row[data-kind='LLM'] {
+.span-row[data-category='LLM'] {
   --node-color: #1e3a8a;
 }
-.span-row[data-kind='TOOL'] {
+.span-row[data-category='TOOL'] {
   --node-color: #7c3aed;
 }
-.span-row[data-kind='RETRIEVER'] {
+.span-row[data-category='RETRIEVER'] {
   --node-color: #047857;
 }
-.span-row[data-kind='EMBEDDING'] {
+.span-row[data-category='EMBEDDING'] {
   --node-color: #0284c7;
 }
-.span-row[data-kind='RERANKER'] {
+.span-row[data-category='RERANKER'] {
   --node-color: #b45309;
 }
-.span-row[data-kind='AGENT'] {
+.span-row[data-category='AGENT'] {
   --node-color: var(--tz-primary);
 }
-.span-row[data-kind='CHAIN'] {
+.span-row[data-category='CONTEXT'] {
+  --node-color: var(--tz-success);
+}
+.span-row[data-category='GUARDRAIL'] {
+  --node-color: var(--tz-warning);
+}
+.span-row[data-category='CHAIN'] {
   --node-color: var(--tz-ink-secondary);
 }
-.span-row[data-kind='INTERNAL'] {
+.span-row[data-category='INTERNAL'] {
   --node-color: var(--tz-ink-muted);
 }
 .node-kind {

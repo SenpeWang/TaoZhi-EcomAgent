@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Iterable, Iterator
 from typing import Dict, Tuple
 
 # 意图分派与界面展示共用同一份角色定义。
@@ -25,6 +26,23 @@ _ARITH_UNIT_RE = re.compile(r"(?:个工作日|工作日|小时|元|块|折|成|�
 def norm_text(s: object) -> str:
     """引用比对前的空白归一化：忽略换行、空格与全角空格差异。"""
     return "".join(str(s).split())
+
+
+def cited_paragraphs(question: str, evidence: list[dict], findings: Iterable[dict]) -> Iterator[str]:
+    """按事实核验顺序把每条唯一结论渲染成可直接拼接的带引文正文。"""
+    include_title = bool(re.search(r"来源|出处|哪份|文档|条款|引用|依据", question))
+    seen = set()
+    for finding in findings:
+        claim = finding["claim"]
+        key = norm_text(claim)
+        if key in seen:
+            continue
+        separator = "\n\n" if seen else ""
+        seen.add(key)
+        index = finding["evidence_index"]
+        title = str(evidence[index].get("title") or "").strip()
+        citation = f"（来源：《{title}》）[{index + 1}]" if include_title and title and title not in claim else f" [{index + 1}]"
+        yield separator + claim + citation
 
 
 def quote_supported(quote: str, doc_quote: str) -> bool:

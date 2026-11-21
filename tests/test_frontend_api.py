@@ -72,7 +72,7 @@ for (const malformed of [
 const traceId = 'a'.repeat(32)
 const timestamp = '2026-01-01T08:00:00Z'
 const run = { trace_id: traceId, run_version: 1, status: 'ok', started_at: timestamp,
-  ended_at: timestamp, kind_counts: { LLM: 2 }, span_count: 2, failed_count: 0, input_tokens: 10, output_tokens: 5 }
+  ended_at: timestamp, kind_counts: { LLM: 2 }, category_counts: { LLM: 2 }, span_count: 2, failed_count: 0, input_tokens: 10, output_tokens: 5 }
 const runPath = '/admin/traces/task/runs?trace_id=' + traceId
 globalThis.fetch = async () => Response.json({ items: [run], next_cursor: null })
 assert.deepEqual((await requestApi(runPath, 'demo', clear)).items, [run])
@@ -82,7 +82,7 @@ for (const kindCounts of [undefined, { UNKNOWN: 2 }, { LLM: -1 }]) {
 }
 const spanPath = '/admin/traces/task/runs/' + traceId + '/spans?kind=LLM'
 const span = { trace_id: traceId, span_id: '1'.repeat(16), parent_span_id: null, name: 'llm.chat',
-  display_name: '模型调用', started_at: timestamp, ended_at: timestamp, status: 'ok', kind: 'LLM',
+  display_name: '模型调用', started_at: timestamp, ended_at: timestamp, status: 'ok', kind: 'LLM', category: 'LLM',
   duration_ms: 0, error_type: null, attributes: { 'llm.model_name': 'demo-1' } }
 globalThis.fetch = async () => Response.json({ items: [span], next_cursor: '2', observed_at: timestamp })
 assert.deepEqual((await requestApi(spanPath, 'demo', clear)).items, [span])
@@ -90,7 +90,7 @@ for (const invalid of [{ trace_id: 'b'.repeat(32) }, { kind: 'TOOL' }, { kind: '
   globalThis.fetch = async () => Response.json({ items: [{ ...span, ...invalid }], next_cursor: null, observed_at: timestamp })
   await assert.rejects(requestApi(spanPath, 'demo', clear), /响应异常/)
 }
-const activityPath = '/admin/traces/task/runs/' + traceId + '/activities?kind=LLM'
+const activityPath = '/admin/traces/task/runs/' + traceId + '/activities?category=LLM'
 const actor = { kind: 'agent', span_id: '2'.repeat(16), display_name: '采购分析师' }
 for (const source of [actor, { ...actor, kind: 'workflow' }, null]) {
   const item = { ...span, actor: source }
@@ -101,7 +101,7 @@ for (const source of [actor, { ...actor, kind: 'workflow' }, null]) {
   assert.deepEqual((await requestApi(activityPath, 'demo', clear)).items, [item])
 }
 for (const invalid of [{ actor: undefined }, { actor: { ...actor, span_id: 'broken' } },
-                       { actor: { ...actor, kind: 'machine' } }, { kind: 'TOOL' }, { trace_id: 'b'.repeat(32) }]) {
+                       { actor: { ...actor, kind: 'machine' } }, { kind: 'TOOL' }, { category: 'TOOL' }, { category: 'UNKNOWN' }, { trace_id: 'b'.repeat(32) }]) {
   globalThis.fetch = async () => Response.json({ items: [{ ...span, actor, ...invalid }], next_cursor: null, observed_at: timestamp })
   await assert.rejects(requestApi(activityPath, 'demo', clear), /响应异常/)
 }

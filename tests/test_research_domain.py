@@ -435,8 +435,10 @@ def test_process_research_job_reads_budgets_from_settings():
         patch("taozhi.application.services.task_service.database_connection", _fake_db),
         patch(
             "taozhi.application.services.task_service.job_repo.get_job_by_id",
-            return_value={"state": "running", "run_version": 1, "cancel_requested": False},
+            return_value={"state": "running", "run_version": 1, "cancel_requested": False,
+                          "owner_id": "user_1", "owner_version": 1, "payload": job["payload"]},
         ),
+        patch("taozhi.application.services.task_service.load_principal", return_value=SimpleNamespace(version=1)),
         patch("taozhi.application.services.task_service._postgres_checkpointer", _fake_saver),
         patch("taozhi.application.services.task_service.execute_autonomous_agents", side_effect=_fake_execute),
     ):

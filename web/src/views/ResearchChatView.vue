@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { ResearchSubagent, User } from '../types'
+import type { ResearchSubagent, TaskEventItem, User } from '../types'
+import { stateText } from '../labels'
 import robotUrl from '../assets/robot.svg'
 import MarkdownReport from './MarkdownReport.vue'
 import { openTaskEventStream, pollTaskUntilTerminal } from '../composables/useTaskStream'
@@ -31,10 +32,14 @@ interface ResearchTurn {
   id: string
   question: string
   created_at: string
-  state: 'queued' | 'running' | 'completed' | 'failed'
+  state: string
   stage: string
   progress: number
   thinkingLogs: string[]
+  events?: TaskEventItem[]
+  restricted?: boolean
+  draft?: string
+  streamError?: boolean
   thinkingSeconds?: number
   result?: ResearchTaskResult
 }
@@ -52,11 +57,12 @@ interface ConversationTurnDto {
   id: string
   question: string
   created_at: string
-  state: 'queued' | 'running' | 'completed' | 'failed'
+  state: string
   stage: string
   progress: number
   elapsed?: number
   thinking_logs?: string[]
+  events?: TaskEventItem[]
   result?: ResearchTaskResult
 }
 
@@ -89,14 +95,21 @@ const conversations = ref<ConversationItem[]>([])
 const activeConvId = ref<string>('')
 const currentKeyword = ref<string>('')
 const turns = ref<ResearchTurn[]>([])
+const loadingConversation = ref(true)
 const inputPrompt = ref<string>('')
-const submitting = ref<boolean>(false)
-const activeRunningTaskId = ref<string>('')
+const activeTurn = computed(() =>
+  turns.value.filter((turn) => ['running', 'queued'].includes(turn.state)).at(-1),
+)
+const submitting = computed(() => Boolean(activeTurn.value))
+const activeRunningTaskId = computed(() =>
+  activeTurn.value?.id.startsWith('tmp_') ? '' : activeTurn.value?.id,
+)
 const thinkingCollapsed = ref<Record<string, boolean>>({})
 
-const liveTimerSeconds = ref<number>(0)
+const clock = ref(Date.now())
 let timerHandle: number | null = null
-let closeActiveStream: (() => void) | null = null
+let conversationVersion = 0
+const subscriptions = new Map<string, AbortController>()
 
 const chatScrollRef = ref<HTMLDivElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -186,30 +199,28 @@ function parseStep(log: string): FormattedThinkingStep {
 }
 
 /**
- * 启动思考计时器，每 100ms 刷新一次已思考秒数。
+ * 读取当前轮次的执行时间，重开会话后继续使用服务端的创建时刻。
+ * @param turn - 运行中的调研轮次。
+ * @returns 已用秒数。
  */
-function startThinkingTimer(): void {
-  stopThinkingTimer()
-  liveTimerSeconds.value = 0
-  timerHandle = window.setInterval(() => {
-    liveTimerSeconds.value = Number((liveTimerSeconds.value + 0.1).toFixed(1))
-  }, 100)
+function elapsedSeconds(turn: ResearchTurn): number {
+  return Math.max(0, Math.floor((clock.value - Date.parse(turn.created_at)) / 1000))
+}
+
+/** 切换会话时停止该视图的所有网络订阅，并使在途响应失效。 */
+function leaveConversation(): void {
+  conversationVersion++
+  for (const controller of subscriptions.values()) controller.abort()
+  subscriptions.clear()
 }
 
 /**
- * 停止思考计时器并清理定时器句柄。
+ * 发送提问或阅读最新内容时跟随更新，向上翻阅时保留当前位置。
+ * @param force - 主动打开会话或发起提问时跳至末尾。
  */
-function stopThinkingTimer(): void {
-  if (timerHandle !== null) {
-    clearInterval(timerHandle)
-    timerHandle = null
-  }
-}
-
-/**
- * 将聊天消息列表平滑滚动到底部最新内容。
- */
-function scrollToBottom(): void {
+function scrollToBottom(force = true): void {
+  const pane = chatScrollRef.value
+  if (!force && pane && pane.scrollHeight - pane.clientHeight - pane.scrollTop > 80) return
   void nextTick(() => {
     if (chatScrollRef.value) {
       chatScrollRef.value.scrollTop = chatScrollRef.value.scrollHeight
@@ -230,8 +241,10 @@ function toggleThinking(turnId: string): void {
  * @returns 异步完成后无返回值
  */
 async function loadConversations(): Promise<void> {
+  const version = conversationVersion
   try {
     const res = await props.api<{ items: ConversationItem[] }>('/research/conversations')
+    if (version !== conversationVersion) return
     conversations.value = res.items || []
     const savedId = localStorage.getItem(STORAGE_ACTIVE_KEY)
     if (savedId && conversations.value.some((c) => c.conversation_id === savedId)) {
@@ -242,7 +255,7 @@ async function loadConversations(): Promise<void> {
       startNewConversation()
     }
   } catch {
-    startNewConversation()
+    if (version === conversationVersion) startNewConversation()
   }
 }
 
@@ -252,13 +265,16 @@ async function loadConversations(): Promise<void> {
  * @returns 异步完成后无返回值
  */
 async function selectConversation(convId: string): Promise<void> {
-  closeActiveStream?.()
-  closeActiveStream = null
-  stopThinkingTimer()
+  leaveConversation()
+  const version = conversationVersion
+  loadingConversation.value = true
+  turns.value = []
+  currentKeyword.value = ''
   activeConvId.value = convId
   localStorage.setItem(STORAGE_ACTIVE_KEY, convId)
   try {
     const res = await props.api<ConversationDetailResponse>(`/research/conversation/${convId}`)
+    if (version !== conversationVersion) return
     turns.value = (res.turns || []).map((t) => ({
       id: t.id,
       question: t.question,
@@ -266,14 +282,23 @@ async function selectConversation(convId: string): Promise<void> {
       state: t.state,
       stage: t.stage,
       progress: t.progress,
+      events: t.events,
       thinkingLogs: t.thinking_logs || (t.stage ? [t.stage] : []),
       thinkingSeconds: t.result?.elapsed || t.elapsed || 0,
       result: t.result,
     }))
     currentKeyword.value = res.keyword || ''
+    for (const turn of turns.value) {
+      if (turn.state === 'queued' || turn.state === 'running') streamTaskEvents(turn)
+    }
     scrollToBottom()
   } catch {
-    ElMessage.error('加载会话失败')
+    if (version === conversationVersion) {
+      ElMessage.error('加载会话失败')
+      startNewConversation()
+    }
+  } finally {
+    if (version === conversationVersion) loadingConversation.value = false
   }
 }
 
@@ -282,9 +307,8 @@ async function selectConversation(convId: string): Promise<void> {
  * @param initKeyword - 可选初始关键词
  */
 function startNewConversation(initKeyword?: string): void {
-  closeActiveStream?.()
-  closeActiveStream = null
-  stopThinkingTimer()
+  leaveConversation()
+  loadingConversation.value = false
   const newId = 'conv_' + Date.now().toString(36)
   activeConvId.value = newId
   localStorage.setItem(STORAGE_ACTIVE_KEY, newId)
@@ -326,138 +350,116 @@ async function deleteConversation(convId: string, e: MouseEvent): Promise<void> 
 }
 
 /**
- * 建立 SSE 连接，实时接收思考推演事件。
- * @param taskId - 任务 ID
- * @param targetTurn - 当前轮次本地响应式状态引用
- * @returns 异步完成后无返回值
+ * 订阅本轮的正文与执行状态，回到进行中的会话时从头回放。
+ * @param turn - 当前会话中的响应式调研轮次。
  */
-async function streamTaskEvents(taskId: string, targetTurn: ResearchTurn): Promise<void> {
-  startThinkingTimer()
-  closeActiveStream?.()
-  closeActiveStream = null
+function streamTaskEvents(turn: ResearchTurn): void {
+  turn.streamError = false
+  const taskId = turn.id
+  const stageIds = new Set(turn.events?.map((event) => event.id))
+  subscriptions.get(taskId)?.abort()
+  const controller = new AbortController()
+  subscriptions.set(taskId, controller)
+  const { signal } = controller
 
-  return new Promise<void>((resolve) => {
-    closeActiveStream = openTaskEventStream(taskId, {
-      /**
-       * 处理服务端推来的流式阶段与思考日志事件。
-       * @param payload - 服务端推送的任务进展条目。
-       */
-      onMessage: (payload) => {
-        if (payload.stage) {
-          targetTurn.stage = payload.stage
-          if (!targetTurn.thinkingLogs.includes(payload.stage)) {
-            targetTurn.thinkingLogs.push(payload.stage)
-          }
-        }
-        if (typeof payload.progress === 'number') {
-          targetTurn.progress = payload.progress
-        }
-        scrollToBottom()
-      },
-      /**
-       * 处理智能调研完成事件，拉取终态研报。
-       */
-      onDone: () => {
-        closeActiveStream = null
-        const elapsed = liveTimerSeconds.value
-        stopThinkingTimer()
-        targetTurn.thinkingSeconds = elapsed > 0 ? elapsed : targetTurn.thinkingSeconds
-        void finalizeTaskResult(taskId, targetTurn)
-        resolve()
-      },
-      /**
-       * 处理连接异常或意外断开，切换为轮询兜底。
-       */
-      onError: () => {
-        closeActiveStream = null
-        void fallbackPoll(taskId, targetTurn)
-        resolve()
-      },
-    })
-  })
-}
-
-/**
- * 任务完成终态处理，拉取最终研报与工件。
- * @param taskId - 任务 ID
- * @param targetTurn - 目标轮次对象
- */
-async function finalizeTaskResult(taskId: string, targetTurn: ResearchTurn): Promise<void> {
-  try {
-    const task = await props.api<ResearchTurn & { elapsed?: number }>(`/tasks/${taskId}`)
-    targetTurn.state = task.state
-    targetTurn.stage = task.stage
-    targetTurn.progress = task.progress
-    targetTurn.result = task.result
-
-    if (task.result?.keyword && !currentKeyword.value) currentKeyword.value = task.result.keyword
-    if (task.result?.elapsed) {
-      targetTurn.thinkingSeconds = task.result.elapsed
-    } else if (task.elapsed) {
-      targetTurn.thinkingSeconds = task.elapsed
-    } else if (liveTimerSeconds.value > 0) {
-      targetTurn.thinkingSeconds = liveTimerSeconds.value
+  /**
+   * 合并服务器确认的状态和最终可见结果。
+   * @param task - 经过权限过滤的任务快照。
+   */
+  function applyTask(task: ResearchTurn & { elapsed?: number }): void {
+    if (signal.aborted) return
+    turn.question = task.question
+    turn.state = task.state
+    turn.stage = task.stage
+    turn.progress = task.progress
+    turn.result = task.result
+    if (task.events) {
+      turn.events = task.events
+      turn.thinkingLogs = task.events.map((event) => event.stage)
     }
-
-    await loadConversations()
-    scrollToBottom()
-  } catch {
-    ElMessage.error('获取结果失败')
+    if (task.restricted) turn.draft = ''
+    turn.thinkingSeconds = task.result?.elapsed ?? task.elapsed ?? elapsedSeconds(turn)
+    if (task.result?.keyword) currentKeyword.value = task.result.keyword
+    const conversation = conversations.value.find(
+      (item) => item.conversation_id === activeConvId.value,
+    )
+    if (conversation && turn === turns.value.at(-1)) conversation.latest_state = task.state
+    scrollToBottom(false)
   }
-}
 
-/**
- * 轮询兜底函数，保障网络抖动下结果能够成功获取。
- * @param taskId - 任务 ID
- * @param targetTurn - 目标轮次对象
- */
-async function fallbackPoll(taskId: string, targetTurn: ResearchTurn): Promise<void> {
-  type ResearchTaskSnapshot = ResearchTurn & { elapsed?: number }
-  const terminal = await pollTaskUntilTerminal<ResearchTaskSnapshot>({
-    /**
-     * 拉取一次调研任务最新状态。
-     * @returns 任务状态快照。
-     */
-    fetchTask: () => props.api<ResearchTaskSnapshot>(`/tasks/${taskId}`),
-    terminalStates: ['completed', 'failed', 'cancelled'],
-    maxAttempts: 45,
-    intervalMs: 2000,
-    /**
-     * 更新进度与阶段日志轨迹。
-     * @param task - 单次轮询拉取的任务状态。
-     */
-    onTick: (task) => {
-      targetTurn.state = task.state
-      targetTurn.stage = task.stage
-      targetTurn.progress = task.progress
-      if (task.stage && !targetTurn.thinkingLogs.includes(task.stage)) {
-        targetTurn.thinkingLogs.push(task.stage)
+  /**
+   * 从权限过滤后的任务接口取回最终结果，永久断线时保留轮询兜底。
+   * @param poll - 是否需要等到任务终态。
+   */
+  async function finish(poll: boolean): Promise<void> {
+    try {
+      /**
+       * 读取此轮任务的权限过滤快照。
+       * @returns 调研状态及可展示结果。
+       */
+      const fetchTask = () => props.api<ResearchTurn & { elapsed?: number }>(`/tasks/${taskId}`)
+      const latest = poll
+        ? await pollTaskUntilTerminal({ fetchTask, onTick: applyTask, signal })
+        : await fetchTask()
+      if (signal.aborted) return
+      if (!latest) {
+        turn.streamError = true
+        return
       }
-      scrollToBottom()
-    },
-  })
-  if (!terminal) return
-  stopThinkingTimer()
-  if (terminal.state === 'completed') {
-    if (terminal.result?.elapsed) {
-      targetTurn.thinkingSeconds = terminal.result.elapsed
-    } else if (liveTimerSeconds.value > 0) {
-      targetTurn.thinkingSeconds = liveTimerSeconds.value
+      applyTask(latest)
+      if (['queued', 'running'].includes(latest.state)) streamTaskEvents(turn)
+    } catch {
+      if (!signal.aborted) turn.streamError = true
+    } finally {
+      if (subscriptions.get(taskId) === controller) subscriptions.delete(taskId)
     }
-    await finalizeTaskResult(taskId, targetTurn)
-  } else if (terminal.state === 'failed') {
-    ElMessage.error(terminal.stage || '任务异常')
   }
+
+  const close = openTaskEventStream(taskId, {
+    /**
+     * 更新当前轮次的阶段记录。
+     * @param row - 服务端阶段消息。
+     */
+    onMessage: (row) => {
+      if (row.stage) {
+        turn.stage = row.stage
+        if (row.id !== undefined && !stageIds.has(row.id)) {
+          stageIds.add(row.id)
+          turn.events ??= []
+          turn.events.push({
+            id: row.id,
+            stage: row.stage,
+            status: row.status ?? 'running',
+            progress: row.progress ?? 0,
+          })
+          turn.thinkingLogs.push(row.stage)
+        }
+      }
+      if (typeof row.progress === 'number') turn.progress = row.progress
+      scrollToBottom(false)
+    },
+    /**
+     * 在正文区域展示最新草稿。
+     * @param text - 当前可见的增量正文合并结果。
+     */
+    onResult: (text) => {
+      turn.draft = text
+      scrollToBottom(false)
+    },
+    /** 获取终态任务的正式报告。 */
+    onDone: () => void finish(false),
+    /** 连接永久关闭时改由任务快照恢复。 */
+    onError: () => void finish(true),
+  })
+  signal.addEventListener('abort', close, { once: true })
 }
 
-/**
- * 发送用户提问或追问。
- * @returns 异步完成后无返回值
- */
 /**
  * 运行期向正在执行的智能体追加中途干预指令 (Steering)。
  */
 async function handleSteer(): Promise<void> {
+  const version = conversationVersion
+  const turn = activeTurn.value
   const steerText = inputPrompt.value.trim()
   if (!steerText || !activeRunningTaskId.value) return
 
@@ -465,9 +467,9 @@ async function handleSteer(): Promise<void> {
     await props.api(`/tasks/${activeRunningTaskId.value}/steer`, 'POST', {
       input: steerText,
     })
-    const lastTurn = turns.value[turns.value.length - 1]
-    if (lastTurn) {
-      lastTurn.thinkingLogs.push(`【用户中途追加干预指令】：${steerText}`)
+    if (version !== conversationVersion) return
+    if (turn) {
+      turn.thinkingLogs.push(`【用户中途追加干预指令】：${steerText}`)
     }
     ElMessage.success('已将补充要求发送给调研团队')
     inputPrompt.value = ''
@@ -484,7 +486,7 @@ async function handleSteer(): Promise<void> {
  */
 async function handleSend(): Promise<void> {
   const prompt = inputPrompt.value.trim()
-  if (!prompt) return
+  if (!prompt || loadingConversation.value || !activeConvId.value) return
 
   if (submitting.value && activeRunningTaskId.value) {
     await handleSteer()
@@ -493,6 +495,7 @@ async function handleSend(): Promise<void> {
 
   if (submitting.value) return
 
+  const version = conversationVersion
   const isFirstTurn = turns.value.length === 0
   const kw = isFirstTurn ? currentKeyword.value || prompt : currentKeyword.value
   currentKeyword.value = kw
@@ -519,7 +522,6 @@ async function handleSend(): Promise<void> {
   })
   turns.value.push(tempTurn)
   inputPrompt.value = ''
-  submitting.value = true
   scrollToBottom()
 
   try {
@@ -531,20 +533,25 @@ async function handleSend(): Promise<void> {
       platforms: ['web', 'p1688'],
       input_level: 1,
     })
+    if (version !== conversationVersion) return
     tempTurn.id = res.id
-    activeRunningTaskId.value = res.id
-    await streamTaskEvents(res.id, tempTurn)
+    streamTaskEvents(tempTurn)
+    const conversation = conversations.value.find(
+      (item) => item.conversation_id === activeConvId.value,
+    )
+    if (conversation) {
+      conversation.turns = turns.value.length
+      conversation.last_active = tempTurn.created_at
+      conversation.latest_state = 'running'
+    }
   } catch (err: unknown) {
-    stopThinkingTimer()
+    if (version !== conversationVersion) return
     tempTurn.state = 'failed'
     const msg = err instanceof Error ? err.message : '提交失败'
     tempTurn.stage = msg
     ElMessage.error(msg)
-  } finally {
-    submitting.value = false
-    activeRunningTaskId.value = ''
-    scrollToBottom()
   }
+  scrollToBottom()
 }
 
 /**
@@ -600,13 +607,15 @@ function downloadReport(text?: string, title?: string): void {
 }
 
 onMounted(() => {
+  timerHandle = window.setInterval(() => {
+    clock.value = Date.now()
+  }, 1000)
   void loadConversations()
 })
 
 onUnmounted(() => {
-  closeActiveStream?.()
-  closeActiveStream = null
-  stopThinkingTimer()
+  leaveConversation()
+  if (timerHandle !== null) window.clearInterval(timerHandle)
 })
 </script>
 
@@ -669,6 +678,7 @@ onUnmounted(() => {
                 v-for="kw in presetKeywords"
                 :key="kw"
                 class="preset-suggestion-btn"
+                :disabled="loadingConversation"
                 @click="choosePreset(kw)"
               >
                 {{ kw }}
@@ -697,24 +707,35 @@ onUnmounted(() => {
                   v-if="turn.state === 'running' || turn.state === 'queued'"
                   class="active-thinking-block"
                 >
-                  <div class="active-thinking-status">
-                    <span class="thinking-spinner" />
-                    <span class="thinking-label">正在调研 · 已用时 {{ liveTimerSeconds }}s</span>
-                  </div>
-                  <div class="live-steps-stream">
-                    <div
-                      v-for="(step, idx) in turn.thinkingLogs.map(parseStep)"
-                      :key="idx"
-                      class="trace-step-entry"
-                      :class="[{ current: idx === turn.thinkingLogs.length - 1 }, step.type]"
+                  <div v-if="turn.streamError" class="active-thinking-status">
+                    <span>调研连接已中断</span>
+                    <el-button link type="primary" @click="streamTaskEvents(turn)"
+                      >重新连接</el-button
                     >
-                      <div class="trace-step-header">
-                        <span class="trace-step-icon" aria-hidden="true">{{ step.icon }}</span>
-                        <span class="trace-step-type">{{ step.label }}</span>
-                      </div>
-                      <div class="trace-step-text">{{ step.content }}</div>
-                    </div>
                   </div>
+                  <div v-else class="active-thinking-status">
+                    <span class="thinking-spinner" />
+                    <span class="thinking-label"
+                      >正在调研 · 已用时 {{ elapsedSeconds(turn) }}s</span
+                    >
+                  </div>
+                  <details v-if="turn.thinkingLogs.length" :open="!turn.draft">
+                    <summary>执行步骤（{{ turn.thinkingLogs.length }}）</summary>
+                    <div class="live-steps-stream">
+                      <div
+                        v-for="(step, idx) in turn.thinkingLogs.map(parseStep)"
+                        :key="idx"
+                        class="trace-step-entry"
+                        :class="[{ current: idx === turn.thinkingLogs.length - 1 }, step.type]"
+                      >
+                        <div class="trace-step-header">
+                          <span class="trace-step-icon" aria-hidden="true">{{ step.icon }}</span>
+                          <span class="trace-step-type">{{ step.label }}</span>
+                        </div>
+                        <div class="trace-step-text">{{ step.content }}</div>
+                      </div>
+                    </div>
+                  </details>
                 </div>
 
                 <div v-else-if="turn.thinkingLogs?.length" class="completed-thinking-accordion">
@@ -749,7 +770,7 @@ onUnmounted(() => {
                 </div>
 
                 <div
-                  v-if="turn.result?.report || turn.result?.reply"
+                  v-if="turn.draft || turn.result?.report || turn.result?.reply"
                   class="response-markdown-body"
                 >
                   <ul
@@ -762,7 +783,8 @@ onUnmounted(() => {
                     </li>
                   </ul>
                   <MarkdownReport
-                    :content="turn.result?.report || turn.result?.reply || ''"
+                    :content="turn.result?.report || turn.result?.reply || turn.draft || ''"
+                    :show-outline="!turn.draft"
                     :id-prefix="'rep-' + turn.id"
                   />
                 </div>
@@ -787,8 +809,11 @@ onUnmounted(() => {
                   </button>
                 </div>
 
-                <div v-if="turn.state === 'failed'" class="error-hint-row">
-                  {{ turn.stage || '调研未完成，请稍后重试。' }}
+                <div
+                  v-if="['failed', 'cancelled', 'rejected', 'review'].includes(turn.state)"
+                  class="error-hint-row"
+                >
+                  {{ turn.stage || stateText(turn.state) }}
                 </div>
               </div>
             </div>
@@ -815,7 +840,7 @@ onUnmounted(() => {
             />
             <button
               :class="['send-circle-btn', { 'steer-mode': submitting }]"
-              :disabled="!inputPrompt.trim()"
+              :disabled="loadingConversation || !inputPrompt.trim()"
               :title="submitting ? '发送补充要求' : '发送消息'"
               @click="handleSend"
             >
@@ -1182,6 +1207,12 @@ onUnmounted(() => {
   to {
     transform: rotate(360deg);
   }
+}
+
+.active-thinking-block summary {
+  cursor: pointer;
+  color: var(--tz-ink-secondary);
+  font-size: 13px;
 }
 
 /* 思考与运行工具步骤排版 */
