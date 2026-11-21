@@ -9,6 +9,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from taozhi.application.rag import intent, retrieval, specialists, workflow
 from taozhi.application.rag.execution import _build_question_result
+from taozhi.core.memory import service as memory_service
 from taozhi.infrastructure.persistence.job_repo import conversation_question_reference
 from taozhi.knowledge.db import database_connection
 
@@ -146,12 +147,12 @@ def test_retained_conversation_source_checks_external_permission(rag, monkeypatc
     assert check.call_args.kwargs == {"external": True}
 
 
-def test_postgres_previous_question_respects_owner_tenant_conversation_and_order():
+def test_postgres_previous_question_respects_owner_tenant_conversation_and_order(monkeypatch):
     """实际 PostgreSQL 排除跨范围、尚未完成及晚于本轮的提问。"""
     before = (datetime(2026, 1, 2, tzinfo=timezone.utc), "current")
     with database_connection() as conn:
         conn.execute("CREATE TEMP TABLE jobs(id text,tenant_id text,owner_id text,conversation_id text,created_at timestamptz,"
-                     "kind text,state text,question text,input_level int,payload jsonb) ON COMMIT DROP")
+                     "kind text,state text,question text,input_level int,payload jsonb,result jsonb,sources jsonb) ON COMMIT DROP")
         for identifier, tenant, owner, conversation, time, status in (
             ("older", "t", "u", "c", "2026-01-01", "completed"),
             ("before", "t", "u", "c", "2026-01-02", "completed"),
@@ -162,10 +163,20 @@ def test_postgres_previous_question_respects_owner_tenant_conversation_and_order
             ("wrong_conversation", "t", "u", "other", "2026-01-01", "completed"),
             ("unfinished", "t", "u", "c", "2026-01-01", "running"),
         ):
-            conn.execute("INSERT INTO jobs VALUES(%s,%s,%s,%s,%s,'ask',%s,'合成问题',2,'{\"allow_external\":false}')",
-                         (identifier, tenant, owner, conversation, time, status))
+            created = datetime.fromisoformat(time).replace(tzinfo=timezone.utc)
+            conn.execute("INSERT INTO jobs VALUES(%s,%s,%s,%s,%s,'ask',%s,'合成问题',2,'{\"allow_external\":false}',"
+                         "jsonb_build_object('citations',jsonb_build_array(jsonb_build_object('chunk_id',%s::text))),'[]')",
+                         (identifier, tenant, owner, conversation, created, status, identifier))
         row = conversation_question_reference(conn, "t", "u", "c", before)
         assert row["id"] == "before" and row["allow_external"] is False
         assert conversation_question_reference(conn, "t", "u", "c", before, "older")["id"] == "older"
         for reference in ("later", "future", "wrong_tenant", "wrong_owner", "wrong_conversation", "unfinished"):
             assert conversation_question_reference(conn, "t", "u", "c", before, reference) is None
+
+        current_principal = SimpleNamespace(id="u", tenant_id="t", boss=False)
+        def fetch_chunk(_conn, _sql, params):
+            chunk_id = params[1]
+            return {**_document(chunk_id), "id": chunk_id, "text": "合成资料", "node_id": "team"}
+        monkeypatch.setattr(memory_service, "fetch_one", fetch_chunk)
+        recalled, _ = memory_service.get_followup_context(conn, current_principal, "它的规格呢", 2, "c", before=before)
+        assert [doc["chunk_id"] for doc in recalled] == ["before"]
