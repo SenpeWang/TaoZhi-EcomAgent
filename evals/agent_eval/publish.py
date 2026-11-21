@@ -104,6 +104,9 @@ class AgentReport(BaseModel):
     git_sha: Annotated[str, Field(pattern=r"^[a-f0-9]{7,64}$")] | None = None
     dataset_sha256: Digest
     judges_sha256: Digest
+    transcript_sha256: Digest | None = None
+    counterexamples_sha256: Digest | None = None
+    model_config_sha256: Digest | None = None
     gate: Gate
     comparison: Baseline | None = None
     metrics: Metrics
@@ -166,6 +169,10 @@ def project_report(raw: dict) -> tuple[dict, list[dict]]:
         raise ValueError("报告的用例数、唯一编号或通过数不一致")
     created_at = datetime.strptime(report.timestamp, "%Y%m%d_%H%M%S_%f").replace(tzinfo=timezone.utc)
     metrics = report.metrics.token_usage.model_dump(exclude={"call_coverage_among_known"})
+    provenance = report.model_dump(include={"transcript_sha256", "counterexamples_sha256", "model_config_sha256"},
+                                   exclude_none=True)
+    if provenance:
+        metrics["provenance"] = provenance
     ratios = {key: getattr(report.metrics, key) for key in ("required_tool_coverage", "parameter_accuracy", "reference_fact_coverage")}
     ratios["call_coverage_among_known"] = report.metrics.token_usage.call_coverage_among_known
     for key, ratio in ratios.items():

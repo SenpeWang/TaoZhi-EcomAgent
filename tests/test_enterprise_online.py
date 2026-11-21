@@ -1530,12 +1530,25 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
     assert publish({**baseline, "run_id": "foreign_report"}, "eval_foreign", "eval_foreign_user")
     current = {
         **baseline, "run_id": "candidate", "passed_cases": 1, "gate": {"passed": False},
+        "transcript_sha256": "1" * 64, "counterexamples_sha256": "2" * 64, "model_config_sha256": "3" * 64,
         "case_results": [{**sample, "status": "failed", "score": 0}, baseline["case_results"][1]],
         "comparison": {"baseline_sha256": fingerprint(baseline)},
     }
     assert publish(current, tenant, users["staff"])
     admin, staff = clients["admin"], clients["staff"]
-    assert [item["run_id"] for item in staff.get(url).json()["items"]] == ["candidate"]
+    listing = staff.get(url).json()["items"]
+    assert [item["run_id"] for item in listing] == ["candidate"]
+    for key in ("transcript_sha256", "counterexamples_sha256", "model_config_sha256"):
+        assert listing[0][key] == current[key]
+        assert admin.get(f"{url}/baseline").json()["run"][key] is None
+    with database_connection() as conn:
+        conn.execute("UPDATE eval_runs SET metrics=metrics-'provenance' WHERE tenant_id=%s AND run_id=%s",
+                     (tenant, current["run_id"]))
+    assert staff.get(f"{url}/candidate").json()["run"]["counterexamples_sha256"] is None
+    assert not publish(current, tenant, users["staff"])
+    restored = staff.get(f"{url}/candidate").json()
+    assert restored["run"]["counterexamples_sha256"] == current["counterexamples_sha256"]
+    assert "provenance" not in restored["metrics"]
     assert staff.get(url, params={"owner_id": "all"}).status_code == 403
     assert staff.get(url, params={"owner_id": users["boss"]}).status_code == 403
     assert [item["run_id"] for item in admin.get(url, params={"owner_id": users["boss"]}).json()["items"]] == ["baseline"]

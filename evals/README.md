@@ -69,7 +69,7 @@ PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay ev
 PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json --counterexamples evals/datasets/agent_research_counterexamples.json --compare "$BASELINE_REPORT"
 ```
 
-第二条命令的 `BASELINE_REPORT` 取第一条打印的报告路径。反例保留输入、版本与其余观测，只修改一个执行步骤或答案；门禁将按设计返回非零退出码。两批均归档后，可在页面上查看每个用例由通过变为失败的具体原因。
+第二条命令的 `BASELINE_REPORT` 取第一条打印的报告路径。反例保留输入、版本与其余观测，只修改一个执行步骤或答案，门禁将按设计返回非零退出码。两批均归档后，在评测中心选择「合成反例复核」批次，并与「合成回放」批次对照，即可查看每个用例由通过变为失败的原因。批次详情会展示报告中可用的回放记录、反例集和模型配置的 SHA-256 摘要，供复核时确认版本。
 
 | 工作 | 入口与输出 |
 |---|---|

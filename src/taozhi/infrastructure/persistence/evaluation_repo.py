@@ -11,6 +11,9 @@ from taozhi.knowledge.db import fetch_all, fetch_one
 _RUN = """
     SELECT r.run_id, r.owner_id, u.display_name AS owner_name, r.created_at, r.mode, r.git_sha,
            r.dataset_sha256, r.judges_sha256, r.gate_passed, r.passed_cases, r.failed_cases, r.unassessable_cases,
+           r.metrics->'provenance'->>'transcript_sha256' AS transcript_sha256,
+           r.metrics->'provenance'->>'counterexamples_sha256' AS counterexamples_sha256,
+           r.metrics->'provenance'->>'model_config_sha256' AS model_config_sha256,
            r.passed_cases+r.failed_cases+r.unassessable_cases AS total_cases, r.metrics, r.report_sha256, r.baseline_sha256
     FROM eval_runs r JOIN users u ON (u.tenant_id,u.id)=(r.tenant_id,r.owner_id)
     WHERE r.tenant_id=%s
@@ -106,6 +109,13 @@ def insert_report(conn: Any, tenant_id: str, owner_id: str, report: dict, rows: 
         existing = run(conn, tenant_id, owner_id, run_id=report["run_id"])
         if existing is None or existing["report_sha256"] != report["report_sha256"]:
             raise ValueError("同一批次编号已经归属于其他发起人或对应不同内容")
+        if "provenance" in report["metrics"] and "provenance" not in existing["metrics"]:
+            conn.execute(
+                "UPDATE eval_runs SET metrics=metrics || %s "
+                "WHERE tenant_id=%s AND run_id=%s AND owner_id=%s AND report_sha256=%s",
+                (Jsonb({"provenance": report["metrics"]["provenance"]}), tenant_id, report["run_id"],
+                 owner_id, report["report_sha256"]),
+            )
         return False
     with conn.cursor() as cursor:
         cursor.executemany("""

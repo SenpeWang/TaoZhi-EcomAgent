@@ -257,13 +257,19 @@ def test_evaluation_center_contracts_and_baseline_scope():
 import assert from 'node:assert/strict'
 import { requestApi } from './web/src/api.ts'
 import { workspaceNavigation } from './web/src/workspaceNavigation.ts'
-import { evaluationRunPath, isBaselineCandidate } from './web/src/evaluations.ts'
+import { evaluationRunPath, evaluationSource, isBaselineCandidate } from './web/src/evaluations.ts'
 
 const pages = workspaceNavigation({id:'member'}, {}, 0, 0).flatMap(group => group.items)
 assert.ok(pages.find(item => item.page === '评测中心'))
 assert.deepEqual(workspaceNavigation({must_change:true}, {}, 0, 0)
   .flatMap(group => group.items.map(item => item.page)), ['个人中心'])
 const run = {run_id:'test-a', mode:'live',dataset_sha256:'1'.repeat(64),judges_sha256:'2'.repeat(64)}
+const replay = {...run, run_id:'replay', mode:'synthetic_trace_regrade', counterexamples_sha256:null}
+const negatives = {...replay, run_id:'negatives', counterexamples_sha256:'a'.repeat(64)}
+assert.equal(evaluationSource(run), '真实调研')
+assert.equal(evaluationSource(replay), '合成回放')
+assert.equal(evaluationSource(negatives), '合成反例复核')
+assert.ok(isBaselineCandidate(replay,negatives))
 assert.equal(evaluationRunPath('test/a'), '/evaluations/runs/test%2Fa')
 assert.ok(isBaselineCandidate(run,{...run,run_id:'test-b'}))
 for (const other of [run,{...run, run_id:'other',mode:'synthetic_trace_regrade'},

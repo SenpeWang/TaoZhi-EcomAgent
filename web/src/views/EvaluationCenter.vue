@@ -50,7 +50,7 @@
         <template #default="{ row }">{{ row.owner_name || row.owner_id }}</template>
       </el-table-column>
       <el-table-column label="执行方式" min-width="130">
-        <template #default="{ row }">{{ evaluationModes[row.mode as EvaluationMode] }}</template>
+        <template #default="{ row }">{{ evaluationSource(row) }}</template>
       </el-table-column>
       <el-table-column label="用例结果" min-width="185">
         <template #default="{ row }">
@@ -81,6 +81,7 @@ import { computed, ref } from 'vue'
 import { useEvaluationPage } from '../composables/useEvaluationPage'
 import {
   evaluationModes,
+  evaluationSource,
   type EvaluationApi,
   type EvaluationMode,
   type EvaluationRun,

@@ -11,6 +11,9 @@ export interface EvaluationRun {
   git_sha: string | null
   dataset_sha256: string
   judges_sha256: string
+  transcript_sha256: string | null
+  counterexamples_sha256: string | null
+  model_config_sha256: string | null
   gate_passed: boolean
   total_cases: number
   passed_cases: number
@@ -100,7 +103,10 @@ export interface EvaluationPage<T> {
   next_cursor: string | null
 }
 
-export const evaluationModes = { live: '实际调研', synthetic_trace_regrade: '合成轨迹回放' }
+export const evaluationModes = {
+  live: '真实调研',
+  synthetic_trace_regrade: '合成记录（回放与反例）',
+}
 export const evaluationStatuses = { passed: '通过', failed: '失败', unassessable: '不可判定' }
 export const evaluationTags = { passed: 'success', failed: 'danger', unassessable: 'info' } as const
 export const evaluationSuites: Record<string, string> = {
@@ -130,6 +136,16 @@ export const evaluationToolStatuses: Record<string, string> = {
   error: '错误',
   timeout: '超时',
   cancelled: '取消',
+}
+
+/**
+ * 按执行方式和反例来源区分报告的实际覆盖范围。
+ * @param run - 来源已经由服务端解析的评测批次。
+ * @returns 面向工作台用户的执行来源名称。
+ */
+export function evaluationSource(run: EvaluationRun): string {
+  if (run.mode === 'live') return '真实调研'
+  return run.counterexamples_sha256 ? '合成反例复核' : '合成回放'
 }
 
 /**

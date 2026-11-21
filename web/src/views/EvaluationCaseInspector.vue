@@ -20,7 +20,7 @@
         }}</el-tag>
       </div>
       <p class="evaluation-muted">
-        {{ caseId }} · {{ evaluationModes[run.mode] }} ·
+        {{ caseId }} · {{ evaluationSource(run) }} ·
         {{ evaluationSuites[detail.case.suite] || detail.case.suite }}
       </p>
       <el-alert
@@ -123,7 +123,7 @@ import {
   evaluationDimensions,
   evaluationFailures,
   evaluationJudges,
-  evaluationModes,
+  evaluationSource,
   evaluationRunPath,
   evaluationStatuses,
   evaluationSuites,

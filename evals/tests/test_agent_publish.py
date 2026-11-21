@@ -58,3 +58,18 @@ def test_inconsistent_denominators_are_rejected():
     raw["metrics"]["parameter_accuracy"] = {"numerator": 3, "denominator": 2}
     with pytest.raises(ValueError):
         project_report(raw)
+
+
+def test_provenance_retains_only_validated_source_digests():
+    raw = record()
+    digests = {"transcript_sha256": "1" * 64, "counterexamples_sha256": "2" * 64, "model_config_sha256": "3" * 64}
+    raw.update(digests, raw_model_configuration="private-source")
+    run, _ = project_report(raw)
+    assert run["metrics"]["provenance"] == digests
+    assert "provenance" not in project_report(record())[0]["metrics"]
+
+
+@pytest.mark.parametrize("key", ["transcript_sha256", "counterexamples_sha256", "model_config_sha256"])
+def test_invalid_source_digest_rejects_report(key):
+    with pytest.raises(ValueError):
+        project_report({**record(), key: "private-source"})

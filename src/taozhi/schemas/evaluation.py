@@ -18,6 +18,9 @@ class EvaluationRun(BaseModel):
     git_sha: str | None
     dataset_sha256: str
     judges_sha256: str
+    transcript_sha256: str | None = None
+    counterexamples_sha256: str | None = None
+    model_config_sha256: str | None = None
     gate_passed: bool
     total_cases: int
     passed_cases: int

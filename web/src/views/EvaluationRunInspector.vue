@@ -10,9 +10,7 @@
         <el-tag :type="summary.gate_passed ? 'success' : 'danger'" size="small">{{
           summary.gate_passed ? '门禁通过' : '门禁阻断'
         }}</el-tag>
-        <span
-          >{{ evaluationModes[summary.mode] }} · {{ summary.owner_name || summary.owner_id }}</span
-        >
+        <span>{{ evaluationSource(summary) }} · {{ summary.owner_name || summary.owner_id }}</span>
       </div>
       <small class="evaluation-meta">{{ summary.run_id }}</small>
       <dl class="evaluation-metrics">
@@ -59,6 +57,22 @@
           <dt>代码提交</dt>
           <dd :title="summary.git_sha ?? undefined">
             {{ summary.git_sha?.slice(0, 8) || '未记录' }}
+          </dd>
+        </div>
+        <div v-if="summary.transcript_sha256">
+          <dt>回放记录</dt>
+          <dd :title="summary.transcript_sha256">{{ summary.transcript_sha256.slice(0, 12) }}</dd>
+        </div>
+        <div v-if="summary.counterexamples_sha256">
+          <dt>反例集版本</dt>
+          <dd :title="summary.counterexamples_sha256">
+            {{ summary.counterexamples_sha256.slice(0, 12) }}
+          </dd>
+        </div>
+        <div v-if="summary.model_config_sha256">
+          <dt>模型配置</dt>
+          <dd :title="summary.model_config_sha256">
+            {{ summary.model_config_sha256.slice(0, 12) }}
           </dd>
         </div>
       </dl>
@@ -153,7 +167,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useEvaluationPage } from '../composables/useEvaluationPage'
 import {
-  evaluationModes,
+  evaluationSource,
   evaluationRunPath,
   evaluationStatuses,
   evaluationTags,

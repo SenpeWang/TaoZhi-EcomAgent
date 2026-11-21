@@ -14,7 +14,15 @@
           v-for="item in candidates"
           :key="item.run_id"
           :value="item.run_id"
-          :label="traceTime(item.created_at) + ' · ' + item.owner_name + ' · ' + item.run_id"
+          :label="
+            evaluationSource(item) +
+            ' · ' +
+            traceTime(item.created_at) +
+            ' · ' +
+            item.owner_name +
+            ' · ' +
+            item.run_id
+          "
         />
         <template #footer>
           <span v-if="choiceBusy" role="status">正在加载可比批次…</span>
@@ -90,6 +98,7 @@
 import { onScopeDispose, ref, watch } from 'vue'
 import {
   evaluationRunPath,
+  evaluationSource,
   isBaselineCandidate,
   type EvaluationApi,
   type EvaluationComparison,
