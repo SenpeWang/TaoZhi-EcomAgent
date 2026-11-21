@@ -119,7 +119,7 @@ evaluation 由服务端按 `(run, name)` upsert。`--dry-run` 只打印计划不
   `Z1` / `N1` / `C1`，与评估集 `case_id`（`GEN-T-*`）实测零交集。拍平进同一个
   Experiment 只会全部落进「未匹配」——看着同步了，实际一条都没写。要让它可见，
   需单独建一个对抗数据集，暂未做。
-- **Traces**：已在 [observability/tracing.py](../src/taozhi/observability/tracing.py) 接入 OpenTelemetry OTLP Span 埋点；若目标主机未配置 `PHOENIX_COLLECTOR_ENDPOINT` 则静默跳过。
+- **在线任务轨迹**由工作台通过 OpenTelemetry 采集并写入 PostgreSQL。本节的 Phoenix 同步脚本处理评估集、实验与评估报告。[在线采集器](../src/taozhi/observability/tracing.py) · [评估同步脚本](sync_phoenix.py)
 
 ## 基线归档（只读）
 

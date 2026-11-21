@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="672" viewBox="0 0 1160 672" role="img" aria-labelledby="title description" lang="zh-CN">
+  <title id="title">淘智工作台的任务运行架构</title>
+  <desc id="description">浏览器通过 FastAPI 提交任务、查询轨迹并接收 SSE 事件。任务写入 PostgreSQL；启用 Kafka 时，同一事务也写入 outbox。Worker 轮询数据库，也可由 Kafka 通知后按编号认领，分别执行资料入库、知识问答或受控问数、智能体调研。结果和任务事件写回 PostgreSQL。问答与调研的 OpenTelemetry 节点和中文诊断由后台线程写入 task_spans。工作流按需访问附件存储、检索服务、模型与业务数据源。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 8 4 0 8Z" fill="#486582"/>
+    </marker>
+    <marker id="trace-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 8 4 0 8Z" fill="#6745a5"/>
+    </marker>
+    <style>
+      text { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #132b48; }
+      .title { font-size: 28px; font-weight: 700; }
+      .heading { font-size: 23px; font-weight: 700; }
+      .label { font-size: 19px; font-weight: 700; }
+      .body { font-size: 17px; fill: #324e69; }
+      .caption { font-size: 15px; fill: #3c5670; }
+      .card { fill: #fff; stroke: #c0cfdf; stroke-width: 1.5; }
+      .line, .telemetry { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.2; }
+      .line { stroke: #486582; marker-end: url(#arrow); }
+      .telemetry { stroke: #6745a5; stroke-dasharray: 6 5; marker-end: url(#trace-arrow); }
+      .icon { fill: none; stroke: #30629a; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+  <rect x="1" y="1" width="1158" height="670" rx="18" fill="#f5f8fc" stroke="#c3d3e4"/>
+  <g>
+    <text x="32" y="44" class="title">任务运行架构</text>
+    <path d="M818 35h34" class="line"/>
+    <text x="862" y="40" class="caption">运行数据流</text>
+    <path d="M981 35h34" class="telemetry"/>
+    <text x="1025" y="40" class="caption">轨迹写入</text>
+  </g>
+
+  <g>
+    <rect x="32" y="74" width="239" height="114" rx="12" class="card"/>
+    <g class="icon" transform="translate(52 94)">
+      <rect width="25" height="17" rx="2"/><path d="M12.5 17v5m-7 0h14"/>
+    </g>
+    <text x="89" y="114" class="heading">Vue 工作台</text>
+    <text x="52" y="148" class="body">资料、问答、调研</text>
+    <text x="52" y="173" class="body">任务进度与轨迹分析</text>
+
+    <rect x="396" y="74" width="280" height="114" rx="12" class="card"/>
+    <g class="icon" transform="translate(416 94)">
+      <rect width="25" height="20" rx="2"/><path d="M0 6h25m-18 7 3 3 4-5"/>
+    </g>
+    <text x="455" y="114" class="heading">FastAPI</text>
+    <text x="416" y="148" class="body">会话、租户与来源权限</text>
+    <text x="416" y="173" class="body">任务提交、事件流与轨迹查询</text>
+
+    <rect x="821" y="74" width="281" height="114" rx="12" fill="#eaf2fe" stroke="#a5bfe2" stroke-width="1.5"/>
+    <g class="icon" transform="translate(842 93)">
+      <ellipse cx="12" cy="4" rx="12" ry="4"/><path d="M0 4v13c0 5 24 5 24 0V4M0 11c0 5 24 5 24 0"/>
+    </g>
+    <text x="880" y="114" class="heading">PostgreSQL</text>
+    <text x="842" y="148" class="body">任务、事件、检查点和轨迹</text>
+    <text x="842" y="173" class="body">文档、权限与 pgvector 索引</text>
+
+    <path d="M274 112h119" class="line"/>
+    <text x="333" y="104" text-anchor="middle" class="caption">REST 请求</text>
+    <path d="M393 161H274" class="line"/>
+    <text x="333" y="152" text-anchor="middle" class="caption">响应与 SSE</text>
+    <path d="M679 112h139" class="line"/>
+    <text x="748" y="104" text-anchor="middle" class="caption">提交任务</text>
+    <path d="M818 161H679" class="line"/>
+    <text x="749" y="152" text-anchor="middle" class="caption">事件与轨迹</text>
+  </g>
+
+  <g>
+    <path d="M853 191v31H427v63" class="line"/>
+    <text x="573" y="214" text-anchor="middle" class="caption">数据库轮询认领</text>
+    <path d="M627 285v-36h263v-58" class="line"/>
+    <text x="747" y="241" text-anchor="middle" class="caption">写回结果与事件</text>
+    <path d="M977 191v94" class="line"/>
+    <text x="990" y="234" class="caption">Worker 转发</text>
+    <text x="990" y="253" class="caption">outbox 记录</text>
+
+    <rect x="32" y="288" width="735" height="201" rx="12" fill="#e8f1fc" stroke="#9ebcde" stroke-width="1.5"/>
+    <g class="icon" transform="translate(51 308)">
+      <rect x="0" y="0" width="25" height="8" rx="1.5"/><rect x="0" y="12" width="25" height="8" rx="1.5"/>
+      <path d="M5 4h1m0 12h1m8-12h5m-5 12h5"/>
+    </g>
+    <text x="89" y="327" class="heading">后台 Worker</text>
+    <text x="260" y="326" class="body">认领任务、续租并按执行版本发布结果</text>
+
+    <rect x="50" y="350" width="209" height="119" rx="8" class="card"/>
+    <text x="66" y="381" class="label">资料入库</text>
+    <text x="66" y="414" class="body">解析原件、生成切片</text>
+    <text x="66" y="441" class="body">写入索引、提交审批</text>
+
+    <rect x="273" y="350" width="240" height="119" rx="8" class="card"/>
+    <text x="289" y="381" class="label">问答路由</text>
+    <text x="289" y="414" class="body">RAG · 授权资料检索</text>
+    <text x="289" y="441" class="body">ChatBI · 受控指标查询</text>
+
+    <rect x="527" y="350" width="222" height="119" rx="8" class="card"/>
+    <text x="543" y="381" class="label">智能体调研</text>
+    <text x="543" y="414" class="body">协调器编排子智能体</text>
+    <text x="543" y="441" class="body">MCP 工具采集与研报</text>
+
+    <rect x="821" y="288" width="281" height="74" rx="10" class="card"/>
+    <text x="840" y="318" class="label">Kafka 通知</text>
+    <text x="840" y="344" class="body">启用时按任务 ID 触发认领</text>
+    <path d="M818 326h-48" class="line"/>
+
+    <rect x="821" y="401" width="281" height="88" rx="10" fill="#f2edfa" stroke="#c5b6de" stroke-width="1.5"/>
+    <text x="840" y="429" class="label">OpenTelemetry</text>
+    <text x="840" y="455" class="body">问答与调研的节点、中文诊断</text>
+    <text x="840" y="478" class="caption">批量写入 task_spans</text>
+    <path d="M770 443h48" class="telemetry"/>
+    <path d="M1105 443h24V160h-24" class="telemetry"/>
+  </g>
+
+  <path d="M396 492v59" class="line"/>
+  <text x="410" y="527" class="caption">按任务调用</text>
+  <g>
+    <rect x="32" y="554" width="1070" height="91" rx="11" class="card"/>
+    <path d="M331 573v53m373-53v53" fill="none" stroke="#d3ddea" stroke-width="1.5"/>
+    <text x="54" y="587" class="label">附件存储</text>
+    <text x="54" y="620" class="body">MinIO 或本地私有目录</text>
+    <text x="355" y="587" class="label">检索与排序</text>
+    <text x="355" y="620" class="body">Elasticsearch、向量编码与重排服务</text>
+    <text x="730" y="587" class="label">模型与数据源</text>
+    <text x="730" y="620" class="body">模型 API、企业业务接口与公开网页</text>
+  </g>
+</svg>
