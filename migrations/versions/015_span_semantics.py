@@ -26,7 +26,6 @@ def upgrade() -> None:
             'gen_ai.agent.name','gen_ai.operation.name','tool'
         ]
     """)
-    # 旧 subagent_id 实际保存规划任务号，不能作为子智能体会话号展示。
     op.execute("""UPDATE task_spans SET attributes=attributes-'subagent_id'
                   WHERE name='research.subagent_worker' AND attributes ? 'subagent_id'""")
     op.execute("""UPDATE task_spans SET kind='CHAIN' WHERE name='pipeline.retrieval' AND kind='RETRIEVER'""")

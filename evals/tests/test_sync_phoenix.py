@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Phoenix 同步的单元测试：报告 → 逐例结果的拍平逻辑。
 
 为什么值得测：这段逻辑决定 Phoenix 界面上"一个用例看到什么分数"。拍错一次
@@ -16,9 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "evals"))
 
-from datetime import datetime  # noqa: E402
+from datetime import datetime
 
-from sync_phoenix import (  # noqa: E402
+from sync_phoenix import (
     _log_case, apply_behavior, apply_retrieval, case_to_example, collect_results,
     experiment_name,
 )

@@ -14,8 +14,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from taozhi.knowledge.db import database_connection, fetch_one  # noqa: E402
-from taozhi.knowledge.metrics import BUILTIN_BUSINESS_METRICS  # noqa: E402
+from taozhi.knowledge.db import database_connection, fetch_one
+from taozhi.knowledge.metrics import BUILTIN_BUSINESS_METRICS
 
 
 def main() -> int:

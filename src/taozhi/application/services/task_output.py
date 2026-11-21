@@ -66,7 +66,6 @@ def read_stream_page(p: Principal, task_id: str, cursor: int, *, draft_visible: 
         rows = rows[:_PAGE_SIZE]
         publishable_state = job["state"] == "completed" or job["state"] == "running" and job["lease_valid"]
         allowed = bool(publishable_state and not job["cancel_requested"] and not job["require_review"])
-        # 阶段可能含干预原文与研究目标。撤权后，阶段与正文都须重新过滤。
         verify = bool(rows) or job["state"] in _TERMINAL_STATES or draft_visible and check_idle
         source_ok = not verify or not job["sources"] or sources_valid(conn, p, job["sources"])
         allowed = allowed and source_ok

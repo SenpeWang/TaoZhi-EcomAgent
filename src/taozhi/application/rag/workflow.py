@@ -1,16 +1,14 @@
 """企业知识问答受控检索、多专家协同核验与发布工作流图组装。"""
 from __future__ import annotations
 
-import re
-
 from taozhi.application.common.task_guard import empty_token_usage, merge_token_usage, traced_node, validate_task_execution
 from taozhi.config import load_config
 from taozhi.core.memory.service import get_followup_context
 from taozhi.core.tools.search_web import extract_search_keyword
+from taozhi.domain.question_context import refers_to_previous_question, requested_business_resources
 from taozhi.domain.rag_verification import cited_paragraphs
 from taozhi.domain.text_guard import detect_injection
-from taozhi.infrastructure.persistence.access_repo import sources_valid
-from taozhi.infrastructure.persistence.job_repo import last_conversation_question, list_recent_completed_ask
+from taozhi.infrastructure.persistence.job_repo import last_conversation_question
 from taozhi.knowledge.business import lookup
 from taozhi.knowledge.db import database_connection
 from taozhi.knowledge.retriever import build_hyde_vector, search_documents
@@ -28,11 +26,10 @@ def retrieval_node(state: State) -> dict:
         cfg = load_config()
         controller = DeterministicController(max_iterations=2)
         query = state["question"]
-        if len(query) <= 12 and re.search(r"^那|它|这个|里面|该|此", query):
+        if refers_to_previous_question(query):
             prev_q = last_conversation_question(c, p.tenant_id, p.id, job.get("conversation_id") or "", job["id"])
             if prev_q and prev_q != query:
                 query = f"{prev_q} {state['question']}"
-        query_history = [state["question"]]
         hyde_trace: dict = {}
         search_traces: list[dict] = []
         hyde_vector = None if cfg.adaptive_hyde else build_hyde_vector(query, conn=c, p=p, job=job, trace_out=hyde_trace)
@@ -49,9 +46,7 @@ def retrieval_node(state: State) -> dict:
             if hyde_vector is None and cfg.adaptive_hyde:
                 hyde_vector = build_hyde_vector(query, conn=c, p=p, job=job, trace_out=hyde_trace)
             candidate_kw = extract_search_keyword(query)
-            rewrite_q = candidate_kw if (candidate_kw and not controller.detect_rewrite_deadlock(candidate_kw, query_history)) else query
-            if rewrite_q != query:
-                query_history.append(rewrite_q)
+            rewrite_q = candidate_kw if (candidate_kw and not controller.detect_rewrite_deadlock(candidate_kw, [state["question"]])) else query
             if rewrite_q != query or hyde_vector is not None:
                 tr2: dict = {}
                 supplement = [e for e in search_documents(c, p, rewrite_q, 10, hyde_vector=hyde_vector, trace_out=tr2) if not detect_injection(e["quote"])[0]]
@@ -74,24 +69,19 @@ def retrieval_node(state: State) -> dict:
             evidence = evidence[:10]
 
         business = []
-        for kind, key in [("stock", "sku_id"), ("orders", "order_id")]:
-            if job["payload"].get(key):
-                business.append(lookup(c, p, kind, job["payload"][key]))
-        if not job["payload"].get("sku_id") and re.search("实时库存|库存多少|可用库存|现价", state["question"]):
-            business.append({"available": False, "message": "查询实时库存或现价需要商品编号；未接入业务系统时不能提供实时数据"})
-        if not job["payload"].get("order_id") and re.search("订单状态|查订单|订单发货", state["question"]):
-            business.append({"available": False, "message": "查询真实订单需要订单编号，并接入企业订单系统"})
+        for kind, identifier in requested_business_resources(state["question"], job["payload"]).items():
+            if identifier:
+                business.append(lookup(c, p, kind, identifier))
+            else:
+                message = ("查询实时库存或现价需要商品编号；未接入业务系统时不能提供实时数据" if kind == "stock"
+                           else "查询真实订单需要订单编号，并接入企业订单系统")
+                business.append({"available": False, "message": message})
 
         sources = [{k: e[k] for k in ("kind", "document_id", "version", "acl_version", "tenant_id")} for e in evidence]
         sources.extend(x["source"] for x in business if x.get("available"))
         for reference in recalled_sources:
             if reference not in sources:
                 sources.append(reference)
-
-        history = []
-        for old in list_recent_completed_ask(c, p.tenant_id, p.id, limit=3):
-            if old["result"] and old["input_level"] <= job["input_level"] and sources_valid(c, p, old["sources"], True):
-                history.append({"answer": old["result"].get("answer", "")[:500]})
 
         blocked = (
             not job["payload"].get("allow_external", True)
@@ -122,7 +112,6 @@ def retrieval_node(state: State) -> dict:
         evidence=evidence,
         sources=sources,
         business=business,
-        history=history,
         external_blocked=blocked,
         hard_block=not evidence and not any(x.get("available") for x in business),
         timing=ret_timing,

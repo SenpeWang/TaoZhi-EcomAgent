@@ -1,15 +1,7 @@
-"""Piagent 风格智能体运行会话中枢（AgentSession）。
-
-借鉴 Pi-mono ``AgentSession`` 架构，将无界面多智能体执行期间的横切关注点收口于统一会话边界：
-1. 隔离沙箱创建（``SubagentContext``）；
-2. 长效记忆库访问（按租户加锁隔离）；
-3. 工具执行后置安全钩子（零宽字符清洗 + 间接提示注入隔离）；
-4. 取消/干预与可审计信标状态透传。
-"""
+"""管理单次调研的子任务工作区、工具结果校验与事实存储。"""
 from __future__ import annotations
 
 import logging
-import threading
 from typing import Any, List, Optional, Tuple
 
 from taozhi.core.agent.context import SubagentContext
@@ -17,6 +9,7 @@ from taozhi.core.agent.protocol import WorkspaceMode
 from taozhi.core.memory.service import get_memory_store
 from taozhi.core.memory.store import LongTermMemoryStore
 from taozhi.domain.text_guard import detect_injection, sanitize
+from taozhi.observability.tracing import record_diagnostic
 
 _LOG = logging.getLogger(__name__)
 
@@ -29,24 +22,15 @@ class AgentSession:
         *,
         conversation_id: str,
         tenant_id: str = "default",
-        keyword: str = "",
-        user_query: str = "",
-        cancel_event: Optional[threading.Event] = None,
     ) -> None:
         """初始化智能体会话上下文。
 
         Args:
             conversation_id: 所属对话或调研任务标识。
             tenant_id: 物理隔离的租户标识。
-            keyword: 核心调研标的词。
-            user_query: 用户原始请求文本。
-            cancel_event: 可选运行期取消事件信号。
         """
         self.conversation_id = conversation_id or "default"
         self.tenant_id = str(tenant_id or "default").strip() or "default"
-        self.keyword = keyword
-        self.user_query = user_query
-        self.cancel_event = cancel_event or threading.Event()
         self._memory: Optional[LongTermMemoryStore] = None
 
     @property
@@ -120,6 +104,7 @@ class AgentSession:
                 predicate=predicate,
                 object_val=str(obj),
                 confidence=confidence,
+                source=source,
             )
         except Exception as exc:
-            _LOG.warning("写入长效记忆事实失败 (%s/%s): %s", subject, predicate, exc)
+            record_diagnostic("storage.memory", "skipped", exc)

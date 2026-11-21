@@ -1,10 +1,8 @@
 """Agent 评测会话沙箱与上下文追踪适配器（移植自 Piagent harness.ts 规范）。"""
 from __future__ import annotations
 
-import json
 import time
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from taozhi.observability.tracing import current_trace_id, node_span

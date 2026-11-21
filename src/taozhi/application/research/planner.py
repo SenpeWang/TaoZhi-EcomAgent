@@ -1,8 +1,9 @@
 """主协调代理（Lead Research Agent）规划与并行扇出路由。"""
 from __future__ import annotations
 
+from contextlib import closing
+
 import json
-import logging
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,7 +28,7 @@ from taozhi.domain.research import (
 from taozhi.domain.text_guard import sanitize
 from taozhi.infrastructure.mcp.adapter import McpClientAdapter
 from taozhi.infrastructure.mcp.server import default_mcp_server
-from taozhi.observability.tracing import node_span
+from taozhi.observability.tracing import node_span, record_diagnostic
 from .hooks import (
     RuntimeHooks,
     attach_route_delta,
@@ -41,7 +42,6 @@ from .hooks import (
 )
 from .schemas import AutonomousAgentState, _OrchestratorDecisionSchema, _ProposedSubtaskSchema, active_evidence
 
-_LOG = logging.getLogger(__name__)
 
 
 def default_fallback_tasks(keyword: str, scope: ResearchScope, steering: List[str]) -> List[SubagentTaskSpec]:
@@ -165,11 +165,11 @@ def _decide_orchestrator_action(
     active_ev: List[Dict[str, Any]],
 ) -> Tuple[_OrchestratorDecisionSchema, List[Dict[str, Any]], str]:
     """调用调研协调员模型获取结构化规划，解析失败时降级至安全规则决策。"""
-    llm = LLMClient(on_attempt=hooks.model_call_observer("research.orchestrator"))
+    planning_error = None
     parsed: Optional[_OrchestratorDecisionSchema] = None
     route_events: List[Dict[str, Any]] = []
     last_ep = ""
-    with route_audit_scope(
+    with closing(LLMClient(on_attempt=hooks.model_call_observer("research.orchestrator"))) as llm, route_audit_scope(
         preferred_endpoint_id=str(state.get("active_llm_endpoint") or "") or None,
         on_failover=make_failover_emitter(hooks),
     ) as route_rec:
@@ -186,12 +186,12 @@ def _decide_orchestrator_action(
             elif isinstance(raw_decision, dict) and raw_decision.get("action"):
                 parsed = _OrchestratorDecisionSchema.model_validate(raw_decision)
         except Exception as exc:
-            _LOG.warning("主协调代理规划结构化输出降级: %s", exc)
-            parsed = None
+            planning_error = exc
         route_events = route_rec.snapshot()
         last_ep = route_rec.last_active_endpoint
 
     if parsed is None:
+        record_diagnostic("workflow.plan", "fallback", planning_error)
         if not active_ev:
             parsed = _OrchestratorDecisionSchema(
                 action="spawn_subagents",

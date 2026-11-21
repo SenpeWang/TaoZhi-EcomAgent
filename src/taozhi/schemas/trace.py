@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from taozhi.domain.trace_diagnostic import DiagnosticCategory, DiagnosticOutcome
 from taozhi.domain.trace_activity import ActivityCategory, SpanKind
 
 
@@ -86,6 +87,7 @@ class TraceRun(BaseModel):
     span_count: int
     kind_counts: dict[SpanKind, int]
     category_counts: dict[ActivityCategory, int]
+    diagnostic_counts: dict[DiagnosticCategory, int]
     failed_count: int
     input_tokens: int
     output_tokens: int
@@ -96,6 +98,19 @@ class TraceRunPage(BaseModel):
 
     items: list[TraceRun]
     next_cursor: str | None
+
+
+class TraceDiagnostic(BaseModel):
+    """发生在该节点的已分类诊断，保留实际处理方式。"""
+
+    timestamp: datetime
+    category: DiagnosticCategory
+    code: str
+    message: str
+    outcome: DiagnosticOutcome
+    level: Literal["warning", "error"]
+    exception_type: str | None
+    http_status: int | None
 
 
 class TraceSpan(BaseModel):
@@ -113,6 +128,7 @@ class TraceSpan(BaseModel):
     duration_ms: int | None
     status: SpanStatus
     error_type: str | None
+    diagnostics: list[TraceDiagnostic]
     attributes: dict[str, str | int | float | bool]
 
 

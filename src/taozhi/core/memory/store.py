@@ -1,13 +1,4 @@
-"""跨会话长效记忆与学习规则存储（Long-Term Memory Store）。
-
-自研长效记忆存储架构：
-1. 跨会话持久化沉淀已学习规则 (/learn)、用户偏好与业务实体事实；
-2. 严格按租户 (tenant_id) 进行物理文件与目录隔离；
-3. 动态追溯项目根路径，杜绝绝对路径硬编码；
-4. 采用进程排他锁 (fcntl.flock) 与原子替换 (os.replace) 保障并发写入安全；
-5. 严格遵循 Google Python Style 规范。
-"""
-
+"""按租户存储调研事实和规则，通过文件锁串行化并发更新。"""
 from __future__ import annotations
 
 import datetime
@@ -15,84 +6,48 @@ import fcntl
 import json
 import os
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-def _resolve_default_storage_dir() -> Path:
-    """动态定位长效记忆数据目录，杜绝绝对路径硬编码。
-
-    Returns:
-        Path: 解析出的记忆存储根目录路径。
-    """
-    env_dir = os.getenv("ECOM_MEMORY_DIR")
-    if env_dir:
-        return Path(env_dir)
-
-    current = Path(__file__).resolve()
-    for parent in current.parents:
-        if (parent / "STRUCTURE.md").exists() or (parent / "pyproject.toml").exists():
-            return parent / "data" / "runtime" / "memory"
-
-    return current.parents[4] / "data" / "runtime" / "memory"
+@contextmanager
+def _write_lock(path: Path) -> Iterator[None]:
+    """读、改、替换共用一把稳定的文件锁，关闭描述符时释放。"""
+    with path.with_suffix(".lock").open("a", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
-def _atomic_write_json(file_path: Path, data: Any) -> None:
-    """原子写入 JSON 文件并加进程排他锁，保障多进程并发安全与防损坏。
-
-    Args:
-        file_path: 目标 JSON 文件路径。
-        data: 待序列化的数据结构。
-    """
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_file = file_path.with_suffix(".lock")
-    with open(lock_file, "a", encoding="utf-8") as lock_f:
-        try:
-            fcntl.flock(lock_f, fcntl.LOCK_EX)
-            temp_fd, temp_path = tempfile.mkstemp(
-                dir=str(file_path.parent),
-                prefix=f".tmp_{file_path.stem}_",
-                suffix=".json",
-            )
-            with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            os.replace(temp_path, str(file_path))
-        finally:
-            try:
-                fcntl.flock(lock_f, fcntl.LOCK_UN)
-            except OSError:
-                pass
+def _read_entries(path: Path) -> list[dict]:
+    """从已原子发布的版本读取记录；损坏的文件保留给运行日志诊断。"""
+    with path.open(encoding="utf-8") as stream:
+        entries = json.load(stream)
+    if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+        raise ValueError("调研记忆文件格式无效")
+    return entries
 
 
-def _safe_read_json(file_path: Path) -> List[Dict[str, Any]]:
-    """安全读取 JSON 文件，加共享读锁并防御空文件或损坏。
-
-    Args:
-        file_path: 待读取的文件路径。
-
-    Returns:
-        List[Dict[str, Any]]: 反序列化后的列表。
-    """
-    if not file_path.exists():
-        return []
-    lock_file = file_path.with_suffix(".lock")
+def _write_entries(path: Path, entries: list[dict]) -> None:
+    """在同一目录完成序列化后替换旧版本，失败时清理未发布文件。"""
+    descriptor, name = tempfile.mkstemp(dir=path.parent)
+    temporary = Path(name)
     try:
-        with open(lock_file, "a", encoding="utf-8") as lock_f:
-            fcntl.flock(lock_f, fcntl.LOCK_SH)
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read().strip()
-                    if not content:
-                        return []
-                    data = json.loads(content)
-                    return data if isinstance(data, list) else []
-            finally:
-                try:
-                    fcntl.flock(lock_f, fcntl.LOCK_UN)
-                except OSError:
-                    pass
-    except Exception:
-        return []
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(entries, stream, ensure_ascii=False, indent=2)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _next_id(prefix: str, entries: list[dict]) -> str:
+    """为已有版本保留原编号，并避开历史记录中可能存在的非连续编号。"""
+    used = {str(entry.get("id")) for entry in entries}
+    number = len(entries) + 1
+    while f"{prefix}_{number}" in used:
+        number += 1
+    return f"{prefix}_{number}"
 
 
 class LongTermMemoryStore:
@@ -110,21 +65,22 @@ class LongTermMemoryStore:
             tenant_id: 租户标识符，实现物理数据隔离。
         """
         self.tenant_id = str(tenant_id).strip() or "default"
-        base_dir = _resolve_default_storage_dir() if storage_dir is None else Path(storage_dir)
+        if self.tenant_id in {".", ".."} or Path(self.tenant_id).name != self.tenant_id:
+            raise ValueError("租户标识必须为单个目录名")
+        base_dir = Path(storage_dir) if storage_dir is not None else Path(
+            os.environ.get("ECOM_MEMORY_DIR") or Path(__file__).resolve().parents[4] / "data/runtime/memory"
+        )
         self.storage_dir = base_dir / self.tenant_id
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
         self.rules_file = self.storage_dir / "learned_rules.json"
         self.facts_file = self.storage_dir / "entity_facts.json"
 
-        self._ensure_files()
-
-    def _ensure_files(self) -> None:
-        """确保存储文件存在。"""
-        if not self.rules_file.exists():
-            _atomic_write_json(self.rules_file, [])
-        if not self.facts_file.exists():
-            _atomic_write_json(self.facts_file, [])
+        for path in (self.rules_file, self.facts_file):
+            if not path.exists():
+                with _write_lock(path):
+                    if not path.exists():
+                        _write_entries(path, [])
 
     def learn_rule(
         self,
@@ -144,20 +100,24 @@ class LongTermMemoryStore:
         Returns:
             Dict[str, Any]: 新增的规则条目。
         """
-        rules = self.get_rules()
-        entry = {
-            "id": f"rule_{len(rules) + 1}",
-            "tenant_id": self.tenant_id,
-            "text": rule_text.strip(),
-            "category": category,
-            "source": source,
-            "confidence": confidence,
-            "learned_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        }
-        if not any(r.get("text") == entry["text"] for r in rules):
+        text = rule_text.strip()
+        with _write_lock(self.rules_file):
+            rules = _read_entries(self.rules_file)
+            for rule in rules:
+                if rule.get("text") == text:
+                    return rule
+            entry = {
+                "id": _next_id("rule", rules),
+                "tenant_id": self.tenant_id,
+                "text": text,
+                "category": category,
+                "source": source,
+                "confidence": confidence,
+                "learned_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
             rules.append(entry)
-            _atomic_write_json(self.rules_file, rules)
-        return entry
+            _write_entries(self.rules_file, rules)
+            return entry
 
     def get_rules(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取当前租户所有已学得的持久化规则。
@@ -168,7 +128,7 @@ class LongTermMemoryStore:
         Returns:
             List[Dict[str, Any]]: 规则列表。
         """
-        items = _safe_read_json(self.rules_file)
+        items = _read_entries(self.rules_file)
         if category:
             return [it for it in items if it.get("category") == category]
         return items
@@ -195,30 +155,21 @@ class LongTermMemoryStore:
         Returns:
             Dict[str, Any]: 知识事实字典。
         """
-        facts = self.query_facts()
-        entry = {
-            "id": f"fact_{len(facts) + 1}",
-            "tenant_id": self.tenant_id,
-            "subject": subject.strip(),
-            "predicate": predicate.strip(),
-            "object": object_val,
-            "confidence": confidence,
-            "source": source,
-            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        }
-
-        updated = False
-        if allow_overwrite:
-            for f in facts:
-                if f.get("subject") == entry["subject"] and f.get("predicate") == entry["predicate"]:
-                    f.update(entry)
-                    updated = True
-                    break
-        if not updated:
-            facts.append(entry)
-
-        _atomic_write_json(self.facts_file, facts)
-        return entry
+        subject, predicate = subject.strip(), predicate.strip()
+        with _write_lock(self.facts_file):
+            facts = _read_entries(self.facts_file)
+            entry = next((
+                fact for fact in facts
+                if allow_overwrite and fact.get("subject") == subject and fact.get("predicate") == predicate
+            ), None)
+            if entry is None:
+                entry = {"id": _next_id("fact", facts), "tenant_id": self.tenant_id,
+                         "subject": subject, "predicate": predicate}
+                facts.append(entry)
+            entry.update(object=object_val, confidence=confidence, source=source,
+                         updated_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+            _write_entries(self.facts_file, facts)
+            return entry
 
     def query_facts(
         self,
@@ -234,8 +185,7 @@ class LongTermMemoryStore:
         Returns:
             List[Dict[str, Any]]: 匹配的事实列表。
         """
-        facts = _safe_read_json(self.facts_file)
-        results = facts
+        results = _read_entries(self.facts_file)
         if subject:
             results = [r for r in results if subject.lower() in r.get("subject", "").lower()]
         if predicate:

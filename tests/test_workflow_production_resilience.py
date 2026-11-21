@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from taozhi.knowledge.db import database_connection, fetch_one, fetch_all
+from taozhi.knowledge.db import database_connection, fetch_one
 from taozhi.server.api import app
 from taozhi.infrastructure.persistence.job_repo import present_job
 from taozhi.infrastructure.persistence.access_repo import load_principal

@@ -16,7 +16,6 @@ import ast
 from pathlib import Path
 from typing import Generator, Optional, Tuple
 
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1] / "src" / "taozhi"
 

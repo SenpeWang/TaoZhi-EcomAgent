@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import html
-import logging
 import os
 import re
 from typing import Any, Dict, List
@@ -21,7 +20,8 @@ import httpx
 
 from .search_web import search_duckduckgo_html
 
-_LOG = logging.getLogger(__name__)
+from taozhi.observability.tracing import record_diagnostic
+from .outcome import result_items
 AMAZON_BASE_URL = "https://www.amazon.com/"
 
 
@@ -54,11 +54,11 @@ def search_amazon(
                     headers["X-API-Key"] = key
                 resp = client.post(custom_url, json={"query": clean_query, "limit": limit}, headers=headers)
                 resp.raise_for_status()
-                items = resp.json().get("items", [])
+                items = result_items(resp.json(), "items", limit)
                 if items:
-                    return items[:limit]
+                    return items
         except Exception as exc:
-            _LOG.warning("Amazon 自定义网关失败，切换直抓链路: %s", exc)
+            record_diagnostic("tool.gateway", "fallback", exc)
 
     headers = {
         "User-Agent": (
@@ -129,8 +129,10 @@ def search_amazon(
                     )
                     if len(results) >= limit:
                         return results
+            else:
+                record_diagnostic("tool.scraper", "fallback", http_status=resp.status_code)
     except Exception as exc:
-        _LOG.warning("Amazon 直抓异常，降级 DuckDuckGo 定向搜索: %s", exc)
+        record_diagnostic("tool.scraper", "fallback", exc)
 
     if not results:
         results = _fallback_duckduckgo_amazon_search(clean_query, limit=limit, timeout=timeout)

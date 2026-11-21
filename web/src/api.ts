@@ -21,6 +21,54 @@ const spanKinds = new Set([
   'INTERNAL',
 ])
 const activityCategories = new Set([...spanKinds, 'CONTEXT', 'GUARDRAIL'])
+const diagnosticCategories = new Set([
+  'model_api',
+  'tool',
+  'retrieval',
+  'context',
+  'permission',
+  'storage',
+  'workflow',
+])
+
+/**
+ * 验证诊断日志的类型、处理结果、可展示字段与当前接口筛选条件。
+ * @param entries - 此步骤记录的全部结构化诊断。
+ * @param filter - 查询要求命中的故障分类。
+ * @returns 是否为所选执行中可展示的诊断记录。
+ */
+function validDiagnostics(entries: unknown, filter: string | null): boolean {
+  if (!Array.isArray(entries)) return false
+  let matched = filter === null
+  for (const entry of entries) {
+    if (
+      !isRecord(entry) ||
+      typeof entry.category !== 'string' ||
+      !diagnosticCategories.has(entry.category) ||
+      typeof entry.timestamp !== 'string' ||
+      !Number.isFinite(Date.parse(entry.timestamp)) ||
+      typeof entry.code !== 'string' ||
+      !entry.code ||
+      typeof entry.message !== 'string' ||
+      !entry.message ||
+      typeof entry.level !== 'string' ||
+      !['error', 'warning'].includes(entry.level) ||
+      typeof entry.outcome !== 'string' ||
+      !['failed', 'retry', 'fallback', 'skipped'].includes(entry.outcome) ||
+      (entry.exception_type !== null && typeof entry.exception_type !== 'string') ||
+      (entry.http_status !== null &&
+        !(
+          typeof entry.http_status === 'number' &&
+          Number.isSafeInteger(entry.http_status) &&
+          entry.http_status >= 100 &&
+          entry.http_status <= 599
+        ))
+    )
+      return false
+    if (filter === 'all' || entry.category === filter) matched = true
+  }
+  return matched
+}
 
 /**
  * 校验本条链路的节点分类计数。
@@ -114,6 +162,7 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
     const requestedKind = query.get('kind')
     const requestedCategory = query.get('category')
     const requestedTraceId = query.get('trace_id')
+    const requestedDiagnostic = query.get('diagnostic')
     for (const item of data.items) {
       if (
         !isRecord(item) ||
@@ -128,6 +177,7 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
             !Number.isInteger(item.run_version) ||
             !validKindCounts(item.kind_counts, spanKinds) ||
             !validKindCounts(item.category_counts, activityCategories) ||
+            !validKindCounts(item.diagnostic_counts, diagnosticCategories) ||
             !Number.isInteger(item.span_count) ||
             !Number.isInteger(item.failed_count) ||
             !Number.isInteger(item.input_tokens) ||
@@ -147,6 +197,7 @@ function validateResponse(path: string, data: JsonRecord, method: string): void 
             (requestedCategory !== null && item.category !== requestedCategory) ||
             (requestedKind !== null && item.kind !== requestedKind) ||
             !isRecord(item.attributes) ||
+            !validDiagnostics(item.diagnostics, requestedDiagnostic) ||
             (item.parent_span_id !== null && typeof item.parent_span_id !== 'string') ||
             (item.error_type !== null && typeof item.error_type !== 'string') ||
             (item.duration_ms !== null && typeof item.duration_ms !== 'number')))
@@ -224,6 +275,7 @@ function readCsrf(mode: string): string {
  * @param onUnauthorized - 旧会话失效时清除内存中的答案、资料和表单。
  * @param method - HTTP 方法；默认只读 GET。
  * @param payload - JSON 可序列化输入或上传 FormData，不允许携带私有模型凭据。
+ * @param signal - 所属账号会话的取消信号，使旧身份的响应失效。
  * @returns 通过基础结构校验的契约响应；字段类型来自 types.ts。
  * @throws 网络、JSON、身份或业务拒绝均转为中文错误，不输出服务端堆栈。
  */
@@ -233,6 +285,7 @@ export async function requestApi<T>(
   onUnauthorized: () => void,
   method = 'GET',
   payload?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const headers: Record<string, string> = {}
   if (method !== 'GET') headers['X-CSRF-Token'] = readCsrf(mode)
@@ -241,24 +294,29 @@ export async function requestApi<T>(
   try {
     response = await fetch('/api' + path, {
       method,
+      signal,
       credentials: 'same-origin',
       headers,
       body: payload ? (payload instanceof FormData ? payload : JSON.stringify(payload)) : undefined,
     })
   } catch {
+    signal?.throwIfAborted()
     throw new Error('暂时无法连接工作台，请稍后重试')
   }
+  signal?.throwIfAborted()
   if (response.status === 401) onUnauthorized()
   let data: unknown
   try {
     data = await response.json()
   } catch {
+    signal?.throwIfAborted()
     throw new Error('服务响应异常，请稍后重试')
   }
   if (!isRecord(data)) throw new Error('服务响应异常，请稍后重试')
   if (!response.ok) {
     throw new Error(typeof data.message === 'string' ? data.message : '操作未完成，请稍后重试')
   }
+  signal?.throwIfAborted()
   validateResponse(path, data, method)
   return data as T
 }

@@ -13,6 +13,7 @@ from taozhi.domain.trace_activity import CHAIN_CATEGORY_BY_NAME, CHAIN_OPERATION
 from taozhi.infrastructure.persistence import trace_repo
 from taozhi.infrastructure.persistence.access_repo import batch_sources_validity, sources_valid
 from taozhi.knowledge.db import database_connection
+from taozhi.observability.diagnostics import safe_diagnostic
 from taozhi.observability.span_attributes import safe_attributes
 
 _SPAN_FLUSH_GRACE = timedelta(seconds=10)
@@ -34,13 +35,13 @@ _TRACE_OPERATIONS = {
     "bi.query_metric": "检索经营指标",
     "bi.bi_publish": "生成指标答复",
     "research.final_node": "归档调研成果",
+    "llm.structured_output": "获取并校验模型结构化结果",
     "embedding.query": "生成查询向量",
     "embedding.passages": "生成文档向量",
     "reranker.rerank": "重排检索结果",
     **CHAIN_OPERATIONS["CONTEXT"],
     **CHAIN_OPERATIONS["GUARDRAIL"],
 }
-# 在直接调用之外，默认保留能够解释执行走向或最终交付的业务步骤。
 _KEY_ACTIVITY_STEPS = (
     "worker.semantic_cache_hit", "pipeline.planning", "pipeline.publication",
     "bi.bi_intent", "bi.bi_publish", "research.final_node", *CHAIN_CATEGORY_BY_NAME,
@@ -133,7 +134,6 @@ def list_traces(
     visible_owner = _visible_owner(p, owner_id)
     before = _decode_cursor(cursor)
     query = query.strip()
-    # 个人搜索中，一批原题匹配结果可能因文档撤权而全部不可见。
     batch_size = max(limit + 1, 50) if query and not p.system_admin else limit + 1
     rows = []
     with database_connection() as conn:
@@ -189,7 +189,6 @@ def _span_status(recorded: str | None, job: dict, run_version: int) -> str:
     now = job["observed_at"]
     if job["state"] == "running":
         return "running" if job["lease_until"] and job["lease_until"] > now else "interrupted"
-    # 任务提交终态后，后台 Span 写线程仍可在短时间内提交本次执行的结束快照。
     if job["finished_at"] and now - job["finished_at"] < _SPAN_FLUSH_GRACE:
         return "running"
     return "interrupted"
@@ -236,6 +235,8 @@ def _display_span(row: dict, job: dict) -> dict:
         "status": _span_status(row["status"], job, job["span_version"]),
         "category": activity_category(row["kind"], row["name"]),
         "attributes": attributes,
+        "diagnostics": [safe for item in row["diagnostics"]
+                        if isinstance(item, dict) and (safe := safe_diagnostic(item, item.get("timestamp"))) is not None],
         "display_name": _span_display_name(row["kind"], row["name"], attributes),
     }
 
@@ -280,7 +281,7 @@ def _activity_actor(row: dict) -> dict | None:
 
 
 def list_activities(
-    p: Principal, task_id: str, trace_id: str, *, category: str | None, cursor: str | None, limit: int,
+    p: Principal, task_id: str, trace_id: str, *, category: str | None, diagnostic: str | None = None, cursor: str | None, limit: int,
 ) -> dict:
     """按精确的链路与执行版本展示实际操作，并在筛选后保留跨页执行者。"""
     after = _activity_cursor(cursor)
@@ -289,7 +290,7 @@ def list_activities(
         if job is None:
             raise Denied("执行轨迹不存在", "NOT_FOUND", 404)
         rows = trace_repo.list_activities(
-            conn, p.tenant_id, task_id, trace_id, job["span_version"], category=category,
+            conn, p.tenant_id, task_id, trace_id, job["span_version"], category=category, diagnostic=diagnostic,
             key_steps=_KEY_ACTIVITY_STEPS, after=after, limit=limit + 1,
         )
     page = rows[:limit]

@@ -1,7 +1,6 @@
 """市场调研自治多智能体 LangGraph 编排图组装与执行入口。"""
 from __future__ import annotations
 
-import logging
 import time
 import uuid
 from functools import wraps
@@ -14,14 +13,13 @@ from opentelemetry.trace import StatusCode
 from taozhi.core.agent.session import AgentSession
 from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.research import StopReason
-from taozhi.observability.tracing import current_trace_id, node_span
+from taozhi.observability.tracing import current_trace_id, node_span, record_diagnostic
 from .hooks import RuntimeHooks, emit_progress, normalize_steering_item, register_hooks, unregister_hooks
 from .planner import lead_orchestrator_node, orchestrator_router
 from .reporter import final_persistence_node, synthesizer_node
 from .schemas import AutonomousAgentState
 from .subagents import subagent_worker_node
 
-_LOG = logging.getLogger(__name__)
 
 
 def _traced_research_node(name: str, func: Callable) -> Callable:
@@ -106,12 +104,12 @@ def _resume_from_prior_checkpoint(
             snap = graph.get_state({"configurable": {"thread_id": f"research_{job_id}_{prev_ver}"}})
             vals = (snap.values or {}) if snap else {}
         except Exception as exc:
-            _LOG.debug("读取上一版检查点失败 (%s_v%s): %s", job_id, prev_ver, exc)
+            record_diagnostic("storage.checkpoint", "skipped", exc)
             vals = {}
         if vals and (vals.get("evidence_pool") or vals.get("outline") or vals.get("llm_route_history")):
             for list_k in ("evidence_pool", "invalidated_evidence_ids", "outline", "audit_trail", "artifacts", "llm_route_history"):
                 if vals.get(list_k):
-                    init_state[list_k] = list(vals.get(list_k) or [])  # type: ignore[literal-required]
+                    init_state[list_k] = list(vals.get(list_k) or [])
             if vals.get("active_llm_endpoint"):
                 init_state["active_llm_endpoint"] = str(vals.get("active_llm_endpoint") or "")
             for txt, eid in zip(vals.get("steering_inbox") or [], vals.get("steering_event_ids") or []):
@@ -303,9 +301,6 @@ def execute_autonomous_agents(
     session = AgentSession(
         conversation_id=conversation_id or job_id or hook_run_id,
         tenant_id=tenant_id,
-        keyword=keyword,
-        user_query=user_query or keyword,
-        cancel_event=hooks.cancel_event,
     )
 
     started_at = time.time()

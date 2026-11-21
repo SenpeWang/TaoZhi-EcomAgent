@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, toRef } from 'vue'
 import { renderMarkdownReport, type MarkdownHeading } from '../markdown'
 
 const props = withDefaults(
@@ -17,6 +17,8 @@ const props = withDefaults(
 )
 
 const rendered = computed(() => renderMarkdownReport(props.content || '', props.idPrefix))
+
+const renderedReportHtml = toRef(() => rendered.value.html)
 
 const outlineHeadings = computed<MarkdownHeading[]>(() => {
   const candidates = rendered.value.headings.filter((item) => item.level >= 2 && item.level <= 3)
@@ -52,8 +54,7 @@ function scrollToHeading(headingId: string): void {
       </button>
     </div>
 
-    <!-- eslint-disable-next-line vue/no-v-html -->
-    <div class="md-report-prose" v-html="rendered.html" />
+    <div class="md-report-prose" v-html="renderedReportHtml" />
   </div>
 </template>
 

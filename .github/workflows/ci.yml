@@ -38,7 +38,7 @@ jobs:
       BUSINESS_API_TOKEN: ''
     steps:
       - name: 读取完整分支历史
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           fetch-depth: 0
           ref: ${{ github.sha }}
@@ -46,7 +46,7 @@ jobs:
       - name: 公开内容与目录检查
         run: python3 scripts/check_repository.py --tracked
       - name: Python 环境
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.10'
           cache: pip
@@ -54,7 +54,7 @@ jobs:
       - name: 安装锁定后端依赖
         run: python -m pip install -r requirements.lock.txt
       - name: Node 环境
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24.21.0'
           cache: npm

@@ -1,4 +1,3 @@
-# 淘智工作台全官方镜像容器编排（有 NVIDIA GPU 时叠加 docker-compose.gpu.yml 启动）
 
 x-app-common: &app-common
   image: taozhi-ecomagent/app:latest

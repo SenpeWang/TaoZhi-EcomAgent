@@ -455,16 +455,6 @@ def last_conversation_question(conn: Any, tenant_id: str, owner_id: str, convers
     return str(row["question"]) if row and row.get("question") else None
 
 
-def list_recent_completed_ask(conn: Any, tenant_id: str, owner_id: str, limit: int = 3) -> list[dict]:
-    """读取用户最近已完成的问答结果与来源列表。"""
-    return fetch_all(
-        conn,
-        "SELECT result,sources,input_level FROM jobs WHERE tenant_id=%s AND owner_id=%s AND kind='ask' "
-        "AND state='completed' ORDER BY created_at DESC LIMIT %s",
-        (tenant_id, owner_id, limit),
-    )
-
-
 def list_research_conversation_summaries(conn: Any, tenant_id: str, owner_id: str) -> list[dict]:
     """按会话分组列出市场调研对话概览。"""
     return fetch_all(
@@ -610,7 +600,6 @@ def present_job(
     result = job["result"] if valid and (job["state"] == "completed" or (job["state"] == "review" and can_review(p, job))) else None
     if full and result:
         result = dict(result)
-        # 角色编号用于关联执行记录，界面统一使用目录中的展示名。
         for group, name_field in (("specialists", "name"), ("subagents", "role")):
             if isinstance(result.get(group), list):
                 result[group] = [

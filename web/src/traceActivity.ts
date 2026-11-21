@@ -1,4 +1,21 @@
-import type { TraceActivity } from './types'
+import type { DiagnosticCategory, TraceActivity, TraceDiagnostic } from './types'
+
+export const diagnosticCategoryLabels: Record<DiagnosticCategory, string> = {
+  model_api: '模型 API',
+  tool: '工具',
+  retrieval: '检索',
+  context: '上下文',
+  permission: '权限',
+  storage: '存储',
+  workflow: '工作流',
+}
+
+export const diagnosticOutcomeLabels: Record<TraceDiagnostic['outcome'], string> = {
+  failed: '失败',
+  retry: '重试',
+  fallback: '降级处理',
+  skipped: '跳过',
+}
 
 const toolActions: Record<string, string> = {
   search_web: '搜索公开网页',

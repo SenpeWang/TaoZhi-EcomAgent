@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from taozhi.knowledge.db import database_connection, fetch_one, as_jsonb  # noqa: E402
+from taozhi.knowledge.db import database_connection, fetch_one
 
 METRICS = [
     ("ops.docs_published_total", "已发布文档总数",

@@ -5,13 +5,13 @@
 
 from __future__ import annotations
 
-import re
 import threading
 from typing import Any, Dict, List, Tuple
 
 from ...knowledge.db import fetch_all, fetch_one
 from taozhi.infrastructure.persistence.access_repo import sources_valid
 from taozhi.domain.privacy import redact
+from taozhi.domain.question_context import recalls_previous_evidence
 from .store import LongTermMemoryStore
 
 _STORES_LOCK = threading.Lock()
@@ -60,7 +60,7 @@ def get_followup_context(
             (p.tenant_id, p.id, conversation_id),
         )
     else:
-        if not re.search(r"刚才|上面|这款|那个|它的|继续|价格呢|还有呢", question):
+        if not recalls_previous_evidence(question, conversation_id):
             return [], []
         rows = fetch_all(
             conn,

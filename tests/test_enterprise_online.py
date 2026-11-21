@@ -1,5 +1,5 @@
 """真实 PostgreSQL、会话、接口与 LangGraph 的企业边界验收。"""
-import os,json,time
+import json,time
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -9,7 +9,7 @@ from taozhi.config import load_config
 from taozhi.knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
 from taozhi.server.api import app
 from taozhi.domain.errors import Denied
-from taozhi.infrastructure.persistence.access_repo import load_principal, source_valid, can_read
+from taozhi.infrastructure.persistence.access_repo import load_principal, can_read
 from taozhi.server.worker import process_next_job
 from taozhi.application.common.task_guard import validate_task_execution
 from taozhi.application.services.task_service import process_question_job
@@ -136,17 +136,38 @@ def test_last_owner_and_admin_protected(clients):
         assert a.status_code==202
         r=clients["boss"].post("/api/approvals/"+a.json()["id"]+"/decision",json={"approve":True});assert r.status_code==409
 def test_document_exception_download_expiry_deny(clients):
-    u,_=ids();boss=clients["boss"];staff=clients["staff"]
-    a=boss.post("/api/documents/test_doc_boss/grants",json={"user_id":u["staff"]})
-    approve(boss,a)
-    assert staff.get("/api/documents/test_doc_boss").status_code==200
-    assert staff.get("/api/documents/test_doc_boss/download").status_code==404
+    """文档列表、详情、下载与检索候选采用同一份生效授权。"""
+    from taozhi.infrastructure.persistence.document_repo import readable_published_documents
+
+    users, _ = ids()
+    boss, staff = clients["boss"], clients["staff"]
+
+    def visible_documents():
+        listing = {doc["id"]: doc for doc in staff.get("/api/documents").json()["items"]}
+        with database_connection() as conn:
+            owner = load_principal(conn, users["staff"])
+            searchable = readable_published_documents(conn, owner, "test_doc_")
+        return listing, searchable
+
+    approval = boss.post("/api/documents/test_doc_boss/grants", json={"user_id": users["staff"]})
+    approve(boss, approval)
+    listing, searchable = visible_documents()
+    assert "test_doc_boss" in searchable
+    assert not listing["test_doc_boss"]["can_download"]
+    assert "user_grant" not in listing["test_doc_boss"]
+    assert staff.get("/api/documents/test_doc_boss").status_code == 200
+    assert staff.get("/api/documents/test_doc_boss/download").status_code == 404
     assert not staff.get("/api/auth/me").json()["is_boss"]
-    with database_connection() as c:c.execute("UPDATE document_grants SET expires_at=now()-interval '1 second' WHERE user_id=%s",(u["staff"],))
-    assert staff.get("/api/documents/test_doc_boss").status_code==404
-    a=boss.post("/api/documents/test_doc_company/grants",json={"user_id":u["staff"],"effect":"deny"})
-    approve(boss,a)
-    assert staff.get("/api/documents/test_doc_company").status_code==404
+    with database_connection() as conn:
+        conn.execute("UPDATE document_grants SET expires_at=now()-interval '1 second' WHERE user_id=%s", (users["staff"],))
+    assert all("test_doc_boss" not in visible for visible in visible_documents())
+    assert staff.get("/api/documents/test_doc_boss").status_code == 404
+    approval = boss.post("/api/documents/test_doc_company/grants", json={"user_id": users["staff"], "effect": "deny"})
+    approve(boss, approval)
+    assert all("test_doc_company" not in visible for visible in visible_documents())
+    assert staff.get("/api/documents/test_doc_company").status_code == 404
+
+
 def test_invalid_expiry_and_other_tenant_grant(clients):
     u,_=ids()
     r=clients["boss"].post("/api/documents/test_doc_boss/grants",json={"user_id":u["staff"],"expires_at":"2020-01-01T00:00:00Z"})
@@ -315,7 +336,6 @@ def test_admin_run_and_span_paging_across_retries(clients):
              "llm.model_name": "model-b", "llm.token_count.prompt": 8, "llm.token_count.completion": 3,
          }},
     ])
-    # 采集器可在节点结束时补全类型，同一 span 的两次快照只计量一次。
     write_spans([{**first_attempt, "kind": "LLM", "status": "error", "error_type": "TimeoutError",
                   "ended_at": started, "duration_ms": 0,
                   "attributes": {"llm.token_count.prompt": 5, "prompt": "私密提示词"}}])
@@ -409,13 +429,11 @@ def test_research_activities_order_and_actor_across_pages(clients):
     })
     prepared = span(11, 3, 5, "CHAIN", "context.prepare_subagent", {"context.observation_count": 1})
     authorized = span(12, 3, 6, "CHAIN", "research.authorize_tool")
-    # 其他链路有相同的父编号；断链节点只能显示自身的调用，不能借用另一条链路的角色。
     partial_workflow = span(10, 9, 8, "CHAIN", "worker.research")
     orphan = span(8, 10, 9, "LLM", "llm.chat", {"llm.model_name": "standalone-model"})
     other_actor = {**span(9, None, 0, "AGENT", "research.synthesizer", {
         "agent.name": "research.synthesizer",
     }), "trace_id": sibling_trace}
-    # 模拟异步写入乱序，同时写入两次在同一微秒开始的工具调用。
     write_spans([other_actor, model, search, empty, prepared, authorized, orphan, partial_workflow, wrapper, agent, coordinator, root])
 
     page = admin.get(path, params={"limit": 2}).json()
@@ -457,6 +475,41 @@ def test_research_activities_order_and_actor_across_pages(clients):
             (s["span_id"], category, "CHAIN") for s in expected
         ]
 
+    diagnostic_event = {
+        "timestamp": start.isoformat(), "category": "tool", "code": "tool.gateway", "outcome": "fallback",
+        "http_status": 503, "exception_type": "HTTPStatusError", "message": "PRIVATE_FROM_STORAGE",
+    }
+    log_node = {**span(15, 4, 18, "INTERNAL", "fallback.flow"), "diagnostics": [diagnostic_event]}
+    model_event = {**diagnostic_event, "code": "model.rate_limit", "category": "model_api", "http_status": 429}
+    other_node = {**span(16, 3, 19, "LLM", "llm.chat"), "diagnostics": [model_event, model_event]}
+    live_node = {**other_node, "duration_ms": None, "ended_at": None, "status": "running"}
+    with database_connection() as conn:
+        conn.execute(
+            "UPDATE jobs SET state='running',run_version=1,lease_until=now()+interval '1 minute' WHERE id=%s",
+            (job_id,),
+        )
+    write_spans([log_node, {**live_node, "diagnostics": []}, live_node, {**live_node, "diagnostics": []}])
+    live = staff.get(path, params={"diagnostic": "model_api"}).json()["items"]
+    assert len(live) == 1 and len(live[0]["diagnostics"]) == 2 and live[0]["status"] == "running"
+    first_events = [{**model_event, "event_id": f"{i:032x}"} for i in range(3)]
+    rollover = {**live_node, "span_id": "e" * 16, "diagnostics": first_events[:2]}
+    write_spans([other_node, {**live_node, "diagnostics": []},
+                 {**rollover, "trace_id": sibling_trace}, {**rollover, "trace_id": sibling_trace, "diagnostics": first_events[1:]}])
+    sibling_logs = admin.get(path.replace(trace_id, sibling_trace), params={"diagnostic": "model_api"}).json()["items"]
+    assert len(sibling_logs) == 1 and len(sibling_logs[0]["diagnostics"]) == 3
+    snapshot = admin.get(f"/api/admin/traces/{job_id}/runs", params={"trace_id": trace_id}).json()["items"][0]
+    assert snapshot["diagnostic_counts"] == {"tool": 1, "model_api": 2}
+    logged = staff.get(path, params={"diagnostic": "all", "limit": 1}).json()
+    [internal] = logged["items"]
+    assert internal["actor"] == expected_agent and internal["span_id"] == log_node["span_id"] and logged["next_cursor"]
+    assert internal["diagnostics"][0]["message"] == "外部检索网关调用失败，切换备用来源"
+    next_log = staff.get(path, params={"diagnostic": "all", "cursor": logged["next_cursor"]}).json()
+    assert next_log["items"][0]["status"] == "ok" and next_log["next_cursor"] is None
+    assert staff.get(path, params={"category": "TOOL", "diagnostic": "tool"}).json()["items"] == []
+    assert admin.get(path.replace(trace_id, sibling_trace), params={"diagnostic": "tool"}).json()["items"] == []
+    assert clients["boss"].get(path, params={"diagnostic": "tool"}).status_code == 404
+    assert "PRIVATE_FROM_STORAGE" not in str(logged) + str(next_log)
+
     first = staff.get(path, params={"category": "TOOL", "limit": 1}).json()
     assert len(first["items"]) == 1 and first["next_cursor"]
     second = staff.get(path, params={"category": "TOOL", "limit": 1, "cursor": first["next_cursor"]}).json()
@@ -467,7 +520,6 @@ def test_research_activities_order_and_actor_across_pages(clients):
         assert row["attributes"]["tool.status"] == recorded["attributes"]["tool.status"]
         assert row["attributes"]["tool.result_count"] == recorded["attributes"]["tool.result_count"]
         assert row["display_name"] == recorded["attributes"]["tool.name"]
-    # 将同一接口的原始响应体交给浏览器使用的契约校验和时间线格式化函数。
     tool_page = staff.get(path, params={"category": "TOOL"})
     display = subprocess.run(
         ["node", "--experimental-strip-types", "--input-type=module", "--eval", """
@@ -494,7 +546,9 @@ console.log(JSON.stringify(page.items.map(entry => [
     recorded_model = next(row for row in activities if row["span_id"] == model["span_id"])
     assert recorded_model["display_name"] == "research-model"
     assert recorded_model["attributes"]["llm.token_count.total"] == 12
-    assert [row["span_id"] for row in admin.get(path, params={"category": "INTERNAL"}).json()["items"]] == [wrapper["span_id"]]
+    assert [row["span_id"] for row in admin.get(path, params={"category": "INTERNAL"}).json()["items"]] == [
+        wrapper["span_id"], log_node["span_id"],
+    ]
     assert staff.get(path, params={"cursor": "invalid"}).status_code == 422
     assert admin.get(path, params={"category": "unknown"}).status_code == 422
     assert TestClient(app).get(path).status_code == 401
@@ -505,7 +559,7 @@ console.log(JSON.stringify(page.items.map(entry => [
 
 
 def test_span_semantics_migration_on_existing_rows():
-    """在独立事务的临时 schema 中，将真实 014 表及已有数据迁移到 015。"""
+    """在独立事务中升级真实旧节点，验证语义迁移与历史诊断默认值。"""
     from uuid import uuid4
 
     from alembic.migration import MigrationContext
@@ -517,7 +571,6 @@ def test_span_semantics_migration_on_existing_rows():
     revisions = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "migrations"))
     engine = create_engine(load_config().dsn.replace("postgresql://", "postgresql+psycopg://", 1), poolclass=NullPool)
     schema = f"span_migration_{uuid4().hex}"
-    # 搜索路径不包含 public，连接关闭时 DDL 与测试数据一并回滚。
     with engine.connect() as conn:
         conn.exec_driver_sql(f"CREATE SCHEMA {schema}")
         conn.exec_driver_sql(f"SET LOCAL search_path TO {schema}")
@@ -544,6 +597,8 @@ def test_span_semantics_migration_on_existing_rows():
                 for i, (name, kind, attrs) in enumerate(previous, 1)
             ])
             revisions.get_revision("015_span_semantics").module.upgrade()
+            revisions.get_revision("018_span_diagnostics").module.upgrade()
+        assert conn.exec_driver_sql("SELECT DISTINCT diagnostics FROM task_spans").scalars().all() == [[]]
         rows = conn.exec_driver_sql("SELECT name,kind,attributes FROM task_spans ORDER BY id").all()
         assert [tuple(row) for row in rows] == [
             ("llm.chat", "LLM", {"llm.model_name": "recorded-model", "llm.token_count.prompt": 13,
@@ -560,13 +615,24 @@ def test_span_semantics_migration_on_existing_rows():
         assert indexes["idx_task_spans_trace_page"].endswith("(trace_id, id)")
 
 
+def test_vector_fallback_keeps_outer_transaction_usable():
+    """向量通道失败后仍能在同一事务中查询词法候选。"""
+    import psycopg
+    from taozhi.knowledge.retriever import _pg_ann
+
+    with database_connection() as conn:
+        with pytest.raises(psycopg.DataError):
+            _pg_ann(conn, "tenant_test", ["test_doc_company"], "invalid-vector")
+        assert fetch_one(conn, "SELECT id FROM documents WHERE id=%s", ("test_doc_company",))
+
+
 def test_team_knowledge_filtered_before_model(monkeypatch, clients):
     """运行完整 RAG；嵌入、精排、库存、订单与聊天的外部 HTTP 响应由测试提供。"""
     from collections import Counter, OrderedDict
     import httpx
     import taozhi.config as cfg
     from taozhi.knowledge import embedding
-    from taozhi.observability.tracing import flush_spans
+    from taozhi.observability import flush_spans
     from taozhi.orchestration.decision import get_decision_engine
 
     seen_prompts = []
@@ -693,7 +759,6 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
     called_tools = staff.get(activity_path, params={"category": "TOOL"}).json()["items"]
     assert {row["span_id"] for row in called_tools} == {tool["span_id"] for tool in tools}
     for row in called_tools:
-        # 来源复核也会独立调用业务工具，同名工具应归属各自实际的调用方。
         ancestors = []
         parent_id = row["parent_span_id"]
         while parent_id is not None:
@@ -819,7 +884,7 @@ def test_trace_lifecycle_tracks_attempts_and_rejects_stale_callbacks(clients):
         update_job_stage(c, active["tenant_id"], job_id, active["run_version"], "延迟回调", 90)
     with database_connection() as c:
         c.execute("UPDATE jobs SET lease_until=now()-interval '1 second' WHERE id=%s", (job_id,))
-    claim_next_job()  # 旧 Worker 已掉线，看门狗写入取消终态。
+    claim_next_job()
     with database_connection() as c:
         events = fetch_all(c, "SELECT run_version,status,progress FROM task_events WHERE job_id=%s ORDER BY id", (job_id,))
     old, new = original["run_version"], active["run_version"]
@@ -1006,7 +1071,7 @@ def test_multi_group_role_does_not_expand_leader_grade(clients):
     assert leader.get("/api/documents/test_doc_leader").status_code==200
 
 def test_admin_permission_metadata_excludes_secret_body(clients):
-    admin=clients["admin"];boss=clients["boss"]
+    admin=clients["admin"]
     r=admin.get("/api/documents/test_doc_boss/permission-status")
     assert r.status_code==200 and "title" not in r.json() and "body" not in r.json()
     a=admin.post("/api/documents/test_doc_boss/policy",json={"level":1,"ai_allowed":True})
@@ -1049,7 +1114,7 @@ def test_external_model_personal_information_masked(monkeypatch,clients):
     seen=[];fake_model(monkeypatch,seen);users,nodes=ids()
     with database_connection() as c:
         setup.add_doc(c,"tenant_test",users["boss"],"personal_info","联系客服资料","客户电话：13812345678。客户地址：上海市隐私路100号。型号 MC-500。",nodes["公司"])
-    tid=task_id(clients["staff"],"MC-500 联系电话13812345678")
+    task_id(clients["staff"],"MC-500 联系电话13812345678")
     process_next_job()
     assert seen and all("13812345678" not in x and "隐私路100号" not in x for x in seen)
     body=clients["staff"].get("/api/documents/personal_info").text
@@ -1074,7 +1139,7 @@ def test_canonical_api_cannot_use_legacy_identity(monkeypatch,clients):
 
 def test_personal_memory_revocation_and_no_cross_user(monkeypatch,clients):
     fake_model(monkeypatch)
-    tid=task_id(clients["staff"]);process_next_job()
+    task_id(clients["staff"]);process_next_job()
     users,_=ids()
     from taozhi.core.memory.service import get_followup_context
     with database_connection() as c:
@@ -1238,6 +1303,93 @@ def test_docx_header_footer_and_pdf_upload_ingestion_and_search(clients):
     assert any("BA-2099" in h["quote"] and "折叠内屏专用" in h["quote"] for h in hits_hdr)
     assert any("LX-99" in h["quote"] for h in hits_pdf)
     assert "C5" in mentions
+
+
+def test_contextual_questions_bypass_shared_cache(monkeypatch, clients):
+    """相同问题切换订单、商品或会话，以及无会话号的追问，都实际执行各自的工作流。"""
+    from taozhi.application.services import task_service
+
+    fake_model(monkeypatch)
+    monkeypatch.setattr(task_service, "get_semantic_cache", lambda: pytest.fail("上下文问答访问了共享缓存"))
+    for question, payload in [
+        ("查询状态", {"order_id": "order_1"}), ("查询状态", {"order_id": "order_2"}),
+        ("查询状态", {"sku_id": "sku_1"}), ("查询状态", {"conversation_id": "conversation_a"}),
+        ("查询状态", {"conversation_id": "conversation_b"}), ("它的参数呢", {}),
+    ]:
+        tid = task_id(clients["staff"], question, **payload)
+        assert process_next_job()
+        task = clients["staff"].get(f"/api/tasks/{tid}").json()
+        assert task["state"] == "completed"
+        assert task["result"]["cache_hit"] is False
+
+
+def test_migration_binds_old_bi_results_to_original_metrics(monkeypatch):
+    """旧结果恢复指标依赖，无法识别、跨租户和被重用的标识均保持不可读。"""
+    from importlib import import_module
+
+    from psycopg.errors import CheckViolation
+
+    migration = import_module("migrations.versions.019_bi_result_sources")
+    with database_connection() as c:
+        c.execute("""CREATE TEMP TABLE jobs(id text, tenant_id text, kind text, result jsonb, sources jsonb,
+                                          started_at timestamptz, created_at timestamptz) ON COMMIT DROP""")
+        c.execute("""CREATE TEMP TABLE metrics(id text, tenant_id text, metric_key text,
+                                               created_at timestamptz) ON COMMIT DROP""")
+        c.execute("""INSERT INTO metrics VALUES ('current','tenant','sales',now() - interval '1 day'),
+                     ('other','other_tenant','foreign',now() - interval '1 day'),
+                     ('replacement','tenant','reused',now() + interval '1 day')""")
+        for key in ("sales", "removed", "foreign", "reused"):
+            c.execute("INSERT INTO jobs VALUES (%s,'tenant','ask',%s,'[]',NULL,now())",
+                      (key, as_jsonb({"data": {"metric_key": key}})))
+        c.execute("INSERT INTO jobs VALUES ('rag','tenant','ask','{}','[]',NULL,now())")
+        monkeypatch.setattr(migration, "op", c)
+        migration.upgrade()
+        sources = {r["id"]: r["sources"] for r in fetch_all(c, "SELECT id,sources FROM jobs")}
+        assert sources["sales"] == [{"kind": "metric", "tenant_id": "tenant", "metric_id": "current"}]
+        for key in ("removed", "foreign", "reused"):
+            assert sources[key] == [{"kind": "metric", "tenant_id": "tenant", "metric_id": None}]
+        assert sources["rag"] == []
+        with pytest.raises(CheckViolation), c.transaction():
+            c.execute("UPDATE jobs SET sources='[]' WHERE id='sales'")
+
+
+def test_metric_results_follow_current_grants(monkeypatch, clients):
+    """问数完成后，任务详情、历史列表和复审均复核指标的授权与发布状态。"""
+    from taozhi.application.bi import workflow
+    from taozhi.application.services import task_service
+
+    users, nodes = ids()
+    with database_connection() as c:
+        c.execute("""
+            INSERT INTO metrics(id,tenant_id,metric_key,name,sql_template,base_table,level,scope,node_id,owner_id,state)
+            VALUES('sales_metric','tenant_test','sales','测试销售额','','orders',1,'selected',%s,%s,'published')
+        """, (nodes["公司"], users["boss"]))
+        c.execute("""
+            INSERT INTO metric_grants(tenant_id,metric_id,user_id,effect,granted_by)
+            VALUES('tenant_test','sales_metric',%s,'allow',%s)
+        """, (users["staff"], users["boss"]))
+    monkeypatch.setattr(workflow.metrics_mod, "execute_metric", lambda *args: (["金额"], [[123]], {"unit": "元"}))
+    monkeypatch.setattr(task_service, "get_semantic_cache", lambda: pytest.fail("实时指标访问了问答缓存"))
+    staff = clients["staff"]
+    complete = task_id(staff, "测试销售额是多少")
+    assert process_next_job()
+    assert staff.get(f"/api/tasks/{complete}").json()["result"]["data"]["rows"] == [[123]]
+    pending = task_id(staff, "测试销售额是多少", require_review=True)
+    assert process_next_job()
+    assert staff.get(f"/api/tasks/{pending}").json()["state"] == "review"
+    with database_connection() as c:
+        c.execute("DELETE FROM metric_grants WHERE metric_id='sales_metric' AND user_id=%s", (users["staff"],))
+    detail = staff.get(f"/api/tasks/{complete}").json()
+    assert detail["result"] is None and detail["restricted"]
+    assert next(j for j in staff.get("/api/tasks").json()["items"] if j["id"] == complete)["restricted"]
+    review = clients["boss"].post(f"/api/tasks/{pending}/review", json={"approve": True})
+    assert review.status_code == 409
+    with database_connection() as c:
+        c.execute("UPDATE metrics SET scope='company' WHERE id='sales_metric'")
+    assert staff.get(f"/api/tasks/{complete}").json()["result"]["data"]["rows"] == [[123]]
+    with database_connection() as c:
+        c.execute("UPDATE metrics SET state='disabled' WHERE id='sales_metric'")
+    assert staff.get(f"/api/tasks/{complete}").json()["restricted"]
 
 
 def test_semantic_cache_invalidated_on_delete_and_stale_worker_check(monkeypatch, clients):

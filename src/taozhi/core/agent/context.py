@@ -1,12 +1,4 @@
-"""子智能体运行上下文与工件隔离存储（Subagent Context & Artifacts System）。
-
-自研架构设计：
-1. 隔离上下文（SubagentContext）避免子级海量原始抓取污染父级上下文；
-2. Scratch 目录暂存大容量中间态（Raw Scraped Data、临时脚本）；
-3. Artifacts 交付区管理高价值成果，附带元数据契约（Summary, UserFacing, RequestFeedback）；
-4. 提供规范的 GitHub 提示框（Alerts）、Mermaid 图表、走马灯（Carousel）与行级文件超链接生成器；
-5. 严格遵循 Google Python Style 规范。
-"""
+"""管理调研子任务的独立工作区、临时文件与交付工件。"""
 
 from __future__ import annotations
 
@@ -15,6 +7,8 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from taozhi.observability.tracing import record_diagnostic
 
 from .protocol import WorkspaceMode
 
@@ -64,7 +58,6 @@ class SubagentContext:
         base_dir (Path): 该子智能体专用的存储根目录。
         scratch_dir (Path): 暂存大容量原始抓取数据的 scratch 目录。
         artifacts_dir (Path): 存放最终交付工件的 artifacts 目录。
-        logs_dir (Path): 存放双轨日志的 logs 目录。
         workspace_dir (Optional[Path]): 分支隔离工作区（BRANCH 模式）。
     """
 
@@ -100,7 +93,6 @@ class SubagentContext:
         self.base_dir = root_dir / self.conversation_id
         self.scratch_dir = self.base_dir / "scratch"
         self.artifacts_dir = self.base_dir / "artifacts"
-        self.logs_dir = self.base_dir / ".system_generated" / "logs"
 
         self.workspace_dir: Optional[Path] = None
         if self.workspace_mode == WorkspaceMode.BRANCH:
@@ -112,7 +104,6 @@ class SubagentContext:
         """确保子智能体所需的隔离工作区目录存在。"""
         self.scratch_dir.mkdir(parents=True, exist_ok=True)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
         if self.workspace_dir:
             self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
@@ -182,86 +173,13 @@ class SubagentContext:
         ]
 
     def cleanup(self) -> None:
-        """清理临时工作区（保留 artifacts 与 logs，删除大容量 scratch 与分支副本）。"""
-        if self.scratch_dir.exists():
-            shutil.rmtree(self.scratch_dir, ignore_errors=True)
-        if self.workspace_dir and self.workspace_dir.exists():
-            shutil.rmtree(self.workspace_dir, ignore_errors=True)
-
-
-    @staticmethod
-    def build_alert(alert_type: str, content: str) -> str:
-        """构建 GitHub 风格的 Markdown 提示块。
-
-        Supported alert_type: NOTE, TIP, IMPORTANT, WARNING, CAUTION.
-
-        Args:
-            alert_type: 提示类型。
-            content: 提示内容。
-
-        Returns:
-            str: 格式化的 alert markdown。
-        """
-        tag = alert_type.upper()
-        if tag not in {"NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"}:
-            tag = "NOTE"
-        lines = [f"> [!{tag}]"]
-        for line in content.splitlines():
-            lines.append(f"> {line}")
-        return "\n".join(lines)
-
-    @staticmethod
-    def build_mermaid(diagram_type: str, body: str) -> str:
-        """构建标准 Mermaid 图表代码块。
-
-        支持图表：flowchart TD/LR, sequenceDiagram, stateDiagram-v2, erDiagram, xychart-beta.
-
-        Args:
-            diagram_type: 图表声明类型。
-            body: 图表内部定义。
-
-        Returns:
-            str: Mermaid fenced code block.
-        """
-        return f"```{diagram_type}\n{body.strip()}\n```"
-
-    @staticmethod
-    def build_carousel(slides: List[str]) -> str:
-        """构建支持图片与代码比对的走马灯（Carousel）组件。
-
-        Args:
-            slides: 各个轮播卡片的 markdown 文本内容列表。
-
-        Returns:
-            str: 格式化的 ````carousel 块。
-        """
-        inner = "\n<!-- slide -->\n".join(s.strip() for s in slides)
-        return f"````carousel\n{inner}\n````"
-
-    @staticmethod
-    def format_file_link(
-        file_path: Path | str,
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
-        label: Optional[str] = None,
-    ) -> str:
-        """生成带行号锚点绝对路径超链接。
-
-        Args:
-            file_path: 目标文件路径。
-            start_line: 起始行号。
-            end_line: 结束行号。
-            label: 链接展示文字，默认采用 basename。
-
-        Returns:
-            str: [label](file:///absolute/path#L1-L10) 格式文本。
-        """
-        p = Path(file_path).resolve()
-        display = label or p.name
-        uri = f"file://{p}"
-        if start_line is not None:
-            if end_line is not None and end_line != start_line:
-                uri += f"#L{start_line}-L{end_line}"
-            else:
-                uri += f"#L{start_line}"
-        return f"[{display}]({uri})"
+        """清理临时工作区并保留交付件，清理异常关联本次执行的诊断日志。"""
+        for temporary in (self.scratch_dir, self.workspace_dir):
+            if temporary is None:
+                continue
+            try:
+                shutil.rmtree(temporary)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                record_diagnostic("storage.cleanup", "skipped", exc)

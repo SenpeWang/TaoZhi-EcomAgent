@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """把当前 evals/baseline.json 归档成只读快照，进 Git 留档。
 
 为什么要有归档目录

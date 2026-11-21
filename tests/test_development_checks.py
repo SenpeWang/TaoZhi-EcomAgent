@@ -2,18 +2,41 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import shutil
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 
 import pytest
+import yaml
 
 PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT / "scripts"))
 spec = importlib.util.spec_from_file_location("development_checks", PROJECT / "scripts/check_development.py")
 development = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(development)
+
+
+def test_source_comments_in_python_and_yaml():
+    """扫描仓库中的脚本、迁移、测试及配置，区分源码注释和字符串数据。"""
+    tracked = subprocess.check_output(
+        ["git", "ls-files", "-z", "*.py", "*.yaml", "*.yml"], cwd=PROJECT,
+    ).decode().split("\0")
+    violations = []
+    for name in filter(None, tracked):
+        source = (PROJECT / name).read_text(encoding="utf-8")
+        if name.endswith(".py"):
+            for token in tokenize.generate_tokens(io.StringIO(source).readline):
+                if token.type == tokenize.COMMENT and not (token.start == (1, 0) and token.string.startswith("#!")):
+                    violations.append(f"{name}:{token.start[0]}")
+        else:
+            scalars = [token for token in yaml.scan(source) if isinstance(token, yaml.tokens.ScalarToken)]
+            for offset, char in enumerate(source):
+                if char == "#" and not any(token.start_mark.index <= offset < token.end_mark.index for token in scalars):
+                    violations.append(f"{name}:{source.count(chr(10), 0, offset) + 1}")
+    assert not violations, "源码说明请使用文档字符串：" + "、".join(violations)
 
 
 @pytest.fixture
@@ -126,6 +149,8 @@ def test_component_filename_and_declaration(workspace):
 
 
 @pytest.mark.parametrize("source", [
+    "// 普通注释\nexport const label = '授权'\n",
+    "/* 普通注释 */\nexport const label = '授权'\n",
     "export function authorizeDocument() { return true }\n",
     "/** Validate permission. */\nexport function authorizeDocument() { return true }\n",
     "/** 校验权限。 */\nexport function wrong_name() { return true }\n",
@@ -135,6 +160,17 @@ def test_key_comment_and_function_naming(workspace, source):
     (root / "web/src/permission.ts").write_text(source)
     with pytest.raises(RuntimeError, match="eslint"):
         development.frontend(root / "web")
+
+
+def test_template_comment_and_unescaped_html_are_rejected(workspace):
+    """在模板和 Markdown 渲染边界分别拒绝普通注释及未转义的表达式。"""
+    root, _ = workspace
+    view = root / "web/src/views/MarkdownReport.vue"
+    view.parent.mkdir()
+    for template in ("<div><!-- 普通注释 --></div>", '<div v-html="rawInput" />'):
+        view.write_text(f"<template>\n  {template}\n</template>\n")
+        with pytest.raises(RuntimeError, match="eslint"):
+            development.frontend(root / "web")
 
 
 def test_missing_dependencies_fail_without_install(workspace):

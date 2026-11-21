@@ -91,26 +91,20 @@ evals-baseline:
 evals-agent:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) -m evals.agent_eval.runner
 
-# Phoenix 客户端装在独立 venv，不进项目 .venv：观测依赖不污染生产环境
 evals-sync:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
 	$(PHOENIX_PY) evals/sync_phoenix.py --all
 
-# 跟随逐例进度实时推送：评估跑批约 2 小时，report 结束才落盘，这条通道补那段空窗
 evals-follow:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
 	$(PHOENIX_PY) evals/sync_phoenix.py --follow
 
-# 基线归档：一次跑批一份只读快照进 Git。baseline.json 会被下次跑批覆盖，
-# 归档目录保留"当时跑出来是什么"，横向对比不用翻 git log。
 evals-archive:
 	$(PYTHON) scripts/archive_baseline.py archive
 
-# 归档完整性：md5 不符说明有人动过历史基线，必须在 CI 里红出来
 evals-archive-check:
 	$(PYTHON) scripts/archive_baseline.py check
 
-# 门禁没过也要同步：失败样例正是最需要被看到、被归因的那批
 evals-pipeline:
 	@$(MAKE) --no-print-directory evals-full || { code=$$?; \
 	  echo "评估未过门禁（退出码 $$code），仍同步结果供归因"; \

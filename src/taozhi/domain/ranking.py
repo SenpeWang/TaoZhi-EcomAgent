@@ -3,15 +3,17 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections import deque
+from collections.abc import Iterator
 from typing import Any, Dict, List, Optional, Tuple
 
 from .entity_extraction import extract_entities
 
 _FENCE_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
 _HISTORY_QUERY_RE = re.compile(r"什么时候|以前|旧版|历史|差异|区别|变更|调整|改了")
-_VERSION_TAG_RE = re.compile(r"(?<![A-Za-z0-9])V(\d+(?:\.\d+)?)(?![A-Za-z0-9])", re.IGNORECASE)
+_VERSION_TAG_RE = re.compile(r"(?<![A-Za-z0-9])V([0-9]{1,9}(?:\.[0-9]{1,9})*)(?![A-Za-z0-9])", re.IGNORECASE)
 _DATE_TAG_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
-_BASE_TITLE_STRIP_RE = re.compile(r"(?:V\d+(?:\.\d+)?|\d{4}-\d{2}-\d{2}|（[^）]*）|\([^\)]*\)|\s+)", re.IGNORECASE)
+_BASE_TITLE_STRIP_RE = re.compile(r"(?:V\d+(?:\.\d+)*|\d{4}-\d{2}-\d{2}|（[^）]*）|\([^\)]*\)|\s+)", re.IGNORECASE)
 
 
 def tokenize_zh(text: str) -> List[str]:
@@ -73,6 +75,24 @@ def _structural_blocks(text: str, max_chars: int) -> List[str]:
     return blocks
 
 
+def _page_chunks(text: str, limit: int, overlap: int) -> Iterator[str]:
+    """在页内聚合完整段落，并为下一块保留预算范围内的结尾段落。"""
+    blocks: deque[str] = deque()
+    size = 0
+    for block in _structural_blocks(text, limit):
+        if blocks and size + 2 + len(block) > limit:
+            yield "\n\n".join(blocks)
+            carry_limit = min(overlap, limit - len(block) - 2)
+            while blocks and size > carry_limit:
+                size -= len(blocks.popleft())
+                if blocks:
+                    size -= 2
+        size += len(block) + (2 if blocks else 0)
+        blocks.append(block)
+    if blocks:
+        yield "\n\n".join(blocks)
+
+
 def split_document_chunks(
     pages: List[Tuple[int, str]],
     doc_id: str,
@@ -86,49 +106,10 @@ def split_document_chunks(
 
     result: List[dict] = []
     for page, raw_text in pages:
-        text = (raw_text or "").strip()
-        if not text:
-            continue
-        blocks = _structural_blocks(text, limit)
-        buf: List[str] = []
-        buf_len = 0
-
-        def _flush() -> None:
-            nonlocal buf, buf_len
-            joined = "\n\n".join(buf).strip()
-            if not joined:
-                buf, buf_len = [], 0
-                return
-            cid = "chunk_" + hashlib.sha256(f"{doc_id}:{version}:{len(result)}".encode()).hexdigest()[:24]
-            result.append(dict(id=cid, ordinal=len(result), page=page, text=joined))
-            if overlap_budget <= 0:
-                buf, buf_len = [], 0
-                return
-            carry: List[str] = []
-            carry_len = 0
-            for prev_blk in reversed(buf):
-                if carry_len + len(prev_blk) <= overlap_budget:
-                    carry.insert(0, prev_blk)
-                    carry_len += len(prev_blk) + (2 if len(carry) > 1 else 0)
-                else:
-                    break
-            buf = carry
-            buf_len = sum(len(x) for x in buf) + max(0, len(buf) - 1) * 2
-
-        for blk in blocks:
-            added = len(blk) + (2 if buf else 0)
-            if buf and buf_len + added > limit:
-                _flush()
-            while buf and buf_len + len(blk) + 2 > limit:
-                buf.pop(0)
-                buf_len = sum(len(x) for x in buf) + max(0, len(buf) - 1) * 2
-            buf.append(blk)
-            buf_len += len(blk) + (2 if len(buf) > 1 else 0)
-        if buf:
-            tail = "\n\n".join(buf).strip()
-            if tail and (not result or tail not in result[-1]["text"]):
-                cid = "chunk_" + hashlib.sha256(f"{doc_id}:{version}:{len(result)}".encode()).hexdigest()[:24]
-                result.append(dict(id=cid, ordinal=len(result), page=page, text=tail))
+        for text in _page_chunks((raw_text or "").strip(), limit, overlap_budget):
+            ordinal = len(result)
+            cid = "chunk_" + hashlib.sha256(f"{doc_id}:{version}:{ordinal}".encode()).hexdigest()[:24]
+            result.append(dict(id=cid, ordinal=ordinal, page=page, text=text))
     return result
 
 
@@ -162,9 +143,9 @@ def chunk_title(chunk: Dict[str, Any], allowed: Optional[Dict[str, Any]] = None)
 def version_tuple(title: str, text: str) -> tuple:
     """提取文档版本与生效日期元信息：(major_ver, date_str)。"""
     probe = f"{title}\n{text[:200]}"
-    versions = [float(x) for x in _VERSION_TAG_RE.findall(probe)]
+    versions = [tuple(int(part) for part in match.split(".")) for match in _VERSION_TAG_RE.findall(probe)]
     dates = _DATE_TAG_RE.findall(probe)
-    return (max(versions) if versions else 0.0, max(dates) if dates else "")
+    return (max(versions, default=()), max(dates) if dates else "")
 
 
 def apply_recency_tiebreak(query: str, ranked: list, chunks: list, allowed: dict, boost: float) -> list:
@@ -179,7 +160,7 @@ def apply_recency_tiebreak(query: str, ranked: list, chunks: list, allowed: dict
         if len(base) < 2:
             continue
         ver = version_tuple(title, c["text"])
-        if ver != (0.0, ""):
+        if ver != ((), ""):
             families.setdefault(base, {})[c["document_id"]] = ver
 
     multi_ver_docs: Dict[str, float] = {}

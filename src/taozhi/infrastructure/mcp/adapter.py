@@ -18,7 +18,8 @@ from taozhi.core.tools.outcome import (
     clamp_timeout_args,
     execute_tool_with_outcome,
 )
-from taozhi.observability.tracing import node_span
+from taozhi.observability.diagnostics import EVENT_NAME
+from taozhi.observability.tracing import node_span, record_diagnostic
 from .server import EcommerceMcpServer, default_mcp_server
 
 
@@ -83,7 +84,7 @@ class McpClientAdapter:
             raw_text = mcp_res.content[0].text if mcp_res.content else ""
             if mcp_res.isError:
                 lowered = raw_text.lower()
-                if "timeout" in lowered or "timed out" in lowered:
+                if "timeout" in lowered or "timed out" in lowered or "执行期限" in lowered:
                     raise TimeoutError(raw_text or "MCP timeout")
                 raise _McpToolCallError(raw_text or "Unknown MCP error")
             try:
@@ -104,6 +105,8 @@ class McpClientAdapter:
                 span.set_attribute("tool.status", outcome.status)
                 span.set_attribute("tool.result_count", outcome.data_count)
                 if outcome.status in ("error", "timeout", "cancelled"):
+                    if not any(e.name == EVENT_NAME and e.attributes.get("outcome") == "failed" for e in span.events):
+                        record_diagnostic(f"tool.{outcome.status}", "failed", publish_now=False)
                     span.set_attribute("error.type", outcome.status)
                     span.set_status(StatusCode.ERROR)
             return outcome

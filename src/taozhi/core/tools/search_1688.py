@@ -7,22 +7,16 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 import subprocess
-from pathlib import Path
 from typing import Any, Dict, List
 
 import httpx
 
 from taozhi.config import resolve_runtime_dir
 
-_LOG = logging.getLogger(__name__)
-
-
-def _resolve_runtime_dir() -> Path:
-    """委托 config.resolve_runtime_dir 解析运维脚本根目录。"""
-    return resolve_runtime_dir()
+from taozhi.observability.tracing import record_diagnostic
+from .outcome import ToolInvocationError, result_items
 
 
 def search_1688_wholesale(
@@ -38,7 +32,7 @@ def search_1688_wholesale(
         timeout: 超时预算（秒）。
 
     Returns:
-        商品列表，包含 ``title``, ``price``, ``sales``, ``shop``, ``url`` 等；失败时返回空列表 ``[]``。
+        商品列表，包含 ``title``, ``price``, ``sales``, ``shop``, ``url`` 等；合法查询未命中时返回空列表。
     """
     budget = max(1.0, float(timeout))
     custom_url = os.environ.get("ECOM_RESEARCH_P1688_URL", "").strip()
@@ -51,28 +45,28 @@ def search_1688_wholesale(
                     headers["X-API-Key"] = key
                 resp = client.post(custom_url, json={"query": keyword, "limit": limit}, headers=headers)
                 resp.raise_for_status()
-                return resp.json().get("items", [])[:limit]
+                return result_items(resp.json(), "items", limit)
         except Exception as exc:
-            _LOG.warning("1688 外部检索网关调用失败，尝试本地抓手: %s", exc)
+            record_diagnostic("tool.gateway", "fallback", exc)
 
-    runtime_dir = _resolve_runtime_dir()
+    runtime_dir = resolve_runtime_dir()
     py = runtime_dir / "scraper-venv/bin/python"
     script = runtime_dir / "p1688_mcp/p1688_search.py"
-    if py.exists() and script.exists():
-        try:
-            proc = subprocess.run(
-                [str(py), str(script), keyword, "--limit", str(limit)],
-                capture_output=True,
-                text=True,
-                timeout=min(90.0, budget),
-            )
-            for line in reversed((proc.stdout or "").strip().splitlines()):
-                line = line.strip()
-                if line.startswith("{"):
-                    res = json.loads(line)
-                    if res.get("state") == "ok":
-                        return res.get("items", [])[:limit]
-        except Exception as exc:
-            _LOG.warning("1688 本地抓手执行异常: %s", exc)
-
-    return []
+    if not py.is_file() or not script.is_file():
+        raise ToolInvocationError("tool.scraper_missing")
+    proc = subprocess.run(
+        [str(py), str(script), keyword, "--limit", str(limit)],
+        capture_output=True, text=True, timeout=min(90.0, budget),
+    )
+    if proc.returncode:
+        raise ToolInvocationError("tool.scraper_exit")
+    for line in reversed((proc.stdout or "").splitlines()):
+        if line.lstrip().startswith("{"):
+            try:
+                result = json.loads(line)
+            except ValueError as exc:
+                raise ToolInvocationError("tool.invalid_response") from exc
+            if isinstance(result, dict) and result.get("state") == "ok":
+                return result_items(result, "items", limit)
+            break
+    raise ToolInvocationError("tool.invalid_response")

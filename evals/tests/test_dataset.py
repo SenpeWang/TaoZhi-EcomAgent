@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """评测数据包 CI 测试：独立、可生成、防空转——三条性质各有一条测试盯住。
 
 背景（2026-10 测试集审计结论）：历史用例集的权限夹具只存在于某台机器的数据库里，
@@ -31,9 +30,9 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "evals"))
 
-from evals.dataset import generate as gen_mod      # noqa: E402
-from evals.dataset import schema as schema_mod     # noqa: E402
-from evals.dataset.seed import EVAL_PASSWORD       # noqa: E402
+from evals.dataset import generate as gen_mod
+from evals.dataset import schema as schema_mod
+from evals.dataset.seed import EVAL_PASSWORD
 
 GEN_LATEST = ROOT / "evals/datasets/generated/latest"
 REQUIRED_CATEGORIES = {"product", "compat", "aftersale", "multi_doc", "insufficient",

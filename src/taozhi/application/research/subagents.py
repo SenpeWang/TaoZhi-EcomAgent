@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import json
-import logging
 import time
+from contextlib import ExitStack, closing
 from typing import Any, Dict, List, Optional, Tuple
 
 from taozhi.ai.client import LLMClient, ModelTier
@@ -21,7 +21,7 @@ from taozhi.domain.research import (
 )
 from taozhi.infrastructure.mcp.adapter import McpClientAdapter
 from taozhi.infrastructure.mcp.server import default_mcp_server
-from taozhi.observability.tracing import node_span
+from taozhi.observability.tracing import node_span, record_diagnostic
 from .hooks import (
     RuntimeHooks,
     attach_route_delta,
@@ -34,7 +34,6 @@ from .hooks import (
 from .planner import deserialize_task
 from .schemas import AuditableAgentTransition, EvidenceRecord, _SubagentStepSchema
 
-_LOG = logging.getLogger(__name__)
 
 
 def _execute_guarded_mcp_tool(
@@ -154,6 +153,7 @@ def _plan_subagent_step(
         )
         if span is not None:
             span.set_attribute("context.output_chars", len(step_prompt))
+    decision_error = None
     step_dec: Optional[_SubagentStepSchema] = None
     with route_audit_scope(preferred_endpoint_id=last_endpoint or None, on_failover=make_failover_emitter(hooks)) as step_rec:
         try:
@@ -169,12 +169,12 @@ def _plan_subagent_step(
             elif isinstance(raw_step, dict) and raw_step.get("action"):
                 step_dec = _SubagentStepSchema.model_validate(raw_step)
         except Exception as exc:
-            _LOG.warning("子智能体 [%s] 第 %s 步决策解析失败，切换安全回落: %s", task.role, step_idx, exc)
-            step_dec = None
+            decision_error = exc
         route_events_out.extend(step_rec.snapshot())
         next_endpoint = step_rec.last_active_endpoint or last_endpoint
 
     if step_dec is None:
+        record_diagnostic("workflow.subagent", "fallback", decision_error)
         if not tools_records and task.allowed_tools:
             step_dec = _SubagentStepSchema(
                 action="call_tool",
@@ -215,7 +215,7 @@ def _synthesize_subagent_summary(
                     max_tokens=800,
                 ).strip()
             except Exception as exc:
-                _LOG.warning("子智能体 [%s] 观测收尾合成异常: %s", task.role, exc)
+                record_diagnostic("workflow.summary", "fallback", exc)
                 summary = ""
             route_events_out.extend(synth_rec.snapshot())
             if synth_rec.last_active_endpoint:
@@ -246,13 +246,9 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
     mcp_specs = mcp_client.list_tool_specs(task.allowed_tools)
     session = AgentSession(
         conversation_id=task.task_id,
-        keyword=keyword,
-        user_query=query,
-        cancel_event=hooks.cancel_event,
     )
     ctx = session.open_subagent_sandbox(role=task.role)
 
-    llm = LLMClient(on_attempt=hooks.model_call_observer(task.role))
     react_observations: List[Dict[str, Any]] = []
     tools_records: List[Dict[str, Any]] = []
     scratch_files: List[str] = []
@@ -264,9 +260,10 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
     sub_last_ep = ""
     t0 = time.perf_counter()
 
-    emit_progress(hooks, f"[agent_start] 启动「{agent_display_name(task.role)}」· 目标：{task.goal}")
-
-    try:
+    with ExitStack() as resources:
+        resources.callback(ctx.cleanup)
+        llm = resources.enter_context(closing(LLMClient(on_attempt=hooks.model_call_observer(task.role))))
+        emit_progress(hooks, f"[agent_start] 启动「{agent_display_name(task.role)}」· 目标：{task.goal}")
         for step_idx in range(1, max_steps + 1):
             if is_cancelled(hooks):
                 gaps_or_errors.append("任务中途取消")
@@ -385,5 +382,3 @@ def subagent_worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
             "elapsed": elapsed,
         }
         return attach_route_delta({"evidence_pool": [evidence], "audit_trail": [transition]}, sub_route_events, sub_last_ep)
-    finally:
-        ctx.cleanup()

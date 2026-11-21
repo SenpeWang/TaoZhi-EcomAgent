@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """评测夹具灌库：把 spec 世界的组织/身份/文档/授权幂等写入 PG。
 
 这是"测试集独立"的关键一环：没有它，权限类用例引用的 SYN_* 夹具只存在于
@@ -28,14 +27,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-import yaml  # noqa: E402
+import yaml
 
-from taozhi.config import load_config  # noqa: E402
-from taozhi.knowledge.db import database_connection, fetch_all, fetch_one  # noqa: E402
-from taozhi.knowledge.ingest import split  # noqa: E402
-from taozhi.domain.passwords import hash_password, verify_password  # noqa: E402
-from taozhi.infrastructure.persistence.access_repo import can_read, can_read_metric, load_principal  # noqa: E402
-from taozhi.knowledge.metrics import BUILTIN_BUSINESS_METRICS  # noqa: E402
+from taozhi.config import load_config
+from taozhi.knowledge.db import database_connection, fetch_all, fetch_one
+from taozhi.knowledge.ingest import split
+from taozhi.domain.passwords import hash_password, verify_password
+from taozhi.infrastructure.persistence.access_repo import can_read, can_read_metric, load_principal
+from taozhi.knowledge.metrics import BUILTIN_BUSINESS_METRICS
 
 SPEC = Path(__file__).resolve().parent / "spec"
 GEN = ROOT / "evals/datasets/generated/latest"

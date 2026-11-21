@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """评测数据集生成器：spec/ → cases.jsonl + corpus_docs.jsonl + manifest.json。
 
 确定性是硬要求：同一份 spec + 同一个种子，输出必须逐字节一致——
@@ -56,7 +55,7 @@ def render(text, ctx):
     def sub(m):
         expr = m.group(1).strip()
         try:
-            return str(eval(expr, {"__builtins__": {}}, ctx))  # noqa: S307
+            return str(eval(expr, {"__builtins__": {}}, ctx))
         except Exception as e:
             raise ValueError(f"槽位解析失败 {expr!r}: {e}") from e
     return SLOT.sub(sub, text)
@@ -176,7 +175,7 @@ def generate():
             elif item is not None:
                 local["product"] = item
             for alias, ref in (tpl.get("context") or {}).items():
-                local[alias] = eval(ref, {"__builtins__": {}}, ctx)  # noqa: S307
+                local[alias] = eval(ref, {"__builtins__": {}}, ctx)
             ident = ctx["identities"][tpl["identity"]]
             ref_ans = render(tpl.get("reference_answer") or tpl["expected_behavior"], local)
             case = {

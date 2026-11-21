@@ -67,13 +67,17 @@ def publish_pending(producer: Any = None) -> int:
 
             client = KafkaProducer(bootstrap_servers=cfg.kafka_brokers.split(","), acks="all", retries=5)
         try:
-            for r in rows:
+            deliveries = [
                 client.send(
                     cfg.kafka_topic,
-                    value=json.dumps({"job_id": r["job_id"]}).encode(),
-                    key=r["job_id"].encode(),
+                    value=json.dumps({"job_id": row["job_id"]}).encode(),
+                    key=row["job_id"].encode(),
                 )
+                for row in rows
+            ]
             client.flush(timeout=10)
+            for delivery in deliveries:
+                delivery.get(timeout=0)
         finally:
             if owns_producer:
                 try:

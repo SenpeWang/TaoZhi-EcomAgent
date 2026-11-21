@@ -12,6 +12,7 @@ class BiState(TypedDict, total=False):
     question: str
     data_intent: dict
     data_result: dict
+    sources: list[dict]
     answer: str
     hard_block: bool
     input_level: int

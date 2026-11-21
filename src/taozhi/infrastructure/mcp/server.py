@@ -6,19 +6,16 @@
 from __future__ import annotations
 
 import json
+import subprocess
+
+import httpx
 from typing import Any, Callable, Dict, List, Optional
 
-from ...core.tools.search_1688 import search_1688_wholesale
-from ...core.tools.search_amazon import search_amazon
-from ...core.tools.search_web import search_web
-from ...core.tools.web_scraper import fetch_web_page
+from taozhi.core.tools.outcome import ToolInvocationError
+from taozhi.domain.trace_diagnostic import CATALOG
+from taozhi.observability.tracing import record_diagnostic
+from ...core import tools
 from .protocol import McpCallToolResult, McpContentItem, McpToolDefinition
-
-
-def _call_global(name: str, **kwargs: Any) -> Any:
-    """按名称解析模块级工具函数，支持测试注入或运行时替换。"""
-    fn = globals()[name]
-    return fn(**kwargs)
 
 
 def _build_handler(tool_name: str, arg_spec: tuple[tuple[str, tuple[str, ...], Any, Any], ...]) -> Callable[[Dict[str, Any]], Any]:
@@ -33,7 +30,7 @@ def _build_handler(tool_name: str, arg_spec: tuple[tuple[str, tuple[str, ...], A
                     continue
                 raw_val = default_val
             kwargs[target_key] = caster(raw_val)
-        return _call_global(tool_name, **kwargs)
+        return getattr(tools, tool_name)(**kwargs)
 
     return _handle
 
@@ -145,8 +142,11 @@ class EcommerceMcpServer:
                 isError=False,
             )
         except Exception as exc:
+            timed_out = isinstance(exc, (TimeoutError, httpx.TimeoutException, subprocess.TimeoutExpired))
+            code = exc.code if isinstance(exc, ToolInvocationError) else ("tool.timeout" if timed_out else "tool.error")
+            record_diagnostic(code, "failed", exc)
             return McpCallToolResult(
-                content=[McpContentItem(type="text", text=f"Execution error: {type(exc).__name__}: {str(exc)}")],
+                content=[McpContentItem(type="text", text=CATALOG[code][1])],
                 isError=True,
             )
 

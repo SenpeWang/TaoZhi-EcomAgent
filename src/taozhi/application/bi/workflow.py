@@ -34,6 +34,7 @@ def data_query_node(state: BiState) -> dict:
     di = state.get("data_intent") or {}
     result: dict = {"denied": True, "message": di.get("reason") or "未找到可回答该问题的指标。"}
     level = 1
+    sources = []
     if di.get("metric_key"):
         with database_connection() as c:
             m = get_published_metric_by_id(c, p.tenant_id, di["metric_id"])
@@ -56,12 +57,14 @@ def data_query_node(state: BiState) -> dict:
                         "description": m["description"],
                     }
                     level = m["level"]
+                    sources.append({"kind": "metric", "metric_id": m["id"], "tenant_id": p.tenant_id})
                 except Denied as e:
                     result = {"denied": True, "message": f"指标执行被安全策略拒绝：{e}"}
                 except Exception:
                     result = {"denied": True, "message": "指标查询暂时不可用，请稍后重试。"}
     return {
         "data_result": result,
+        "sources": sources,
         "hard_block": result.get("denied", False),
         "input_level": max(job["input_level"], level),
     }

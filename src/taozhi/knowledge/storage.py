@@ -60,7 +60,8 @@ class MinioBlobStore:
         try:
             self.client.remove_object(self.cfg.minio_bucket, self._key(tenant_id, name))
         except S3Error as exc:
-            _LOG.debug("移除 MinIO 对象跳过 (%s/%s): %s", tenant_id, name, exc)
+            if exc.code not in {"NoSuchKey", "NoSuchObject"}:
+                _LOG.warning("附件对象清理失败（错误码=%s）", exc.code)
     def open_blob(self, tenant_id, name) -> bytes:
         resp = self.client.get_object(self.cfg.minio_bucket, self._key(tenant_id, name))
         try:
@@ -103,10 +104,9 @@ def get_blob_store():
     if cfg.minio_enabled:
         try:
             store = MinioBlobStore(cfg)
-            store.client.bucket_exists(cfg.minio_bucket)
             if cfg.blob_dual_write:
                 return DualBlobStore(store, LocalBlobStore(cfg))
             return store
         except Exception as exc:
-            _LOG.warning("MinIO 不可用，附件回退本地目录 (%s): %s", type(exc).__name__, exc)
+            _LOG.warning("MinIO 不可用，附件回退本地目录（异常类型=%s）", type(exc).__name__)
     return LocalBlobStore(cfg)

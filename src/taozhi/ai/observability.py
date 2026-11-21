@@ -77,6 +77,7 @@ class UsageAccumulator:
 
     def add_error(self) -> None:
         """累计一次大模型调用失败计数。"""
+        self.llm_attempts += 1
         self.llm_errors += 1
 
     def add_json_attempt(self, *, is_retry: bool = False) -> None:
@@ -174,24 +175,23 @@ def percentile(name: str, p: float = 0.95) -> float:
     return values[idx]
 
 
-def rag_hit_rate(channel: str = "") -> float:
-    """计算指定检索通道或全局的 RAG 命中率。"""
+def record_retrieval(count: int) -> None:
+    """按实际完成的知识检索记录调用次数及命中次数。"""
     with _lock:
-        if channel:
-            calls = _counters.get(f"rag.calls.{channel}", 0.0)
-            empty = _counters.get(f"rag.empty.{channel}", 0.0)
-            return 0.0 if not calls else (calls - empty) / calls
-        calls = sum(v for k, v in _counters.items() if k.startswith("rag.calls."))
-        empty = sum(v for k, v in _counters.items() if k.startswith("rag.empty."))
-    return 0.0 if not calls else (calls - empty) / calls
+        _counters["rag.calls.total"] = _counters.get("rag.calls.total", 0) + 1
+        if count:
+            _counters["rag.hits.total"] = _counters.get("rag.hits.total", 0) + 1
 
 
 def snapshot() -> Dict[str, float]:
-    """返回当前进程级计数器与汇总衍生指标快照。"""
+    """按已结束的模型调用和实际完成的检索计算错误率与命中率。"""
     with _lock:
         out = dict(_counters)
-    out["llm.error_rate"] = out.get("llm.errors.total", 0.0) / max(1.0, out.get("llm.calls.total", 1.0))
-    out["rag.hit_rate"] = rag_hit_rate()
+    errors = out.get("llm.errors.total", 0.0)
+    completed = out.get("llm.calls.total", 0.0) + errors
+    out["llm.error_rate"] = errors / completed if completed else 0.0
+    calls = out.get("rag.calls.total", 0.0)
+    out["rag.hit_rate"] = out.get("rag.hits.total", 0.0) / calls if calls else 0.0
     return out
 
 

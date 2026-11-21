@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """评估指标单元测试：口径一旦写错，所有基线和阈值决策都会跟着错，所以必须有测试盯住。
 
 运行：.venv/bin/python -m pytest evals/tests -q
@@ -14,7 +13,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "evals"))
 
-from metrics import (  # noqa: E402
+from metrics import (
     flat_means,
     hit_at_k,
     ndcg_at_k,
@@ -110,7 +109,7 @@ def test_retrieval_report_handles_empty_input():
 
 
 
-from metrics import accuracy_report, cohen_kappa, paired_delta  # noqa: E402
+from metrics import accuracy_report, cohen_kappa, paired_delta
 
 
 def test_paired_delta_flags_uniform_drop():
@@ -179,7 +178,7 @@ def test_accuracy_report_carries_confidence_interval():
     assert rep["ci95"]["relevant_rate"] is not None
 
 
-from metrics import (  # noqa: E402
+from metrics import (
     answer_correctness,
     citation_accuracy,
     context_relevancy,

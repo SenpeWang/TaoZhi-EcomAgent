@@ -160,6 +160,18 @@ export type SpanStatus = 'running' | 'ok' | 'error' | 'interrupted'
 export type SpanKind =
   'CHAIN' | 'AGENT' | 'LLM' | 'TOOL' | 'RETRIEVER' | 'EMBEDDING' | 'RERANKER' | 'INTERNAL'
 export type ActivityCategory = SpanKind | 'CONTEXT' | 'GUARDRAIL'
+export type DiagnosticCategory =
+  'model_api' | 'tool' | 'retrieval' | 'context' | 'permission' | 'storage' | 'workflow'
+export interface TraceDiagnostic {
+  timestamp: string
+  category: DiagnosticCategory
+  code: string
+  message: string
+  outcome: 'failed' | 'retry' | 'fallback' | 'skipped'
+  level: 'error' | 'warning'
+  exception_type: string | null
+  http_status: number | null
+}
 export interface TraceRun {
   run_version: number
   trace_id: string
@@ -168,6 +180,7 @@ export interface TraceRun {
   status: SpanStatus
   kind_counts: Partial<Record<SpanKind, number>>
   category_counts: Partial<Record<ActivityCategory, number>>
+  diagnostic_counts: Partial<Record<DiagnosticCategory, number>>
   span_count: number
   failed_count: number
   input_tokens: number
@@ -190,6 +203,7 @@ export interface TraceSpan {
   duration_ms: number | null
   status: SpanStatus
   error_type: string | null
+  diagnostics: TraceDiagnostic[]
   attributes: Record<string, string | number | boolean>
 }
 export interface TraceSpanPage<T extends TraceSpan> {

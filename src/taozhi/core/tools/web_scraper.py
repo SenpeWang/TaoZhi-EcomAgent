@@ -15,6 +15,7 @@ from urllib.parse import urljoin
 import httpx
 
 from taozhi.domain.errors import Denied
+from taozhi.observability.tracing import record_diagnostic
 from taozhi.domain.url_guard import validate_public_http_url
 
 _MAX_REDIRECTS = 3
@@ -48,14 +49,17 @@ def fetch_web_page(url: str, max_chars: int = 4000, timeout: float = 10.0) -> Di
                 if resp.status_code in (301, 302, 303, 307, 308):
                     location = resp.headers.get("location", "")
                     if not location:
+                        record_diagnostic("tool.redirect", "failed")
                         return {"url": current_url, "status": "error", "text": "重定向缺少目标地址", "title": ""}
                     current_url = validate_public_http_url(urljoin(current_url, location))
                     continue
                 break
             else:
+                record_diagnostic("tool.redirect", "failed")
                 return {"url": current_url, "status": "error", "text": "重定向次数超过安全上限", "title": ""}
 
             if resp is None or resp.status_code != 200:
+                record_diagnostic("tool.http", "failed", http_status=resp.status_code if resp is not None else None)
                 code = resp.status_code if resp is not None else "unknown"
                 return {"url": current_url, "status": "error", "text": f"HTTP {code}", "title": ""}
 
@@ -80,6 +84,8 @@ def fetch_web_page(url: str, max_chars: int = 4000, timeout: float = 10.0) -> Di
                 "text": text[:max_chars],
             }
     except Denied as exc:
+        record_diagnostic("permission.denied" if exc.status == 403 else "tool.error", "failed", exc)
         return {"url": url, "status": "error", "error": exc.code, "text": exc.message, "title": ""}
     except Exception as exc:
+        record_diagnostic("tool.timeout" if isinstance(exc, httpx.TimeoutException) else "tool.error", "failed", exc)
         return {"url": url, "status": "error", "text": f"抓取异常: {type(exc).__name__}", "title": ""}

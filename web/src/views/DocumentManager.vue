@@ -72,14 +72,13 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import type { DocumentListItem } from '../types'
+import { levelText, stateText } from '../labels'
 
 const props = defineProps<{
   documents: DocumentListItem[]
   search: string
   canWrite: boolean
   canManagePermissions: boolean
-  levelText: (level: number) => string
-  stateText: (state: string) => string
 }>()
 
 const emit = defineEmits<{

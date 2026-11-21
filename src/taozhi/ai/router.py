@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple
 
 from ..config import Settings, get_settings
+from ..observability import record_diagnostic
+from ..observability.diagnostics import http_status_of
 
 RegionType = Literal["domestic", "overseas"]
 
@@ -94,8 +96,8 @@ class _RouteAuditRecorder:
         if clean["failover"] and self._on_failover is not None:
             try:
                 self._on_failover(clean)
-            except Exception:
-                pass
+            except Exception as exc:
+                record_diagnostic("workflow.progress", "skipped", exc)
 
     def snapshot(self) -> List[Dict[str, Any]]:
         """返回当前累积的脱敏路由轨迹副本。"""
@@ -144,6 +146,19 @@ class CircuitBreakerRegistry:
 
     def classify_error(self, exc: Exception, settings: Settings) -> Tuple[str, int]:
         """将模型异常归类为标准原因码与建议冷却秒数。"""
+        status = http_status_of(exc)
+        if status is not None:
+            if status in (401, 403):
+                return "auth_error", settings.llm_circuit_cooldown_auth
+            if status == 404:
+                return "model_not_found", settings.llm_circuit_cooldown_auth
+            if status == 429:
+                return "rate_limit", settings.llm_circuit_cooldown_rate_limit
+            if status == 408:
+                return "network_timeout", settings.llm_circuit_cooldown_transient
+            if status >= 500:
+                return "upstream_error", settings.llm_circuit_cooldown_transient
+            return "invoke_error", settings.llm_circuit_cooldown_transient
         msg = str(exc).lower()
         cls_name = type(exc).__name__.lower()
         combined = f"{cls_name} {msg}"

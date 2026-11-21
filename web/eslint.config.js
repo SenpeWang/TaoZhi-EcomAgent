@@ -5,9 +5,34 @@ import prettier from 'eslint-config-prettier'
 import jsdoc from 'eslint-plugin-jsdoc'
 import globals from 'globals'
 
+const documentationComments = {
+  rules: {
+    'only-jsdoc': {
+      create(context) {
+        return {
+          'Program:exit'() {
+            const source = context.sourceCode
+            const templateComments = source.parserServices.getDocumentFragment?.()?.comments ?? []
+            const comments = [...source.getAllComments(), ...templateComments]
+            for (const comment of comments) {
+              if (comment.type === 'Block' && comment.value.startsWith('*')) continue
+              context.report({ loc: comment.loc, message: '源码说明请使用 JSDoc 文档块' })
+            }
+          },
+        }
+      },
+    },
+  },
+}
+
 export default ts.config(
   { ignores: ['dist/**', 'node_modules/**', '.build-*/**'] },
   js.configs.recommended,
+  {
+    files: ['**/*.{js,cjs,mjs,ts,vue}'],
+    plugins: { documentation: documentationComments },
+    rules: { 'documentation/only-jsdoc': 'error' },
+  },
   ...ts.configs.recommended,
   ...vue.configs['flat/recommended'],
   {
@@ -62,6 +87,10 @@ export default ts.config(
   {
     files: ['*.{js,cjs,mjs}'],
     languageOptions: { globals: globals.node },
+  },
+  {
+    files: ['src/views/MarkdownReport.vue'],
+    rules: { 'vue/no-v-html': ['error', { ignorePattern: '^renderedReportHtml$' }] },
   },
   prettier,
 )

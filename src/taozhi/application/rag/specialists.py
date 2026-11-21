@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
-_LOG = logging.getLogger(__name__)
 
 from openinference.semconv.trace import SpanAttributes
 from opentelemetry import context as otel_context
@@ -26,7 +24,7 @@ from taozhi.domain.rag_verification import SPECIALIST_AGENTS, cited_paragraphs, 
 from taozhi.domain.text_guard import detect_injection
 from taozhi.infrastructure.persistence.job_repo import count_model_calls, get_job_by_id, insert_model_call, update_model_call
 from taozhi.knowledge.db import database_connection
-from taozhi.observability.tracing import node_span
+from taozhi.observability.tracing import node_span, record_diagnostic
 from taozhi.application.common.task_guard import empty_token_usage, merge_token_usage, validate_task_execution
 from taozhi.application.services.task_output import publish_answer_delta
 from .state import State
@@ -147,7 +145,8 @@ def domain_node(state: State) -> dict:
                         continue
                     agent_findings.append(dict(role=specialist_id, claim=claim, evidence_index=i, quote=f["quote"][:quote_cap]))
                 agent_missing.extend(str(x)[:160] for x in (data.get("missing") or [])[:4])
-            except Exception:
+            except Exception as exc:
+                record_diagnostic("workflow.summary", "fallback", exc)
                 agent_missing.append(specialist_name + "模型暂时不可用，保留原文供核验。")
                 outcome = "failed"
             finally:
@@ -160,7 +159,7 @@ def domain_node(state: State) -> dict:
                 with database_connection() as c:
                     update_model_call(c, call_id, elapsed, usage_totals["prompt_tokens"], usage_totals["completion_tokens"], outcome)
             except Exception as exc:
-                _LOG.warning("回写专家模型调用消耗失败 (%s): %s", call_id, exc)
+                record_diagnostic("storage.write", "skipped", exc)
         return {
             "findings": agent_findings,
             "missing": agent_missing,

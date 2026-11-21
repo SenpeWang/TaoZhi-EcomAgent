@@ -104,22 +104,21 @@ def can_read(conn: Any, p: Principal, d: dict[str, Any], include_draft: bool = F
         允许阅读返回 True。
     """
     g = get_document_grant(conn, p, d)
-    needs_write = include_draft and d.get("state") != "published"
-    can_w = can_write(conn, p, d) if needs_write else False
-    return evaluate_read_permission(p, d, g, include_draft=include_draft, can_write_flag=can_w)
+    return evaluate_read_permission(p, d, g, include_draft=include_draft)
 
 
 def can_download(conn: Any, p: Principal, d: dict[str, Any]) -> bool:
     """判定主体是否有权下载目标文档。"""
     g = get_document_grant(conn, p, d)
-    can_r = can_read(conn, p, d)
-    return evaluate_download_permission(p, d, g, can_read_flag=can_r)
+    return evaluate_download_permission(p, d, g)
 
 
-def require_document_read(conn: Any, p: Principal, d: dict[str, Any]) -> None:
-    """强制断言阅读权限（允许写作者查看草稿），否则抛出 404 防枚举。"""
-    if not can_read(conn, p, d, True):
+def require_document_read(conn: Any, p: Principal, d: dict[str, Any]) -> dict[str, Any] | None:
+    """核验阅读权限并返回本次判定采用的个人授权，拒绝时统一返回 404。"""
+    grant = get_document_grant(conn, p, d)
+    if not evaluate_read_permission(p, d, grant, include_draft=True):
         raise Denied("资料不存在或没有访问权限", "NOT_FOUND", 404)
+    return grant
 
 
 def get_metric_grant(conn: Any, p: Principal, m: dict[str, Any] | str) -> dict[str, Any] | None:
@@ -138,8 +137,22 @@ def can_read_metric(conn: Any, p: Principal, m: dict[str, Any]) -> bool:
     return evaluate_metric_read_permission(p, m, g)
 
 
+def _readable_metric_ids(conn: Any, p: Principal, metric_ids: set[str]) -> set[str]:
+    """一次读取指标及当前用户的授权，按与执行指标相同的规则复核历史结果。"""
+    if not metric_ids:
+        return set()
+    rows = fetch_all(
+        conn,
+        "SELECT m.id,m.tenant_id,m.node_id,m.scope,m.level,m.state,g.effect FROM metrics m "
+        "LEFT JOIN metric_grants g ON (g.tenant_id,g.metric_id)=(m.tenant_id,m.id) AND g.user_id=%s "
+        "WHERE m.tenant_id=%s AND m.id=ANY(%s)",
+        (p.id, p.tenant_id, sorted(metric_ids)),
+    )
+    return {m["id"] for m in rows if evaluate_metric_read_permission(p, m, {"effect": m["effect"]})}
+
+
 def source_valid(conn: Any, p: Principal, source: dict[str, Any], external: bool = False) -> bool:
-    """实时核验单条引用来源（文档版本/ACL 或业务快照）是否仍对主体有效。
+    """实时核验单条引用来源的文档版本、指标权限或业务快照。
 
     Args:
         conn: 数据库连接。
@@ -150,6 +163,14 @@ def source_valid(conn: Any, p: Principal, source: dict[str, Any], external: bool
     Returns:
         来源仍然有效且主体有权限时返回 True。
     """
+    if source.get("kind") == "metric":
+        metric_id = source.get("metric_id")
+        return bool(
+            not external
+            and source.get("tenant_id") == p.tenant_id
+            and metric_id
+            and metric_id in _readable_metric_ids(conn, p, {metric_id})
+        )
     if source.get("kind") == "business":
         if (
             source.get("tenant_id") != p.tenant_id
@@ -185,7 +206,7 @@ def batch_sources_validity(
     jobs: list[dict[str, Any]],
     external: bool = False,
 ) -> dict[str, bool]:
-    """批量预取文档与授权字典，一次性校验多条任务的引用来源有效性（消除 N+1 查询）。
+    """批量读取文档、指标和用户授权，检验每条任务引用的来源。
 
     Args:
         conn: 数据库连接。
@@ -226,10 +247,20 @@ def batch_sources_validity(
             docs_by_id[did] = d
             readable_by_id[did] = evaluate_read_permission(p, d, grants_by_doc.get(did))
 
+    metric_ids = {
+        s["metric_id"] for job in jobs for s in (job.get("sources") or [])
+        if s.get("kind") == "metric" and s.get("tenant_id") == p.tenant_id and s.get("metric_id")
+    }
+    readable_metrics = set() if external else _readable_metric_ids(conn, p, metric_ids)
     validity: dict[str, bool] = {}
     for j in jobs:
         ok = True
         for s in j.get("sources") or []:
+            if s.get("kind") == "metric":
+                if s.get("tenant_id") != p.tenant_id or s.get("metric_id") not in readable_metrics:
+                    ok = False
+                    break
+                continue
             if s.get("kind") == "business":
                 if not source_valid(conn, p, s, external):
                     ok = False

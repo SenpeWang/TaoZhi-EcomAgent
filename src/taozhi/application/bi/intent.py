@@ -55,14 +55,20 @@ def _intent_of(conn: Any, p: Any, m: dict, q: str) -> dict:
     }
 
 
+def may_request_metric(question: str) -> bool:
+    """在打开指标数据库连接前判定是否需要进行语义层匹配。"""
+    return bool(_DATA_KEYWORDS.search(question))
+
+
 def detect_data_intent(conn: Any, p: Any, q: str) -> dict | None:
     """识别问数意图：别名强匹配（含越权检测）→ 词重叠弱匹配（阈值门控）。"""
-    if not _DATA_KEYWORDS.search(q):
+    if not may_request_metric(q):
         return None
     all_m = list_published_metrics(conn, p.tenant_id)
     if not all_m:
         return None
-    visible_ids = {m["id"] for m in metrics_mod.list_metrics(conn, p)}
+    visible = metrics_mod.list_metrics(conn, p)
+    visible_ids = {m["id"] for m in visible}
     strong = []
     for m in all_m:
         names = [m["name"]] + [a for a in (m["aliases"] or []) if a]
@@ -81,7 +87,7 @@ def detect_data_intent(conn: Any, p: Any, q: str) -> dict | None:
 
     terms = set(tokenize_zh(q))
     scored = []
-    for m in metrics_mod.list_metrics(conn, p):
+    for m in visible:
         toks = set(tokenize_zh(m["metric_key"] + " " + m["name"] + " " + " ".join(m["aliases"]) + " " + m["description"]))
         score = len(terms & toks) / max(1, len(terms))
         if score >= 0.4:

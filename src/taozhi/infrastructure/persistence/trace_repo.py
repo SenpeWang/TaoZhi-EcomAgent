@@ -139,6 +139,14 @@ def list_span_runs(
             SELECT tenant_id,job_id,run_version,trace_id FROM task_spans
             WHERE {' AND '.join(filters)}
             GROUP BY tenant_id,job_id,run_version,trace_id ORDER BY run_version DESC,trace_id DESC LIMIT %s
+        ), diagnosis AS (
+            SELECT run_version,trace_id,jsonb_object_agg(grouped.category,grouped.entries) AS counts
+            FROM (
+                SELECT run_version,trace_id,entry->>'category' AS category,COUNT(*) AS entries
+                FROM page JOIN task_spans USING (tenant_id,job_id,run_version,trace_id)
+                CROSS JOIN LATERAL jsonb_array_elements(diagnostics) AS entry
+                GROUP BY run_version,trace_id,entry->>'category'
+            ) grouped GROUP BY run_version,trace_id
         ), by_category AS (
             SELECT run_version,trace_id,kind,{_ACTIVITY_CATEGORY} AS category, COUNT(*) AS nodes, MIN(started_at) AS started_at,
                 MAX(ended_at) FILTER (WHERE parent_span_id IS NULL) AS root_end,
@@ -158,8 +166,10 @@ def list_span_runs(
             MAX(root_status) AS status,SUM(nodes) AS span_count,jsonb_object_agg(kind,kind_nodes) AS kind_counts,
             jsonb_object_agg(category,nodes) AS category_counts,
             SUM(errors) AS failed_count,COALESCE(SUM(prompt_tokens),0) AS input_tokens,
-            COALESCE(SUM(completion_tokens),0) AS output_tokens
-        FROM totals GROUP BY run_version,trace_id ORDER BY run_version DESC,trace_id DESC
+            COALESCE(SUM(completion_tokens),0) AS output_tokens,
+            COALESCE(diagnosis.counts,'{{}}'::jsonb) AS diagnostic_counts
+        FROM totals LEFT JOIN diagnosis USING (run_version,trace_id)
+        GROUP BY run_version,trace_id,diagnosis.counts ORDER BY run_version DESC,trace_id DESC
     """, (*params, limit, Jsonb(CHAIN_CATEGORY_BY_NAME)))
 
 
@@ -171,7 +181,7 @@ def list_spans(
     params = (tenant_id, task_id, trace_id, after_id)
     return fetch_all(
         conn, "SELECT id, trace_id, span_id, parent_span_id, name, kind, started_at, ended_at, "
-        "duration_ms, status, error_type, attributes FROM task_spans "
+        "duration_ms, status, error_type, attributes, diagnostics FROM task_spans "
         f"WHERE tenant_id=%s AND job_id=%s AND trace_id=%s AND id>%s{kind_filter} ORDER BY id LIMIT %s",
         (*params, kind, limit) if kind else (*params, limit),
     )
@@ -179,7 +189,7 @@ def list_spans(
 
 def list_activities(
     conn: Any, tenant_id: str, task_id: str, trace_id: str, run_version: int, *,
-    category: str | None, key_steps: tuple[str, ...], after: tuple[datetime, int] | None, limit: int,
+    category: str | None, diagnostic: str | None, key_steps: tuple[str, ...], after: tuple[datetime, int] | None, limit: int,
 ) -> list[dict]:
     """按实际开始时刻取一页，并在同一快照中从完整父链解析每条活动的执行者。"""
     filters = ["tenant_id=%s", "job_id=%s", "trace_id=%s", "run_version=%s"]
@@ -187,23 +197,26 @@ def list_activities(
     if category:
         filters.append(f"({_ACTIVITY_CATEGORY})=%s")
         params.extend([Jsonb(CHAIN_CATEGORY_BY_NAME), category])
-    else:
+    elif not diagnostic:
         filters.append("(kind IN ('AGENT','TOOL','LLM','RETRIEVER','EMBEDDING','RERANKER') "
-                       "OR (kind='CHAIN' AND name=ANY(%s)))")
+                       "OR diagnostics <> '[]'::jsonb OR (kind='CHAIN' AND name=ANY(%s)))")
         params.append(list(key_steps))
+    if diagnostic == "all":
+        filters.append("diagnostics <> '[]'::jsonb")
+    elif diagnostic:
+        filters.append("diagnostics @> %s")
+        params.append(Jsonb([{"category": diagnostic}]))
     if after:
         filters.append("(started_at,id)>(%s,%s)")
         params.extend(after)
 
-    # 按页找起点后才展开祖先。找到 Agent 即停止；没有 Agent 时必须到达根才可确认工作流归属。
-    # visited 同时提供深度与环检测，损坏或尚未补齐的父链不会误指另一个并行 Agent。
     return fetch_all(conn, f"""
         WITH page AS (
             SELECT * FROM task_spans WHERE {' AND '.join(filters)}
             ORDER BY started_at,id LIMIT %s
         )
         SELECT page.id,page.trace_id,page.span_id,page.parent_span_id,page.name,page.kind,
-            page.started_at,page.ended_at,page.duration_ms,page.status,page.error_type,page.attributes,
+            page.started_at,page.ended_at,page.duration_ms,page.status,page.error_type,page.attributes,page.diagnostics,
             actor.span_id AS actor_span_id,actor.kind AS actor_kind,actor.name AS actor_operation,
             actor.role AS actor_role
         FROM page LEFT JOIN LATERAL (

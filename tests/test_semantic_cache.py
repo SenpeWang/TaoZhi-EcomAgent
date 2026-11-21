@@ -10,11 +10,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import numpy as np  # noqa: E402
-import pytest  # noqa: E402
+import numpy as np
+import pytest
 
-from taozhi.knowledge import semantic_cache as sc  # noqa: E402
-from taozhi.knowledge.semantic_cache import SemanticCache  # noqa: E402
+from taozhi.knowledge import semantic_cache as sc
+from taozhi.knowledge.semantic_cache import SemanticCache
 
 PHONE = "13812345678"
 RAW_ANSWER = f"客户联系电话 {PHONE}，可以正常退货。"
@@ -41,6 +41,27 @@ def test_staff_hitting_boss_entry_gets_redacted(cache):
     assert PHONE not in hit["answer"]
     assert PHONE not in hit["citations"][0]["quote"]
     assert "上海市浦东新区" not in hit["citations"][0]["quote"]
+
+
+@pytest.mark.parametrize("sources", [
+    [],
+    [{"kind": "metric", "metric_id": "m1"}],
+    [{"kind": "document", "document_id": "d1"}, {"kind": "business", "identifier": "order1"}],
+])
+def test_shared_cache_accepts_only_document_evidence(cache, sources):
+    """任何实时数据依赖都使整份答案无法成为跨问题的共享候选。"""
+    assert not cache.put("t1", "当前状态", "只对当前请求有效", [], sources)
+    assert cache.get("t1", "当前状态") is None
+
+
+def test_embedding_dimension_change_replaces_incompatible_entries(cache, monkeypatch):
+    """编码服务切换向量维度后以新样本恢复命中，禁止拼接不同维度的答案。"""
+    sources = [{"kind": "document", "document_id": "d1"}]
+    assert cache.put("t1", "旧问题", "旧答案", [], sources)
+    monkeypatch.setattr(sc, "encode_query", lambda q: np.ones((1, 32), dtype="float32"))
+    assert cache.get("t1", "新问题") is None
+    assert cache.put("t1", "新问题", "新答案", [], sources)
+    assert cache.get("t1", "新问题")["answer"] == "新答案"
 
 
 def test_boss_gets_own_entry_untouched(cache):

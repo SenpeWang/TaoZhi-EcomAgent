@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """评测基准运行器：固定基准集 → 结构化分数 → 与基线对比输出增减。
 
 六项核心指标（每层跑完统一汇总，见结果 JSON 的 six_metrics）：
@@ -26,6 +25,7 @@
 供 `evals/sync_phoenix.py --follow` 增量推 Phoenix 实时观看。
 """
 import argparse
+from contextlib import closing
 import json
 import os
 import re
@@ -46,18 +46,18 @@ BASELINE = EVALS / "baseline.json"
 MANIFEST = EVALS / "datasets/generated/latest/manifest.json"
 LIVE = OUT_DIR / "live.jsonl"
 
-import metrics  # noqa: E402
+import metrics
 
-import httpx  # noqa: E402
+import httpx
 
-from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
+from pydantic import BaseModel, ConfigDict, Field
 
-from taozhi.config import Config, load_config  # noqa: E402
-from taozhi.ai import observability as obs_metrics  # noqa: E402
-from taozhi.knowledge.db import database_connection, fetch_all, fetch_one  # noqa: E402
-from taozhi.infrastructure.persistence.access_repo import load_principal  # noqa: E402
-from evals.dataset import schema as dataset_schema  # noqa: E402
-from evals.dataset.seed import EVAL_PASSWORD  # noqa: E402
+from taozhi.config import Config, load_config
+from taozhi.ai import observability as obs_metrics
+from taozhi.knowledge.db import database_connection, fetch_all, fetch_one
+from taozhi.infrastructure.persistence.access_repo import load_principal
+from evals.dataset import schema as dataset_schema
+from evals.dataset.seed import EVAL_PASSWORD
 
 
 def resolve_eval_node(conn):
@@ -809,7 +809,6 @@ def phase_behavior():
         node = resolve_eval_node(c)
     from taozhi.ai.client import LLMClient, ModelTier
 
-    judge_client = LLMClient()
     judge_lock = threading.Lock()
     judge_cap = _judge_quote_cap()
     canaries = load_canaries()
@@ -995,21 +994,22 @@ def phase_behavior():
     first_round_outputs: list[dict] = []
     all_outputs: list[dict] = []
     wall_t0 = time.perf_counter()
-    for r_idx in range(rounds):
-        if workers > 1:
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                round_out = list(pool.map(_run_case, chosen))
-        else:
-            round_out = [_run_case(c) for c in chosen]
-        for out_item in round_out:
-            cid = out_item["case"]["case_id"]
-            if out_item.get("record"):
-                all_rounds_runs[cid].append(bool(out_item["record"].get("pass")))
-                if r_idx == 0:
-                    live_emit({"type": "behavior", "detail": out_item["record"]})
-        if r_idx == 0:
-            first_round_outputs = round_out
-        all_outputs.extend(round_out)
+    with closing(LLMClient()) as judge_client:
+        for r_idx in range(rounds):
+            if workers > 1:
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    round_out = list(pool.map(_run_case, chosen))
+            else:
+                round_out = [_run_case(c) for c in chosen]
+            for out_item in round_out:
+                cid = out_item["case"]["case_id"]
+                if out_item.get("record"):
+                    all_rounds_runs[cid].append(bool(out_item["record"].get("pass")))
+                    if r_idx == 0:
+                        live_emit({"type": "behavior", "detail": out_item["record"]})
+            if r_idx == 0:
+                first_round_outputs = round_out
+            all_outputs.extend(round_out)
     wall_s = time.perf_counter() - wall_t0
 
     judge_stats = {"grounded": 0, "relevant": 0, "abstain": 0, "judge_n": 0}

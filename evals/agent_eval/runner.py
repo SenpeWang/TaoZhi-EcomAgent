@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 import time
@@ -45,7 +44,7 @@ def run_agent_evaluations(
     sha = git_sha()
 
     print("=" * 80)
-    print(f"🤖 淘智真·自治多智能体系统科学评测 (Piagent 规范移植版)")
+    print("🤖 淘智真·自治多智能体系统科学评测 (Piagent 规范移植版)")
     print(f"时间: {time.strftime('%Y-%m-%d %H:%M:%S')} | Git SHA: {sha} | 用例总数: {len(cases)}")
     print("=" * 80)
 

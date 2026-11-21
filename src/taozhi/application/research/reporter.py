@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import json
-import logging
 import time
 from collections.abc import Iterator
 from typing import Any, Dict, List
 
-_LOG = logging.getLogger(__name__)
 
 from taozhi.ai.client import LLMClient, ModelTier
 from taozhi.ai.router import route_audit_scope
@@ -16,7 +14,7 @@ from taozhi.core.agent.context import ArtifactMetadata, SubagentContext
 from taozhi.core.memory.service import get_memory_store
 from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.research import StopReason
-from taozhi.observability.tracing import node_span
+from taozhi.observability.tracing import node_span, record_diagnostic
 from .hooks import attach_route_delta, emit_progress, get_hooks, make_failover_emitter
 from .schemas import AuditableAgentTransition, AutonomousAgentState, EvidenceRecord, active_evidence
 
@@ -105,6 +103,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
         except OutputDeliveryError:
             raise
         except Exception as exc:
+            record_diagnostic("workflow.report", "fallback", exc)
             parts = []
             for section in _evidence_report(keyword, active_ev, type(exc).__name__):
                 parts.append(section)
@@ -160,7 +159,7 @@ def final_persistence_node(state: AutonomousAgentState) -> Dict[str, Any]:
         if keyword and report:
             mem.remember_fact(subject=keyword, predicate="全景调研报告摘要", object_val=report[:250], confidence=0.95)
     except Exception as exc:
-        _LOG.warning("沉淀终态调研记忆事实失败 (%s): %s", keyword, exc)
+        record_diagnostic("storage.memory", "skipped", exc)
 
     final_status = "TIMEOUT" if state.get("stop_reason") == StopReason.TIMEOUT.value and not report else "COMPLETED"
     return {"system_status": final_status}

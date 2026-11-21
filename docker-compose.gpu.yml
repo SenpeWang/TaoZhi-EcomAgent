@@ -1,4 +1,3 @@
-# GPU 直通叠加配置（需宿主机已安装 nvidia-container-toolkit）
 
 services:
   embedding:

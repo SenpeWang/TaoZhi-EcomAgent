@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """在企业正式库创建/补齐标准角色真实账号（员工 / 组长 / 管理员；老板由 manage_database.py bootstrap-owner 初始化）。
 
 与已删除的 seed_demo 区别：
@@ -21,10 +20,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from taozhi.config import load_config, resolve_runtime_dir  # noqa: E402
-from taozhi.knowledge.db import database_connection, fetch_one  # noqa: E402
-from taozhi.domain.passwords import hash_password  # noqa: E402
-from taozhi.infrastructure.persistence.job_repo import generate_id  # noqa: E402
+from taozhi.config import load_config, resolve_runtime_dir
+from taozhi.knowledge.db import database_connection, fetch_one
+from taozhi.domain.passwords import hash_password
+from taozhi.infrastructure.persistence.job_repo import generate_id
 
 BLUEPRINT = [
     ("admin", "系统管理员", "admin", "company", True),

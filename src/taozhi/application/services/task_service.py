@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from taozhi.application.bi import build_bi_workflow, detect_data_intent
+from taozhi.application.bi.intent import may_request_metric
 from taozhi.application.common.task_guard import empty_token_usage, validate_task_execution
 from taozhi.application.rag.workflow import build_rag_workflow
 from taozhi.application.research.graph import build_autonomous_agent_graph, execute_autonomous_agents
@@ -20,6 +21,7 @@ from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
+from taozhi.domain.question_context import recalls_previous_evidence, refers_to_previous_question, requested_business_resources
 from taozhi.infrastructure.persistence import bi_repo, job_repo
 from taozhi.infrastructure.persistence.access_repo import (
     audit,
@@ -33,7 +35,7 @@ from taozhi.knowledge.business import lookup as business_lookup
 from taozhi.knowledge.db import autocommit_connection, database_connection, fetch_one
 from taozhi.knowledge.retriever import search_documents
 from taozhi.knowledge.semantic_cache import get_semantic_cache
-from taozhi.observability.tracing import current_trace_id, node_span
+from taozhi.observability.tracing import current_trace_id, node_span, record_diagnostic
 
 _LOG = logging.getLogger("taozhi.application.task_service")
 _CHECKPOINTER_SETUP_LOCK = threading.Lock()
@@ -167,7 +169,7 @@ def steer_task(p: Principal, task_id: str, *, text: str, request_id: str = "") -
             if steer_id not in seen_ids:
                 graph.update_state(cfg, {"steering_inbox": [text], "steering_event_ids": [steer_id]})
     except Exception as exc:
-        _LOG.warning("LangGraph 检查点即时注入失败（已由 DB 队列兜底）: %s", exc)
+        _LOG.warning("检查点即时注入失败，使用数据库队列（%s）", type(exc).__name__)
     return {"message": "中途干预指令已发送并生效", "task_id": task_id, "input": text, "request_id": steer_id}
 
 
@@ -535,20 +537,30 @@ def _build_question_result(
 
 def process_question_job(job: dict[str, Any]) -> None:
     """按意图分发至独立工作流：ChatBI 受控问数（application/bi）或知识库 RAG（application/rag）。"""
-    cache = get_semantic_cache()
-    queue_wait_ms = _diff_ms(job.get("created_at"), job.get("started_at"))
-    if _try_answer_from_semantic_cache(job, cache, queue_wait_ms):
-        return
-
+    question = job["question"]
+    payload = job["payload"]
+    business = requested_business_resources(question, payload)
+    cache_allowed = not (
+        business
+        or recalls_previous_evidence(question, job.get("conversation_id") or "")
+        or refers_to_previous_question(question)
+    )
     data_intent: dict[str, Any] | None = None
-    try:
-        with database_connection() as c:
-            p_init = load_principal(c, job["owner_id"])
-            data_intent = detect_data_intent(c, p_init, job["question"])
-    except Exception:
-        data_intent = None
+    if not any(business.values()) and may_request_metric(question):
+        try:
+            with database_connection() as c:
+                p_init = load_principal(c, job["owner_id"])
+                data_intent = detect_data_intent(c, p_init, question)
+        except Exception as exc:
+            cache_allowed = False
+            record_diagnostic("workflow.intent", "fallback", exc)
 
     is_bi = bool(data_intent)
+    cache = get_semantic_cache() if cache_allowed and not is_bi else None
+    queue_wait_ms = _diff_ms(job.get("created_at"), job.get("started_at"))
+    if cache is not None and _try_answer_from_semantic_cache(job, cache, queue_wait_ms):
+        return
+
     with _postgres_checkpointer() as saver:
         if is_bi:
             flow = build_bi_workflow(saver)
@@ -572,7 +584,7 @@ def process_question_job(job: dict[str, Any]) -> None:
         if not row or row["state"] != "running" or row["run_version"] != job["run_version"] or row["cancel_requested"]:
             raise Denied("任务执行版本已失效", "STALE", 409)
         p = load_principal(c, row["owner_id"])
-        sources = [] if is_bi else state["sources"]
+        sources = state["sources"]
         if p.version != row["owner_version"] or not sources_valid(c, p, sources):
             raise Denied("人员或来源权限已变化", "SOURCE_CHANGED", 409)
         e2e_ms = _diff_ms(row.get("created_at") or job.get("created_at"))
@@ -603,11 +615,12 @@ def process_question_job(job: dict[str, Any]) -> None:
             sources=sources,
             input_level=state["input_level"],
         )
-        epoch = _tenant_epoch(c, p.tenant_id)
+        if cache is not None:
+            epoch = _tenant_epoch(c, p.tenant_id)
         if status == "completed":
             job_repo.delete_checkpoint_threads(c, [f"{job['id']}:{job['run_version']}"])
 
-    if not is_bi and not state.get("hard_block") and not state.get("review") and state.get("answer"):
+    if cache is not None and not state.get("hard_block") and not state.get("review") and state.get("answer"):
         try:
             cache.put(
                 job["tenant_id"],
@@ -620,7 +633,7 @@ def process_question_job(job: dict[str, Any]) -> None:
                 epoch=epoch,
             )
         except Exception as exc:
-            _LOG.warning("写入问答语义缓存失败 (%s): %s", job["id"], exc)
+            record_diagnostic("storage.write", "skipped", exc)
 
 
 def process_research_job(job: dict[str, Any]) -> None:

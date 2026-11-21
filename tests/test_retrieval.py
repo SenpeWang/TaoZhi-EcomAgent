@@ -1,4 +1,3 @@
-import pytest
 
 
 import numpy as np
@@ -12,6 +11,7 @@ class _Cfg:
                  max_chunks_per_doc=3, rerank_min_score=0.05, rerank_relative=0.15,
                  quote_max_chars=1200, ann_max_distance=0.45):
         self.rerank_enabled = enabled
+        self.es_enabled = True
         self.rerank_candidates = candidates
         self.rerank_chars = rerank_chars
         self.max_chunks_per_doc = max_chunks_per_doc
@@ -201,8 +201,7 @@ def test_search_documents_fast_path_runs_hyde_pg_ann_and_title_rerank(monkeypatc
     ann_calls = []
 
     monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg())
-    monkeypatch.setattr(ent_retriever, "can_read", lambda conn, p, d: True)
-    monkeypatch.setattr(es_index, "available", lambda: True)
+    monkeypatch.setattr(ent_retriever, "readable_published_documents", lambda conn, p, prefix: {"d1": docs[0]})
     monkeypatch.setattr(es_index, "search_bm25", lambda tid, allowed, q: {})
     monkeypatch.setattr(ent_embedding, "available", lambda: True)
     monkeypatch.setattr(ent_embedding, "encode_query", lambda q: np.ones((1, 512), dtype="float32"))
@@ -214,8 +213,6 @@ def test_search_documents_fast_path_runs_hyde_pg_ann_and_title_rerank(monkeypatc
     monkeypatch.setattr(ent_retriever, "_pg_ann", _fake_pg_ann)
 
     def _fake_fetch_all(conn, sql, params=()):
-        if "FROM documents" in sql:
-            return docs
         if "FROM chunks" in sql:
             return chunks
         return []
@@ -272,3 +269,17 @@ def test_entity_diversity_prefers_title_dedicated_documents(monkeypatch):
     monkeypatch.setattr(ent_embedding, "rerank", lambda q, texts: [0.99, 0.85, 0.84])
     out = ent_retriever._finalize("iPhone 15 贴 C5 和 C1 怎么选？", chunks, np.array([0.04, 0.03, 0.02]), 2, allowed, _P())
     assert {r["document_id"] for r in out} == {"d_c1", "d_c5"}
+
+
+def test_chunk_page_citations_and_numeric_release_order():
+    """相同段落在多页分别保留页码，知识库多段版本按整数分量比较。"""
+    from taozhi.domain.ranking import apply_recency_tiebreak, split_document_chunks
+
+    chunks = split_document_chunks([(1, "本条有效"), (2, "有效")], "doc", 1, 128, 16)
+    assert [(chunk["page"], chunk["text"]) for chunk in chunks] == [(1, "本条有效"), (2, "有效")]
+    versions = [
+        {"document_id": "previous", "doc_title": "保修政策 V1.9.2", "text": "旧条款"},
+        {"document_id": "current", "doc_title": "保修政策 V1.10.12", "text": "新条款"},
+    ]
+    ranked = apply_recency_tiebreak("目前执行版本", [(0, 0.9), (1, 0.88)], versions, {}, 0.08)
+    assert [index for index, _ in ranked] == [1, 0]

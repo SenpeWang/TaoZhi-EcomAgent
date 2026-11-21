@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional
 import httpx
 from opentelemetry import context as otel_context
 
+from taozhi.domain.trace_diagnostic import CATALOG
 from .truncate import truncate_text
 
 _LOG = logging.getLogger(__name__)
@@ -27,6 +28,22 @@ ToolStatus = Literal["ok", "empty", "error", "timeout", "cancelled"]
 
 _POOL_LOCK = threading.Lock()
 _TOOL_POOL: Optional[ThreadPoolExecutor] = None
+
+
+class ToolInvocationError(RuntimeError):
+    """采集通道不可用或协议错误，仅携带可展示的内部故障码。"""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(CATALOG[code][1])
+
+
+def result_items(payload: object, field: str, limit: int) -> list:
+    """读取真实采集结果，区分有效的零条记录和格式异常。"""
+    items = payload.get(field) if isinstance(payload, dict) else None
+    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+        raise ToolInvocationError("tool.invalid_response")
+    return items[:limit]
 
 
 def _get_tool_pool() -> ThreadPoolExecutor:

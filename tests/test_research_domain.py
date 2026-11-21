@@ -239,8 +239,8 @@ def test_parallel_orchestrator_and_react_query_refinement():
     mock_llm.chat.return_value = "# 便携充气泵市场调研报告\n\n## 1. 市场需求与痛点\n散热噪音突出，零售 129 元；1688 出厂 38 元。"
 
     with _patch_llm(mock_llm):
-        with patch("taozhi.infrastructure.mcp.server.search_web", side_effect=fake_search_web):
-            with patch("taozhi.infrastructure.mcp.server.search_1688_wholesale", return_value=[{"title": "东莞充气泵源头厂", "price": 38}]):
+        with patch("taozhi.core.tools.search_web", side_effect=fake_search_web):
+            with patch("taozhi.core.tools.search_1688_wholesale", return_value=[{"title": "东莞充气泵源头厂", "price": 38}]):
                 res = execute_autonomous_agents(
                     keyword="便携充气泵",
                     user_query="调研便携充气泵全网差评与1688出厂价",
@@ -270,7 +270,7 @@ def test_live_cancel_and_mid_flight_steering():
     ]
     cancel_checks = iter([False, True])
     with _patch_llm(mock_llm_cancel):
-        with patch("taozhi.infrastructure.mcp.server.search_web", return_value=[{"title": "耳机", "snippet": "热销"}]):
+        with patch("taozhi.core.tools.search_web", return_value=[{"title": "耳机", "snippet": "热销"}]):
             res_cancel = execute_autonomous_agents(
                 keyword="无线耳机",
                 check_cancel_fn=lambda: next(cancel_checks, True),
@@ -346,14 +346,14 @@ def test_idempotent_steering_deduplicates_by_event_id():
         "steering_inbox": ["初始指令"],
         "steering_event_ids": ["req_0"],
     }
-    delta_texts, delta_ids, all_inbox = _collect_new_steering(state, hooks)  # type: ignore[arg-type]
+    delta_texts, delta_ids, all_inbox = _collect_new_steering(state, hooks)
     assert delta_ids == ["req_1", "req_2"]
     assert delta_texts == ["核查1688底价", "核查1688底价"]
     assert all_inbox == ["初始指令", "核查1688底价", "核查1688底价"]
 
     state["steering_inbox"].extend(delta_texts)
     state["steering_event_ids"].extend(delta_ids)
-    delta_texts_2, delta_ids_2, _ = _collect_new_steering(state, hooks)  # type: ignore[arg-type]
+    delta_texts_2, delta_ids_2, _ = _collect_new_steering(state, hooks)
     assert delta_texts_2 == []
     assert delta_ids_2 == []
 
@@ -371,7 +371,7 @@ def test_wall_clock_started_at_triggers_timeout_across_processes():
         "steering_inbox": [],
         "steering_event_ids": [],
     }
-    out = lead_orchestrator_node(state)  # type: ignore[arg-type]
+    out = lead_orchestrator_node(state)
     assert out["stop_reason"] == StopReason.TIMEOUT.value
     assert out["next_action"] == "final_node"
 
@@ -490,7 +490,7 @@ def test_sensenova_router_failover_circuit_and_compliance():
         llm_circuit_cooldown_auth=600,
     )
 
-    eps = build_sensenova_endpoints(fake_settings)  # type: ignore[arg-type]
+    eps = build_sensenova_endpoints(fake_settings)
     assert [e.endpoint_id for e in eps] == [
         "sensenova_overseas",
         "dots",
@@ -508,7 +508,7 @@ def test_sensenova_router_failover_circuit_and_compliance():
     ledger = []
     hooks = _RuntimeHooks(model_call_fn=lambda role, event: ledger.append((role, event)))
     observer = hooks.model_call_observer("research.orchestrator")
-    client = LLMClient(settings=fake_settings, allow_overseas=True, registry=reg, on_attempt=observer)  # type: ignore[arg-type]
+    client = LLMClient(settings=fake_settings, allow_overseas=True, registry=reg, on_attempt=observer)
 
     called_urls = []
 
@@ -543,6 +543,9 @@ def test_sensenova_router_failover_circuit_and_compliance():
 
     calls = [s for s in spans if s["kind"] == "LLM" and s["ended_at"] is not None]
     assert [s["status"] for s in calls] == ["error", "error", "ok", "ok"]
+    assert [s["diagnostics"][0]["outcome"] for s in calls[:2]] == ["fallback", "fallback"]
+    assert calls[0]["diagnostics"][0]["category"] == "model_api"
+    assert calls[2]["diagnostics"] == []
     assert calls[-1]["attributes"]["llm.token_count.prompt"] == 100
     assert calls[-1]["attributes"]["llm.token_count.completion"] == 50
     assert calls[-1]["attributes"]["llm.token_count.total"] == 150
@@ -565,7 +568,7 @@ def test_sensenova_router_failover_circuit_and_compliance():
     assert any(e["endpoint_id"] == "sensenova_overseas" and e["reason"] == "rate_limit" for e in events)
     assert any(e["endpoint_id"] == "sensenova_cn_primary" and e["outcome"] == "ok" and e["failover"] is True for e in events)
 
-    strict_client = LLMClient(settings=fake_settings, allow_overseas=False, registry=reg)  # type: ignore[arg-type]
+    strict_client = LLMClient(settings=fake_settings, allow_overseas=False, registry=reg)
     strict_calls = []
 
     def _make_failing_domestic(ep):
@@ -626,7 +629,7 @@ def test_checkpoint_cross_version_resume_hydrates_evidence_and_route_history():
     mock_llm_v1.chat.return_value = "# V1 调研报告"
 
     with _patch_llm(mock_llm_v1):
-        with patch("taozhi.infrastructure.mcp.server.search_web", return_value=[{"title": "测评", "snippet": "散热好"}]):
+        with patch("taozhi.core.tools.search_web", return_value=[{"title": "测评", "snippet": "散热好"}]):
             res_v1 = execute_autonomous_agents(
                 keyword="无线充电器",
                 job_id="job_ckpt_resume_1",
@@ -720,7 +723,7 @@ def test_llm_client_respects_explicit_small_max_tokens():
         llm_circuit_cooldown_transient=25,
     )
     bound_budgets = []
-    client = LLMClient(settings=fake_settings, allow_overseas=False, registry=CircuitBreakerRegistry())  # type: ignore[arg-type]
+    client = LLMClient(settings=fake_settings, allow_overseas=False, registry=CircuitBreakerRegistry())
 
     def _fake_client(_ep):
         raw = MagicMock()

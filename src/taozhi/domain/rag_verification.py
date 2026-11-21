@@ -6,7 +6,6 @@ import re
 from collections.abc import Iterable, Iterator
 from typing import Dict, Tuple
 
-# 意图分派与界面展示共用同一份角色定义。
 SPECIALIST_AGENTS: Dict[str, Tuple[str, str]] = {
     "product": ("商品规格分析师", "核对型号、尺寸、材料、批次和参数，不混用不同型号。"),
     "compatibility": ("产品兼容性分析师", "死磕手机完整机型、屏幕形态、微缝公差与互斥死角，不推测兼容。"),

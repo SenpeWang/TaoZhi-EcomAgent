@@ -5,6 +5,9 @@ import logging
 import secrets
 import signal
 import threading
+from contextlib import nullcontext
+
+from opentelemetry import context as otel_context
 
 from taozhi.application.services.document_service import process_ingestion_job
 from taozhi.application.services.task_service import process_question_job, process_research_job
@@ -13,19 +16,20 @@ from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence import document_repo, job_repo
 from taozhi.knowledge import queue
 from taozhi.knowledge.db import close_pools, database_connection
-from taozhi.observability.tracing import flush_spans, job_trace, setup_tracing
+from taozhi.observability import flush_spans, job_trace, record_diagnostic, setup_tracing
 
 _LOG = logging.getLogger(__name__)
 STOP = threading.Event()
 WORKER = "worker_" + secrets.token_hex(8)
 
 
-def renew_job_lease(job: dict, done: threading.Event) -> None:
+def renew_job_lease(job: dict, done: threading.Event, parent_context) -> None:
     """周期续约运行中任务租约与 Worker 心跳。
 
     Args:
         job: 正在执行的任务记录字典。
         done: 任务结束通知事件，置位后退出续约循环。
+        parent_context: 当前执行的 OTel 上下文。
     """
     wid = job.get("worker_id") or WORKER
     lease_seconds = load_config().lease_seconds
@@ -34,7 +38,11 @@ def renew_job_lease(job: dict, done: threading.Event) -> None:
             with database_connection() as c:
                 job_repo.renew_lease_once(c, job["id"], job["run_version"], wid, lease_seconds)
         except Exception as exc:
-            _LOG.warning("续约任务租约失败 (%s): %s", job.get("id"), exc)
+            token = otel_context.attach(parent_context)
+            try:
+                record_diagnostic("workflow.lease", "retry", exc)
+            finally:
+                otel_context.detach(token)
 
 
 def heartbeat() -> None:
@@ -46,17 +54,23 @@ def heartbeat() -> None:
 def run_job(job: dict) -> None:
     """在独立租约保护下路由执行资料解析、自主调研或问答任务。"""
     done = threading.Event()
-    thread = threading.Thread(target=renew_job_lease, args=(job, done), daemon=True)
-    thread.start()
+    scope = nullcontext() if job["kind"] == "ingest" else job_trace(
+        job["tenant_id"], job["id"], job["run_version"], f"task.{job['kind']}",
+    )
     try:
-        if job["kind"] == "ingest":
-            process_ingestion_job(job)
-        else:
-            with job_trace(job["tenant_id"], job["id"], job["run_version"], f"task.{job['kind']}"):
-                if job["kind"] == "research":
+        with scope:
+            thread = threading.Thread(target=renew_job_lease, args=(job, done, otel_context.get_current()), daemon=True)
+            thread.start()
+            try:
+                if job["kind"] == "ingest":
+                    process_ingestion_job(job)
+                elif job["kind"] == "research":
                     process_research_job(job)
                 else:
                     process_question_job(job)
+            finally:
+                done.set()
+                thread.join(timeout=2)
     except Exception as exc:
         message = exc.message if isinstance(exc, Denied) else "任务处理失败，请重试或联系管理员"
         with database_connection() as c:
@@ -68,10 +82,7 @@ def run_job(job: dict) -> None:
                     document_repo.mark_document_ingest_failed(
                         c, job["payload"]["document_id"], job["payload"]["version"], message
                     )
-        _LOG.exception("任务执行失败 (%s, %s)", job["id"], type(exc).__name__)
-    finally:
-        done.set()
-        thread.join(timeout=2)
+        _LOG.error("任务执行失败（任务=%s，异常类型=%s）", job["id"], type(exc).__name__)
 
 
 def process_next_job() -> bool:
@@ -124,7 +135,7 @@ def main() -> None:
                 if not process_next_job():
                     STOP.wait(idle)
             except Exception as exc:
-                _LOG.warning("任务进程正在重连 (%s): %s", type(exc).__name__, exc)
+                _LOG.warning("任务进程正在重连（%s）", type(exc).__name__)
                 STOP.wait(3)
     finally:
         STOP.set()

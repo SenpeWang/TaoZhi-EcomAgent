@@ -96,3 +96,4 @@ def test_bi_workflow_executes_independently_end_to_end():
     assert "销售额" in final_state["answer"]
     assert "12800" in final_state["answer"]
     assert final_state["data_result"]["metric_key"] == "gmv"
+    assert final_state["sources"] == [{"kind": "metric", "metric_id": "m_gmv", "tenant_id": "t1"}]

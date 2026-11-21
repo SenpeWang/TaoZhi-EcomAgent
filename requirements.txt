@@ -1,13 +1,8 @@
-# 手机配件企业工作台 —— 项目依赖声明（安装已验证版本使用 requirements.lock.txt）
-# 安装： pip install -r requirements.txt
-
-# ─── Agent 编排（LangGraph 1.0 / LangChain 1.0） ───
 langchain-core>=1.6.0
 langchain-openai>=1.6.0
 langgraph>=1.2.12
 langgraph-checkpoint>=4.2.0
 
-# ─── 数据模型 / Web ───
 pydantic>=2.13.0
 pydantic-settings>=2.15.0
 fastapi>=0.141.0
@@ -18,26 +13,21 @@ opentelemetry-sdk>=1.44,<2
 openinference-instrumentation>=0.1.61,<0.2
 openinference-semantic-conventions>=0.1.35,<0.2
 
-# ─── 检索 / 向量 ───
 numpy>=2.0.0
 scikit-learn>=1.5.0
 rank-bm25>=0.2.2
 jieba>=0.42.1
-pgvector>=0.4.0                # PG pgvector 的 Python 客户端（chunks.embedding 向量读写）
+pgvector>=0.4.0
 
-# ─── 文档解析（多模态） ───
 pymupdf>=1.24.0
 python-docx>=1.1.0
 
-# ─── 基础设施客户端（可选，未启用时自动降级为本地实现） ───
 elasticsearch>=9.0.0
 kafka-python>=2.0.2
 minio>=7.2.0
 
-# ─── 测试 ───
 pytest>=8.0.0
 
-# 企业在线持久化与浏览器验收
 psycopg[binary]>=3.3,<4
 psycopg-pool>=3.2,<4
 alembic>=1.20,<2

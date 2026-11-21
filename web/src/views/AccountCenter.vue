@@ -43,7 +43,7 @@
                 <span>{{ m.name || m.node_id }}</span>
               </div>
               <el-tag size="small" :type="roleTagType(m.role)" effect="light">
-                {{ formatRoleName(m.role) }}
+                {{ roleName(m.role) }}
               </el-tag>
             </div>
           </div>
@@ -174,13 +174,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { roleName } from '../labels'
 import type { User } from '../types'
 
 const props = defineProps<{
   user: User
   tenantName: string
   busy: boolean
-  formatRoleName: (role: string) => string
 }>()
 
 const emit = defineEmits<{

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """judge 校准：把 LLM 判定与人工标注放在一起比，算 Cohen's kappa。
 
 为什么必须先做这一步：生成层的所有分数（faithfulness / relevancy / 通过率）都由
@@ -27,7 +26,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "evals"))
-import metrics  # noqa: E402
+import metrics
 
 EVALS = ROOT / "evals"
 REPORTS = EVALS / "reports"

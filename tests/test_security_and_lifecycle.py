@@ -124,6 +124,51 @@ def test_queue_relay_loop_respects_external_stop_event():
     queue.relay_loop(stop_event=stop)
 
 
+def test_published_document_search_loads_only_the_current_users_active_grants_once():
+    """检索候选一次关联本租户、本用户及有效期，仅将可读资料交给后续召回。"""
+    from taozhi.domain.entities import Principal
+    from taozhi.infrastructure.persistence.document_repo import readable_published_documents
+
+    principal = Principal("u", "t", "staff", "员工", 1, 1, False, [], {})
+    document = {"tenant_id": "t", "scope": "company", "level": 1, "state": "published"}
+    grant = {"effect": "allow", "can_read": True}
+    conn = MagicMock()
+    conn.execute.return_value.fetchall.return_value = [
+        dict(document, id="d_plain", user_grant=None),
+        dict(document, id="d_shared", scope="selected", user_grant=grant),
+        dict(document, id="d_hidden", scope="selected", user_grant=None),
+        dict(document, id="d_blocked", user_grant={"effect": "deny"}),
+    ]
+    assert set(readable_published_documents(conn, principal, "d_")) == {"d_plain", "d_shared"}
+    conn.execute.assert_called_once()
+    query, params = conn.execute.call_args.args
+    assert params == ("u", "t", "d_")
+    assert "g.tenant_id=d.tenant_id AND g.document_id=d.id AND g.user_id=%s" in query
+    assert "(g.expires_at IS NULL OR g.expires_at>now())" in query
+    assert "WHERE d.tenant_id=%s AND d.state='published' AND starts_with(d.id,%s)" in query
+
+
+def test_draft_writer_can_read_but_cannot_download_and_explicit_deny_overrides_boss():
+    """草稿仅供写作者阅读，下载始终要求已发布；每个判定只读取一次个人授权。"""
+    from taozhi.domain.entities import Principal
+    from taozhi.infrastructure.persistence.access_repo import can_download, can_read
+
+    principal = Principal("boss", "t", "boss", "老板", 3, 1, False,
+                          [{"node_id": "n", "role": "boss"}], {"n": {"kind": "company"}})
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = None
+    draft = {"id": "d", "tenant_id": "t", "scope": "org", "node_id": "n", "state": "draft"}
+    assert can_read(conn, principal, draft, include_draft=True)
+    assert not can_download(conn, principal, draft)
+    assert conn.execute.call_count == 2
+    conn.execute.reset_mock()
+    conn.execute.return_value.fetchone.return_value = {"effect": "deny"}
+    published = dict(draft, state="published")
+    assert not can_read(conn, principal, published, include_draft=True)
+    assert not can_download(conn, principal, published)
+    assert conn.execute.call_count == 2
+
+
 def test_batch_sources_validity_matches_single_checks():
     """验证 batch_sources_validity 批量权限与单条 sources_valid 判定完全等价且仅用批量 SQL。"""
     from taozhi.domain.entities import Principal
@@ -172,7 +217,7 @@ def test_semantic_cache_invalidates_across_processes_on_epoch_bump():
         patch("taozhi.knowledge.semantic_cache.embedding_available", return_value=True),
         patch("taozhi.knowledge.semantic_cache.encode_query", return_value=vec),
     ):
-        assert sc.put("t1", "钢化膜厚度是多少", "0.33mm", [], [{"document_id": "d1"}], input_level=1, epoch=10)
+        assert sc.put("t1", "钢化膜厚度是多少", "0.33mm", [], [{"kind": "document", "document_id": "d1"}], input_level=1, epoch=10)
         assert sc.get("t1", "钢化膜厚度是多少", input_level=1, epoch=10) is not None
         assert sc.get("t1", "钢化膜厚度是多少", input_level=1, epoch=11) is None
 
@@ -215,3 +260,25 @@ def test_subagent_worker_cleans_sandbox_even_on_error(tmp_path):
             }
         )
     assert not sandbox.scratch_dir.exists()
+
+
+def test_concurrent_memory_updates_preserve_facts_and_stable_ids(tmp_path):
+    """不同调研执行同时归档时保留所有事实，更新仍指向初次写入的编号。"""
+    from concurrent.futures import ThreadPoolExecutor
+    from taozhi.core.memory.store import LongTermMemoryStore
+
+    def store_fact(index):
+        store = LongTermMemoryStore(storage_dir=tmp_path, tenant_id="tenant_a")
+        return store.remember_fact(f"商品{index}", "价格", index, source="本轮调研")
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        stored = list(executor.map(store_fact, range(32)))
+    memory = LongTermMemoryStore(storage_dir=tmp_path, tenant_id="tenant_a")
+    assert len(memory.query_facts()) == len({entry["id"] for entry in stored}) == 32
+    updated = memory.remember_fact("商品0", "价格", 90, source="新一轮")
+    assert updated["id"] == stored[0]["id"] and updated["source"] == "新一轮"
+    assert memory.learn_rule("使用人民币") == memory.learn_rule("使用人民币")
+    memory.facts_file.write_text("{", encoding="utf-8")
+    with pytest.raises(ValueError):
+        memory.remember_fact("商品1", "价格", 100)
+    assert memory.facts_file.read_text(encoding="utf-8") == "{"

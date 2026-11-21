@@ -10,7 +10,7 @@
       </tr>
     </thead>
     <tbody>
-      <tr v-for="{ entry, action, result, elapsed } in rows" :key="entry.span_id">
+      <tr v-for="{ entry, action, result, elapsed, diagnostics } in rows" :key="entry.span_id">
         <td class="activity-time">
           <time :datetime="entry.started_at" :title="traceTime(entry.started_at)">
             <strong>{{ clock.format(new Date(entry.started_at)) }}</strong>
@@ -35,6 +35,18 @@
           <strong>{{ action.title }}</strong>
           <code v-if="action.target" class="activity-target">{{ action.target }}</code>
           <small v-if="result">{{ result }}</small>
+          <template v-if="diagnostics.length">
+            <TraceDiagnosticLog :entries="diagnostics" />
+            <details class="step-identifiers">
+              <summary>定位此步骤</summary>
+              <small
+                >操作 <code>{{ entry.name }}</code></small
+              >
+              <small
+                >Span ID <code>{{ entry.span_id }}</code></small
+              >
+            </details>
+          </template>
         </td>
         <td class="activity-status">
           <strong :data-status="entry.status">{{ spanStatusLabels[entry.status] }}</strong>
@@ -50,9 +62,14 @@ import { computed } from 'vue'
 import { traceTime } from '../labels'
 import { activityAction, activityResult, actorInstanceLabels } from '../traceActivity'
 import { activityCategoryLabels, formatDuration, spanStatusLabels } from '../traceWaterfall'
-import type { TraceActivity } from '../types'
+import TraceDiagnosticLog from './TraceDiagnosticLog.vue'
+import type { DiagnosticCategory, TraceActivity } from '../types'
 
-const props = defineProps<{ activities: TraceActivity[]; observedAt: number }>()
+const props = defineProps<{
+  activities: TraceActivity[]
+  observedAt: number
+  diagnostic?: DiagnosticCategory | 'all'
+}>()
 const clock = new Intl.DateTimeFormat('zh-CN', {
   hour: '2-digit',
   minute: '2-digit',
@@ -78,6 +95,10 @@ function timelineRows() {
   return props.activities.map((entry) => ({
     entry,
     action: activityAction(entry),
+    diagnostics:
+      props.diagnostic && props.diagnostic !== 'all'
+        ? entry.diagnostics.filter((event) => event.category === props.diagnostic)
+        : entry.diagnostics,
     result: activityResult(entry),
     elapsed:
       entry.duration_ms ??
@@ -127,6 +148,11 @@ const rows = computed(timelineRows)
 .activity-actor,
 .activity-action {
   overflow-wrap: anywhere;
+}
+.step-identifiers summary {
+  cursor: pointer;
+  color: var(--tz-primary);
+  font-size: 12px;
 }
 .activity-category span {
   display: inline-block;

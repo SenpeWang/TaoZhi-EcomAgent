@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import html
-import logging
 import os
 import re
 from typing import Any, Dict, List
@@ -15,7 +14,8 @@ from urllib.parse import unquote
 
 import httpx
 
-_LOG = logging.getLogger(__name__)
+from taozhi.observability.tracing import record_diagnostic
+from .outcome import result_items
 
 _DDG_RESULT_PATTERN = re.compile(
     r'<a class="result__url"[^>]*href="(?P<url>[^"]+)"[^>]*>.*?<h2[^>]*>.*?'
@@ -64,7 +64,7 @@ def search_duckduckgo_html(
         source: 结果条目中标记的数据来源字段。
 
     Returns:
-        结构化检索结果列表，抓取失败或无结果时返回空列表 ``[]``。
+        结构化检索结果列表，成功查询无结果时返回空列表。
     """
     headers = {
         "User-Agent": (
@@ -74,33 +74,31 @@ def search_duckduckgo_html(
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     }
     results: List[Dict[str, Any]] = []
-    try:
-        with httpx.Client(headers=headers, timeout=timeout, follow_redirects=True) as client:
-            resp = client.post("https://html.duckduckgo.com/html/", data={"q": query})
-            if resp.status_code != 200:
-                return results
-            for m in _DDG_RESULT_PATTERN.finditer(resp.text):
-                clean_title = html.unescape(re.sub(r"<[^<]+?>", "", m.group("title")).strip())
-                clean_snippet = html.unescape(re.sub(r"<[^<]+?>", "", m.group("snippet")).strip())
-                raw_url = m.group("url")
-                actual_url = raw_url
-                if "uddg=" in raw_url:
-                    u_match = re.search(r"uddg=([^&]+)", raw_url)
-                    if u_match:
-                        actual_url = unquote(u_match.group(1))
-                if clean_title and clean_snippet:
-                    results.append(
-                        {
-                            "title": clean_title,
-                            "snippet": clean_snippet,
-                            "url": actual_url,
-                            "source": source,
-                        }
-                    )
-                if len(results) >= limit:
-                    break
-    except Exception as exc:
-        _LOG.warning("DuckDuckGo 全网检索失败 (%s): %s", query[:40], exc)
+    with httpx.Client(headers=headers, timeout=timeout, follow_redirects=True) as client:
+        resp = client.post("https://html.duckduckgo.com/html/", data={"q": query})
+        resp.raise_for_status()
+        if resp.status_code != 200:
+            raise ValueError("搜索引擎未返回结果页面")
+        for m in _DDG_RESULT_PATTERN.finditer(resp.text):
+            clean_title = html.unescape(re.sub(r"<[^<]+?>", "", m.group("title")).strip())
+            clean_snippet = html.unescape(re.sub(r"<[^<]+?>", "", m.group("snippet")).strip())
+            raw_url = m.group("url")
+            actual_url = raw_url
+            if "uddg=" in raw_url:
+                u_match = re.search(r"uddg=([^&]+)", raw_url)
+                if u_match:
+                    actual_url = unquote(u_match.group(1))
+            if clean_title and clean_snippet:
+                results.append(
+                    {
+                        "title": clean_title,
+                        "snippet": clean_snippet,
+                        "url": actual_url,
+                        "source": source,
+                    }
+                )
+            if len(results) >= limit:
+                break
     return results
 
 
@@ -132,8 +130,8 @@ def search_web(
                     headers["X-API-Key"] = key
                 resp = client.post(custom_url, json={"query": query, "limit": limit}, headers=headers)
                 resp.raise_for_status()
-                return resp.json().get("results", [])[:limit]
+                return result_items(resp.json(), "results", limit)
         except Exception as exc:
-            _LOG.warning("自定义全网检索网关不可用，降级为 DuckDuckGo: %s", exc)
+            record_diagnostic("tool.gateway", "fallback", exc)
 
     return search_duckduckgo_html(query, limit=limit, timeout=timeout, source="duckduckgo")

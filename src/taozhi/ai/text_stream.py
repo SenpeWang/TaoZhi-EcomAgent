@@ -57,7 +57,6 @@ def _unwrap_markdown(parts: Iterator[str]) -> Iterator[str]:
         if opening and not opening.startswith("```"):
             yield opening
         return
-    # 仅暂存行首可能是结束围栏的空白和反引号。只要后面还有正文便原样输出。
     candidate: list[str] = []
     line_start = True
     for part in chain((opening.partition("\n")[2],), parts):

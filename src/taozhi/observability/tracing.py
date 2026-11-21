@@ -9,6 +9,7 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
+from uuid import uuid4
 
 from openinference.instrumentation import OITracer, TraceConfig
 from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttributes
@@ -19,8 +20,10 @@ from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace import SpanKind, StatusCode
 
+from taozhi.domain.trace_diagnostic import CATALOG, OUTCOMES, DiagnosticOutcome
+from .diagnostics import EVENT_NAME, diagnostic_events, failure_code, http_status_of
 from .span_attributes import safe_attributes
-from .span_writer import flush_spans, submit_span
+from .span_writer import submit_span
 
 _LOG = logging.getLogger(__name__)
 _JOB = otel_context.create_key("taozhi.job")
@@ -54,7 +57,6 @@ class _TaskSpanProcessor(SpanProcessor):
                 job = job or parent_job
             if job is None:
                 return
-            # 第三方库可能永不结束 Span，限制进程内关联表的最大规模。
             if len(self._active) >= 16384:
                 self._active.popitem(last=False)
             self._active[key] = job
@@ -66,7 +68,19 @@ class _TaskSpanProcessor(SpanProcessor):
         if job is not None:
             self._snapshot(span, job)
 
-    def _snapshot(self, span: ReadableSpan, job: tuple) -> None:
+    def add_diagnostic(self, span, job, attrs, publish_now: bool) -> bool:
+        """只向开始时绑定同一任务的活动节点追加事件。"""
+        ctx = span.get_span_context()
+        with self._lock:
+            if self._active.get((ctx.trace_id, ctx.span_id)) != job or not span.is_recording():
+                return False
+            span.add_event(EVENT_NAME, {**attrs, "event_id": uuid4().hex})
+        if publish_now:
+            self._snapshot(span, job)
+        return True
+
+    @staticmethod
+    def _snapshot(span: ReadableSpan, job: tuple) -> None:
         try:
             tenant_id, job_id, run_version = job
             attributes = safe_attributes(span.attributes)
@@ -82,7 +96,6 @@ class _TaskSpanProcessor(SpanProcessor):
             if scope == _INSTRUMENTATION and _SPAN_NAME.fullmatch(span.name):
                 name = span.name
             else:
-                # 第三方操作名可能内含完整 SQL、URL、请求文本或上游报错。
                 library = scope if _SPAN_NAME.fullmatch(scope) else "library"
                 name = f"{library}.{span.kind.name.lower()}"
             submit_span({
@@ -100,10 +113,13 @@ class _TaskSpanProcessor(SpanProcessor):
                 "duration_ms": max(0, (end - start) // 1_000_000) if end is not None else None,
                 "error_type": attributes.get("error.type"),
                 "attributes": attributes,
+                "diagnostics": diagnostic_events(span.events) if scope == _INSTRUMENTATION else [],
             })
         except Exception as exc:
-            # 采集故障不能改变原始业务调用的返回值或异常。
             _LOG.warning("执行链路采集失败 (%s)", type(exc).__name__)
+
+
+_PROCESSOR = _TaskSpanProcessor()
 
 
 def _local_provider(service_name: str = "taozhi-worker") -> TracerProvider:
@@ -116,7 +132,7 @@ def _local_provider(service_name: str = "taozhi-worker") -> TracerProvider:
                     sampler=ALWAYS_ON,
                     shutdown_on_exit=False,
                 )
-                provider.add_span_processor(_TaskSpanProcessor())
+                provider.add_span_processor(_PROCESSOR)
                 _provider = provider
     return _provider
 
@@ -140,6 +156,39 @@ def _workflow_tracer() -> OITracer:
     )
 
 
+def record_diagnostic(
+    code: str, outcome: DiagnosticOutcome, exc: BaseException | None = None, *,
+    http_status: int | None = None, publish_now: bool = True,
+) -> None:
+    """在捕获处记录安全的中文诊断，同一事件关联进程日志、任务、链路与节点。"""
+    try:
+        category, message = CATALOG[code]
+        span = trace.get_current_span()
+        ctx = span.get_span_context()
+        job = otel_context.get_value(_JOB)
+        attrs = {"code": code, "outcome": outcome}
+        if exc is not None:
+            attrs["exception_type"] = type(exc).__name__
+        status = http_status or http_status_of(exc)
+        if type(status) is int and 100 <= status <= 599:
+            attrs["http_status"] = status
+        scope = getattr(getattr(span, "instrumentation_scope", None), "name", None)
+        step = getattr(span, "name", "") if scope == _INSTRUMENTATION else ""
+        step = step if _SPAN_NAME.fullmatch(step) else ""
+        trace_id = trace.format_trace_id(ctx.trace_id) if ctx.is_valid else ""
+        span_id = trace.format_span_id(ctx.span_id) if ctx.is_valid else ""
+        _LOG.log(logging.ERROR if outcome == "failed" else logging.WARNING,
+                 "%s。%s（故障码=%s，HTTP=%s，异常类型=%s，步骤=%s，链路=%s，节点=%s）",
+                 message, OUTCOMES[outcome], code, attrs.get("http_status", "无"), attrs.get("exception_type", "无"),
+                 step or "未采集", trace_id or "未采集", span_id or "未采集",
+                 extra={"diagnostic_code": code, "diagnostic_category": category, "diagnostic_outcome": outcome,
+                        "trace_id": trace_id, "span_id": span_id, "step": step})
+        if job and scope == _INSTRUMENTATION and _PROCESSOR.add_diagnostic(span, job, attrs, publish_now) and exc is not None:
+            setattr(exc, "_taozhi_diagnostic_trace", ctx.trace_id)
+    except Exception as diagnostic_error:
+        _LOG.warning("节点诊断未能记录（%s）", type(diagnostic_error).__name__)
+
+
 @contextmanager
 def node_span(name: str, kind: str, attributes: dict | None = None, *, context=None):
     """在当前或显式父上下文中计时，保留错误类型并传播原异常。"""
@@ -159,6 +208,8 @@ def node_span(name: str, kind: str, attributes: dict | None = None, *, context=N
             try:
                 yield span
             except BaseException as exc:
+                if getattr(exc, "_taozhi_diagnostic_trace", None) != span.get_span_context().trace_id:
+                    record_diagnostic(failure_code(kind, name, exc), "failed", exc, publish_now=False)
                 span.set_attribute("error.type", type(exc).__name__)
                 span.set_status(StatusCode.ERROR)
                 raise

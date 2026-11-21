@@ -64,7 +64,7 @@ def test_mcp_server_call_tool_and_alias():
     server = EcommerceMcpServer()
 
     with patch(
-        "taozhi.infrastructure.mcp.server.search_amazon",
+        "taozhi.core.tools.search_amazon",
         return_value=[{"title": "Thermal Mug", "price": "$22.50", "asin": "B0MUG00001", "url": f"{AMAZON_BASE_URL}dp/B0MUG00001", "source": "amazon"}],
     ):
         res = server.call_tool("search_amazon", {"query": "thermal mug", "limit": 2})
@@ -79,7 +79,7 @@ def test_mcp_server_call_tool_and_alias():
     assert parsed[0]["source"] == "amazon"
 
     with patch(
-        "taozhi.infrastructure.mcp.server.search_1688_wholesale",
+        "taozhi.core.tools.search_1688_wholesale",
         return_value=[{"title": "东莞源头厂保温杯", "price": 18.5}],
     ):
         ws_res = server.call_tool("search_1688_wholesale", {"keyword": "保温杯", "limit": 2})
@@ -104,7 +104,7 @@ def test_mcp_client_adapter_integration():
     assert "inputSchema" in specs[0]
 
     with patch(
-        "taozhi.infrastructure.mcp.server.search_amazon",
+        "taozhi.core.tools.search_amazon",
         return_value=[{"title": "AMZ Mug", "price": "$19.99", "asin": "B001", "source": "amazon"}],
     ):
         outcome = adapter.call_tool("search_amazon", {"query": "screen protector", "limit": 2})

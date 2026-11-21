@@ -5,7 +5,6 @@ from typing import Literal
 SpanKind = Literal["CHAIN", "AGENT", "LLM", "TOOL", "RETRIEVER", "EMBEDDING", "RERANKER", "INTERNAL"]
 ActivityCategory = SpanKind | Literal["CONTEXT", "GUARDRAIL"]
 
-# 同一 CHAIN 类型既支持工作流编排，也承载具体的上下文或权限操作。
 CHAIN_OPERATIONS = {
     "CONTEXT": {
         "context.recall_conversation": "读取会话历史证据",

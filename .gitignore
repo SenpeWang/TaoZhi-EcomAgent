@@ -1,11 +1,8 @@
-# 业务资料、个人说明和本机维护约束永不提交
 /data/
 /项目说明.md
 /面试文档.md
-# 任意目录和大小写的 AGENTS.md 都只保留在维护主机
 [Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
 
-# 私有配置，只保留无秘密的示例
 .env
 .env.*
 !.env.example
@@ -17,7 +14,6 @@
 database-secrets.json
 bootstrap-owner-*.json
 
-# 数据库、归档、运行日志
 *.sqlite
 *.sqlite3
 *.db
@@ -25,7 +21,6 @@ bootstrap-owner-*.json
 *.log
 *.pid
 
-# 依赖、缓存、构建产物
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -37,13 +32,11 @@ venv/
 node_modules/
 web/dist/
 
-# 编辑器与系统
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 
-# 不生成源码副本或自动备份
 *.bak
 *.bak.*
 *.old

@@ -23,7 +23,6 @@ class State(TypedDict, total=False):
     review: bool
     input_level: int
     usage: list
-    history: list
     timing: dict
     degraded: dict
     token_usage: dict

@@ -120,6 +120,22 @@ def test_workflow_agent_and_tool_names_use_inference_semantics(monkeypatch):
     assert completed["TOOL"]["attributes"][SpanAttributes.TOOL_NAME] == "search"
 
 
+def test_live_event_requires_the_scope_bound_to_its_span(monkeypatch):
+    """跨租户拼接的上下文既不能创建实时快照，也不能污染原始节点。"""
+    rows = []
+    monkeypatch.setenv("TAOZHI_TRACING", "1")
+    monkeypatch.setattr(tracing, "submit_span", rows.append)
+    with tracing.job_trace("first", "job1", 1, "task.ask"):
+        wrong = context.attach(context.set_value(tracing._JOB, ("second", "job2", 1)))
+        try:
+            tracing.record_diagnostic("model.rate_limit", "retry")
+        finally:
+            context.detach(wrong)
+        tracing.record_diagnostic("context.prepare", "fallback")
+    assert {r["tenant_id"] for r in rows} == {"first"}
+    assert [e["code"] for e in rows[-1]["diagnostics"]] == ["context.prepare"]
+
+
 def test_retrieval_model_spans_only_measure_real_requests(monkeypatch):
     from types import SimpleNamespace
 
@@ -216,3 +232,78 @@ def test_native_sdk_child_keeps_start_tenant_when_ended_in_another_job(monkeypat
     assert [r["status"] for r in emitted] == ["running", "error"]
     assert all(r["tenant_id"] == "first" and r["job_id"] == "job1" and r["parent_span_id"] == root_id for r in emitted)
     assert "request-value-secret" not in str(rows)
+
+
+def test_live_diagnostics_keep_multiple_failures_private_and_attributed(monkeypatch, caplog):
+    """同一工具的降级与失败在结束前可见，异常传播不在父步骤重复登记。"""
+    rows = []
+    monkeypatch.setattr(tracing, "submit_span", rows.append)
+    monkeypatch.setenv("TAOZHI_TRACING", "1")
+    with pytest.raises(ValueError, match="private-payload"):
+        with tracing.job_trace("tenant_a", "job", 2, "task.research"):
+            with tracing.node_span("research.subagent_worker", "AGENT"):
+                with tracing.node_span("mcp.call_tool", "TOOL") as span:
+                    tracing.record_diagnostic("tool.gateway", "fallback", TypeError("private-http-url"), http_status=503)
+                    assert rows[-1]["status"] == "running" and rows[-1]["diagnostics"][0]["http_status"] == 503
+                    span.add_event("exception", {"exception.message": "private-payload"})
+                    raise ValueError("private-payload")
+    tool = next(row for row in rows if row["kind"] == "TOOL" and row["ended_at"])
+    assert [(d["code"], d["level"], d["exception_type"]) for d in tool["diagnostics"]] == [
+        ("tool.gateway", "warning", "TypeError"), ("tool.error", "error", "ValueError"),
+    ]
+    assert all(row["diagnostics"] == [] for row in rows if row["kind"] != "TOOL")
+    assert all(row["tenant_id"] == "tenant_a" and row["run_version"] == 2 for row in rows)
+    assert caplog.records[-1].trace_id == tool["trace_id"] and caplog.records[-1].span_id == tool["span_id"]
+    assert "private-" not in str(rows) and "private-" not in caplog.text
+
+
+def test_failed_scraper_is_not_reported_as_an_empty_search(monkeypatch, tmp_path):
+    """走真实 MCP 调用线程，验证网关故障、缺失抓手和合法空结果有各自的状态。"""
+    import importlib
+    import httpx
+    from taozhi.infrastructure.mcp.adapter import McpClientAdapter
+    from taozhi.infrastructure.mcp.server import EcommerceMcpServer
+
+    search = importlib.import_module("taozhi.core.tools.search_1688")
+    rows = []
+    monkeypatch.setattr(tracing, "submit_span", rows.append)
+    monkeypatch.setenv("TAOZHI_TRACING", "1")
+    monkeypatch.setattr(search, "resolve_runtime_dir", lambda: tmp_path)
+    monkeypatch.setenv("ECOM_RESEARCH_P1688_URL", "https://example.test/gateway")
+    responses = iter([httpx.Response(502), httpx.Response(200, json={"items": []})])
+    def respond(transport, request):
+        response = next(responses)
+        response.request = request
+        return response
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", respond)
+    adapter = McpClientAdapter(server=EcommerceMcpServer())
+    with tracing.job_trace("t", "j", 1, "task.research"):
+        with tracing.node_span("research.subagent_worker", "AGENT") as agent:
+            failed = adapter.call_tool("search_1688_wholesale", {"keyword": "private-keyword"})
+            empty = adapter.call_tool("search_1688_wholesale", {"keyword": "private-keyword"})
+    assert (failed.status, empty.status) == ("error", "empty")
+    tools = [row for row in rows if row["kind"] == "TOOL" and row["ended_at"]]
+    assert [row["parent_span_id"] for row in tools] == [trace.format_span_id(agent.get_span_context().span_id)] * 2
+    assert [e["code"] for e in tools[0]["diagnostics"]] == ["tool.gateway", "tool.scraper_missing"]
+    assert tools[0]["diagnostics"][0]["http_status"] == 502 and tools[1]["diagnostics"] == []
+    assert "private-keyword" not in str(rows)
+
+
+def test_observed_rates_include_failures_and_empty_searches():
+    """进程指标按真实结束的调用计算，只有失败时错误率也在零到一之间。"""
+    from taozhi.ai import observability
+
+    observability.reset()
+    try:
+        with observability.usage_scope() as usage:
+            observability.record_llm_error("fast")
+            observability.record_llm_error("fast")
+            observability.record_llm_call("fast", 0.1, 3, 2)
+            observability.record_retrieval(0)
+            observability.record_retrieval(4)
+        counters = observability.snapshot()
+        assert counters["llm.error_rate"] == pytest.approx(2 / 3)
+        assert counters["rag.hit_rate"] == 0.5
+        assert usage.llm_attempts == 3 and usage.llm_errors == 2
+    finally:
+        observability.reset()

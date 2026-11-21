@@ -248,6 +248,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { roleName } from '../labels'
 import type { Approval, Organization, OrganizationTree, User } from '../types'
 
 const props = defineProps<{
@@ -282,21 +283,6 @@ const approvalTabs: { value: 'all' | 'pending' | 'done'; label: string }[] = [
   { value: 'pending', label: '待审批' },
   { value: 'done', label: '已处理' },
 ]
-
-const ROLE_LABELS: Record<string, string> = {
-  employee: '普通员工',
-  leader: '部门主管',
-  boss: '企业负责人',
-}
-
-/**
- * 将角色代码转为规范的企业中文职级名称。
- * @param role - 服务端角色编码。
- * @returns 企业规范化角色名称。
- */
-function roleName(role: string): string {
-  return ROLE_LABELS[role] || role
-}
 
 /**
  * 统计待处理审批事项数量。

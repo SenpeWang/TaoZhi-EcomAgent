@@ -60,13 +60,20 @@ async def invalid(request: Request, exc: RequestValidationError):
 @app.exception_handler(Exception)
 async def unexpected(request: Request, exc: Exception):
     """兜底未捕获异常，防止泄露内部栈信息。"""
+    request_id = getattr(request.state, "request_id", "")
+    route = request.scope.get("route")
+    logging.getLogger(__name__).error(
+        "接口处理失败，请求编号=%s，方法=%s，接口=%s，异常类型=%s",
+        request_id, request.method, getattr(route, "path", "未匹配"), type(exc).__name__,
+    )
     return JSONResponse(
         {
             "code": "INTERNAL_ERROR",
             "message": "服务暂时无法处理请求，请稍后重试",
-            "request_id": getattr(request.state, "request_id", ""),
+            "request_id": request_id,
         },
         status_code=500,
+        headers={"X-Request-Id": request_id, "Cache-Control": "no-store"},
     )
 
 

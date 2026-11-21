@@ -10,17 +10,18 @@
 """
 from __future__ import annotations
 
-import logging
 import time
+from contextlib import closing
 from typing import Any, Dict, List, Optional
 
-_LOG = logging.getLogger(__name__)
 
 import numpy as np
+
 from rank_bm25 import BM25Okapi
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from taozhi.ai.observability import record_retrieval
 from taozhi.domain.entity_extraction import extract_entities
 from taozhi.domain.privacy import redact
 from taozhi.domain.ranking import (
@@ -30,8 +31,8 @@ from taozhi.domain.ranking import (
     dedup_chunks_by_text,
     tokenize_zh,
 )
-from taozhi.infrastructure.persistence.access_repo import can_read
-from taozhi.observability.tracing import node_span
+from taozhi.infrastructure.persistence.document_repo import readable_published_documents
+from taozhi.observability.tracing import node_span, record_diagnostic
 from ..config import Config, load_config
 from ..knowledge.db import fetch_all, fetch_one
 from ..knowledge.embedding import to_vector
@@ -84,7 +85,8 @@ def build_hyde_vector(
             if not (job.get("payload") or {}).get("allow_external", True) or int(job.get("input_level", 1)) >= 3:
                 return None
             if conn is not None:
-                row = fetch_one(conn, "SELECT count(*) AS n FROM model_calls WHERE job_id=%s", (job["id"],))
+                with conn.transaction():
+                    row = fetch_one(conn, "SELECT count(*) AS n FROM model_calls WHERE job_id=%s", (job["id"],))
                 if row and row["n"] >= cfg.max_model_calls:
                     return None
         from ..ai.client import LLMClient, ModelTier
@@ -100,12 +102,8 @@ def build_hyde_vector(
         hyde_chars = int(getattr(cfg, "hyde_passage_chars", Config.hyde_passage_chars))
         with usage_scope() as hyde_usage:
             try:
-                text = LLMClient(allow_overseas=False).chat(
-                    redact(query),
-                    tier=ModelTier.FAST,
-                    system=_HYDE_SYSTEM,
-                    max_tokens=hyde_max_tok,
-                )
+                with closing(LLMClient(allow_overseas=False)) as client:
+                    text = client.chat(redact(query), tier=ModelTier.FAST, system=_HYDE_SYSTEM, max_tokens=hyde_max_tok)
             except Exception:
                 outcome = "failed"
                 raise
@@ -125,18 +123,20 @@ def build_hyde_vector(
                 )
                 if conn is not None and p is not None and job is not None:
                     try:
-                        conn.execute(
-                            "INSERT INTO model_calls(tenant_id,job_id,role,elapsed_ms,prompt_tokens,completion_tokens,outcome) "
-                            "VALUES(%s,%s,'hyde',%s,%s,%s,%s)",
-                            (p.tenant_id, job["id"], elapsed_ms, u["prompt_tokens"], u["completion_tokens"], outcome),
-                        )
-                    except Exception:
-                        pass
+                        with conn.transaction():
+                            conn.execute(
+                                "INSERT INTO model_calls(tenant_id,job_id,role,elapsed_ms,prompt_tokens,completion_tokens,outcome) "
+                                "VALUES(%s,%s,'hyde',%s,%s,%s,%s)",
+                                (p.tenant_id, job["id"], elapsed_ms, u["prompt_tokens"], u["completion_tokens"], outcome),
+                            )
+                    except Exception as exc:
+                        record_diagnostic("storage.write", "skipped", exc)
         if not text or len(text.strip()) < 20:
             tr["outcome"] = "short_or_empty"
             return None
         return encode_passages([text.strip()[:hyde_chars]])[0]
-    except Exception:
+    except Exception as exc:
+        record_diagnostic("retrieval.hyde", "skipped", exc)
         return None
     finally:
         if trace_out is not None:
@@ -165,13 +165,14 @@ def _semantic_matrix(conn, tenant_id, chunks, dim):
 
                     with database_connection() as bc:
                         bc.execute("UPDATE chunks SET embedding=%s WHERE id=%s", (mats[i], chunks[i]["id"]))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    record_diagnostic("storage.write", "skipped", exc)
         rows = [m for m in mats if m is not None]
         if not rows:
             return None
         return np.stack(rows), [m is not None for m in mats]
-    except Exception:
+    except Exception as exc:
+        record_diagnostic("retrieval.score", "fallback", exc)
         return None
 
 
@@ -220,7 +221,7 @@ def _rerank_order(query, chunks, fused, allowed=None, trace_out: Optional[Dict[s
             trace_out.update(rerank_ms=int((time.perf_counter() - t0) * 1000), rerank_used=True, rerank_fallback=False)
         return [(cand[j], float(scores[j])) for j in np.argsort(-scores)]
     except Exception as exc:
-        _LOG.warning("Rerank 失败，保持融合序 (%s): %s", type(exc).__name__, exc)
+        record_diagnostic("retrieval.rerank", "fallback", exc)
         if trace_out is not None:
             trace_out.update(rerank_ms=int((time.perf_counter() - t0) * 1000), rerank_used=False, rerank_fallback=True)
         return [(i, None) for i in cand]
@@ -301,13 +302,14 @@ def _ann_gate(chunks, vecs, qv, max_dist):
 
 def _pg_ann(conn, tenant_id, allowed_ids, qv, size=200):
     """PG pgvector ANN（HNSW 近似近邻）：授权文档当前版本内按余弦距离取前 size。"""
-    rows = fetch_all(
-        conn,
-        """SELECT c.id FROM chunks c JOIN documents d ON d.id=c.document_id AND d.current_version=c.version
-        WHERE c.tenant_id=%s AND c.document_id=ANY(%s) AND c.embedding IS NOT NULL
-        ORDER BY c.embedding <=> %s::vector LIMIT %s""",
-        (tenant_id, list(allowed_ids), qv, size),
-    )
+    with conn.transaction():
+        rows = fetch_all(
+            conn,
+            """SELECT c.id FROM chunks c JOIN documents d ON d.id=c.document_id AND d.current_version=c.version
+            WHERE c.tenant_id=%s AND c.document_id=ANY(%s) AND c.embedding IS NOT NULL
+            ORDER BY c.embedding <=> %s::vector LIMIT %s""",
+            (tenant_id, list(allowed_ids), qv, size),
+        )
     return {r["id"]: rank for rank, r in enumerate(rows, 1)}
 
 
@@ -357,6 +359,7 @@ def search_documents(
     """授权文档集内执行混合检索（ES BM25 + PG pgvector + 词重叠 + 字符 TF-IDF + HyDE）并精排返回。"""
     with node_span("knowledge.search", "RETRIEVER") as span:
         documents = _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, doc_id_prefix)
+        record_retrieval(len(documents))
         if span is not None:
             span.set_attribute("retrieval.result_count", len(documents))
         return documents
@@ -378,12 +381,7 @@ def _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, 
         "ann_blocked": False,
     }
     try:
-        docs = fetch_all(conn, "SELECT * FROM documents WHERE tenant_id=%s AND state='published'", (p.tenant_id,))
-        allowed = {
-            d["id"]: d
-            for d in docs
-            if can_read(conn, p, d) and (not doc_id_prefix or str(d["id"]).startswith(doc_id_prefix))
-        }
+        allowed = readable_published_documents(conn, p, doc_id_prefix)
         if not allowed:
             return []
         qv = None
@@ -396,7 +394,10 @@ def _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, 
 
             if embed_available():
                 qv = encode_query(query)
-        except Exception:
+            else:
+                record_diagnostic("retrieval.embedding_unavailable", "fallback")
+        except Exception as exc:
+            record_diagnostic("retrieval.embedding", "fallback", exc)
             qv = None
         tr["embed_ms"] = int((time.perf_counter() - t_emb) * 1000)
 
@@ -404,13 +405,13 @@ def _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, 
         try:
             from ..knowledge import es_index
 
-            if es_index.available():
+            if load_config().es_enabled:
                 bm25_rank = es_index.search_bm25(p.tenant_id, list(allowed), query)
                 tr["es_used"] = True
             else:
                 tr["es_fallback"] = True
         except Exception as exc:
-            _LOG.warning("ES BM25 召回失败，回落本地词法 (%s): %s", type(exc).__name__, exc)
+            record_diagnostic("retrieval.lexical", "fallback", exc)
             bm25_rank = None
             tr["es_fallback"] = True
         tr["es_ms"] = int((time.perf_counter() - t_es) * 1000)
@@ -420,7 +421,7 @@ def _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, 
             try:
                 ann_rank = _pg_ann(conn, p.tenant_id, list(allowed), np.asarray(qv, dtype="float32").reshape(-1))
             except Exception as exc:
-                _LOG.warning("PG ANN 召回失败，该路缺席 (%s): %s", type(exc).__name__, exc)
+                record_diagnostic("retrieval.vector", "skipped", exc)
                 ann_rank = None
             tr["pg_ann_ms"] = int((time.perf_counter() - t_ann) * 1000)
 
@@ -428,7 +429,8 @@ def _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, 
             t_hy = time.perf_counter()
             try:
                 hyde_rank = _pg_ann(conn, p.tenant_id, list(allowed), np.asarray(hyde_vector, dtype="float32").reshape(-1))
-            except Exception:
+            except Exception as exc:
+                record_diagnostic("retrieval.vector", "skipped", exc)
                 hyde_rank = None
             tr["hyde_ann_ms"] = int((time.perf_counter() - t_hy) * 1000)
 
@@ -438,18 +440,14 @@ def _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, 
                 conn, p.tenant_id, list(allowed), entities, int(getattr(load_config(), "entity_quota", 2))
             )
             ids = list(dict.fromkeys(list(bm25_rank or {}) + list(ann_rank or {}) + list(hyde_rank or {}) + mention_ids))
-            chunks = [
-                c
-                for c in fetch_all(
-                    conn,
-                    "SELECT c.*, d.title AS doc_title FROM chunks c "
-                    "JOIN documents d ON d.id=c.document_id AND d.current_version=c.version "
-                    "WHERE c.tenant_id=%s AND c.document_id=ANY(%s) AND c.id=ANY(%s) "
-                    "ORDER BY c.document_id, c.ordinal",
-                    (p.tenant_id, list(allowed), ids),
-                )
-                if c["id"] in set(ids)
-            ]
+            chunks = fetch_all(
+                conn,
+                "SELECT c.*, d.title AS doc_title FROM chunks c "
+                "JOIN documents d ON d.id=c.document_id AND d.current_version=c.version "
+                "WHERE c.tenant_id=%s AND c.document_id=ANY(%s) AND c.id=ANY(%s) "
+                "ORDER BY c.document_id, c.ordinal",
+                (p.tenant_id, list(allowed), ids),
+            )
             if not chunks:
                 return []
             chunks = dedup_chunks_by_text(chunks)
@@ -513,7 +511,7 @@ def _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, 
                         hy[idx] = cosine_similarity(matrix, np.asarray(hyde_vector, dtype="float32").reshape(1, -1)).reshape(-1)
                         signals.append(hy)
             except Exception as exc:
-                _LOG.warning("语义向量矩阵评分失败，已降级为 BM25+TF-IDF+词面信号: %s", exc)
+                record_diagnostic("retrieval.score", "fallback", exc)
         fused = np.zeros(len(chunks))
         for s in signals:
             if np.max(s) > np.min(s):

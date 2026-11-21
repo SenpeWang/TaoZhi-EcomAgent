@@ -178,7 +178,6 @@ export function openTaskEventStream(taskId: string, handlers: TaskStreamHandlers
   source.onerror = () => {
     if (closed) return
     handlers.onResult?.('')
-    // 临时断线由浏览器携带 Last-Event-ID 续传，永久关闭才回源。
     if (source.readyState === EventSource.CLOSED) {
       close()
       handlers.onError?.()

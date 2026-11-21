@@ -72,7 +72,7 @@ for (const malformed of [
 const traceId = 'a'.repeat(32)
 const timestamp = '2026-01-01T08:00:00Z'
 const run = { trace_id: traceId, run_version: 1, status: 'ok', started_at: timestamp,
-  ended_at: timestamp, kind_counts: { LLM: 2 }, category_counts: { LLM: 2 }, span_count: 2, failed_count: 0, input_tokens: 10, output_tokens: 5 }
+  ended_at: timestamp, kind_counts: { LLM: 2 }, category_counts: { LLM: 2 }, diagnostic_counts: { model_api: 2 }, span_count: 2, failed_count: 0, input_tokens: 10, output_tokens: 5 }
 const runPath = '/admin/traces/task/runs?trace_id=' + traceId
 globalThis.fetch = async () => Response.json({ items: [run], next_cursor: null })
 assert.deepEqual((await requestApi(runPath, 'demo', clear)).items, [run])
@@ -83,7 +83,7 @@ for (const kindCounts of [undefined, { UNKNOWN: 2 }, { LLM: -1 }]) {
 const spanPath = '/admin/traces/task/runs/' + traceId + '/spans?kind=LLM'
 const span = { trace_id: traceId, span_id: '1'.repeat(16), parent_span_id: null, name: 'llm.chat',
   display_name: '模型调用', started_at: timestamp, ended_at: timestamp, status: 'ok', kind: 'LLM', category: 'LLM',
-  duration_ms: 0, error_type: null, attributes: { 'llm.model_name': 'demo-1' } }
+  duration_ms: 0, error_type: null, diagnostics: [], attributes: { 'llm.model_name': 'demo-1' } }
 globalThis.fetch = async () => Response.json({ items: [span], next_cursor: '2', observed_at: timestamp })
 assert.deepEqual((await requestApi(spanPath, 'demo', clear)).items, [span])
 for (const invalid of [{ trace_id: 'b'.repeat(32) }, { kind: 'TOOL' }, { kind: 'MODEL' }, { display_name: null }]) {
@@ -105,6 +105,28 @@ for (const invalid of [{ actor: undefined }, { actor: { ...actor, span_id: 'brok
   globalThis.fetch = async () => Response.json({ items: [{ ...span, actor, ...invalid }], next_cursor: null, observed_at: timestamp })
   await assert.rejects(requestApi(activityPath, 'demo', clear), /响应异常/)
 }
+const diagnosticPath = '/admin/traces/task/runs/' + traceId + '/activities?diagnostic=model_api'
+const diagnostic = {timestamp, category: 'model_api', code: 'rate_limit', message: '模型 API 限流',
+  outcome: 'retry', level: 'warning', exception_type: 'RateLimitError', http_status: 429}
+const logPage = (diagnostics) => ({items:[{...span, actor, diagnostics}], next_cursor:'next', observed_at:timestamp})
+globalThis.fetch = async () => Response.json(logPage([diagnostic]))
+assert.deepEqual((await requestApi(diagnosticPath, 'demo', clear)).items[0].diagnostics, [diagnostic])
+for (const entries of [[], [{...diagnostic, outcome:['retry']}], [{...diagnostic, category:'tool'}], [{...diagnostic, http_status:1}],
+                       [{...diagnostic, timestamp:'invalid'}], [{...diagnostic, outcome:'unknown'}]]) {
+  globalThis.fetch = async () => Response.json(logPage(entries))
+  await assert.rejects(requestApi(diagnosticPath, 'demo', clear), /响应异常/)
+}
+for (const diagnostic_counts of [undefined, {unknown: 2}, {storage: -1}]) {
+  globalThis.fetch = async () => Response.json({items: [{...run, diagnostic_counts}], next_cursor:null})
+  await assert.rejects(requestApi(runPath, 'demo', clear), /响应异常/)
+}
+const previousSession = new AbortController()
+globalThis.fetch = async () => {
+  previousSession.abort()
+  return Response.json({message:'旧会话的拒绝响应'}, {status:401})
+}
+await assert.rejects(requestApi('/documents', 'demo', clear, 'GET', undefined, previousSession.signal), {name:'AbortError'})
+assert.equal(cleared, 1)
 for (const data of [{}, { items: [null] }, { items: [1] }, [], null]) {
   globalThis.fetch = async () => new Response(JSON.stringify(data), { status: 200 })
   await assert.rejects(requestApi('/documents', 'demo', clear), /响应异常/)

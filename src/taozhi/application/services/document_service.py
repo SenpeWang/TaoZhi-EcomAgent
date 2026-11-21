@@ -9,6 +9,7 @@ from typing import Any
 _LOG = logging.getLogger(__name__)
 
 from taozhi.config import load_config
+from taozhi.domain.access import evaluate_download_permission, evaluate_read_permission, evaluate_write_permission
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
@@ -16,7 +17,6 @@ from taozhi.infrastructure.persistence import admin_repo, document_repo, job_rep
 from taozhi.infrastructure.persistence.access_repo import (
     audit,
     can_download,
-    can_read,
     can_write,
     get_document,
     require_document_read,
@@ -39,35 +39,26 @@ _MIME_EXT_MAP = {
 def list_documents(p: Principal) -> list[dict[str, Any]]:
     """列出当前用户有权阅读的未删除资料清单。"""
     with database_connection() as c:
-        rows = document_repo.list_active_documents(c, p.tenant_id)
+        rows = document_repo.list_active_documents(c, p)
         result = []
-        for d in rows:
-            if can_read(c, p, d, True):
-                result.append(
-                    dict(
-                        **{
-                            k: d[k]
-                            for k in (
-                                "id",
-                                "title",
-                                "scope",
-                                "node_id",
-                                "level",
-                                "state",
-                                "current_version",
-                                "acl_version",
-                                "ai_allowed",
-                                "download_allowed",
-                                "updated_at",
-                                "error",
-                            )
-                        },
-                        node_name=p.nodes.get(d["node_id"], {}).get("name", ""),
-                        can_write=can_write(c, p, d),
-                        can_download=can_download(c, p, d),
-                        can_policy=p.boss or p.system_admin or p.manages(d["node_id"]),
-                    )
+        for document in rows:
+            grant = document["user_grant"]
+            if not evaluate_read_permission(p, document, grant, include_draft=True):
+                continue
+            item = {
+                key: document[key]
+                for key in (
+                    "id", "title", "scope", "node_id", "level", "state", "current_version",
+                    "acl_version", "ai_allowed", "download_allowed", "updated_at", "error",
                 )
+            }
+            item.update(
+                node_name=p.nodes.get(document["node_id"], {}).get("name", ""),
+                can_write=evaluate_write_permission(p, document, grant),
+                can_download=evaluate_download_permission(p, document, grant),
+                can_policy=p.boss or p.system_admin or p.manages(document["node_id"]),
+            )
+            result.append(item)
         return result
 
 
@@ -149,7 +140,7 @@ def get_document_detail(p: Principal, doc_id: str) -> dict[str, Any]:
     """读取资料详情与当前版本正文（非老板视角执行敏感字段脱敏）。"""
     with database_connection() as c:
         d = get_document(c, p, doc_id)
-        require_document_read(c, p, d)
+        grant = require_document_read(c, p, d)
         v = document_repo.get_document_version(c, d["id"], d["current_version"])
         redacted_body = redact(v["body"])
         return dict(
@@ -170,8 +161,8 @@ def get_document_detail(p: Principal, doc_id: str) -> dict[str, Any]:
                 )
             },
             body=v["body"] if p.boss else redacted_body,
-            can_write=can_write(c, p, d) and (p.boss or v["body"] == redacted_body),
-            can_download=can_download(c, p, d),
+            can_write=evaluate_write_permission(p, d, grant) and (p.boss or v["body"] == redacted_body),
+            can_download=evaluate_download_permission(p, d, grant),
         )
 
 
@@ -179,11 +170,11 @@ def list_document_versions(p: Principal, doc_id: str) -> list[dict[str, Any]]:
     """按历史策略快照权限过滤并返回资料版本历史。"""
     with database_connection() as c:
         d = get_document(c, p, doc_id)
-        require_document_read(c, p, d)
+        grant = require_document_read(c, p, d)
         result = []
         for v in document_repo.list_document_versions(c, p.tenant_id, d["id"]):
             historic = {**d, **v["policy"]}
-            if (v["version"] == d["current_version"] and can_read(c, p, d, True)) or can_read(c, p, historic, True):
+            if v["version"] == d["current_version"] or evaluate_read_permission(p, historic, grant, include_draft=True):
                 item = {k: v[k] for k in ("version", "title", "body", "created_at", "content_hash")}
                 if not p.boss:
                     item["body"] = redact(item["body"])

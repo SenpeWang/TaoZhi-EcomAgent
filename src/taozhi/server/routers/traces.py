@@ -1,12 +1,13 @@
 """工作台成员可见的提问、执行记录和管理员发起人筛选。"""
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Path, Query
 
 from taozhi.application.services import trace_service
 from taozhi.domain.trace_activity import ActivityCategory, SpanKind
+from taozhi.domain.trace_diagnostic import DiagnosticCategory
 from taozhi.schemas.trace import TraceActivityPage, TraceDetail, TraceKind, TraceOwnerPage, TracePage, TraceRunPage, TraceSpanPage, TraceState
 from taozhi.server.auth import identity
 
@@ -80,9 +81,10 @@ def trace_activities(
     task_id: TaskId,
     trace_id: Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")],
     category: ActivityCategory | None = None,
+    diagnostic: DiagnosticCategory | Literal["all"] | None = None,
     cursor: str | None = Query(None, min_length=1, max_length=64),
     limit: int = Query(100, ge=1, le=500),
     p=Depends(identity),
 ):
     """按开始时间读取关键行动，可按行动类别查看该链路的具体执行者。"""
-    return trace_service.list_activities(p, task_id, trace_id, category=category, cursor=cursor, limit=limit)
+    return trace_service.list_activities(p, task_id, trace_id, category=category, diagnostic=diagnostic, cursor=cursor, limit=limit)

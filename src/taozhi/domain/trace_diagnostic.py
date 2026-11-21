@@ -1,0 +1,57 @@
+"""执行诊断的封闭分类和中文说明，禁止写入请求或上游异常正文。"""
+from __future__ import annotations
+
+from typing import Literal
+
+DiagnosticCategory = Literal["model_api", "tool", "retrieval", "context", "permission", "storage", "workflow"]
+DiagnosticOutcome = Literal["failed", "retry", "fallback", "skipped"]
+
+OUTCOMES = {"failed": "步骤失败", "retry": "准备重试", "fallback": "启用替代处理", "skipped": "跳过此项"}
+CATALOG: dict[str, tuple[DiagnosticCategory, str]] = {
+    "model.auth_error": ("model_api", "模型 API 拒绝身份凭据或访问权限"),
+    "model.model_not_found": ("model_api", "模型 API 未找到指定模型或端点"),
+    "model.rate_limit": ("model_api", "模型 API 请求受到限流"),
+    "model.network_timeout": ("model_api", "模型 API 连接异常或请求超时"),
+    "model.upstream_error": ("model_api", "模型 API 上游服务异常"),
+    "model.invoke_error": ("model_api", "模型 API 调用失败"),
+    "model.invalid_output": ("model_api", "模型结构化输出解析或校验失败"),
+    "model.structured_request": ("model_api", "结构化请求未取得模型响应"),
+    "model.empty_output": ("model_api", "模型未返回可用正文"),
+    "tool.scraper_missing": ("tool", "本地采集程序或解释器未就绪"),
+    "tool.scraper_exit": ("tool", "本地采集程序异常退出"),
+    "tool.invalid_response": ("tool", "采集通道未返回预期的数据格式"),
+    "tool.gateway": ("tool", "外部检索网关调用失败，切换备用来源"),
+    "tool.scraper": ("tool", "商品直采渠道不可用，切换定向检索"),
+    "tool.http": ("tool", "网页抓取收到异常 HTTP 响应"),
+    "tool.redirect": ("tool", "网页重定向无效或超过次数限制"),
+    "storage.database": ("storage", "数据库操作失败"),
+    "tool.error": ("tool", "工具调用失败"),
+    "tool.timeout": ("tool", "工具未在执行期限内返回"),
+    "tool.cancelled": ("tool", "工具调用已取消"),
+    "tool.business_response": ("tool", "业务工具收到非成功的 HTTP 响应"),
+    "retrieval.search": ("retrieval", "资料检索失败"),
+    "retrieval.embedding": ("retrieval", "向量编码失败"),
+    "retrieval.embedding_unavailable": ("retrieval", "嵌入服务未通过健康检查，继续使用词法检索"),
+    "retrieval.rerank": ("retrieval", "精排失败"),
+    "retrieval.lexical": ("retrieval", "搜索引擎召回失败，改用本地词法检索"),
+    "retrieval.vector": ("retrieval", "向量召回失败，跳过该召回通道"),
+    "retrieval.score": ("retrieval", "向量评分失败，保留其他排序信号"),
+    "retrieval.hyde": ("retrieval", "查询扩展失败，继续使用原始查询"),
+    "context.prepare": ("context", "上下文读取或组装失败"),
+    "permission.denied": ("permission", "访问或执行权限校验未通过"),
+    "storage.delivery": ("storage", "流式结果未能写入"),
+    "storage.write": ("storage", "运行数据写入失败"),
+    "storage.embedding_cache": ("storage", "嵌入缓存读取失败，重新计算向量"),
+    "storage.checkpoint": ("storage", "无法读取上一轮检查点，跳过本次恢复"),
+    "storage.cleanup": ("storage", "调研临时工作区清理失败"),
+    "storage.memory": ("storage", "调研记忆归档失败"),
+    "workflow.step": ("workflow", "执行步骤出现异常"),
+    "workflow.plan": ("workflow", "协调员未获得有效规划，启用规则决策"),
+    "workflow.subagent": ("workflow", "子智能体未获得有效决策，启用规则处理"),
+    "workflow.summary": ("workflow", "智能体摘要生成失败，使用已采集的证据"),
+    "workflow.report": ("workflow", "报告生成失败，改用证据汇总"),
+    "workflow.lease": ("workflow", "执行租约续期失败，将在下一次心跳重试"),
+    "workflow.intent": ("workflow", "经营指标意图识别异常，转入知识问答流程"),
+    "workflow.progress": ("workflow", "任务进度未能发布"),
+    "workflow.control": ("workflow", "运行控制消息读取失败"),
+}

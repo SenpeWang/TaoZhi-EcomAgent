@@ -22,5 +22,5 @@ os.environ.setdefault("TRACE_DIR", str(Path(_TMP) / "traces"))
 os.environ.setdefault("AUDIT_DIR", str(Path(_TMP) / "audit"))
 
 
-def pytest_configure(config):  # noqa: ANN001
+def pytest_configure(config):
     config.addinivalue_line("markers", "slow: 需要调用 LLM 的端到端测试")

@@ -63,3 +63,26 @@ def test_kafka_topic_and_outbox_relay():
         c.execute("DELETE FROM task_events WHERE job_id=%s", (test_job_id,))
         c.execute("DELETE FROM task_outbox WHERE job_id=%s", (test_job_id,))
         c.execute("DELETE FROM jobs WHERE id=%s", (test_job_id,))
+
+def test_outbox_requires_broker_ack_before_deletion(monkeypatch):
+    """只要一条消息投递失败，整批待发任务就继续保留。"""
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from taozhi.knowledge import queue
+
+    connection = Mock()
+    producer = Mock()
+    confirmed, failed = Mock(), Mock()
+    failed.get.side_effect = RuntimeError("代理拒绝投递")
+    producer.send.side_effect = [confirmed, failed]
+    monkeypatch.setattr(queue, "load_config", lambda: SimpleNamespace(kafka_topic="tasks"))
+    monkeypatch.setattr(queue, "database_connection", lambda: nullcontext(connection))
+    monkeypatch.setattr(queue, "fetch_all", lambda *_: [{"id": 1, "job_id": "a"}, {"id": 2, "job_id": "b"}])
+
+    with pytest.raises(RuntimeError, match="代理拒绝投递"):
+        publish_pending(producer)
+    connection.execute.assert_not_called()
+    producer.send.side_effect = [confirmed, confirmed]
+    assert publish_pending(producer) == 2
+    connection.execute.assert_called_once()

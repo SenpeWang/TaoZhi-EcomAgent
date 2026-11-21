@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from enum import Enum
@@ -20,7 +19,8 @@ from openinference.semconv.trace import SpanAttributes
 from pydantic import BaseModel
 
 from ..config import Settings, get_settings
-from ..observability.tracing import node_span
+from opentelemetry.trace import StatusCode
+from ..observability.tracing import node_span, record_diagnostic
 from .observability import get_active_usage, record_llm_call, record_llm_error
 from .parsers import _JSON_RULES, clean_model_output, get_pydantic_parser
 from .router import (
@@ -35,7 +35,6 @@ from .usage import extract_usage
 from .text_stream import OutputDeliveryError, stream_answer
 
 Message = Union[str, BaseMessage, Dict[str, str]]
-_LOG = logging.getLogger(__name__)
 
 
 class ModelTier(str, Enum):
@@ -148,7 +147,7 @@ class LLMClient:
             try:
                 self._on_attempt(event)
             except Exception as exc:
-                _LOG.warning("模型调用计量写入失败 (%s)", type(exc).__name__)
+                record_diagnostic("storage.write", "skipped", exc)
 
     def _on_invoke_success(
         self,
@@ -246,18 +245,20 @@ class LLMClient:
             )
             candidates = [fallback_endpoint]
 
+        retry_empty = False
         with self._slots:
             result: Optional[AIMessage] = None
             for endpoint_index, endpoint in enumerate(candidates):
                 retried_endpoint = False
                 while True:
                     attempt_started_at = time.perf_counter()
-                    try:
-                        model_attributes = {
-                            "llm.endpoint_id": endpoint.endpoint_id,
-                            SpanAttributes.LLM_MODEL_NAME: endpoint.model or self._model_for_tier(tier),
-                        }
-                        with node_span("llm.chat", "LLM", model_attributes) as span:
+                    retry = False
+                    model_attributes = {
+                        "llm.endpoint_id": endpoint.endpoint_id,
+                        SpanAttributes.LLM_MODEL_NAME: endpoint.model or self._model_for_tier(tier),
+                    }
+                    with node_span("llm.chat", "LLM", model_attributes) as span:
+                        try:
                             model_client = self._client_for_endpoint(endpoint)
                             bound = model_client.bind(
                                 temperature=sampling_temperature, max_tokens=output_token_limit,
@@ -271,40 +272,58 @@ class LLMClient:
                                 span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_PROMPT, usage["prompt_tokens"])
                                 span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_COMPLETION, usage["completion_tokens"])
                                 span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_TOTAL, usage["total_tokens"])
-                    except OutputDeliveryError:
-                        raise
-                    except Exception as exc:
-                        latency_ms = int((time.perf_counter() - attempt_started_at) * 1000)
-                        reason, cooldown = self._registry.classify_error(exc, self.settings)
-                        self._registry.record_failure(endpoint, reason, cooldown)
-                        has_next = endpoint_index < len(candidates) - 1
-                        self._record_route(
-                            {
-                                "endpoint_id": endpoint.endpoint_id,
-                                "label": endpoint.label,
-                                "region": endpoint.region,
-                                "model": endpoint.model,
-                                "outcome": "failed",
-                                "reason": reason,
-                                "latency_ms": latency_ms,
-                                "failover": has_next,
-                            }
-                        )
-                        if has_next:
-                            break
-                        transient_failure = reason in ("rate_limit", "network_timeout", "upstream_error")
-                        if len(candidates) == 1 and not retried_endpoint and transient_failure:
-                            retried_endpoint = True
-                            time.sleep(0.5)
-                            continue
-                        record_llm_error(tier.value)
-                        raise
-                    used_failover = endpoint_index > 0
-                    reason = "failover_recovered" if used_failover else "primary_ok"
-                    self._on_invoke_success(
-                        endpoint, tier, usage, time.perf_counter() - attempt_started_at, failover=used_failover,
-                        reason="single_endpoint_retry_ok" if retried_endpoint else reason,
-                    )
+                        except OutputDeliveryError:
+                            raise
+                        except Exception as exc:
+                            result = None
+                            latency_ms = int((time.perf_counter() - attempt_started_at) * 1000)
+                            reason, cooldown = self._registry.classify_error(exc, self.settings)
+                            self._registry.record_failure(endpoint, reason, cooldown)
+                            has_next = endpoint_index < len(candidates) - 1
+                            transient_failure = reason in ("rate_limit", "network_timeout", "upstream_error")
+                            retry = len(candidates) == 1 and not retried_endpoint and transient_failure
+                            outcome = "fallback" if has_next else "retry" if retry else "failed"
+                            record_diagnostic(f"model.{reason}", outcome, exc,
+                                              publish_now=False)
+                            if span is not None:
+                                span.set_attribute("error.type", type(exc).__name__)
+                                span.set_status(StatusCode.ERROR)
+                            self._record_route(
+                                {
+                                    "endpoint_id": endpoint.endpoint_id,
+                                    "label": endpoint.label,
+                                    "region": endpoint.region,
+                                    "model": endpoint.model,
+                                    "outcome": "failed",
+                                    "reason": reason,
+                                    "latency_ms": latency_ms,
+                                    "failover": has_next,
+                                }
+                            )
+                            if has_next:
+                                break
+                            if not retry:
+                                record_llm_error(tier.value)
+                                raise
+                        else:
+                            used_failover = endpoint_index > 0
+                            reason = "failover_recovered" if used_failover else "primary_ok"
+                            self._on_invoke_success(
+                                endpoint, tier, usage, time.perf_counter() - attempt_started_at, failover=used_failover,
+                                reason="single_endpoint_retry_ok" if retried_endpoint else reason,
+                            )
+                            text = result.content if isinstance(result.content, str) else str(result.content)
+                            text = text.strip() if on_delta is not None else clean_model_output(text)
+                            if not text:
+                                retry_empty = (_empty_retry < self.settings.llm_empty_retries
+                                               and output_token_limit < self.settings.llm_output_cap)
+                                record_diagnostic("model.empty_output", "retry" if retry_empty else "failed", publish_now=False)
+                                if span is not None:
+                                    span.set_status(StatusCode.ERROR)
+                    if retry:
+                        retried_endpoint = True
+                        time.sleep(0.5)
+                        continue
                     break
                 if result is not None:
                     break
@@ -312,11 +331,7 @@ class LLMClient:
         if result is None:
             raise RuntimeError("所有商汤模型通道均不可用")
 
-        text = result.content if isinstance(result.content, str) else str(result.content)
-        text = text.strip() if on_delta is not None else clean_model_output(text)
-
-        if (not text and _empty_retry < self.settings.llm_empty_retries
-                and output_token_limit < self.settings.llm_output_cap):
+        if retry_empty:
             return self.chat(
                 prompt,
                 tier=tier,
@@ -369,26 +384,26 @@ class LLMClient:
             acc = get_active_usage()
             if acc is not None:
                 acc.add_json_attempt(is_retry=(attempt > 0))
-            try:
-                raw = self.chat(
-                    full_prompt
-                    if attempt == 0
-                    else f"{full_prompt}\n\n上一次输出无法解析为合法 JSON：\n{last_raw[:400]}\n请严格重新输出规范 JSON。",
-                    tier=tier,
-                    system=system or "你是严谨的电商业务结构化信息抽取引擎。",
-                    allow_overseas=allow_overseas,
-                    **({"max_tokens": max_tokens} if max_tokens else {}),
-                )
-            except Exception:
-                if attempt == retries - 1:
-                    return default if default is not None else ({} if expect == "object" else [])
-                continue
-
-            last_raw = raw
-            try:
-                return parser.parse(raw) if parser is not None else JsonOutputParser().parse(raw)
-            except Exception:
-                pass
+            outcome = "retry" if attempt + 1 < retries else "fallback"
+            with node_span("llm.structured_output", "CHAIN"):
+                try:
+                    raw = self.chat(
+                        full_prompt
+                        if attempt == 0
+                        else f"{full_prompt}\n\n上一次输出无法解析为合法 JSON：\n{last_raw[:400]}\n请严格重新输出规范 JSON。",
+                        tier=tier,
+                        system=system or "你是严谨的电商业务结构化信息抽取引擎。",
+                        allow_overseas=allow_overseas,
+                        **({"max_tokens": max_tokens} if max_tokens else {}),
+                    )
+                except Exception as exc:
+                    record_diagnostic("model.structured_request", outcome, exc)
+                    continue
+                last_raw = raw
+                try:
+                    return parser.parse(raw) if parser is not None else JsonOutputParser().parse(raw)
+                except Exception as exc:
+                    record_diagnostic("model.invalid_output", outcome, exc)
 
         return default if default is not None else ({} if expect == "object" else [])
 

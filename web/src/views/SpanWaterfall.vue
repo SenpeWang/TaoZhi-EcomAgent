@@ -100,9 +100,13 @@
             <code>{{ row.span.parent_span_id || '根节点' }}</code>
           </dd>
           <dt>开始时间</dt>
-          <dd>{{ timestamp(row.span.started_at) }}</dd>
+          <dd>{{ preciseTraceTime(row.span.started_at) }}</dd>
           <dt v-if="row.span.ended_at">结束时间</dt>
-          <dd v-if="row.span.ended_at">{{ timestamp(row.span.ended_at) }}</dd>
+          <dd v-if="row.span.ended_at">{{ preciseTraceTime(row.span.ended_at) }}</dd>
+          <template v-if="row.span.diagnostics.length">
+            <dt>问题日志</dt>
+            <dd><TraceDiagnosticLog :entries="row.span.diagnostics" /></dd>
+          </template>
           <template v-if="row.span.error_type">
             <dt>异常类型</dt>
             <dd class="span-error">{{ row.span.error_type }}</dd>
@@ -124,6 +128,8 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { preciseTraceTime } from '../labels'
+import TraceDiagnosticLog from './TraceDiagnosticLog.vue'
 import {
   analysisRows,
   buildWaterfall,
@@ -173,17 +179,6 @@ const visibleRows = computed(
   () =>
     view.value === 'tree' ? waterfall.value.rows : analysisRows(waterfall.value.rows, view.value),
 )
-const clock = new Intl.DateTimeFormat('zh-CN', {
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  fractionalSecondDigits: 3,
-  hour12: false,
-})
-
 /**
  * 展开或收起节点的子调用。
  * @param id - 目标节点编号。
@@ -199,15 +194,6 @@ function toggleBranch(id: string): void {
  */
 function inspect(id: string): void {
   selectedSpanId.value = selectedSpanId.value === id ? '' : id
-}
-
-/**
- * 格式化精确到毫秒的事件时间。
- * @param value - 服务端时间。
- * @returns 本地时区的时间文本。
- */
-function timestamp(value: string): string {
-  return clock.format(new Date(value))
 }
 </script>
 

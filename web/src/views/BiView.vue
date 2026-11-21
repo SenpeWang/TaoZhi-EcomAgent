@@ -442,6 +442,7 @@ const quickQuestions = [
 let charts: echarts.ECharts[] = []
 let closeStream: (() => void) | null = null
 const viewLifetime = new AbortController()
+let boardRequest = 0
 
 const activeDays = computed(() => board.value?.days || periodDays.value)
 
@@ -645,12 +646,16 @@ function switchTab(t: 'board' | 'chat'): void {
  * @returns 异步完成后无返回值
  */
 async function loadBoard(): Promise<void> {
+  const request = ++boardRequest
   boardLoading.value = true
   try {
-    board.value = await props.api<BoardData>(`/bi/dashboard?days=${periodDays.value}`)
+    const snapshot = await props.api<BoardData>(`/bi/dashboard?days=${periodDays.value}`)
+    if (request !== boardRequest || viewLifetime.signal.aborted) return
+    board.value = snapshot
     await nextTick()
     renderCharts()
   } catch (e: unknown) {
+    if (request !== boardRequest || viewLifetime.signal.aborted) return
     board.value = null
     const msg =
       e instanceof Error && /[\u4e00-\u9fff]/.test(e.message)
@@ -658,7 +663,7 @@ async function loadBoard(): Promise<void> {
         : '经营看板加载失败，请稍后重试'
     ElMessage.error(msg)
   } finally {
-    boardLoading.value = false
+    if (request === boardRequest) boardLoading.value = false
   }
 }
 
@@ -1204,7 +1209,6 @@ onUnmounted(() => {
   gap: 14px;
 }
 
-/* KPI Strip */
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1338,7 +1342,6 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-/* Charts & Breakdowns */
 .chart-grid,
 .detail-grid {
   display: grid;
@@ -1407,7 +1410,6 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
-/* 问数 */
 .chat {
   display: flex;
   flex-direction: column;

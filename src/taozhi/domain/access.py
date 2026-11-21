@@ -48,7 +48,6 @@ def evaluate_read_permission(
     doc: dict,
     grant: Optional[dict] = None,
     include_draft: bool = False,
-    can_write_flag: bool = False,
 ) -> bool:
     """按文档范围、密级与个人特例授权判定阅读权限。
 
@@ -57,7 +56,6 @@ def evaluate_read_permission(
         doc: 文档记录字典。
         grant: 该用户针对本文档的有效个人授权记录。
         include_draft: 是否允许有写权限者读取非发布态草稿。
-        can_write_flag: 调用方预判的写权限标志。
 
     Returns:
         允许阅读返回 True，否则返回 False。
@@ -67,7 +65,7 @@ def evaluate_read_permission(
     if grant and grant.get("effect") == "deny":
         return False
     if doc.get("state") != "published":
-        return include_draft and can_write_flag
+        return include_draft and evaluate_write_permission(p, doc, grant)
     if grant and grant.get("effect") == "allow" and grant.get("can_read"):
         return True
     if p.boss:
@@ -101,7 +99,6 @@ def evaluate_download_permission(
     p: Principal,
     doc: dict,
     grant: Optional[dict] = None,
-    can_read_flag: bool = False,
 ) -> bool:
     """判定主体是否有权下载文档内容或原始附件。
 
@@ -109,14 +106,11 @@ def evaluate_download_permission(
         p: 当前用户主体。
         doc: 文档记录字典。
         grant: 该用户针对本文档的有效个人授权记录。
-        can_read_flag: 调用方预判的阅读权限标志。
 
     Returns:
         允许下载返回 True，否则返回 False。
     """
-    if not can_read_flag:
-        return False
-    if grant and grant.get("effect") == "deny":
+    if not evaluate_read_permission(p, doc, grant):
         return False
     return (
         p.boss

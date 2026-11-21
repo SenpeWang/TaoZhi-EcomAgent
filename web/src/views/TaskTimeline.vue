@@ -25,30 +25,16 @@ const emit = defineEmits<{
 const steerInput = ref('')
 
 /**
- * 格式化任务状态描述。
- * @param s - 状态码。
- * @returns 中文描述。
- */
-function state(s?: string): string {
-  return stateText(s)
-}
-
-/**
- * 格式化密级描述。
- * @param l - 密级数值。
- * @returns 中文描述。
- */
-function level(l?: number): string {
-  return levelText(l)
-}
-
-/**
  * 复制当前调研研报到剪贴板。
  */
-function copyReport() {
+async function copyReport(): Promise<void> {
   if (!props.task?.result?.report) return
-  navigator.clipboard.writeText(props.task.result.report)
-  ElMessage.success('已复制调研研报 Markdown')
+  try {
+    await navigator.clipboard.writeText(props.task.result.report)
+    ElMessage.success('已复制调研研报 Markdown')
+  } catch {
+    ElMessage.warning('复制失败，可选中报告正文手动复制')
+  }
 }
 
 /**
@@ -71,9 +57,9 @@ function onSteer() {
     <template v-if="task">
       <h3>{{ task.question }}</h3>
       <div class="detail-meta">
-        <el-tag>{{ state(task.state) }}</el-tag>
+        <el-tag>{{ stateText(task.state) }}</el-tag>
         <span>{{ formatStage(task.stage) }}</span>
-        <span>{{ level(task.input_level) }}</span>
+        <span>{{ levelText(task.input_level) }}</span>
         <el-button v-if="canInspect" link type="primary" @click="emit('inspect', task.id)"
           >查看执行轨迹</el-button
         >

@@ -384,8 +384,6 @@
           v-else-if="currentPage === '我的任务' || currentPage === '团队审核'"
           :tasks="visibleTasks"
           :is-review-page="currentPage === '团队审核'"
-          :state-text="stateText"
-          :state-tag="stateTag"
           @open="openTask"
           @navigate="navigate"
           @reload="load"
@@ -397,8 +395,6 @@
           :documents="documents"
           :can-write="capabilities.write"
           :can-manage-permissions="capabilities.permissions"
-          :level-text="levelText"
-          :state-text="stateText"
           @reload="load"
           @open-permission-id="permissionIdOpen = true"
           @open-request-access="accessOpen = true"
@@ -518,7 +514,6 @@
           :user="user"
           :tenant-name="workspaceInfo.name || '企业工作空间'"
           :busy="busy"
-          :format-role-name="roleLabel"
           @change-password="changePassword"
           @sign-out="signOut"
         />
@@ -959,7 +954,7 @@ const approvals = ref<Approval[]>([])
 const users = ref<User[]>([])
 const audits = ref<AuditEvent[]>([])
 const runtimeStatus = ref<RuntimeStatus | null>(null)
-const dashboard = ref<Dashboard>({
+const emptyDashboard: Dashboard = {
   documents: 0,
   tasks: 0,
   review: 0,
@@ -967,7 +962,10 @@ const dashboard = ref<Dashboard>({
   teams: [],
   model_ready: false,
   business_ready: false,
-})
+}
+const dashboard = ref<Dashboard>(emptyDashboard)
+let session = new AbortController()
+let workspaceRequest = 0
 
 const loginForm = reactive({ username: '', password: '' })
 const askForm = reactive({ question: '', node_id: '', input_level: 1, allow_external: false })
@@ -1187,21 +1185,6 @@ const clearanceShortText = computed(
 )
 
 /**
- * 将组织角色编码映射为规范企业岗位称谓。
- * @param role - 服务端角色编码。
- * @returns 中文岗位名称。
- */
-function roleLabel(role: string): string {
-  const map: Record<string, string> = {
-    employee: '普通员工',
-    leader: '部门主管',
-    boss: '企业负责人',
-    admin: '系统管理员',
-  }
-  return map[role] || role
-}
-
-/**
  * 格式化用户信息条展示的岗位角色摘要。
  * @param row - 账号对象。
  * @returns 角色摘要文案。
@@ -1219,6 +1202,9 @@ function displayRoles(row: User): string {
  * 清空客户端所有业务状态，确保退出或改密后不残留会话信息。
  */
 function clearSession(): void {
+  session.abort()
+  session = new AbortController()
+  workspaceRequest++
   taskSelection++
   user.value = null
   inspectedTrace.value = null
@@ -1231,8 +1217,34 @@ function clearSession(): void {
   runtimeStatus.value = null
   detail.value = null
   activeTask.value = null
-  docOpen.value = false
-  taskOpen.value = false
+  dashboard.value = emptyDashboard
+  currentPage.value = '工作概览'
+  search.value = ''
+  askForm.question = ''
+  askForm.node_id = ''
+  loginForm.password = ''
+  docForm.id = docForm.title = docForm.body = ''
+  selectedFile.value = null
+  history.value = []
+  currentGrants.value = []
+  accessId.value = permissionId.value = ''
+  accountForm.password = resetForm.new_password = ''
+  taskDraft.value = ''
+  for (const dialog of [
+    docOpen,
+    taskOpen,
+    docEdit,
+    policyOpen,
+    grantOpen,
+    historyOpen,
+    accessOpen,
+    permissionIdOpen,
+    accountOpen,
+    memberOpen,
+    resetOpen,
+    orgOpen,
+  ])
+    dialog.value = false
 }
 
 /**
@@ -1243,7 +1255,16 @@ function clearSession(): void {
  * @returns 经过结构校验的服务端响应数据。
  */
 async function api<T>(path: string, method = 'GET', payload?: unknown): Promise<T> {
-  return requestApi<T>(path, workspaceInfo.value.mode, clearSession, method, payload)
+  return requestApi<T>(
+    path,
+    workspaceInfo.value.mode,
+    () => {
+      if (user.value) clearSession()
+    },
+    method,
+    payload,
+    session.signal,
+  )
 }
 
 /**
@@ -1264,7 +1285,7 @@ async function action(fn: () => Promise<void>): Promise<void> {
   try {
     await fn()
   } catch (e: unknown) {
-    ElMessage.error(readError(e))
+    if (!(e instanceof DOMException && e.name === 'AbortError')) ElMessage.error(readError(e))
   } finally {
     busy.value = false
   }
@@ -1279,6 +1300,7 @@ async function load(): Promise<void> {
     currentPage.value = '个人中心'
     return
   }
+  const request = ++workspaceRequest
   const query = search.value ? '?q=' + encodeURIComponent(search.value) : ''
   const [overview, organizationPage, documentPage, taskPage, approvalPage, userPage] =
     await Promise.all([
@@ -1293,6 +1315,7 @@ async function load(): Promise<void> {
         ? api<Items<User>>('/users')
         : Promise.resolve({ items: [] as User[] }),
     ])
+  if (request !== workspaceRequest) return
   dashboard.value = overview
   organizations.value = organizationPage.items
   documents.value = documentPage.items
@@ -1311,6 +1334,7 @@ async function signIn(): Promise<void> {
       ...loginForm,
       tenant_code: workspaceInfo.value.tenant_code,
     })
+    clearSession()
     const signedUser = result.user
     user.value = signedUser
     loginForm.password = ''
@@ -1394,7 +1418,6 @@ async function submitQuestion(): Promise<void> {
   })
 }
 
-// 统一从详情弹窗的当前任务订阅，覆盖新提问、已运行任务和重试。
 watch(
   () =>
     taskOpen.value &&
@@ -1482,20 +1505,15 @@ async function showTask(id: string, selection: number): Promise<void> {
 }
 
 /**
- * 提交审核决定。
- * @param approveOrTaskId - 审核决定或任务 ID。
- * @param maybeApprove - 当首参为 ID 时的审核布尔决定。
+ * 审核点击时选定的任务，并在仍查看该任务时更新详情。
+ * @param taskId - 已选任务编号。
+ * @param approve - 是否通过审核。
  */
-async function reviewTask(
-  approveOrTaskId: boolean | string,
-  maybeApprove?: boolean,
-): Promise<void> {
-  if (!activeTask.value) return
-  const approve = typeof approveOrTaskId === 'boolean' ? approveOrTaskId : Boolean(maybeApprove)
+async function reviewTask(taskId: string, approve: boolean): Promise<void> {
   await action(async () => {
-    await api('/tasks/' + activeTask.value!.id + '/review', 'POST', { approve, comment: '' })
+    await api('/tasks/' + taskId + '/review', 'POST', { approve, comment: '' })
     ElMessage.success(approve ? '已通过并发布' : '已驳回')
-    activeTask.value = await api<Task>('/tasks/' + activeTask.value!.id)
+    if (taskOpen.value && activeTask.value?.id === taskId) await showTask(taskId, taskSelection)
     await load()
   })
 }
@@ -1979,11 +1997,15 @@ onMounted(async () => {
         if (taskOpen.value && activeTask.value === selected) activeTask.value = snapshot
       }
       if (docOpen.value && detail.value) {
+        const selected = detail.value
         try {
-          detail.value = await api<DocumentRecord>('/documents/' + detail.value.id)
+          const snapshot = await api<DocumentRecord>('/documents/' + selected.id)
+          if (docOpen.value && detail.value === selected) detail.value = snapshot
         } catch {
-          docOpen.value = false
-          detail.value = null
+          if (detail.value === selected) {
+            docOpen.value = false
+            detail.value = null
+          }
         }
       }
     } catch {}

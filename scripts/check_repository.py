@@ -16,7 +16,7 @@ PRE_LOCAL_AGENT_POLICY_COMMITS = frozenset({
     "2b071e5b087099cd0a4683c4394a4b972282b652",
 })
 FORBIDDEN_DIRECTORIES = {
-    "data", "node_modules", "__pycache__", ".venv", ".venv", "venv",
+    "data", "node_modules", "__pycache__", ".venv", "venv",
     ".pytest_cache", ".mypy_cache", ".ruff_cache", ".idea", ".vscode",
 }
 FORBIDDEN_SUFFIXES = {

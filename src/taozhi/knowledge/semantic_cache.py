@@ -19,14 +19,15 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+from uuid import uuid4
 
 import numpy as np
 
 from ..config import Config, load_config
 from ..knowledge.embedding import available as embedding_available, encode_query
 from taozhi.domain.entity_extraction import extract_entities
-from ..knowledge.retriever import SEMANTIC_DIM
 from taozhi.domain.privacy import redact
+from taozhi.observability import record_diagnostic
 
 logger = logging.getLogger("taozhi.server.semantic_cache")
 
@@ -35,8 +36,6 @@ logger = logging.getLogger("taozhi.server.semantic_cache")
 class CacheEntry:
     """语义缓存条目。"""
     id: str
-    tenant_id: str
-    query: str
     embedding: np.ndarray
     answer: str
     citations: List[Dict[str, Any]]
@@ -102,7 +101,7 @@ class SemanticCache:
         """重构租户向量矩阵，供矩阵点积批量加速。"""
         entries = self._entries.get(tenant_id, [])
         if not entries:
-            self._matrices[tenant_id] = np.zeros((0, SEMANTIC_DIM), dtype="float32")
+            self._matrices.pop(tenant_id, None)
         else:
             self._matrices[tenant_id] = np.vstack([e.embedding for e in entries])
 
@@ -135,8 +134,8 @@ class SemanticCache:
         t0 = time.monotonic()
         try:
             q_vec = encode_query(query)[0]
-        except Exception as e:
-            logger.warning("语义缓存向量化失败: %s", e)
+        except Exception as exc:
+            record_diagnostic("retrieval.embedding", "skipped", exc)
             with self._lock:
                 self._misses += 1
             return None
@@ -145,7 +144,7 @@ class SemanticCache:
             self._sync_epoch_unlocked(tenant_id, epoch)
             entries = self._entries.get(tenant_id, [])
             matrix = self._matrices.get(tenant_id)
-            if not entries or matrix is None or len(matrix) == 0:
+            if not entries or matrix is None or matrix.shape[1] != len(q_vec):
                 self._misses += 1
                 return None
 
@@ -180,15 +179,13 @@ class SemanticCache:
                 elapsed = (time.monotonic() - t0) * 1000
                 best_sim = float(sims[idx])
                 logger.info(
-                    "语义缓存命中! 相似度: %.4f, 匹配原问题: '%s', 耗时: %.2fms",
+                    "语义缓存命中（相似度 %.4f，耗时 %.2f 毫秒）",
                     best_sim,
-                    entry.query,
                     elapsed,
                 )
                 matched_payload = {
                     "entry_id": entry.id,
                     "cache_hit": True,
-                    "matched_query": entry.query,
                     "similarity": round(best_sim, 4),
                     "answer": answer,
                     "citations": citations,
@@ -224,26 +221,28 @@ class SemanticCache:
         redacted 记的是这批内容有没有脱敏过（boss 的答案没有），命中时据此对齐；
         可选传入 epoch（``tenants.epoch``）以支持 API↔Worker 跨进程权限失效感知。
         """
-        if not embedding_available() or not answer.strip():
+        if not sources or any(s.get("kind") != "document" for s in sources):
+            return False
+        if self.max_entries_per_tenant <= 0 or not answer.strip() or not embedding_available():
             return False
 
         try:
             q_vec = encode_query(query)[0]
-        except Exception:
+        except Exception as exc:
+            record_diagnostic("retrieval.embedding", "skipped", exc)
             return False
 
         with self._lock:
             self._sync_epoch_unlocked(tenant_id, epoch)
             entries = self._entries.setdefault(tenant_id, [])
+            if entries and len(entries[0].embedding) != len(q_vec):
+                entries.clear()
             if len(entries) >= self.max_entries_per_tenant:
                 entries.sort(key=lambda x: (x.hits, x.created_at))
                 entries.pop(0)
 
-            entry_id = f"sc_{int(time.time()*1000)}_{len(entries)}"
             entry = CacheEntry(
-                id=entry_id,
-                tenant_id=tenant_id,
-                query=query,
+                id=f"sc_{uuid4().hex}",
                 embedding=q_vec,
                 answer=answer,
                 citations=citations,

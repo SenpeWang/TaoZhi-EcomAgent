@@ -4,8 +4,8 @@
 为什么需要单独一个脚本
 ----------------------
 evals/ 的产物一直是文件：``datasets/generated/latest/cases.jsonl`` 是用例集，
-``reports/*.json`` 是逐例判定结果。Phoenix 只被动接收应用上报的 span，而本项目
-代码里没有 OTel 埋点，所以 Phoenix 界面上既看不到评估集，也看不到分数。
+``reports/*.json`` 是逐例判定结果。应用的 OTel 运行轨迹由工作台保存，
+评估集与逐例分数通过本脚本单独同步。
 
 职责边界不变：评估在 ``evals/rag_eval/run.py`` 跑（纯离线计算，不依赖 Phoenix），
 本脚本只把已有产物搬进 Phoenix 供人查看与横向对比。Phoenix 没起时评估照常产出

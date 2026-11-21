@@ -54,6 +54,26 @@ const traceClock = new Intl.DateTimeFormat('zh-CN', {
   hour12: false,
 })
 
+const preciseClock = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  fractionalSecondDigits: 3,
+  hour12: false,
+})
+
+/**
+ * 显示毫秒级本地时间以定位同一步骤中的多次失败。
+ * @param timestamp - 已通过接口边界校验的时间戳。
+ * @returns 包含日期的诊断时间。
+ */
+export function preciseTraceTime(timestamp: string): string {
+  return preciseClock.format(new Date(timestamp))
+}
+
 /**
  * 将执行记录的时间戳显示为浏览器本地时间。
  * @param value - 服务端时间戳。
@@ -83,4 +103,20 @@ export function formatStage(raw?: string | null): string {
   const txt = (raw || '').trim()
   if (!txt) return '等待处理'
   return txt.replace(/^(\[[a-zA-Z0-9_]+\]\s*)+/, '').trim() || txt
+}
+
+const roleLabels: Record<string, string> = {
+  employee: '普通员工',
+  leader: '部门主管',
+  boss: '企业负责人',
+  admin: '系统管理员',
+}
+
+/**
+ * 显示企业岗位的中文称谓。
+ * @param role - 岗位代码。
+ * @returns 对应的中文岗位名称。
+ */
+export function roleName(role: string): string {
+  return roleLabels[role] ?? role
 }

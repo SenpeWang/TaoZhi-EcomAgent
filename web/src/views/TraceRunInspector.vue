@@ -32,6 +32,14 @@
       <button type="button" :aria-pressed="view === 'activities'" @click="chooseView('activities')">
         行动记录
       </button>
+      <button
+        type="button"
+        :aria-pressed="view === 'diagnostics'"
+        @click="chooseView('diagnostics')"
+      >
+        问题日志
+        <strong :class="{ 'metric-error': diagnosticTotal > 0 }">{{ diagnosticTotal }}</strong>
+      </button>
       <button type="button" :aria-pressed="view === 'spans'" @click="chooseView('spans')">
         调用分析
       </button>
@@ -59,7 +67,7 @@
         </dd>
       </div>
     </dl>
-    <p v-if="view === 'spans'" class="trace-id">
+    <p v-if="view !== 'activities'" class="trace-id">
       Trace ID <code>{{ selectedRun.trace_id }}</code>
     </p>
     <fieldset v-if="view === 'activities'" class="kind-filters">
@@ -77,6 +85,28 @@
           @click="chooseCategory(category)"
         >
           {{ label }} <span>{{ selectedRun.category_counts[category] ?? 0 }}</span>
+        </button>
+      </div>
+    </fieldset>
+    <fieldset v-else-if="view === 'diagnostics'" class="kind-filters">
+      <legend>问题类型</legend>
+      <div>
+        <button
+          type="button"
+          :aria-pressed="selectedDiagnostic === 'all'"
+          @click="chooseDiagnostic('all')"
+        >
+          全部问题 <span>{{ diagnosticTotal }}</span>
+        </button>
+        <button
+          v-for="(label, category) in diagnosticCategoryLabels"
+          :key="category"
+          type="button"
+          :aria-pressed="selectedDiagnostic === category"
+          :disabled="!selectedRun.diagnostic_counts[category]"
+          @click="chooseDiagnostic(category)"
+        >
+          {{ label }} <span>{{ selectedRun.diagnostic_counts[category] ?? 0 }}</span>
         </button>
       </div>
     </fieldset>
@@ -99,8 +129,9 @@
       </div>
     </fieldset>
     <TraceActivityTimeline
-      v-if="view === 'activities' && activities.length"
+      v-if="view !== 'spans' && activities.length"
       :activities="activities"
+      :diagnostic="view === 'diagnostics' ? selectedDiagnostic : undefined"
       :observed-at="observedAt"
     />
     <SpanWaterfall
@@ -116,13 +147,17 @@
       v-else-if="!error"
       :image-size="48"
       :description="
-        view === 'activities' ? '本次执行尚无此类行动记录' : '本条执行链路没有此类型的节点'
+        view === 'diagnostics'
+          ? '本次执行没有记录此类诊断日志'
+          : view === 'activities'
+            ? '本次执行尚无此类行动记录'
+            : '本条执行链路没有此类型的节点'
       "
     />
     <div v-if="nextCursor" class="load-nodes">
       <el-button :disabled="loading" @click="loadMore">
-        {{ view === 'activities' ? '加载更多行动' : '加载更多节点' }}（已显示
-        {{ view === 'activities' ? activities.length : spans.length }}）
+        {{ view === 'spans' ? '加载更多节点' : '加载更多步骤' }}（已显示
+        {{ view === 'spans' ? spans.length : activities.length }}）
       </el-button>
     </div>
   </template>
@@ -136,8 +171,9 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted, ref, shallowRef, toRef, watch } from 'vue'
+import { computed, onUnmounted, ref, shallowRef, toRef, watch } from 'vue'
 import { traceTime } from '../labels'
+import { diagnosticCategoryLabels } from '../traceActivity'
 import {
   activityCategoryLabels,
   formatDuration,
@@ -147,6 +183,7 @@ import {
 } from '../traceWaterfall'
 import type {
   ActivityCategory,
+  DiagnosticCategory,
   SpanKind,
   TraceActivity,
   TraceDetail,
@@ -158,7 +195,7 @@ import type {
 import SpanWaterfall from './SpanWaterfall.vue'
 import TraceActivityTimeline from './TraceActivityTimeline.vue'
 
-type RunView = 'activities' | 'spans'
+type RunView = 'activities' | 'diagnostics' | 'spans'
 
 const props = defineProps<{
   detail: TraceDetail
@@ -173,6 +210,13 @@ const runPageCursors = ref<(string | null)[]>([null])
 const nextRunCursor = ref<string | null>(null)
 const selectedCategory = ref<ActivityCategory | ''>('')
 const selectedKind = ref<SpanKind | ''>('')
+const selectedDiagnostic = ref<DiagnosticCategory | 'all'>('all')
+const diagnosticTotal = computed(() =>
+  Object.values(selectedRun.value?.diagnostic_counts ?? {}).reduce(
+    (total, count) => total + count,
+    0,
+  ),
+)
 const view = ref<RunView>('activities')
 const activities = shallowRef<TraceActivity[]>([])
 const spans = shallowRef<TraceSpan[]>([])
@@ -227,6 +271,7 @@ async function readEntries<T extends TraceSpan>(
     if (view.value === 'activities' && selectedCategory.value)
       query.set('category', selectedCategory.value)
     if (view.value === 'spans' && selectedKind.value) query.set('kind', selectedKind.value)
+    if (view.value === 'diagnostics') query.set('diagnostic', selectedDiagnostic.value)
     const page = await props.api<TraceSpanPage<T>>(endpoint + '?' + query)
     if (requestSequence !== requestId) return null
     for (const span of page.items) merged.set(span.span_id, span)
@@ -296,6 +341,7 @@ async function load(
     const changed = target?.trace_id !== selectedRun.value?.trace_id
     if (action === 'page' || action === 'select') pinnedTraceId = target?.trace_id ?? null
     if (changed) {
+      selectedDiagnostic.value = 'all'
       selectedKind.value = ''
       selectedCategory.value = ''
     }
@@ -303,8 +349,9 @@ async function load(
     selectedRun.value = target
     emit('recording', target?.status === 'running')
     if (!target) return
-    const endpoint = basePath() + '/' + target.trace_id + '/' + view.value
-    if (view.value === 'activities') {
+    const endpoint =
+      basePath() + '/' + target.trace_id + '/' + (view.value === 'spans' ? 'spans' : 'activities')
+    if (view.value !== 'spans') {
       const items = await readEntries(endpoint, activities.value, requestId, action === 'append')
       if (items && requestId === requestSequence) activities.value = items
     } else {
@@ -336,6 +383,7 @@ function chooseKind(kind: SpanKind | ''): void {
 function chooseView(mode: RunView): void {
   if (view.value === mode) return
   view.value = mode
+  selectedDiagnostic.value = 'all'
   selectedCategory.value = ''
   selectedKind.value = ''
   void load('filter')
@@ -348,6 +396,16 @@ function chooseView(mode: RunView): void {
 function chooseCategory(category: ActivityCategory | ''): void {
   if (selectedCategory.value === category) return
   selectedCategory.value = category
+  void load('filter')
+}
+
+/**
+ * 从整条链路中查找含指定诊断的步骤，由服务端先筛选再分页。
+ * @param category - 故障分类，all 包括全部已采集的诊断。
+ */
+function chooseDiagnostic(category: DiagnosticCategory | 'all'): void {
+  if (selectedDiagnostic.value === category) return
+  selectedDiagnostic.value = category
   void load('filter')
 }
 
@@ -506,7 +564,7 @@ onUnmounted(stop)
   line-height: 1.3;
   font-variant-numeric: tabular-nums;
 }
-.execution-metrics .metric-error {
+.metric-error {
   color: var(--tz-danger);
 }
 .usage-metric dd {

@@ -15,7 +15,7 @@ from opentelemetry.trace import StatusCode
 
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
-from taozhi.observability.tracing import node_span
+from taozhi.observability.tracing import node_span, record_diagnostic
 
 _ALLOWED_FIELDS = {
     "tenant_id",
@@ -167,6 +167,7 @@ def lookup(
             with httpx.Client(trust_env=False, follow_redirects=False, timeout=10, transport=transport) as client:
                 resp = client.get(endpoint, headers=headers)
             if resp.status_code != 200:
+                record_diagnostic("tool.business_response", "failed", http_status=resp.status_code, publish_now=False)
                 if span is not None:
                     span.set_attribute("error.type", "BusinessServiceError")
                     span.set_attribute("tool.status", "error")

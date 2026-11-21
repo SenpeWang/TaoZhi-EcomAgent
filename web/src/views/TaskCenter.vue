@@ -59,7 +59,7 @@
 
     <div class="task-toolbar">
       <el-radio-group v-if="!isReviewPage" v-model="kindFilter" size="default">
-        <el-radio-button value="all">全部 ({{ baseTasks.length }})</el-radio-button>
+        <el-radio-button value="all">全部 ({{ tasks.length }})</el-radio-button>
         <el-radio-button value="ask">{{ traceKind('ask') }} ({{ askCount }})</el-radio-button>
         <el-radio-button value="research"
           >{{ traceKind('research') }} ({{ researchCount }})</el-radio-button
@@ -124,7 +124,7 @@
             :disabled="(row.error || row.stage || '').length < 24"
           >
             <span class="task-stage-text" :class="{ 'is-error': Boolean(row.error) }">
-              {{ cleanStage(row.error || row.stage) }}
+              {{ formatStage(row.error || row.stage) }}
             </span>
           </el-tooltip>
         </template>
@@ -173,13 +173,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { Task } from '../types'
-import { traceKind } from '../labels'
+import { formatStage, stateTag, stateText, traceKind } from '../labels'
 
 const props = defineProps<{
   tasks: Task[]
   isReviewPage: boolean
-  stateText: (state: string) => string
-  stateTag: (state: string) => 'primary' | 'success' | 'warning' | 'danger' | 'info'
 }>()
 
 const emit = defineEmits<{
@@ -194,16 +192,15 @@ const keyword = ref('')
 const currentPage = ref(1)
 const pageSize = ref(12)
 
-const baseTasks = computed(() => props.tasks)
-const askCount = computed(() => baseTasks.value.filter((t) => t.kind !== 'research').length)
-const researchCount = computed(() => baseTasks.value.filter((t) => t.kind === 'research').length)
+const askCount = computed(() => props.tasks.filter((t) => t.kind !== 'research').length)
+const researchCount = computed(() => props.tasks.filter((t) => t.kind === 'research').length)
 
 const kindFiltered = computed(() => {
-  if (props.isReviewPage || kindFilter.value === 'all') return baseTasks.value
+  if (props.isReviewPage || kindFilter.value === 'all') return props.tasks
   if (kindFilter.value === 'research') {
-    return baseTasks.value.filter((t) => t.kind === 'research')
+    return props.tasks.filter((t) => t.kind === 'research')
   }
-  return baseTasks.value.filter((t) => t.kind !== 'research')
+  return props.tasks.filter((t) => t.kind !== 'research')
 })
 
 const activeCount = computed(
@@ -265,17 +262,6 @@ watch([kindFilter, stateFilter, keyword, pageSize, () => props.isReviewPage], ()
  */
 function selectStateFilter(target: string): void {
   stateFilter.value = stateFilter.value === target && target !== 'all' ? 'all' : target
-}
-
-/**
- * 清洗后端阶段文本中的机器标签前缀，提升列表可读性。
- * @param raw 原始阶段或错误文本。
- * @returns 面向用户的精简阶段说明。
- */
-function cleanStage(raw?: string | null): string {
-  const txt = (raw || '').trim()
-  if (!txt) return '等待处理'
-  return txt.replace(/^(\[[a-zA-Z0-9_]+\]\s*)+/, '').trim() || txt
 }
 
 /**

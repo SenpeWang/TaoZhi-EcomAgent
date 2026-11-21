@@ -10,7 +10,6 @@ depends_on = None
 def upgrade() -> None:
     """在线构建索引，允许任务在迁移过程中继续入队。"""
     with op.get_context().autocommit_block():
-        # 并发建索引中断时 PostgreSQL 会留下 INVALID 索引，重跑应重新建立。
         op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_jobs_trace_page")
         op.execute(
             "CREATE INDEX CONCURRENTLY idx_jobs_trace_page "

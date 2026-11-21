@@ -1,5 +1,3 @@
-# 多阶段统一构建：前端静态资源 / 业务 API & Worker / 向量推理服务（全部基于官方基础镜像）
-
 FROM node:24-slim AS frontend-builder
 ARG NPM_REGISTRY=""
 WORKDIR /web

@@ -158,7 +158,6 @@ async function loadDetail(): Promise<void> {
         detail.value?.trace.state === 'queued' ||
         Math.abs(Date.now() - Date.parse(snapshot.trace.finished_at)) < 15000)
     ) {
-      // 完成状态可能先于尾部 Span 批次提交。
       finalRefreshes.value = 3
     } else if (finalRefreshes.value) finalRefreshes.value--
     detail.value = snapshot

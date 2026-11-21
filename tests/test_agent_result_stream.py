@@ -61,6 +61,29 @@ def test_report_failover_replaces_partial_output():
         client.close()
 
 
+def test_empty_model_output_is_diagnosed_on_the_attempt(monkeypatch):
+    """空答重试归入返回空正文的模型节点，第二次请求保留独立结果。"""
+    from langchain_core.messages import AIMessage
+    from taozhi.config import get_settings
+    from taozhi.observability import tracing
+
+    rows = []
+    monkeypatch.setattr(tracing, "submit_span", rows.append)
+    monkeypatch.setenv("TAOZHI_TRACING", "1")
+    settings = get_settings().model_copy(update={"llm_empty_retries": 1, "llm_output_cap": 4096})
+    client = LLMClient(settings=settings, registry=CircuitBreakerRegistry())
+    try:
+        with tracing.job_trace("tenant", "task", 1, "task.research"), patch.object(client, "_client_for_endpoint") as provider:
+            provider.return_value.bind.return_value.invoke.side_effect = [AIMessage(content=""), AIMessage(content="已完成")]
+            assert client.chat("提问", max_tokens=128) == "已完成"
+    finally:
+        client.close()
+    calls = [row for row in rows if row["kind"] == "LLM" and row["ended_at"]]
+    assert [row["status"] for row in calls] == ["error", "ok"]
+    assert calls[0]["diagnostics"][0]["code"] == "model.empty_output"
+    assert calls[0]["diagnostics"][0]["outcome"] == "retry" and not calls[1]["diagnostics"]
+
+
 @pytest.mark.parametrize("review,hard,expected_deltas", [(False, False, 2), (True, False, 0), (False, True, 0)])
 def test_only_verified_answer_paragraphs_are_streamed(monkeypatch, review, hard, expected_deltas):
     """核验后的结论以最终引文格式发布，审核、硬阻断、重复与无依据结论不会进入草稿。"""

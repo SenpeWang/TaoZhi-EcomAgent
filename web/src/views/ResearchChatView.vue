@@ -925,7 +925,6 @@ onUnmounted(() => {
   color: #16a34a;
 }
 
-/* ── 左侧简洁历史栏 ─────────────────────────────── */
 .chat-history-sidebar {
   width: 240px;
   background: #f8fafc;
@@ -1040,7 +1039,6 @@ onUnmounted(() => {
   padding: 24px 8px;
 }
 
-/* ── 中间聊天舞台 ──────────────────────────────── */
 .chat-conversation-stage {
   flex: 1;
   display: flex;
@@ -1068,7 +1066,6 @@ onUnmounted(() => {
   margin-left: 10px;
 }
 
-/* 消息流 (居中 820px 宽度) */
 .messages-scroll-area {
   flex: 1;
   overflow-y: auto;
@@ -1079,7 +1076,6 @@ onUnmounted(() => {
   margin: 0 auto;
 }
 
-/* 空白欢迎区 */
 .chat-welcome-box {
   margin: 60px auto 40px;
   text-align: center;
@@ -1136,12 +1132,10 @@ onUnmounted(() => {
   color: #0f172a;
 }
 
-/* 问答对话流 */
 .message-turn-group {
   margin-bottom: 32px;
 }
 
-/* 用户问题 (靠右) */
 .user-query-container {
   display: flex;
   justify-content: flex-end;
@@ -1158,7 +1152,6 @@ onUnmounted(() => {
   word-break: break-word;
 }
 
-/* 调研团队答复 */
 .assistant-response-container {
   display: flex;
   align-items: flex-start;
@@ -1182,7 +1175,6 @@ onUnmounted(() => {
   min-width: 0;
 }
 
-/* 运行中思考块 */
 .active-thinking-block {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
@@ -1219,7 +1211,6 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
-/* 思考与运行工具步骤排版 */
 .live-steps-stream {
   display: flex;
   flex-direction: column;
@@ -1251,7 +1242,6 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
-/* 完成后思考折叠条 */
 .completed-thinking-accordion {
   margin-bottom: 14px;
 }
@@ -1287,7 +1277,6 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-/* Markdown 回答正文容器 */
 .research-roles {
   display: flex;
   flex-wrap: wrap;
@@ -1311,7 +1300,6 @@ onUnmounted(() => {
   border-radius: 10px;
 }
 
-/* 操作行 */
 .response-actions-row {
   margin-top: 10px;
   display: flex;
@@ -1337,7 +1325,6 @@ onUnmounted(() => {
   color: #ef4444;
 }
 
-/* ── 底部居中输入区域 ──────────────────────────── */
 .conversation-input-footer {
   position: absolute;
   bottom: 0;

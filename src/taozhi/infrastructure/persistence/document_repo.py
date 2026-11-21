@@ -4,18 +4,40 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from taozhi.domain.access import evaluate_read_permission
+from taozhi.domain.entities import Principal
 from taozhi.domain.entity_extraction import extract_entities
-from taozhi.infrastructure.persistence.access_repo import can_read
 from taozhi.knowledge.db import as_jsonb, fetch_all, fetch_one
 
 
-def list_active_documents(conn: Any, tenant_id: str) -> list[dict]:
-    """列出租户下未删除文档。"""
+_DOCUMENTS_WITH_USER_GRANT = (
+    "SELECT d.*,to_jsonb(g) AS user_grant FROM documents d "
+    "LEFT JOIN document_grants g ON g.tenant_id=d.tenant_id AND g.document_id=d.id AND g.user_id=%s "
+    "AND (g.expires_at IS NULL OR g.expires_at>now()) WHERE d.tenant_id=%s"
+)
+
+
+def list_active_documents(conn: Any, p: Principal) -> list[dict]:
+    """列出租户下未删除文档与本用户的有效授权，供列表统一判定读写和下载权限。"""
     return fetch_all(
         conn,
-        "SELECT * FROM documents WHERE tenant_id=%s AND state<>'deleted' ORDER BY updated_at DESC LIMIT 2000",
-        (tenant_id,),
+        _DOCUMENTS_WITH_USER_GRANT + " AND d.state<>'deleted' ORDER BY d.updated_at DESC LIMIT 2000",
+        (p.id, p.tenant_id),
     )
+
+
+def readable_published_documents(conn: Any, p: Principal, doc_id_prefix: str | None = None) -> dict[str, dict]:
+    """一次查询载入已发布资料及有效授权，按原样匹配编号前缀并仅返回可读资料。"""
+    query = _DOCUMENTS_WITH_USER_GRANT + " AND d.state='published'"
+    params = (p.id, p.tenant_id)
+    if doc_id_prefix:
+        query += " AND starts_with(d.id,%s)"
+        params += (doc_id_prefix,)
+    return {
+        doc["id"]: doc
+        for doc in fetch_all(conn, query, params)
+        if evaluate_read_permission(p, doc, doc["user_grant"])
+    }
 
 
 def get_published_document(conn: Any, tenant_id: str, doc_id: str) -> dict | None:
@@ -252,8 +274,7 @@ def index_mentions(conn: Any, tenant: str, doc_id: str, version: int, chunks: li
 
 def list_visible_mentions(conn: Any, p: Any) -> list[dict]:
     """列出当前用户有权访问且处于发布版本中的实体提及。"""
-    docs = fetch_all(conn, "SELECT * FROM documents WHERE tenant_id=%s AND state='published'", (p.tenant_id,))
-    allowed = {d["id"]: d for d in docs if can_read(conn, p, d)}
+    allowed = readable_published_documents(conn, p)
     if not allowed:
         return []
     rows = fetch_all(

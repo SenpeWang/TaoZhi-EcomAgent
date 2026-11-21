@@ -1,4 +1,3 @@
--- 前置条件：需超级用户执行 CREATE EXTENSION vector（pgvector，本库为 0.8.7）
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE tenants (
  id text PRIMARY KEY, code text UNIQUE NOT NULL, name text NOT NULL, mode text NOT NULL,
@@ -143,7 +142,7 @@ CREATE TABLE task_spans (
  run_version bigint NOT NULL, trace_id varchar(32) NOT NULL, span_id varchar(16) NOT NULL, parent_span_id varchar(16),
  name text NOT NULL, kind text NOT NULL, status text NOT NULL CHECK(status IN ('running','ok','error')),
  started_at timestamptz NOT NULL, ended_at timestamptz, duration_ms bigint CHECK(duration_ms >= 0),
- error_type text, attributes jsonb NOT NULL DEFAULT '{}', UNIQUE(trace_id,span_id)
+ error_type text, attributes jsonb NOT NULL DEFAULT '{}', diagnostics jsonb NOT NULL DEFAULT '[]', UNIQUE(trace_id,span_id)
 );
 CREATE INDEX idx_task_spans_run ON task_spans(tenant_id,job_id,run_version,trace_id);
 CREATE INDEX idx_task_spans_trace_page ON task_spans(trace_id,id);
