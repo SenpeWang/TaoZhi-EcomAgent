@@ -18,9 +18,15 @@ sys.path.insert(0, str(ROOT / "evals"))
 from datetime import datetime
 
 from sync_phoenix import (
-    _log_case, apply_behavior, apply_retrieval, case_to_example, collect_results,
+    _agent_label, _log_case, apply_behavior, apply_retrieval, case_to_example, collect_results,
     experiment_name,
 )
+
+
+def test_agent_labels_preserve_unknown_results_and_older_scores():
+    assert _agent_label({"status": "unassessable", "passed": False}) == "UNASSESSABLE"
+    assert _agent_label({"passed": True}) == "PASS"
+    assert _agent_label({"passed": False}) == "FAIL"
 
 
 def test_case_to_example_splits_three_parts():

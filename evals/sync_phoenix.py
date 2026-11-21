@@ -528,6 +528,12 @@ def follow_live(client, live_path: Path, name: str, url: str,
 
 
 
+def _agent_label(result: dict) -> str:
+    if result.get("status") == "unassessable":
+        return "UNASSESSABLE"
+    return "PASS" if result["passed"] else "FAIL"
+
+
 def sync_agent_eval(client, url: str, force: bool, dry_run: bool) -> None:
     """把多智能体（Agent Eval）用例集与评测报告同步到 Phoenix。"""
     try:
@@ -558,18 +564,20 @@ def sync_agent_eval(client, url: str, force: bool, dry_run: bool) -> None:
         })
 
     ds, known = _existing_case_ids(client, agent_dataset_name)
+    if dry_run:
+        print(f"[agent-dataset] 待同步用例 {sum(c['id'] not in known for c in AGENT_BENCHMARK_CASES)} 个")
+        return
     if ds is None:
         print(f"[agent-dataset] 新建：{agent_dataset_name}（{len(examples)} 例）")
-        if not dry_run:
-            ds = client.datasets.create_dataset(
-                name=agent_dataset_name,
-                examples=examples,
-                timeout=HTTP_TIMEOUT,
-                dataset_description="淘智电商真·多智能体自治系统评测基准集（10个典型场景用例）",
-            )
+        ds = client.datasets.create_dataset(
+            name=agent_dataset_name,
+            examples=examples,
+            timeout=HTTP_TIMEOUT,
+            dataset_description="淘智多智能体调研评测基准集",
+        )
     else:
         todo = [e for e in examples if e["metadata"]["case_id"] not in known]
-        if todo and not dry_run:
+        if todo:
             print(f"[agent-dataset] 追加 {len(todo)} 例")
             client.datasets.add_examples_to_dataset(
                 dataset=agent_dataset_name,
@@ -595,6 +603,8 @@ def sync_agent_eval(client, url: str, force: bool, dry_run: bool) -> None:
             rep_data = json.loads(rep_file.read_text(encoding="utf-8"))
         except Exception:
             continue
+        if rep_data.get("mode", "live") != "live":
+            continue
         exp_name = f"agent-{rep_file.stem.replace('agent_eval_report_', '')}"
         exist = _find_experiment(client, dataset_id, exp_name)
         if exist is not None and not force:
@@ -608,6 +618,8 @@ def sync_agent_eval(client, url: str, force: bool, dry_run: bool) -> None:
                 "git": rep_data.get("git_sha", "latest"),
                 "pass_rate": rep_data.get("pass_rate", 0),
                 "total_cases": rep_data.get("total_cases", 0),
+                "dataset_sha256": rep_data.get("dataset_sha256"),
+                "judges_sha256": rep_data.get("judges_sha256"),
             },
             timeout=HTTP_TIMEOUT,
         )
@@ -627,6 +639,7 @@ def sync_agent_eval(client, url: str, force: bool, dry_run: bool) -> None:
                         "name": case_res.get("name"),
                         "score": case_res.get("score"),
                         "passed": case_res.get("passed"),
+                        "status": case_res.get("status"),
                         "elapsed": case_res.get("elapsed"),
                         "tool_calls_count": case_res.get("tool_calls_count", 0),
                     },
@@ -639,8 +652,8 @@ def sync_agent_eval(client, url: str, force: bool, dry_run: bool) -> None:
                     experiment_run_id=run_id,
                     name="pass_verdict",
                     annotator_kind="CODE",
-                    score=1.0 if case_res.get("passed") else 0.0,
-                    label="PASS" if case_res.get("passed") else "FAIL",
+                    score=None if case_res.get("status") == "unassessable" else float(bool(case_res.get("passed"))),
+                    label=_agent_label(case_res),
                     explanation=f"综合得分: {case_res.get('score')}",
                     start_time=now,
                     end_time=now,
@@ -651,16 +664,16 @@ def sync_agent_eval(client, url: str, force: bool, dry_run: bool) -> None:
                         experiment_run_id=run_id,
                         name=v.get("judge", "judge"),
                         annotator_kind="CODE",
-                        score=float(v.get("score", 0)),
-                        label="PASS" if v.get("passed") else "FAIL",
+                        score=v.get("score"),
+                        label=_agent_label(v),
                         explanation=v.get("reason", "")[:500],
                         start_time=now,
                         end_time=now,
                         timeout=HTTP_TIMEOUT,
                     )
                 logged += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[agent-experiment] {cid} 同步未完成（{type(exc).__name__}）", file=sys.stderr)
         print(f"[agent-experiment] {exp_name} 同步完成（{logged} 条 run）")
 
     print(f"[agent-url] {url}/datasets/{dataset_id}/experiments")

@@ -1,193 +1,173 @@
-"""可观测多智能体评测 CLI 运行器与报告器（移植自 Piagent cli.ts / report.ts 规范）。"""
+"""运行调研评测或重评合成执行记录，生成分层报告和回归门禁结果。"""
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
+import hashlib
 import json
+from pathlib import Path
+from statistics import mean
 import subprocess
 import sys
-import time
-from pathlib import Path
-from typing import Any, Dict, List
+from uuid import uuid4
 
 from .cases import AGENT_BENCHMARK_CASES
-from .harness import AgentEvalHarness, AgentRunResult
-from .judges import (
-    AntiHallucinationJudge,
-    DeliverableJudge,
-    JudgeVerdict,
-    SteeringJudge,
-    ToolExecutionJudge,
-)
+from .contracts import validate_cases
+from .harness import AgentEvalHarness, replay_transcript
+from .judges import evaluate_case
+from .reporting import case_record, compare_reports, fingerprint, group_metrics, release_gate, review_candidates, validate_baseline
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = ROOT / "evals/reports/agent_eval"
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def git_sha() -> str:
+def git_sha() -> str | None:
+    """在可读取 Git 元数据时记录当前提交。"""
     try:
-        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, text=True).strip()
-    except Exception:
-        return "unknown"
+        result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True)
+    except OSError:
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
 
 
-def run_agent_evaluations(
-    cases: List[Dict[str, Any]],
-    sync_phoenix: bool = True,
-) -> Dict[str, Any]:
-    """执行全量多智能体可观测评测并输出结构化度量报告。"""
-    harness = AgentEvalHarness()
-    observations: List[Dict[str, Any]] = []
-    case_results: List[Dict[str, Any]] = []
-
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    sha = git_sha()
-
-    print("=" * 80)
-    print("🤖 淘智真·自治多智能体系统科学评测 (Piagent 规范移植版)")
-    print(f"时间: {time.strftime('%Y-%m-%d %H:%M:%S')} | Git SHA: {sha} | 用例总数: {len(cases)}")
-    print("=" * 80)
-
-    total_passed = 0
-    total_score = 0.0
-    latencies: List[float] = []
-
-    for idx, case in enumerate(cases, start=1):
-        case_id = case["id"]
-        case_name = case["name"]
-        print(f"[{idx}/{len(cases)}] 正在评测: [{case_id}] {case_name} ...")
-
-        run_res: AgentRunResult = harness.run(case)
-        latencies.append(run_res.elapsed)
-
-        verdicts: List[JudgeVerdict] = []
-
-        tool_judge = ToolExecutionJudge(
-            required_tools=case.get("required_tools"),
-            forbidden_tools=case.get("forbidden_tools"),
-        )
-        verdicts.append(tool_judge.evaluate(run_res))
-
-        deliv_judge = DeliverableJudge(
-            required_sections=case.get("required_sections"),
-            min_chars=case.get("min_chars", 80),
-        )
-        verdicts.append(deliv_judge.evaluate(run_res))
-
-        anti_fake_judge = AntiHallucinationJudge()
-        verdicts.append(anti_fake_judge.evaluate(run_res))
-
-        if case.get("steering_keyword"):
-            steer_judge = SteeringJudge(steering_keyword=case["steering_keyword"])
-            verdicts.append(steer_judge.evaluate(run_res))
-
-        all_passed = all(v.passed for v in verdicts)
-        avg_score = round(sum(v.score for v in verdicts) / max(1, len(verdicts)), 2)
-        if all_passed:
-            total_passed += 1
-        total_score += avg_score
-
-        status_tag = "✅ PASS" if all_passed else "❌ FAIL"
-        trace_str = f"TraceID: {run_res.trace_id[:16]}..." if run_res.trace_id else "TraceID: N/A"
-        print(f"    结论: {status_tag} (得分: {avg_score:.2f}) | 耗时: {run_res.elapsed}s | {trace_str}")
-        for v in verdicts:
-            v_mark = "✓" if v.passed else "✗"
-            print(f"      {v_mark} [{v.judge_name}]: {v.reason}")
-
-        obs = {
-            "case_id": case_id,
-            "category": case.get("category"),
-            "passed": all_passed,
-            "score": avg_score,
-            "elapsed_seconds": run_res.elapsed,
-            "trace_id": run_res.trace_id,
-            "tools_called": [t["tool_name"] for t in run_res.tool_calls],
-            "verdicts": [
-                {"judge": v.judge_name, "passed": v.passed, "score": v.score, "reason": v.reason}
-                for v in verdicts
-            ],
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        observations.append(obs)
-        case_results.append({
-            "case_id": case_id,
-            "name": case_name,
-            "passed": all_passed,
-            "score": avg_score,
-            "elapsed": run_res.elapsed,
-            "trace_id": run_res.trace_id,
-            "subagents_count": len(run_res.subagents),
-            "tool_calls_count": len(run_res.tool_calls),
-            "verdicts": obs["verdicts"],
-        })
-
-    pass_rate = round(total_passed / max(1, len(cases)), 3)
-    mean_score = round(total_score / max(1, len(cases)), 3)
-    p50_lat = round(sorted(latencies)[len(latencies) // 2], 2) if latencies else 0.0
-    p95_lat = round(sorted(latencies)[int(len(latencies) * 0.95)], 2) if latencies else 0.0
-
-    summary = {
-        "git_sha": sha,
-        "timestamp": timestamp,
-        "total_cases": len(cases),
-        "passed_cases": total_passed,
-        "pass_rate": pass_rate,
-        "mean_score": mean_score,
-        "latency_p50_seconds": p50_lat,
-        "latency_p95_seconds": p95_lat,
-        "case_results": case_results,
+def read_synthetic_replay(path: Path, known_ids: set[str]) -> tuple[dict, dict]:
+    """拒绝未标记为合成、版本不匹配、重复或未知用例的执行记录。"""
+    payload = path.read_bytes()
+    envelope = json.loads(payload)
+    if not isinstance(envelope, dict) or type(envelope.get("schema_version")) is not int or envelope["schema_version"] != 1:
+        raise ValueError("回放文件须使用 schema_version 1")
+    if envelope.get("source") != "synthetic" or not isinstance(envelope.get("observations"), list):
+        raise ValueError("回放文件须声明合成来源并包含 observations 列表")
+    observations = {}
+    for observation in envelope["observations"]:
+        case_id = observation.get("case_id") if isinstance(observation, dict) else None
+        if not isinstance(case_id, str) or case_id not in known_ids or case_id in observations:
+            raise ValueError("回放记录含未知或重复的用例编号")
+        observations[case_id] = observation
+    config = envelope.get("model_config")
+    return observations, {
+        "transcript_sha256": hashlib.sha256(payload).hexdigest(),
+        "model_config_sha256": fingerprint(config) if config is not None else None,
     }
 
-    obs_file = REPORTS_DIR / f"agent_observations_{timestamp}.jsonl"
-    with open(obs_file, "w", encoding="utf-8") as f:
-        for o in observations:
-            f.write(json.dumps(o, ensure_ascii=False) + "\n")
 
-    rep_file = REPORTS_DIR / f"agent_eval_report_{timestamp}.json"
-    with open(rep_file, "w", encoding="utf-8") as f:
-        f.write(json.dumps(summary, ensure_ascii=False, indent=2))
+def _sync_live_reports() -> None:
+    """保留已有 Phoenix 同步入口，退出状态独立于评测门禁。"""
+    from taozhi.config import resolve_runtime_dir
 
-    print("=" * 80)
-    print(f"📊 评测总览：通过率 {pass_rate:.1%} ({total_passed}/{len(cases)}) | 综合得分: {mean_score:.2f}")
-    print(f"⏱️ 耗时分布：P50 {p50_lat}s | P95 {p95_lat}s")
-    print(f"📁 报告归档：{rep_file.relative_to(ROOT)}")
-    print(f"📁 遥测日志：{obs_file.relative_to(ROOT)}")
-    print("=" * 80)
+    executable = resolve_runtime_dir() / "phoenix-venv/bin/python"
+    result = subprocess.run([str(executable) if executable.is_file() else sys.executable,
+                             str(ROOT / "evals/sync_phoenix.py"), "--agent"], check=False)
+    if result.returncode:
+        print("Phoenix 同步未完成，评测报告已保存在本地。", file=sys.stderr)
 
-    if sync_phoenix:
+
+def run_agent_evaluations(cases: list[dict], sync_phoenix: bool = True, *,
+                          replay_file: Path | None = None, reports_dir: Path | None = None,
+                          catalog: list[dict] | None = None, compare_file: Path | None = None) -> dict:
+    """通过同一组判定器评估实际运行或已有记录，将来源写入独立报告。"""
+    dataset = cases if catalog is None else catalog
+    validate_cases(dataset)
+    if not cases:
+        raise ValueError("未选中用例")
+    indices = {case["id"]: case for case in dataset}
+    if len({case["id"] for case in cases}) != len(cases) or any(indices.get(c["id"]) != c for c in cases):
+        raise ValueError("运行用例包含重复或未登记的定义")
+    root = Path(reports_dir or REPORTS_DIR)
+    mode = "live" if replay_file is None else "synthetic_trace_regrade"
+    schema_version = 2
+    judges_sha256 = hashlib.sha256(Path(__file__).with_name("judges.py").read_bytes()).hexdigest()
+    baseline = None
+    if compare_file is not None:
+        baseline = json.loads(Path(compare_file).read_bytes())
+        validate_baseline(baseline, schema_version=schema_version, mode=mode, judges_sha256=judges_sha256)
+    captured = {}
+    source = {"model_config_sha256": None}
+    if replay_file is None:
+        harness = AgentEvalHarness()
+    else:
+        captured, source = read_synthetic_replay(Path(replay_file), set(indices))
+        root = root / mode
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    run_id = f"{timestamp}_{uuid4().hex[:8]}"
+    records = []
+    for case in cases:
+        case_id = case["id"]
+        if replay_file is None:
+            result = harness.run(case)
+        elif case_id in captured:
+            try:
+                result = replay_transcript(case, captured[case_id])
+            except (ValueError, TypeError, KeyError) as exc:
+                raise ValueError(f"用例 {case_id} 的执行记录格式无效") from exc
+        else:
+            result = None
+        checks = evaluate_case(case, result) if result is not None else []
+        record = case_record(case, result, checks)
+        records.append(record)
+        print(f"[{case_id}] {record['status']}")
+
+    metrics = group_metrics(records)
+    scores = [r["score"] for r in records if r["score"] is not None]
+    report = {
+        "schema_version": schema_version, "git_sha": git_sha(), "timestamp": timestamp, "run_id": run_id,
+        "mode": mode, "dataset_sha256": fingerprint(sorted(dataset, key=lambda c: c["id"])),
+        "judges_sha256": judges_sha256,
+        **source, "total_cases": len(records), "passed_cases": metrics["passed"],
+        "pass_rate": metrics["task_completion"]["rate"], "mean_score": round(mean(scores), 4) if scores else None,
+        "latency_p50_seconds": metrics["latency_p50_seconds"], "latency_p95_seconds": metrics["latency_p95_seconds"],
+        "metrics": metrics,
+        "suites": {suite: group_metrics([r for r in records if r["suite"] == suite])
+                   for suite in sorted({r["suite"] for r in records})},
+        "gate": release_gate(records), "case_results": records, "review_candidates": review_candidates(records),
+    }
+    if compare_file is not None:
+        comparison = compare_reports(report, baseline)
+        report["comparison"] = comparison
+        if not comparison["passed"]:
+            report["gate"]["passed"] = False
+            blockers = report["gate"]["blocking_case_ids"]
+            blockers.extend(cid for cid in comparison["changes"]["standard"]["regressed"] if cid not in blockers)
+
+    root.mkdir(parents=True, exist_ok=True)
+    observation_path = root / f"agent_observations_{run_id}.jsonl"
+    report_path = root / f"agent_eval_report_{run_id}.json"
+    observation_path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records), encoding="utf-8")
+    temporary = report_path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    temporary.replace(report_path)
+    print(f"门禁{'通过' if report['gate']['passed'] else '未通过'}，评测报告 {report_path}")
+    if sync_phoenix and replay_file is None and root.resolve() == REPORTS_DIR.resolve():
         try:
-            from taozhi.config import resolve_runtime_dir
-
-            print("🚀 正在将评测遥测同步至 Arize Phoenix ...")
-            runtime_base = resolve_runtime_dir()
-            py_bin = runtime_base / "phoenix-venv/bin/python"
-            if not py_bin.is_file():
-                py_bin = Path(sys.executable)
-            subprocess.run([str(py_bin), str(ROOT / "evals/sync_phoenix.py"), "--agent"], check=False)
-            print("✓ Phoenix 状态同步完成")
-        except Exception as e:
-            print(f"⚠️ Phoenix 同步异常: {e}")
-
-    return summary
+            _sync_live_reports()
+        except (ImportError, OSError, RuntimeError):
+            print("Phoenix 暂不可用，评测报告已保存在本地。", file=sys.stderr)
+    return report
 
 
-def main():
-    parser = argparse.ArgumentParser(description="多智能体可观测评测 CLI 运行器（测试完成自动同步至 Phoenix）")
-    parser.add_argument("--case", default="", help="指定评测单例 ID")
-    parser.add_argument("--no-sync", action="store_true", help="跳过自动同步至 Phoenix")
-    args = parser.parse_args()
-
-    selected = AGENT_BENCHMARK_CASES
-    if args.case:
-        selected = [c for c in AGENT_BENCHMARK_CASES if c["id"] == args.case]
-        if not selected:
-            print(f"错误：未找到 ID 为 '{args.case}' 的测试用例", file=sys.stderr)
-            sys.exit(1)
-
-    res = run_agent_evaluations(selected, sync_phoenix=not args.no_sync)
-    if res["pass_rate"] < 0.75:
-        sys.exit(1)
+def main(argv: list[str] | None = None) -> int:
+    """缺少记录、硬失败和统计回归使用非零退出码。"""
+    parser = argparse.ArgumentParser(description="调研 Agent 评测与合成轨迹重评")
+    parser.add_argument("--case", help="只评估指定用例，缺少其录制会记为未判定")
+    parser.add_argument("--replay", type=Path, metavar="PATH", help="读取合成 JSON 执行记录进行重评")
+    parser.add_argument("--compare", type=Path, metavar="REPORT", help="与同来源、同裁判的已有 Agent 报告逐例比较")
+    parser.add_argument("--output-dir", type=Path, help="报告目录，合成重评另存于其子目录")
+    parser.add_argument("--no-sync", action="store_true", help="跳过真实运行报告的 Phoenix 同步")
+    args = parser.parse_args(argv)
+    selected = [case for case in AGENT_BENCHMARK_CASES if args.case is None or case["id"] == args.case]
+    if not selected:
+        parser.error("未找到指定用例")
+    try:
+        report = run_agent_evaluations(selected, sync_phoenix=not args.no_sync, replay_file=args.replay,
+                                       reports_dir=args.output_dir, catalog=AGENT_BENCHMARK_CASES,
+                                       compare_file=args.compare)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        parser.error("无法读取评测文件或写入报告")
+    except ValueError as exc:
+        parser.error(str(exc))
+    return 0 if report["gate"]["passed"] else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -3,7 +3,7 @@ PHOENIX_PY ?= $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
 PROJECT_ROOT := $(CURDIR)
 COMPOSE := docker compose
 
-.PHONY: help start stop status logs test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
+.PHONY: help start stop status logs test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -19,6 +19,7 @@ help:
 	@echo "make logs           实时跟踪容器日志"
 	@echo "make test           在独立测试库运行离线回归（含 evals 单元测试）"
 	@echo "make evals-tests    只跑评估代码自身的单元测试（不需要在线服务）"
+	@echo "make evals-agent-replay  使用合成执行记录验证 Agent 判定与报告"
 	@echo "make evals-quick    评估：检索+对抗层（需企业服务在线；对比基线并过门禁）"
 	@echo "make evals-full     评估：三层全跑（需企业服务在线；对比基线并过门禁）"
 	@echo "make evals-sync     评估集与最新报告同步到 Phoenix（旁路；Phoenix 离线只跳过）"
@@ -90,6 +91,9 @@ evals-baseline:
 
 evals-agent:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env.production" PYTHONPATH=src $(PYTHON) -m evals.agent_eval.runner
+
+evals-agent-replay:
+	PYTHONPATH=src python3 -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_web_replay.json
 
 evals-sync:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
