@@ -447,9 +447,13 @@ function streamTaskEvents(turn: ResearchTurn): void {
       scrollToBottom(false)
     },
     /** 获取终态任务的正式报告。 */
-    onDone: () => void finish(false),
+    onDone: () => {
+      void finish(false)
+    },
     /** 连接永久关闭时改由任务快照恢复。 */
-    onError: () => void finish(true),
+    onError: () => {
+      void finish(true)
+    },
   })
   signal.addEventListener('abort', close, { once: true })
 }
