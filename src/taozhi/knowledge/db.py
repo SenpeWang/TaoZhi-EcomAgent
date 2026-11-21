@@ -18,6 +18,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from taozhi.domain.text_guard import strip_invalid_text
+
 from taozhi.config import load_config
 
 _LOG = logging.getLogger(__name__)
@@ -117,5 +119,5 @@ def fetch_all(conn: Any, sql: str, params: tuple[Any, ...] = ()) -> list[dict[st
 
 
 def as_jsonb(value: Any) -> Jsonb:
-    """将 Python 对象包装为 psycopg JSONB 参数适配器。"""
-    return Jsonb(value)
+    """将 Python 对象清洗非法字符后包装为 psycopg JSONB 参数适配器。"""
+    return Jsonb(strip_invalid_text(value))

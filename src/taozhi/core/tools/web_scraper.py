@@ -16,6 +16,7 @@ import httpx
 
 from taozhi.domain.errors import Denied
 from taozhi.observability.tracing import record_diagnostic
+from taozhi.infrastructure.mcp.remote_search import fetch_page_via_mcp
 from taozhi.domain.url_guard import validate_public_http_url
 
 _MAX_REDIRECTS = 3
@@ -60,6 +61,9 @@ def fetch_web_page(url: str, max_chars: int = 4000, timeout: float = 10.0) -> Di
 
             if resp is None or resp.status_code != 200:
                 record_diagnostic("tool.http", "failed", http_status=resp.status_code if resp is not None else None)
+                fallback_text = fetch_page_via_mcp(current_url, timeout=max(timeout, 20.0))
+                if fallback_text:
+                    return {"url": current_url, "status": "ok", "title": "", "text": fallback_text[:max_chars]}
                 code = resp.status_code if resp is not None else "unknown"
                 return {"url": current_url, "status": "error", "text": f"HTTP {code}", "title": ""}
 
@@ -88,4 +92,7 @@ def fetch_web_page(url: str, max_chars: int = 4000, timeout: float = 10.0) -> Di
         return {"url": url, "status": "error", "error": exc.code, "text": exc.message, "title": ""}
     except Exception as exc:
         record_diagnostic("tool.timeout" if isinstance(exc, httpx.TimeoutException) else "tool.error", "failed", exc)
+        fallback_text = fetch_page_via_mcp(url, timeout=max(timeout, 20.0))
+        if fallback_text:
+            return {"url": url, "status": "ok", "title": "", "text": fallback_text[:max_chars]}
         return {"url": url, "status": "error", "text": f"抓取异常: {type(exc).__name__}", "title": ""}

@@ -8,6 +8,7 @@ import threading
 import time
 from typing import Any
 
+from taozhi.domain.text_guard import strip_invalid_text
 from taozhi.config import load_config
 from taozhi.domain.access import RESTRICTED_QUESTION, can_review, can_task
 from taozhi.domain.agent_catalog import agent_display_name
@@ -208,7 +209,7 @@ def update_job_stage(conn: Any, tenant_id: str, job_id: str, run_version: int, s
         "RETURNING tenant_id,id,run_version,stage,progress) "
         "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) "
         "SELECT tenant_id,id,run_version,stage,progress,%s FROM changed",
-        (stage, progress, tenant_id, job_id, run_version, status),
+        (strip_invalid_text(stage), progress, tenant_id, job_id, run_version, status),
     )
     if written.rowcount == 0:
         raise Denied("任务已取消或执行版本已失效", "TASK_STOPPED", 409)
@@ -253,7 +254,7 @@ def mark_job_failed_or_cancelled(conn: Any, job: dict, status: str, message: str
     stage_txt = "已取消" if status == "cancelled" else "处理失败"
     conn.execute(
         "UPDATE jobs SET state=%s,error=%s,stage=%s,progress=100,finished_at=now(),lease_until=NULL WHERE id=%s",
-        (status, message, stage_txt, job["id"]),
+        (status, strip_invalid_text(message), stage_txt, job["id"]),
     )
     conn.execute(
         "INSERT INTO task_events(tenant_id,job_id,run_version,stage,progress,status) VALUES(%s,%s,%s,%s,100,%s)",

@@ -73,7 +73,7 @@ def run_job(job: dict) -> None:
                 done.set()
                 thread.join(timeout=2)
     except Exception as exc:
-        message = exc.message if isinstance(exc, Denied) else "任务处理失败，请重试或联系管理员"
+        message = exc.message if isinstance(exc, Denied) else f"任务处理失败（{type(exc).__name__}），请重试或联系管理员"
         with database_connection() as c:
             row = job_repo.get_job_by_id(c, job["id"], for_update=True)
             if row and row["state"] == "running" and row["run_version"] == job["run_version"]:

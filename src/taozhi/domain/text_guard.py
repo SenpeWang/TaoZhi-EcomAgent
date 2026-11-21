@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 _INJECTION_PATTERNS: List[Tuple[str, str]] = [
     (r"ignore\s+(all\s+)?previous\s+instructions", "英文越权指令"),
@@ -23,6 +23,29 @@ _INJECTION_PATTERNS: List[Tuple[str, str]] = [
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
 _MAX_INPUT_CHARS = 4000
+_INVALID_JSON_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufffe\uffff]")
+
+
+def strip_invalid_text(value: Any) -> Any:
+    """递归清理无法写入 JSON/JSONB 的字符并返回同结构副本。
+
+    PostgreSQL 的 JSONB 拒绝 NUL（``\\u0000``）与孤立代理项，模型或抓取结果一旦携带
+    这些字符就会导致整条记录写入失败，因此在持久化边界统一清洗。
+
+    Args:
+        value: 待写入 JSONB 的任意 Python 对象（字符串、字典、列表或标量）。
+
+    Returns:
+        清理后的同结构对象：去除 NUL、非法控制字符与孤立代理项。
+    """
+    if isinstance(value, str):
+        safe = value.encode("utf-8", "ignore").decode("utf-8", "ignore")
+        return _INVALID_JSON_CHARS_RE.sub("", safe)
+    if isinstance(value, dict):
+        return {strip_invalid_text(k): strip_invalid_text(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [strip_invalid_text(item) for item in value]
+    return value
 
 
 def sanitize(text: str, max_chars: int = _MAX_INPUT_CHARS) -> str:
