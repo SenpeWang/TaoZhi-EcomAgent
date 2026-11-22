@@ -5,12 +5,7 @@ import { openTaskEventStream } from '../../shared/taskStream'
 import type { User } from '../administration/types'
 import type { KnowledgeQuestion, Task } from './types'
 
-/**
- * 管理任务详情选中状态、流式预览和交互动作，按当前会话及页面校验异步响应。
- * @param options - 当前身份、页面状态及任务访问接口。
- * @returns 任务窗口和问答工作区使用的状态与操作。
- */
-export function useTaskWorkspace(options: {
+interface TaskWorkspaceOptions {
   api: ApiClient
   user: Ref<User | null>
   tasks: Ref<Task[]>
@@ -19,7 +14,14 @@ export function useTaskWorkspace(options: {
   busy: Readonly<Ref<boolean>>
   action: (operation: () => Promise<void>) => Promise<void>
   load: () => Promise<void>
-}) {
+}
+
+/**
+ * 管理任务详情选中状态、流式预览和交互动作，按当前会话及页面校验异步响应。
+ * @param options - 当前身份、页面状态及任务访问接口。
+ * @returns 任务窗口和问答工作区使用的状态与操作。
+ */
+export function useTaskWorkspace(options: TaskWorkspaceOptions) {
   const { api, user, tasks, knowledgePage, reviewPage, busy, action, load } = options
 
   const taskOpen = ref(false)

@@ -1,5 +1,14 @@
 import { isRecord, type JsonRecord } from './response.ts'
 
+interface RequestOptions {
+  mode: string
+  onUnauthorized: () => void
+  method: string
+  payload?: unknown
+  signal?: AbortSignal
+  validate: (path: string, data: JsonRecord, method: string) => void
+}
+
 /**
  * 从当前环境的非 HttpOnly CSRF Cookie 读取令牌；不读取会话 Cookie。
  * @param mode - 服务端返回的运行环境名（production / test）。
@@ -26,18 +35,7 @@ function readCsrf(mode: string): string {
  * @returns 通过基础结构校验的契约响应；由调用方检查业务契约。
  * @throws 网络、JSON、身份或业务拒绝均转为中文错误，不输出服务端堆栈。
  */
-
-export async function requestJson<T>(
-  path: string,
-  options: {
-    mode: string
-    onUnauthorized: () => void
-    method: string
-    payload?: unknown
-    signal?: AbortSignal
-    validate: (path: string, data: JsonRecord, method: string) => void
-  },
-): Promise<T> {
+export async function requestJson<T>(path: string, options: RequestOptions): Promise<T> {
   const { mode, onUnauthorized, method, payload, signal, validate } = options
   const headers: Record<string, string> = {}
   if (method !== 'GET') headers['X-CSRF-Token'] = readCsrf(mode)
