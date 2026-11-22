@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     dots_api_key: str = Field(default="", alias="DOTS_API_KEY")
     dots_model: str = Field(default="dots3-note-prev", alias="DOTS_MODEL")
     dots_direct_connection: bool = Field(default=True, alias="DOTS_DIRECT_CONNECTION")
+    bailian_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1", alias="BAILIAN_BASE_URL"
+    )
+    bailian_api_key: str = Field(default="", alias="BAILIAN_API_KEY")
+    bailian_model: str = Field(default="deepseek-v4.1-flash", alias="BAILIAN_MODEL")
+    bailian_direct_connection: bool = Field(default=True, alias="BAILIAN_DIRECT_CONNECTION")
 
     llm_circuit_cooldown_rate_limit: int = Field(default=45, ge=5, le=600, alias="LLM_CIRCUIT_COOLDOWN_RATE_LIMIT")
     llm_circuit_cooldown_transient: int = Field(default=25, ge=5, le=600, alias="LLM_CIRCUIT_COOLDOWN_TRANSIENT")

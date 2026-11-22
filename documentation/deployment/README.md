@@ -8,7 +8,7 @@
 | --- | --- |
 | PostgreSQL 与 MinIO | 按配置示例在部署主机创建私有 `.env`，填写 `ECOM_PG_PASSWORD`、`ECOM_MINIO_ACCESS_KEY` 和 `ECOM_MINIO_SECRET_KEY`。数据库密码会拼入连接 URL，可选用随机十六进制值。 |
 | 向量和精排 | `ECOM_MODELS_DIR` 指向模型父目录。启用对应服务时准备 `bge-small-zh-v1.5` 和 `bge-reranker-v2-m3`。Compose 默认使用 CPU，可叠加 GPU 配置。 |
-| 大模型与业务网关 | 按需设置 `BASE_URL`、`API_KEY` 和 `MODEL`。实时库存与订单使用 `BUSINESS_API_URL` 和 `BUSINESS_API_TOKEN`。 |
+| 大模型与业务网关 | 按需设置 `BASE_URL`、`API_KEY` 和 `MODEL`；备用通道为 `SENSENOVA_OVERSEAS_*`、`DOTS_*`、`BAILIAN_*`，候选顺序依次为海外商用通道、Dots、阿里云百炼、国内主备。实时库存与订单使用 `BUSINESS_API_URL` 和 `BUSINESS_API_TOKEN`。 |
 | 中间件 | 根据部署目标设置 `ECOM_MINIO_ENABLED`、`ECOM_KAFKA_ENABLED` 和 `ECOM_ES_ENABLED`。环境示例给出功能开关，容器启动顺序由 Compose 编排定义。 |
 | 持久化 | 保证容器可写 `data/`。生产资料保存在对象存储或私有附件目录，部署主机保管数据库和运行记录。 |
 

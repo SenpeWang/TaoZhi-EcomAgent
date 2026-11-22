@@ -296,6 +296,22 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
         dots_direct,
     )
 
+    bailian_key = getattr(settings, "bailian_api_key", "")
+    bailian_url = getattr(
+        settings, "bailian_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
+    bailian_model = getattr(settings, "bailian_model", "") or "deepseek-v4.1-flash"
+    bailian_direct = bool(getattr(settings, "bailian_direct_connection", True))
+    _add(
+        "bailian",
+        "阿里云百炼（DeepSeek V4.1 Flash）",
+        "domestic",
+        bailian_url,
+        bailian_key,
+        bailian_model,
+        bailian_direct,
+    )
+
     _add(
         "sensenova_cn_primary",
         "商汤国内版（Key 2）",
