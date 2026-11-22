@@ -19,7 +19,7 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 
 _ENV_FILES = [str(PROJECT_ROOT / ".env")] if (PROJECT_ROOT / ".env").exists() else []
 _ecom_env_file = os.getenv("ECOM_ENV_FILE")
-if _ecom_env_file:
+if _ecom_env_file and _ecom_env_file not in _ENV_FILES:
     _ENV_FILES.append(_ecom_env_file)
 
 
@@ -194,12 +194,15 @@ def load_config() -> Config:
     Raises:
         RuntimeError: 当 ECOM_DATABASE_URL 缺失或 ECOM_MODE 非法时抛出。
     """
-    source = Path(os.environ.get("ECOM_ENV_FILE", ROOT / ".env.production"))
+    source = Path(os.environ.get("ECOM_ENV_FILE", ROOT / ".env"))
     values = {**dotenv_values(source), **os.environ}
     mode = values.get("ECOM_MODE", "production")
-    dsn = values.get("ECOM_DATABASE_URL", "")
+    dsn_key = "ECOM_TEST_DATABASE_URL" if mode == "test" else "ECOM_DATABASE_URL"
+    dsn = values.get(dsn_key, "")
     if not dsn or mode not in ("production", "test"):
-        raise RuntimeError("企业数据库或运行环境未配置（仅支持 production / test）")
+        raise RuntimeError(f"企业数据库或运行环境未配置：缺少 {dsn_key}（仅支持 production / test）")
+    if mode == "test" and "/ecom_test" not in dsn:
+        raise RuntimeError("测试模式必须连接独立的 ecom_test 数据库，拒绝使用生产库")
     private = Path(values.get("ECOM_PRIVATE_DIR", ROOT / "data/private" / mode / "private"))
     private.mkdir(parents=True, exist_ok=True, mode=0o700)
     minio_ep = values.get("ECOM_MINIO_ENDPOINT", "127.0.0.1:19000")

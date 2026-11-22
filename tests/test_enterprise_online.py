@@ -1176,6 +1176,8 @@ def test_model_budget_is_shared_across_retry_attempts(monkeypatch,clients):
     with database_connection() as c:assert fetch_one(c,"SELECT count(*) AS n FROM model_calls WHERE job_id=%s",(tid,))["n"]==6
 def test_production_forbids_demo_password(monkeypatch,clients):
     monkeypatch.setenv("ECOM_MODE","production")
+    monkeypatch.setenv("ECOM_QUICK_LOGIN","false")
+    monkeypatch.setenv("ECOM_QUICK_LOGIN_PASSWORD","")
     r=clients["staff"].post("/api/auth/login",json={"username":"staff","password":"123456"})
     assert r.status_code==403 and "演示口令" in r.text
 def test_canonical_api_cannot_use_legacy_identity(monkeypatch,clients):

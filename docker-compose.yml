@@ -11,8 +11,6 @@ x-app-common: &app-common
   env_file:
     - path: .env
       required: false
-    - path: .env.production
-      required: false
   environment: &app-env
     ECOM_MODE: production
     ECOM_DATABASE_URL: postgresql://${ECOM_PG_USER:-ecom_production}:${ECOM_PG_PASSWORD:?请配置 ECOM_PG_PASSWORD}@127.0.0.1:15432/${ECOM_PG_DB:-ecom_production}

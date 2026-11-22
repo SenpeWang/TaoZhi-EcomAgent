@@ -19,7 +19,7 @@
   python -m evals.rag_eval.run --adversarial-only  # 只重跑对抗层（规则判定，约 5 分钟）
 
 用例与语料来自独立数据包（evals/dataset/：spec → generate → seed 灌库，检索走 PG/ES）；
-跑评测前先灌库：PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed。
+跑评测前先灌库：PYTHONPATH=src ECOM_ENV_FILE=.env .venv/bin/python -m evals.dataset.seed。
 结果落盘 evals/reports/<时间戳>-<git短SHA>.json；基线随代码进 Git。
 跑的过程中每完成一例就追加一行到 evals/reports/live.jsonl（不动报告本身），
 供 `evals/sync_phoenix.py --follow` 增量推 Phoenix 实时观看。
@@ -131,14 +131,14 @@ def preflight_check(*, need_http: bool = True, need_embedding: bool = True) -> N
     """跑前环境与夹具强校验，防止因服务宕机、未灌库或 Worker 离线跑出虚假分数。"""
     cfg = load_config()
     if cfg.mode != "production":
-        raise SystemExit(f"评测必须在 production 模式下执行（当前 mode={cfg.mode!r}），请检查 ECOM_ENV_FILE=.env.production")
+        raise SystemExit(f"评测必须在 production 模式下执行（当前 mode={cfg.mode!r}），请检查 .env 中的 ECOM_DATABASE_URL")
     with database_connection() as c:
         resolve_eval_node(c)
         u = fetch_one(c, "SELECT id FROM users WHERE username=%s", (ADVERSARIAL_IDENTITY["username"],))
         if not u:
             raise SystemExit(
                 f"测评账号 {ADVERSARIAL_IDENTITY['username']} 不存在，请先运行 "
-                "PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed"
+                "PYTHONPATH=src ECOM_ENV_FILE=.env .venv/bin/python -m evals.dataset.seed"
             )
         if need_http:
             wb = fetch_one(
@@ -369,7 +369,7 @@ def phase_retrieval():
         if not eval_user:
             raise SystemExit(
                 f"检索层评测账号缺失（{ADVERSARIAL_IDENTITY['username']}）：请先执行 "
-                "PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed"
+                "PYTHONPATH=src ECOM_ENV_FILE=.env .venv/bin/python -m evals.dataset.seed"
             )
         default_principal = load_principal(c, eval_user["id"])
         principals_by_user = {ADVERSARIAL_IDENTITY["username"]: default_principal}
@@ -484,7 +484,7 @@ def phase_retrieval():
             live_emit({"type": "retrieval", **ev})
         coverage = metrics.summarize([1.0] * len(pairs) + [0.0] * skipped)
         if coverage["mean"] is not None and coverage["mean"] < 0.8:
-            hint = ("需先灌库夹具：PYTHONPATH=src ECOM_ENV_FILE=.env.production "
+            hint = ("需先灌库夹具：PYTHONPATH=src ECOM_ENV_FILE=.env "
                     ".venv/bin/python -m evals.dataset.seed")
             print(f"⚠ 检索层可评估覆盖率仅 {coverage['mean']:.0%}"
                   f"（{len(pairs)}/{len(chosen)} 例能解析出预期文档）："
@@ -638,7 +638,7 @@ def phase_adversarial():
     if auth_client is None:
         raise SystemExit(
             f"对抗层登录失败（{ADVERSARIAL_IDENTITY['username']}, status={auth_code}）：评测账号未灌库或口令不符，"
-            "请先执行 PYTHONPATH=src ECOM_ENV_FILE=.env.production "
+            "请先执行 PYTHONPATH=src ECOM_ENV_FILE=.env "
             ".venv/bin/python -m evals.dataset.seed（拒绝输出虚假分数）"
         )
     auth_client.close()
@@ -1084,7 +1084,7 @@ def phase_behavior():
     if login_failures and len(login_failures) == len(chosen):
         raise SystemExit(
             f"行为层 {len(chosen)} 例全部登录失败：评测账号未灌库或口令不符，"
-            "请先执行 PYTHONPATH=src ECOM_ENV_FILE=.env.production "
+            "请先执行 PYTHONPATH=src ECOM_ENV_FILE=.env "
             ".venv/bin/python -m evals.dataset.seed（拒绝输出虚假分数）"
         )
     if rejected and rejected == len(chosen):

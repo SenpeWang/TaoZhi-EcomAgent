@@ -13,18 +13,20 @@ npm --prefix web ci
 npm --prefix web run build
 ```
 
-**2. 创建独立测试库**
+**2. 创建本地数据库与 `.env`**
 
-在新检出目录执行一次。以下命令生成随机数据库口令，将连接写入仅当前用户可读的 `.env.test`，并将数据库绑定到本机的 `15433` 端口。
+在新检出目录执行一次。以下命令生成随机数据库口令，把连接写入仅当前用户可读的 `.env`（从模板复制），并将数据库绑定到本机的 `15433` 端口。
 
 ```bash
 umask 077
+cp .env.example .env
+chmod 600 .env
 demo_password="$(.venv/bin/python -c 'import secrets; print(secrets.token_hex(24))')"
 docker run -d --name taozhi-demo-db -p 127.0.0.1:15433:5432 \
   -e POSTGRES_USER=taozhi_demo -e POSTGRES_DB=ecom_test \
   -e POSTGRES_PASSWORD="$demo_password" pgvector/pgvector:pg18
-printf 'ECOM_MODE=test\nECOM_TENANT_CODE=mofa\nECOM_DATABASE_URL=postgresql://%s@127.0.0.1:15433/ecom_test\n' \
-  "taozhi_demo:$demo_password" > .env.test
+printf 'ECOM_MODE=test\nECOM_TENANT_CODE=mofa\nECOM_TEST_DATABASE_URL=postgresql://%s@127.0.0.1:15433/ecom_test\n' \
+  "taozhi_demo:$demo_password" >> .env
 unset demo_password
 docker exec taozhi-demo-db pg_isready -h 127.0.0.1 -U taozhi_demo -d ecom_test
 ```
@@ -32,7 +34,7 @@ docker exec taozhi-demo-db pg_isready -h 127.0.0.1 -U taozhi_demo -d ecom_test
 首次初始化可能需要片刻。重复执行最后一条就绪检查，看到 `accepting connections` 后，在仓库根目录运行迁移、导入测试账号与资料，并启动 API。
 
 ```bash
-export ECOM_ENV_FILE="$PWD/.env.test" PYTHONPATH=src
+export ECOM_ENV_FILE="$PWD/.env" ECOM_MODE=test PYTHONPATH=src
 .venv/bin/python -m alembic upgrade head
 .venv/bin/python -c 'from scripts.manage_database import seed_test; seed_test()'
 .venv/bin/python -m uvicorn taozhi.server.api:app --host 127.0.0.1 --port 18080
@@ -52,7 +54,7 @@ ECOM_ENV_FILE="$PWD/.env.test" PYTHONPATH=src .venv/bin/python -m taozhi.server.
 
 ## 开发检查
 
-准备锁定依赖后，在仓库根目录运行检查。企业集成测试会清空 `.env.test` 指定测试库的租户和业务数据，请使用上面的专用测试库。
+准备锁定依赖后，在仓库根目录运行检查。企业集成测试会清空 `.env` 中 `ECOM_TEST_DATABASE_URL` 指定的测试库的租户和业务数据，测试模式只允许连接 `ecom_test` 库。
 
 ```bash
 make check-repository

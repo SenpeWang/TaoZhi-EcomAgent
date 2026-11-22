@@ -8,7 +8,7 @@ from taozhi.orchestration.decision import (
     get_decision_engine,
 )
 
-_is_test_env = os.environ.get("ECOM_MODE") == "test" or os.environ.get("ECOM_ENV_FILE", "").endswith(".env.test")
+_is_test_env = os.environ.get("ECOM_MODE") == "test"
 _env_path = Path(__file__).resolve().parents[1] / ".env"
 if not _is_test_env and _env_path.exists():
     _cfg = dotenv_values(_env_path)
