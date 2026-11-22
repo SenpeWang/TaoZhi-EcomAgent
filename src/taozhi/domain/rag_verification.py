@@ -59,7 +59,7 @@ _WARRANTY = r"(?:保修|质保|保固)(?:期限|期|时长)?"
 _RETURN_POLICY = r"(?P<window>(?:\d{1,3}|[一二三四五六七八九十]{1,3})天)?无理由退货"
 _RETURN_DECISION = r"(?P<decision>不支持|不接受|不允许|不提供|支持|接受|允许|提供)"
 _COMPARABLE_RULES = (
-    ("保修期限", re.compile(_WARRANTY + r"(?:为|是|[：:])?" + _DURATION)),
+    ("保修期限", re.compile(r"(?:提供|享受)?" + _WARRANTY + r"(?:为|是|[：:])?" + _DURATION)),
     ("保修期限", re.compile(r"(?:提供|享受)?" + _DURATION + r"的?" + _WARRANTY)),
     ("切幅", re.compile(r"(?:切幅|裁切幅宽)(?:为|是|[：:])?" + _NUMBER + r"(?P<unit>毫米|厘米|mm|cm)", re.I)),
     ("无理由退货", re.compile(_RETURN_DECISION + _RETURN_POLICY)),
@@ -69,6 +69,7 @@ _UNITS = {"月": ("月", 1), "个月": ("月", 1), "年": ("月", 12), "天": ("
           "cm": ("毫米", 10), "厘米": ("毫米", 10), "mm": ("毫米", 1), "毫米": ("毫米", 1)}
 _DOCUMENT_LABEL = re.compile(r"产品手册|商品手册|售后手册|产品规格|商品规格|规格[书表]|技术手册|售后政策|保修政策|退货政策|政策|说明书|产品说明|说明|手册|条款|资料")
 _NON_EXCLUSIVE = re.compile(r"不少于|不超过|不低于|至少|至多|最多|最长|大约|约为|左右|以上|以下|任选|可选|分别|或者|[~～]|\d+(?:毫米|mm|月|天)?[至到～]\d+")
+_QUALIFIER = re.compile(r"渠道|订单|批次|适用|拆封|会员|范围|系列|版本|凭证|发票|线上|线下|门店|经销|直营")
 
 
 def _models(text: str) -> set[str]:
@@ -182,9 +183,11 @@ def _comparable_facts(document: str, title: str, document_id: str):
         if not owner:
             continue
         following = sentences[position + 1] if position + 1 < len(sentences) else ""
-        condition = following if _SCOPE_NOTE.match(following) else ""
+        condition = following if _SCOPE_NOTE.match(following) or _QUALIFIER.search(following) else ""
         for label, match in matches:
-            if sentence[match.end():].startswith(("起", "或", "至", "到", "-")):
+            if sentence[match.end():].startswith(("起", "或", "至", "到", "-", "/", "／")):
+                continue
+            if label != "无理由退货" and sentence[:match.start()].endswith(("不", "无", "不再", "不能", "无法", "并非")):
                 continue
             scope = tuple(sorted(filter(None, {title_scope, _scope_text(heading), _scope_text(condition),
                                                _scope_text(sentence[:match.start()] + sentence[match.end():])})))
