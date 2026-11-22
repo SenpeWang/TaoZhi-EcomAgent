@@ -25,6 +25,7 @@ from taozhi.ai.observability import record_retrieval
 from taozhi.domain.entity_extraction import extract_entities
 from taozhi.domain.privacy import redact
 from taozhi.domain.ranking import (
+    RRF_K,
     apply_entity_diversity,
     apply_recency_tiebreak,
     chunk_title,
@@ -38,7 +39,6 @@ from ..knowledge.db import fetch_all, fetch_one
 from ..knowledge.embedding import to_vector
 from ..knowledge.index_cache import encode_index
 
-RRF_K = 60
 RRF_FLOOR = 0.0022
 BACKFILL_LIMIT = 256
 SEMANTIC_DIM = 512

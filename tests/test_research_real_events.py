@@ -151,6 +151,8 @@ def test_pipeline_a_events_emitted_during_research():
     result_agents = {agent["role"]: agent for agent in result["subagents"]}
     assert result_agents["research.market_intelligence"]["id"] == branch["attributes"]["subagent_id"]
     assert tool["attributes"]["tool.name"] == "search_web"
+    assert tool["attributes"]["tool.dispatched"] is True
+    assert result_agents["research.market_intelligence"]["tools"][0]["dispatched"] is True
     assert not result_agents["research.synthesizer"]["tools"]
     model, = [s for s in completed.values() if s["kind"] == "LLM"]
     report_agent = completed[model["parent_span_id"]]

@@ -77,7 +77,11 @@ class McpClientAdapter:
         Returns:
             经由共享超时执行器返回的归一化 ToolOutcome。
         """
-        call_args = clamp_timeout_args(arguments or {}, remaining_seconds=remaining_seconds, inject_timeout=True)
+        accepts_timeout = any(
+            tool.name == tool_name and "timeout" in tool.inputSchema.get("properties", {})
+            for tool in self.server.list_tools()
+        )
+        call_args = clamp_timeout_args(arguments, remaining_seconds=remaining_seconds, inject_timeout=accepts_timeout)
 
         def _invoke_mcp() -> Any:
             mcp_res = self.server.call_tool(tool_name, call_args)
@@ -103,6 +107,7 @@ class McpClientAdapter:
             )
             if span is not None:
                 span.set_attribute("tool.status", outcome.status)
+                span.set_attribute("tool.dispatched", outcome.dispatched)
                 span.set_attribute("tool.result_count", outcome.data_count)
                 if outcome.status in ("error", "timeout", "cancelled"):
                     if not any(e.name == EVENT_NAME and e.attributes.get("outcome") == "failed" for e in span.events):

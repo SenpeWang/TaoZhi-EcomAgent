@@ -1,6 +1,8 @@
-"""电商多智能体标准化测试基准用例集（覆盖正常协同、异常容错、边界隔离、复杂多步与多品类全场景）。"""
+"""调研评测目录，包含实际调研任务与固定证据的合成回放任务。"""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Dict, List
 
 AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
@@ -117,3 +119,17 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
         "min_chars": 80,
     },
 ]
+
+
+def _load_synthetic_cases() -> list[dict]:
+    path = Path(__file__).resolve().parents[1] / "datasets" / "agent_research_cases.json"
+    catalog = json.loads(path.read_text(encoding="utf-8"))
+    if catalog.get("schema_version") != 1 or catalog.get("source") != "synthetic":
+        raise ValueError("无法识别调研回放用例集版本或来源")
+    cases = catalog["cases"]
+    if not cases or any(case.get("execution_mode") != "synthetic_trace_regrade" for case in cases):
+        raise ValueError("合成调研用例须声明回放执行方式")
+    return cases
+
+
+AGENT_BENCHMARK_CASES.extend(_load_synthetic_cases())

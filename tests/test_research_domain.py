@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import Future
 from contextlib import contextmanager
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,10 +22,7 @@ from taozhi.domain.research import (
     enforce_tool_allowed,
     evaluate_hard_stop,
 )
-from taozhi.application.research.hooks import (
-    RuntimeHooks as _RuntimeHooks,
-    collect_new_steering as _collect_new_steering,
-)
+from taozhi.application.research.hooks import RuntimeHooks, collect_new_steering
 from taozhi.application.research.schemas import (
     _OrchestratorDecisionSchema,
     _ProposedSubtaskSchema,
@@ -83,15 +82,15 @@ def test_authorize_subagent_tasks_prunes_and_caps():
     budget = ResearchBudget(max_turns=5, max_parallel_subagents=2, max_subagent_steps=3, timeout_seconds=180.0)
 
     proposed = [
-        SubagentTaskSpec("t1", "全网口碑员", "查口碑", ("search_web", "search_1688_wholesale"), ("智能保温杯",)),
-        SubagentTaskSpec("t2", "越权采购员", "查1688底价", ("search_1688_wholesale", "search_amazon"), ("智能保温杯",)),
+        SubagentTaskSpec("t1", "全网口碑员", "查口碑", ("search_web", "search_1688_wholesale", "get_current_time"), ("智能保温杯",)),
+        SubagentTaskSpec("t2", "越权采购员", "查1688底价", ("search_1688_wholesale", "search_amazon", "get_current_time"), ("智能保温杯",)),
         SubagentTaskSpec("t3", "网页深抓员", "深抓评测", ("fetch_web_page",), ("https://example.com",)),
         SubagentTaskSpec("t4", "超额任务", "超出并发上限", ("search_web",), ("保温杯",)),
     ]
 
     plan = authorize_subagent_tasks(proposed, scope=scope_web_only, budget=budget)
     assert len(plan.tasks) == 2
-    assert plan.tasks[0].allowed_tools == ("search_web",)
+    assert plan.tasks[0].allowed_tools == ("search_web", "get_current_time")
     assert plan.tasks[1].task_id == "t3"
     assert any("整单驳回" in msg for msg in plan.rejected_reasons)
     assert any("超出单轮并发上限" in msg for msg in plan.rejected_reasons)
@@ -132,6 +131,7 @@ def test_tool_outcome_distinguishes_empty_error_timeout_cancel():
 
     err = execute_tool_with_outcome("search_web", boom, {"query": "x"})
     assert err.status == "error"
+    assert err.dispatched is True
     assert "upstream 502" in err.error_reason
 
     def slow(**_):
@@ -140,11 +140,25 @@ def test_tool_outcome_distinguishes_empty_error_timeout_cancel():
 
     to = execute_tool_with_outcome("search_web", slow, {"query": "x"}, remaining_seconds=0.5)
     assert to.status == "timeout"
+    assert to.dispatched is True
 
     ev = threading.Event()
     ev.set()
     ca = execute_tool_with_outcome("search_web", lambda query: [{"title": "a"}], {"query": "x"}, cancel_event=ev)
     assert ca.status == "cancelled"
+    assert ca.dispatched is False
+    exhausted = execute_tool_with_outcome("search_web", boom, {}, remaining_seconds=0)
+    assert exhausted.status == "timeout" and exhausted.dispatched is False
+
+
+def test_tool_timeout_in_queue_is_not_dispatched():
+    queued = Future()
+    tool = MagicMock()
+    with patch("taozhi.core.tools.outcome._get_tool_pool") as pool:
+        pool.return_value.submit.return_value = queued
+        result = execute_tool_with_outcome("search_web", tool, {}, remaining_seconds=0.5)
+    assert queued.cancelled() and result.status == "timeout" and result.dispatched is False
+    tool.assert_not_called()
 
 
 def test_steering_impact_classification():
@@ -256,6 +270,54 @@ def test_parallel_orchestrator_and_react_query_refinement():
     assert pcts[-1] == 100
 
 
+@pytest.mark.parametrize("timezone,with_search", [("UTC", False), (None, True)])
+def test_clock_reading_reaches_report_without_creating_market_data(timezone, with_search):
+    """时间出现在工具轨迹与报告中，空的商品检索仍保留空结果。"""
+    goal = "核对当前时间并检索商品" if with_search else "查询 UTC 当前时间"
+    allowed_tools = ["get_current_time", "search_web"] if with_search else ["get_current_time"]
+    steps = [
+        _OrchestratorDecisionSchema(
+            action="spawn_subagents", thought=goal,
+            subtasks=[_ProposedSubtaskSchema(role="research.subagent_worker", goal=goal, allowed_tools=allowed_tools)],
+        ),
+        _SubagentStepSchema(action="call_tool", thought="读系统时钟", tool_name="get_current_time", timezone=timezone),
+    ]
+    if with_search:
+        steps.append(_SubagentStepSchema(action="call_tool", thought="检索商品", tool_name="search_web", query_or_url="耳机"))
+    steps.extend([
+        _SubagentStepSchema(action="finish", thought="已完成", findings_summary="工具执行完毕"),
+        _OrchestratorDecisionSchema(action="finish", thought="回答用户"),
+    ])
+    llm = MagicMock()
+    llm.chat_json.side_effect = steps
+    llm.chat.side_effect = RuntimeError("触发基于观测的报告")
+    with _patch_llm(llm), patch("taozhi.core.tools.search_web", return_value=[]) as search:
+        result = execute_autonomous_agents(keyword="耳机", user_query=goal)
+
+    evidence, = result["evidence_pool"]
+    reading, = evidence["time_references"]
+    stamp, zone = reading.removesuffix(")").split(" (")
+    assert datetime.fromisoformat(stamp).utcoffset() is not None
+    assert zone == (timezone or "Asia/Shanghai")
+    assert reading in llm.chat.call_args.args[0]
+    assert reading in result["report"]
+    assert evidence["platform_items"] == {}
+    worker, = [tr for tr in result["audit_trail"] if tr["role"] == "research.subagent_worker"]
+    first = worker["tools"][0]
+    assert first["tool_name"] == "get_current_time"
+    assert first["dispatched"] and first["status"] == "ok" and first["result_summary"] == reading
+    assert first["parameters"] == ({"timezone": timezone} if timezone else {})
+    assert worker["scratch_files"] == []
+    if with_search:
+        search.assert_called_once()
+        assert evidence["status"] == "empty"
+        assert result["platforms"][0]["items_count"] == 0
+    else:
+        search.assert_not_called()
+        assert evidence["status"] == "ok" and evidence["channel"] == "clock"
+        assert result["platforms"] == []
+
+
 def test_live_cancel_and_mid_flight_steering():
     """测试运行中取消熔断，以及中途动态 Steering 回调驱动主脑增量补采。"""
     mock_llm_cancel = MagicMock()
@@ -335,7 +397,7 @@ def test_checkpointer_required_for_persistent_graph():
 
 def test_idempotent_steering_deduplicates_by_event_id():
     """测试带唯一 id 的 Steering 队列在跨通道重放/重试下严格幂等。"""
-    hooks = _RuntimeHooks(
+    hooks = RuntimeHooks(
         fetch_steering_fn=lambda: [
             {"id": "req_1", "text": "核查1688底价"},
             {"id": "req_1", "text": "核查1688底价"},
@@ -346,14 +408,14 @@ def test_idempotent_steering_deduplicates_by_event_id():
         "steering_inbox": ["初始指令"],
         "steering_event_ids": ["req_0"],
     }
-    delta_texts, delta_ids, all_inbox = _collect_new_steering(state, hooks)
+    delta_texts, delta_ids, all_inbox = collect_new_steering(state, hooks)
     assert delta_ids == ["req_1", "req_2"]
     assert delta_texts == ["核查1688底价", "核查1688底价"]
     assert all_inbox == ["初始指令", "核查1688底价", "核查1688底价"]
 
     state["steering_inbox"].extend(delta_texts)
     state["steering_event_ids"].extend(delta_ids)
-    delta_texts_2, delta_ids_2, _ = _collect_new_steering(state, hooks)
+    delta_texts_2, delta_ids_2, _ = collect_new_steering(state, hooks)
     assert delta_texts_2 == []
     assert delta_ids_2 == []
 
@@ -504,7 +566,7 @@ def test_sensenova_router_failover_circuit_and_compliance():
 
     reg = CircuitBreakerRegistry()
     ledger = []
-    hooks = _RuntimeHooks(model_call_fn=lambda role, event: ledger.append((role, event)))
+    hooks = RuntimeHooks(model_call_fn=lambda role, event: ledger.append((role, event)))
     observer = hooks.model_call_observer("research.orchestrator")
     client = LLMClient(settings=fake_settings, allow_overseas=True, registry=reg, on_attempt=observer)
 

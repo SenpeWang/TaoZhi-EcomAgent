@@ -31,6 +31,7 @@ class _SubagentStepSchema(BaseModel):
     thought: str = Field(description="当前观察后的简短推理，说明为什么换词检索、深抓链接或可以结束")
     tool_name: str = Field(default="", description="当 action=call_tool 时的工具名")
     query_or_url: str = Field(default="", description="当 action=call_tool 时的搜索词或 fetch_web_page 目标 URL")
+    timezone: str | None = Field(default=None, description="读取当前时间时使用的 IANA 时区，省略则用 Asia/Shanghai")
     findings_summary: str = Field(default="", description="当 action=finish 时基于工具实测结果的客观结论摘要")
     key_metrics: List[str] = Field(default_factory=list, description="从工具结果直接提取的关键数据事实（含价格/起订量/销量/痛点，严禁编造）")
     gaps_or_errors: List[str] = Field(default_factory=list, description="客观存在的空结果、抓包失败或尚待补充的缺口")
@@ -41,6 +42,7 @@ class AuditableToolRecord(TypedDict):
 
     tool_name: str
     parameters: Dict[str, Any]
+    dispatched: bool
     status: str
     result_summary: str
     data_count: int
@@ -73,6 +75,7 @@ class EvidenceRecord(TypedDict):
     key_metrics: List[str]
     gaps_or_errors: List[str]
     platform_items: Dict[str, List[Dict[str, Any]]]
+    time_references: List[str]
     tool_counts: Dict[str, int]
     status: str
     elapsed: float

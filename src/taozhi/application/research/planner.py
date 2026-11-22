@@ -149,6 +149,7 @@ def _build_orchestrator_prompt(
         "1. 若关键维度尚缺、存在口径矛盾或刚收到 Steering 纠偏需要重抓：输出 action='spawn_subagents'，"
         "合理拆解 1 到多个互不重叠的子任务并发执行（比如区分全网痛点、1688源头底价、Amazon海外竞品、交叉核验等），"
         "每个子任务明确 role、goal、allowed_tools（仅从白名单选）与 seed_queries；如旧证据被纠偏推翻，可在 invalidate_evidence_ids 中作废。\n"
+        "需要当前日期或某地时间时，给对应子任务授权 get_current_time。只问时间时可仅授权此工具。\n"
         "2. 若已有证据已充分覆盖用户核心问题（且无高价值可补查缺口）：输出 action='finish' 并完善 3-4 条 outline 研报章节大纲。"
     )
 

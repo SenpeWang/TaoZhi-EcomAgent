@@ -4,7 +4,10 @@ from __future__ import annotations
 import importlib
 import json
 import threading
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from taozhi.core.tools.search_amazon import AMAZON_BASE_URL, search_amazon
 
@@ -25,11 +28,48 @@ def test_mcp_protocol_and_server_registration():
     assert "search_1688_wholesale" in tool_names
     assert "search_web" in tool_names
     assert "fetch_web_page" in tool_names
+    clock_schema = next(t.inputSchema for t in tools if t.name == "get_current_time")
+    assert set(clock_schema["properties"]) == {"timezone"}
+    assert clock_schema["properties"]["timezone"]["default"] == "Asia/Shanghai"
+    assert clock_schema["additionalProperties"] is False
 
     amz_tool = next(t for t in tools if t.name == "search_amazon")
     assert amz_tool.inputSchema["type"] == "object"
     assert "query" in amz_tool.inputSchema["properties"]
     assert "query" in amz_tool.inputSchema["required"]
+
+
+def test_current_time_through_mcp_uses_the_system_clock_and_default_timezone():
+    adapter = McpClientAdapter()
+    before = datetime.now(timezone.utc).replace(microsecond=0)
+    outcome = adapter.call_tool("get_current_time", {}, remaining_seconds=2)
+    after = datetime.now(timezone.utc)
+    assert outcome.status == "ok" and outcome.dispatched and outcome.data_count == 1
+    item, = outcome.items
+    assert item["timezone"] == "Asia/Shanghai"
+    current_time = datetime.fromisoformat(item["current_time"])
+    assert before <= current_time <= after
+    assert current_time.utcoffset() == timedelta(hours=8)
+    assert item["current_time"] == current_time.isoformat(timespec="seconds")
+
+
+@pytest.mark.parametrize(("month", "offset"), [(1, "-05:00"), (7, "-04:00")])
+def test_current_time_observes_the_requested_timezone(month, offset):
+    instant = datetime(2026, month, 1, 12, tzinfo=timezone.utc)
+    with patch("taozhi.core.tools.current_time.datetime") as clock:
+        clock.now.side_effect = instant.astimezone
+        result = EcommerceMcpServer().call_tool("get_current_time", {"timezone": "America/New_York"})
+    assert not result.isError
+    item = json.loads(result.content[0].text)
+    assert item["timezone"] == "America/New_York"
+    assert item["current_time"].endswith(offset)
+    assert datetime.fromisoformat(item["current_time"]) == instant
+
+
+@pytest.mark.parametrize("zone", ["Unknown/City", "", None])
+def test_current_time_rejects_invalid_timezones(zone):
+    result = EcommerceMcpServer().call_tool("get_current_time", {"timezone": zone})
+    assert result.isError and "无法识别时区" in result.content[0].text
 
 
 def test_search_amazon_execution_and_data_structure():
@@ -128,7 +168,7 @@ def test_research_scope_filters_mcp_tool_specs():
     web_scope = classify_research_scope("调研无线耳机全网口碑与痛点")
     web_specs = adapter.list_tool_specs(web_scope.allowed_tools)
     web_names = {s["name"] for s in web_specs}
-    assert web_names == {"search_web", "fetch_web_page"}
+    assert web_names == {"search_web", "fetch_web_page", "get_current_time"}
 
     sourcing_scope = classify_research_scope("调研保温杯1688出厂价与Amazon零售对标")
     sourcing_specs = adapter.list_tool_specs(sourcing_scope.allowed_tools)

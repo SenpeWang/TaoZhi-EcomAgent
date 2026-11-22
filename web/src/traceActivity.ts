@@ -18,6 +18,7 @@ export const diagnosticOutcomeLabels: Record<TraceDiagnostic['outcome'], string>
 }
 
 const toolActions: Record<string, string> = {
+  get_current_time: '读取当前时间',
   search_web: '搜索公开网页',
   fetch_web_page: '读取网页正文',
   search_1688_wholesale: '查询 1688 批发报价',
@@ -32,9 +33,24 @@ const agentActions: Record<string, string> = {
   'rag.specialist': '核验问答资料',
 }
 const toolOutcomes: Record<string, string> = {
+  error: '工具执行失败',
   empty: '无匹配结果',
   timeout: '工具超时',
   cancelled: '工具已取消',
+}
+const retrievalDecisions: Record<string, string> = {
+  retry_weak_evidence: '首轮证据不足，进入补查',
+  retry_low_confidence: '重排置信度偏低，进入补查',
+  sufficient_evidence: '进入授权上下文汇集',
+  run_specialists: '转入专家核验',
+  no_authorized_evidence: '缺少可用授权证据，跳过专家核验',
+  external_processing_blocked: '未获外发许可，跳过专家核验',
+  no_finance_evidence: '缺少授权财务依据，跳过专家核验',
+}
+const verificationIssues: Record<string, string> = {
+  model_unconfigured: '尚未配置核验模型',
+  budget_exhausted: '已用完本次核验的调用预算',
+  model_unavailable: '核验模型暂时不可用',
 }
 
 /**
@@ -80,6 +96,13 @@ export function activityResult(entry: TraceActivity): string {
   const details: string[] = []
   const toolStatus = attrs['tool.status']
   if (entry.kind === 'TOOL') {
+    const dispatched = attrs['tool.dispatched']
+    if (dispatched === false) {
+      if (toolStatus === 'timeout') return '未派发 · 派发前已超时'
+      if (toolStatus === 'cancelled') return '未派发 · 派发前已取消'
+      return entry.error_type ? '未派发 · ' + entry.error_type : '未派发'
+    }
+    if (dispatched === true) details.push('已派发')
     const outcome =
       typeof toolStatus === 'string' && Object.hasOwn(toolOutcomes, toolStatus)
         ? toolOutcomes[toolStatus]
@@ -115,6 +138,19 @@ export function activityResult(entry: TraceActivity): string {
   if (entry.kind === 'RETRIEVER' && typeof attrs['retrieval.result_count'] === 'number') {
     details.push('检索到 ' + attrs['retrieval.result_count'] + ' 条')
   }
+  if (entry.name === 'pipeline.retrieval_retry') {
+    const searches = attrs['rag.retrieval_search_count']
+    if (searches === 1) details.push('未执行第二次检索')
+    if (searches === 2) details.push('已执行第二次检索')
+  }
+  const decision = attrs['rag.retrieval_decision']
+  if (typeof decision === 'string' && Object.hasOwn(retrievalDecisions, decision)) {
+    details.push(retrievalDecisions[decision])
+  }
+  const issue = attrs['rag.verification_issue']
+  if (typeof issue === 'string' && Object.hasOwn(verificationIssues, issue)) {
+    details.push(verificationIssues[issue])
+  }
   if (entry.name === 'research.orchestrator') {
     switch (attrs['research.next_action']) {
       case 'dispatch_subagents': {
@@ -132,7 +168,11 @@ export function activityResult(entry: TraceActivity): string {
   }
   if (
     entry.error_type &&
-    !(entry.kind === 'TOOL' && toolStatus === entry.error_type && details.length)
+    !(
+      entry.kind === 'TOOL' &&
+      toolStatus === entry.error_type &&
+      Object.hasOwn(toolOutcomes, toolStatus)
+    )
   ) {
     details.push(entry.error_type)
   }

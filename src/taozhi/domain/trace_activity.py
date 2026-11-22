@@ -7,6 +7,8 @@ ActivityCategory = SpanKind | Literal["CONTEXT", "GUARDRAIL"]
 
 CHAIN_OPERATIONS = {
     "CONTEXT": {
+        "pipeline.business_snapshot": "核对实时业务记录",
+        "pipeline.prepare_evidence": "汇集授权上下文并选择答复路径",
         "context.recall_conversation": "读取会话历史证据",
         "context.prepare_specialist": "组装问答专家上下文",
         "context.prepare_coordinator": "组装协调员决策上下文",

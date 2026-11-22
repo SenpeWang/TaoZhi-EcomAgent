@@ -150,7 +150,8 @@ def _build_research_result_payload(
                     {
                         "name": t["tool_name"],
                         "description": t["result_summary"],
-                        "status": t.get("status", "ok"),
+                        "status": t.get("status"),
+                        "dispatched": t.get("dispatched"),
                         "data_count": t["data_count"],
                         "parameters": t["parameters"],
                     }
@@ -210,7 +211,7 @@ def _build_research_result_payload(
         emit_progress(hooks, f"[system] 任务已按用户取消请求提前终止 (耗时 {total_elapsed}s)", 100)
     else:
         for ev in active_ev:
-            if ev.get("status") == "ok" and ev.get("summary"):
+            if ev.get("channel") != "clock" and ev.get("status") == "ok" and ev.get("summary"):
                 session.record_fact(
                     subject=keyword,
                     predicate=agent_display_name(str(ev.get("role") or "调研洞察")),
@@ -221,7 +222,6 @@ def _build_research_result_payload(
 
     return {
         "report": merged_state.get("report", ""),
-        "reply": merged_state.get("report", ""),
         "outline": merged_state.get("outline", []),
         "platforms": platforms_summary,
         "model_calls": hooks.model_calls,

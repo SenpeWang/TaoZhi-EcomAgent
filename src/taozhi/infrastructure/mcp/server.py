@@ -1,8 +1,4 @@
-"""电商情报类 MCP 标准服务端实现（EcommerceMcpServer）。
-
-基于 Anthropic MCP 协议规范，将 1688、亚马逊、全网搜索与网页去噪统一暴露为标准 MCP 工具集。
-严格遵循 Google Python Style 规范。
-"""
+"""提供调研 Agent 的 MCP 工具发现与调用。"""
 from __future__ import annotations
 
 import json
@@ -11,6 +7,7 @@ import subprocess
 import httpx
 from typing import Any, Callable, Dict, List, Optional
 
+from taozhi.core.tools.current_time import DEFAULT_TIMEZONE
 from taozhi.core.tools.outcome import ToolInvocationError
 from taozhi.domain.trace_diagnostic import CATALOG
 from taozhi.observability.tracing import record_diagnostic
@@ -38,7 +35,7 @@ def _build_handler(tool_name: str, arg_spec: tuple[tuple[str, tuple[str, ...], A
 class EcommerceMcpServer:
     """电商与市场情报类 MCP 服务端（支持 tools/list 与 tools/call）。"""
 
-    _BUILTIN_SPECS: tuple[tuple[str, str, Dict[str, Any], tuple[tuple[str, tuple[str, ...], Any, Any], ...]], ...] = (
+    _SEARCH_TOOL_SPECS: tuple[tuple[str, str, Dict[str, Any], tuple[tuple[str, tuple[str, ...], Any, Any], ...]], ...] = (
         (
             "search_amazon",
             "在亚马逊全球站 (https://www.amazon.com/) 检索跨境商品、零售价($)、ASIN、评分与买家评论。",
@@ -103,12 +100,26 @@ class EcommerceMcpServer:
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
-        """注册内置的 4 大电商情报类 MCP 工具。"""
-        for name, desc, schema, arg_spec in self._BUILTIN_SPECS:
+        for name, desc, schema, arg_spec in self._SEARCH_TOOL_SPECS:
             self.register_tool(
                 McpToolDefinition(name=name, description=desc, inputSchema=schema),
                 handler=_build_handler(name, arg_spec),
             )
+        self.register_tool(
+            McpToolDefinition(
+                name="get_current_time",
+                description="读取当前日期和时间，可指定 IANA 时区，结果包含 UTC 偏移。",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "timezone": {"type": "string", "default": DEFAULT_TIMEZONE,
+                                     "description": "IANA 时区名称，如 Asia/Shanghai 或 UTC"},
+                    },
+                    "additionalProperties": False,
+                },
+            ),
+            handler=lambda args: tools.get_current_time(**args),
+        )
 
     def register_tool(
         self, definition: McpToolDefinition, handler: Callable[[Dict[str, Any]], Any]

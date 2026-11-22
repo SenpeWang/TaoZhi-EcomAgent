@@ -6,6 +6,7 @@ import json
 import secrets
 import threading
 import time
+from datetime import datetime
 from typing import Any
 
 from taozhi.domain.text_guard import strip_invalid_text
@@ -453,15 +454,23 @@ def record_research_model_call(conn: Any, job: dict, role: str, event: dict) -> 
     )
 
 
-def last_conversation_question(conn: Any, tenant_id: str, owner_id: str, conversation_id: str, exclude_job_id: str) -> str | None:
-    """读取同一会话中上一条已完成的提问，供短指代词多轮检索补全。"""
-    row = fetch_one(
+def conversation_question_reference(
+    conn: Any, tenant_id: str, owner_id: str, conversation_id: str, before: tuple[datetime, str], reference_id: str | None = None,
+) -> dict | None:
+    """读取同一用户会话的已完成提问及外发许可，补查时按首次选择的编号重验。"""
+    params = [tenant_id, owner_id, conversation_id, *before]
+    selected = ""
+    if reference_id is not None:
+        selected = " AND id=%s"
+        params.append(reference_id)
+    return fetch_one(
         conn,
-        "SELECT question FROM jobs WHERE tenant_id=%s AND owner_id=%s AND kind='ask' AND state='completed' "
-        "AND conversation_id=%s AND id != %s ORDER BY created_at DESC LIMIT 1",
-        (tenant_id, owner_id, conversation_id, exclude_job_id),
+        "SELECT id,question,input_level,COALESCE(payload->'allow_external','true'::jsonb) AS allow_external FROM jobs "
+        "WHERE tenant_id=%s AND owner_id=%s AND kind='ask' AND state='completed' AND conversation_id=%s "
+        "AND (created_at,id)<(%s,%s)"
+        + selected + " ORDER BY created_at DESC,id DESC LIMIT 1",
+        tuple(params),
     )
-    return str(row["question"]) if row and row.get("question") else None
 
 
 def list_research_conversation_summaries(conn: Any, tenant_id: str, owner_id: str) -> list[dict]:

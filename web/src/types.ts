@@ -103,6 +103,17 @@ export interface Citation {
   title: string
   version: number
   quote: string
+  cited?: boolean
+  page?: number | null
+}
+export interface KnowledgeQuestion {
+  question: string
+  node_id: string
+  allow_external: boolean
+  allow_public_reference: boolean
+  require_review: boolean
+  sku_id: string
+  order_id: string
 }
 export interface ResearchPlatform {
   name: string
@@ -124,6 +135,16 @@ export interface ResearchSubagent {
 }
 export interface TaskResult {
   answer?: string
+  answer_basis?:
+    | 'internal_evidence'
+    | 'business_snapshot'
+    | 'source_excerpt'
+    | 'public_reference'
+    | 'insufficient_evidence'
+  guidance?: string
+  public_sources?: { title: string; url: string }[]
+  cache_hit?: boolean
+  data?: unknown
   report?: string
   outline?: string[]
   platforms?: ResearchPlatform[]
@@ -164,12 +185,9 @@ export interface TraceOwner {
   username: string
   display_name: string
 }
-export interface TraceOwnerPage {
-  items: TraceOwner[]
-  next_cursor: string | null
-}
-export interface TracePage {
-  items: TraceSummary[]
+export type ApiReader = <T>(path: string) => Promise<T>
+export interface CursorPage<T> {
+  items: T[]
   next_cursor: string | null
 }
 export interface TraceEvent extends TaskEventItem {
@@ -211,10 +229,6 @@ export interface TraceRun {
   input_tokens: number
   output_tokens: number
 }
-export interface TraceRunPage {
-  items: TraceRun[]
-  next_cursor: string | null
-}
 export interface TraceSpan {
   trace_id: string
   span_id: string
@@ -231,9 +245,7 @@ export interface TraceSpan {
   diagnostics: TraceDiagnostic[]
   attributes: Record<string, string | number | boolean>
 }
-export interface TraceSpanPage<T extends TraceSpan> {
-  items: T[]
-  next_cursor: string | null
+export interface TraceSpanPage<T extends TraceSpan> extends CursorPage<T> {
   observed_at: string
 }
 export interface TraceActivity extends TraceSpan {

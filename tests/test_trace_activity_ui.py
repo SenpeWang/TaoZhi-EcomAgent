@@ -8,17 +8,28 @@ def test_readable_trace_actions():
     root = Path(__file__).resolve().parents[1]
     script = """
 import assert from 'node:assert/strict'
-import { activityCategoryLabels } from './web/src/traceWaterfall.ts'
+import { activityCategoryLabels, spanFields } from './web/src/traceWaterfall.ts'
 import { activityAction, activityResult, actorInstanceLabels } from './web/src/traceActivity.ts'
 
 const actor = {kind: 'agent', span_id: '1000000000000000', display_name: '市场调研员'}
 const base = {actor, kind: 'TOOL', name: 'mcp.call_tool', display_name: 'search_web', status: 'ok', error_type: null,
   attributes: {'tool.name': 'search_web', 'tool.status': 'empty', 'tool.result_count': 0}}
 assert.deepEqual(activityAction(base), {title: '搜索公开网页', target: 'search_web'})
+assert.deepEqual(activityAction({...base, attributes: {'tool.name':'get_current_time'}}),
+  {title: '读取当前时间', target: 'get_current_time'})
 assert.equal(activityResult(base), '无匹配结果 · 返回 0 条')
 assert.equal(activityResult({...base, status: 'error', error_type: 'timeout',
   attributes: {'tool.status':'timeout', 'tool.result_count':0}}), '工具超时')
 assert.equal(activityAction({...base, attributes: {'tool.name':'internal_catalog'}}).target, 'internal_catalog')
+for (const [dispatched, status, expected] of [
+  [false, 'cancelled', '未派发 · 派发前已取消'], [false, 'timeout', '未派发 · 派发前已超时'],
+  [true, 'timeout', '已派发 · 工具超时'], [true, 'error', '已派发 · 工具执行失败'],
+]) {
+  const node = {...base, status:'error', error_type:status,
+    attributes:{'tool.dispatched':dispatched,'tool.status':status,'tool.result_count':0}}
+  assert.equal(activityResult(node),expected)
+  assert.equal(spanFields(node).find(item => item.key === 'tool.dispatched').value,dispatched ? '是' : '否')
+}
 const model = {...base, kind: 'LLM', attributes: {'llm.model_name': 'qa-model', 'llm.token_count.prompt': 0, 'llm.token_count.completion': 4}}
 assert.deepEqual(activityAction(model), {title:'调用模型', target:'qa-model'})
 assert.equal(activityResult(model), '输入 0 Token · 输出 4 Token')
@@ -32,6 +43,25 @@ const context = { ...base, category: 'CONTEXT', kind: 'CHAIN', name: 'context.pr
 assert.equal(activityAction(context).title, '组装报告证据上下文')
 assert.equal(activityResult(context), '0 份证据 · 320 字符')
 assert.equal(activityResult({...context, attributes:{'context.input_chars':2000,'context.output_chars':1500}}), '2000 → 1500 字符')
+const retrieval = {...context, name:'pipeline.retrieval', category:'CHAIN',
+  attributes:{'rag.retrieval_decision':'retry_weak_evidence'}}
+assert.equal(activityResult(retrieval), '首轮证据不足，进入补查')
+assert.equal(activityResult({...retrieval, name:'pipeline.specialists',
+  attributes:{'rag.verification_issue':'model_unavailable'}}), '核验模型暂时不可用')
+for (const [count, expected] of [[1,'未执行第二次检索'], [2,'已执行第二次检索']]) {
+  const retry = {...retrieval, name:'pipeline.retrieval_retry', attributes:{'rag.retrieval_search_count':count}}
+  assert.equal(activityResult(retry), expected)
+  assert.equal(spanFields(retry).find(item => item.key === 'rag.retrieval_search_count').value,count)
+}
+for (const [reason, expected] of [
+  ['external_processing_blocked','未获外发许可，跳过专家核验'],
+  ['no_finance_evidence','缺少授权财务依据，跳过专家核验'],
+  ['no_authorized_evidence','缺少可用授权证据，跳过专家核验'],
+  ['run_specialists','转入专家核验'], ['unknown',''],
+]) {
+  const assembled = {...context, name:'pipeline.prepare_evidence', attributes:{'rag.retrieval_decision':reason}}
+  assert.equal(activityResult(assembled), expected)
+}
 const coordinator = {...base, kind:'AGENT', name:'research.orchestrator', attributes:{}}
 assert.equal(activityResult(coordinator), '')
 for (const [action, expected] of [['dispatch_subagents','已派发 2 项子任务'], ['synthesizer','转入报告撰写'], ['final_node','进入归档']]) {

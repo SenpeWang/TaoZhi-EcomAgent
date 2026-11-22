@@ -59,6 +59,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { answerBasisLabel } from '../knowledgeAnswers'
 import { traceTime } from '../labels'
 import { activityAction, activityResult, actorInstanceLabels } from '../traceActivity'
 import { activityCategoryLabels, formatDuration, spanStatusLabels } from '../traceWaterfall'
@@ -99,7 +100,9 @@ function timelineRows() {
       props.diagnostic && props.diagnostic !== 'all'
         ? entry.diagnostics.filter((event) => event.category === props.diagnostic)
         : entry.diagnostics,
-    result: activityResult(entry),
+    result: [activityResult(entry), answerBasisLabel(entry.attributes['rag.answer_basis'])]
+      .filter(Boolean)
+      .join(' · '),
     elapsed:
       entry.duration_ms ??
       (entry.status === 'running'

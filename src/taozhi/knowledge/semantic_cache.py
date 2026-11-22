@@ -1,22 +1,13 @@
-"""企业级高并发语义缓存引擎（Semantic Cache）。
-
-在电商大促及高并发场景中，70%~80% 的商品咨询属于高频重复或同义变体问题（如“支持Mate60吗”与“华为Mate60pro能贴吗”）。
-语义缓存层在检索与多智能体之前拦截请求：
-1. 向量近邻比对：通过本地 BGE 将问题编码，与缓存中已通过质检核验的权威答案做 Cosine 相似度匹配；
-2. 毫秒级命中返回：相似度 >= 阈值（默认 0.92）直接返回权威答案与引用，时延 < 5ms，消耗 0 LLM Token；
-3. 租户与权限隔离：严格按 tenant_id 隔离，且校验 input_level 密级防越权；
-4. 动态失效与 LRU：支持 TTL 自动过期与最大容量 LRU 淘汰。
-
-密级与脱敏是两件事，必须各判各的：缓存里存的是"当初那位提问者"看到的文本，
-boss 看到的是未脱敏原文（手机号、身份证、收货地址）。按密级放行会让 staff 用
-一个相似问题拿到 boss 那份原文，所以命中时还要做一次脱敏对齐（见 get()）。
-"""
+"""复用可访问的已核验文档答复，校验租户、密级、主体、业务条件和脱敏范围。"""
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -45,6 +36,25 @@ class CacheEntry:
     hits: int = 0
     redacted: bool = False
     entities: Tuple[str, ...] = field(default_factory=tuple)
+    fact_question: bytes = b""
+
+
+_BUSINESS_FACT = re.compile(
+    r"本[店司款品]|我[司们店]|公司|内部|保修|质保|退换|七天|无理由|赔付|条款|政策|保价|退款|"
+    r"报价|价格|定价|折扣|售价|底价|合同|供应商|采购|成本|毛利|利润|佣金|审批|制度|"
+    r"库存|交期|账期|订单|运费|包邮|适配|兼容|型号|规格|切幅|尺寸|功率|支持|承诺|授权|"
+    r"线上|线下|直营|经销|门店|平台|渠道|生效|今年|去年|明年|多久|几天|退货期|维修|"
+    r"营业|上班|下班|值班|联系人|客服电话|供应链|售后|发票|赔偿|返利|[0-9]|"
+    r"usb|type-c|蓝牙|bluetooth|gtin|sku|\bble\b", re.I,
+)
+
+
+def _fact_question(query: str) -> bytes:
+    """涉及内部承诺或具体参数时，将缓存复用限定在同一问题。"""
+    if not _BUSINESS_FACT.search(query):
+        return b""
+    normalized = unicodedata.normalize("NFKC", query).strip().rstrip("?。!").strip()
+    return hashlib.sha256(normalized.encode()).digest()
 
 
 def _norm_entities(query: str) -> Tuple[str, ...]:
@@ -150,6 +160,7 @@ class SemanticCache:
 
             now = time.monotonic()
             q_entities = _norm_entities(query)
+            fact_question = _fact_question(query)
             sims = np.dot(matrix, q_vec)
             candidates = [int(i) for i in np.argsort(-sims) if float(sims[i]) >= self.similarity_threshold]
 
@@ -162,7 +173,7 @@ class SemanticCache:
                     continue
                 if entry.input_level > input_level:
                     continue
-                if entry.entities != q_entities:
+                if entry.entities != q_entities or entry.fact_question != fact_question:
                     continue
                 if boss and entry.redacted:
                     continue
@@ -251,6 +262,7 @@ class SemanticCache:
                 created_at=time.monotonic(),
                 redacted=redacted,
                 entities=_norm_entities(query),
+                fact_question=_fact_question(query),
             )
             entries.append(entry)
             self._rebuild_matrix(tenant_id)

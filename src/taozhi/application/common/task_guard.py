@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import functools
 import time
-from typing import Any, Callable, Mapping, Tuple
+from typing import Any, Callable, Mapping
 
 from taozhi.config import load_config
+from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import load_principal, sources_valid
 from taozhi.infrastructure.persistence.job_repo import get_job_by_id, update_job_stage
@@ -65,28 +66,34 @@ def merge_token_usage(base: dict | None, role_key: str, u: dict) -> dict:
     return out
 
 
-def validate_task_execution(state: Mapping[str, Any], stage: str, progress: int, external: bool = False) -> Tuple[object, dict]:
-    """每个节点重验取消状态、执行租约、身份代际与外发授权，并推进阶段进度。"""
+def authorized_running_task(conn: Any, state: Mapping[str, Any], *, external: bool = False) -> tuple[Principal, dict]:
+    """读取有效执行中的任务，复核主体、来源和当前外发权限。"""
+    job = get_job_by_id(conn, state["job_id"])
+    if (
+        not job
+        or job["state"] != "running"
+        or job["run_version"] != state["run_version"]
+        or job["cancel_requested"]
+        or not job["lease_until"]
+        or job["lease_until"].timestamp() < time.time()
+    ):
+        raise Denied("任务已取消或执行租约失效", "TASK_STOPPED", 409)
+    if time.time() - job["started_at"].timestamp() > load_config().task_timeout:
+        raise Denied("任务处理超时，请重试", "TASK_TIMEOUT", 409)
+    p = load_principal(conn, job["owner_id"])
+    if p.version != job["owner_version"]:
+        raise Denied("人员权限已变化，请重新提交", "PERMISSION_CHANGED", 409)
+    if not sources_valid(conn, p, state.get("sources", []), external):
+        raise Denied("资料来源或访问权限已变化", "SOURCE_CHANGED", 409)
+    if external and (not job["payload"].get("allow_external", True) or job["input_level"] >= 3 and not p.boss):
+        raise Denied("当前问题不允许发送外部模型", "EXTERNAL_BLOCKED", 409)
+    return p, job
+
+
+def validate_task_execution(state: Mapping[str, Any], stage: str, progress: int, external: bool = False) -> tuple[Principal, dict]:
+    """校验当前任务并推进节点执行进度。"""
     with database_connection() as c:
-        job = get_job_by_id(c, state["job_id"])
-        if (
-            not job
-            or job["state"] != "running"
-            or job["run_version"] != state["run_version"]
-            or job["cancel_requested"]
-            or not job["lease_until"]
-            or job["lease_until"].timestamp() < time.time()
-        ):
-            raise Denied("任务已取消或执行租约失效", "TASK_STOPPED", 409)
-        if time.time() - job["started_at"].timestamp() > load_config().task_timeout:
-            raise Denied("任务处理超时，请重试", "TASK_TIMEOUT", 409)
-        p = load_principal(c, job["owner_id"])
-        if p.version != job["owner_version"]:
-            raise Denied("人员权限已变化，请重新提交", "PERMISSION_CHANGED", 409)
-        if not sources_valid(c, p, state.get("sources", []), external):
-            raise Denied("资料来源或访问权限已变化", "SOURCE_CHANGED", 409)
-        if external and (not job["payload"].get("allow_external", True) or job["input_level"] >= 3 and not p.boss):
-            raise Denied("当前问题不允许发送外部模型", "EXTERNAL_BLOCKED", 409)
+        p, job = authorized_running_task(c, state, external=external)
         update_job_stage(c, p.tenant_id, job["id"], job["run_version"], stage, progress)
         return p, job
 
@@ -105,6 +112,14 @@ def traced_node(name: str, func: Callable[[Any], Any], span_prefix: str = "pipel
             try:
                 if span is not None:
                     r = result or {}
+                    if "answer_basis" in r:
+                        span.set_attribute("rag.answer_basis", r["answer_basis"])
+                    if "verification_issue" in r:
+                        span.set_attribute("rag.verification_issue", r["verification_issue"])
+                    if "retrieval_decision" in r:
+                        span.set_attribute("rag.retrieval_decision", r["retrieval_decision"])
+                    if "retrieval_search_count" in r:
+                        span.set_attribute("rag.retrieval_search_count", r["retrieval_search_count"])
                     if r.get("selected_agents") is not None:
                         span.set_attribute("state.selected_agents", ",".join(map(str, r["selected_agents"])))
                     for key in ("evidence", "findings", "missing", "business"):

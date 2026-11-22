@@ -188,7 +188,8 @@ import type {
   TraceActivity,
   TraceDetail,
   TraceRun,
-  TraceRunPage,
+  ApiReader,
+  CursorPage,
   TraceSpan,
   TraceSpanPage,
 } from '../types'
@@ -201,7 +202,7 @@ const props = defineProps<{
   detail: TraceDetail
   visible: boolean
   initialTraceId: string | null
-  api: <T>(path: string) => Promise<T>
+  api: ApiReader
 }>()
 const emit = defineEmits<{ (e: 'events'): void; (e: 'recording', active: boolean): void }>()
 const availableRuns = shallowRef<TraceRun[]>([])
@@ -295,14 +296,14 @@ async function readRuns(preferredId: string | null, requestId: number): Promise<
   const query = new URLSearchParams({ limit: '30' })
   const cursor = runPageCursors.value.at(-1)
   if (cursor) query.set('cursor', cursor)
-  const page = await props.api<TraceRunPage>(basePath() + '?' + query)
+  const page = await props.api<CursorPage<TraceRun>>(basePath() + '?' + query)
   if (requestSequence !== requestId) return null
   let target = page.items[0] ?? null
   if (preferredId) {
     const match = page.items.find((entry) => entry.trace_id === preferredId)
     if (match) target = match
     else {
-      const exact = await props.api<TraceRunPage>(
+      const exact = await props.api<CursorPage<TraceRun>>(
         basePath() + '?trace_id=' + encodeURIComponent(preferredId),
       )
       if (requestSequence !== requestId) return null
