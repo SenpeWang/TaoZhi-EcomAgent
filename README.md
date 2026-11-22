@@ -39,11 +39,11 @@
 
 | 要了解什么 | 文档 |
 | --- | --- |
-| 体验工作台 | [本地演示](documentation/quickstart.md) |
-| 准备资料、入库及核对答复依据 | [手机配件资料与问答](documentation/knowledge-base.md) |
-| 理解源码分层和数据模型 | [目录契约](STRUCTURE.md) · [数据库模型](documentation/database.md) |
-| 配置、部署与运维 | [部署与运维手册](documentation/deployment.md) |
-| 权限、审计与隔离边界 | [权限与文档治理](documentation/access-control.md) |
+| 体验工作台 | [本地演示](documentation/quickstart/) |
+| 准备资料、入库及核对答复依据 | [手机配件资料与问答](documentation/knowledge-base/) |
+| 理解源码分层和数据模型 | [目录契约](STRUCTURE.md) · [数据库模型](documentation/database/) |
+| 配置、部署与运维 | [部署与运维手册](documentation/deployment/) |
+| 权限、审计与隔离边界 | [权限与文档治理](documentation/access-control/) |
 | 参与开发与提交规范 | [贡献规范](CONTRIBUTING.md) |
 | 运行评测和对照基线 | [评测指南](evals/README.md) · [基准与门禁](evals/BENCHMARK.md) |
 

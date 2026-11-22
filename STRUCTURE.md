@@ -10,7 +10,12 @@
 | `.github/ISSUE_TEMPLATE/` | 中文 Bug、功能、文档与使用问题表单 |
 | `.github/workflows/` | main 推送触发的最小权限 CI，不自动部署 |
 | `.githooks/` | 每份克隆主动启用的提交与推送门禁 |
-| `documentation/` | 本地演示、配件资料使用、数据库及部署手册 |
+| `documentation/` | 使用手册根目录，每篇手册为独立子目录，入口统一为 `README.md` |
+| `documentation/quickstart/` | 本地快速开始与首次体验手册 |
+| `documentation/knowledge-base/` | 资料准备、入库与答复依据手册 |
+| `documentation/database/` | 数据模型、索引与迁移手册 |
+| `documentation/deployment/` | 配置、部署与运维手册 |
+| `documentation/access-control/` | 权限、审计与隔离边界手册 |
 | `migrations/` | Alembic 环境 |
 | `migrations/versions/` | 只追加已验证的数据库升级版本 |
 | `scripts/` | 部署、数据管理、构建与运维；不含评估逻辑 |
@@ -65,7 +70,7 @@
 
 ## 根文件
 
-README.md 提供项目入口和文档索引，CONTRIBUTING.md 提供开发与提交规范。Makefile 提供维护命令，Dockerfile 定义构建目标，Compose 文件描述应用及中间件拓扑。Alembic 管理表结构版本，依赖锁文件用于复现验证。代码、格式和提交消息由 ESLint、Prettier、Commitlint 及仓库检查脚本验证。[部署手册](documentation/deployment.md) · [GitHub CI](.github/workflows/ci.yml)
+README.md 提供项目入口和文档索引，CONTRIBUTING.md 提供开发与提交规范。Makefile 提供维护命令，Dockerfile 定义构建目标，Compose 文件描述应用及中间件拓扑。Alembic 管理表结构版本，依赖锁文件用于复现验证。代码、格式和提交消息由 ESLint、Prettier、Commitlint 及仓库检查脚本验证。[部署手册](documentation/deployment/) · [GitHub CI](.github/workflows/ci.yml)
 
 AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；两者都不跟踪或提交，公开文档不链接或依赖它们。维护者在本机维护这些文件，克隆仓库无需取得它们。
 

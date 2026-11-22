@@ -11,4 +11,4 @@
 | 查阅手机壳和保护膜测试 | [市售手机壳抽检](bsmi-market-phone-case-tests-2022-zh-tw.pdf) · [手机壳检验标准附表](bsmi-market-phone-case-testing-criteria-2022-zh-tw.pdf) · [市售手机钢化膜材料实测](bassinet-retail-screen-protector-glass-study-2022-en.pdf) |
 | 查阅贴膜器和手机支架设计 | [Spigen 贴膜器专利扫描件](uspto-spigen-screen-protector-installation-us10744705b2-en.pdf) · [手机支架结构参数优化](yao-phone-stand-structural-optimization-2025-zh-cn.pdf) |
 
-自行做词嵌入时，读取清单 `files` 所列路径，按原件页序切片并保留来源、型号和版本。标有 `requires_ocr` 的扫描件需要先做文字识别，个别以图像呈现的附页可按原页码查阅。引用抽检和召回时注明日期、市场及样品型号。[资料与问答手册](../../documentation/knowledge-base.md)
+自行做词嵌入时，读取清单 `files` 所列路径，按原件页序切片并保留来源、型号和版本。标有 `requires_ocr` 的扫描件需要先做文字识别，个别以图像呈现的附页可按原页码查阅。引用抽检和召回时注明日期、市场及样品型号。[资料与问答手册](../../documentation/knowledge-base/)

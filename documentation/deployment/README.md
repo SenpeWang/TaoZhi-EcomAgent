@@ -1,6 +1,6 @@
 # 部署与运维
 
-生产环境使用 Linux、Docker Engine 和支持 `env_file.required` 的 Compose v2。API 和 Worker 共用应用镜像，向量服务单独加载模型。迁移成功且依赖服务健康后，API 和 Worker 才启动。[Compose 编排](../docker-compose.yml) · [GPU 覆盖配置](../docker-compose.gpu.yml)
+生产环境使用 Linux、Docker Engine 和支持 `env_file.required` 的 Compose v2。API 和 Worker 共用应用镜像，向量服务单独加载模型。迁移成功且依赖服务健康后，API 和 Worker 才启动。[Compose 编排](../../docker-compose.yml) · [GPU 覆盖配置](../../docker-compose.gpu.yml)
 
 ## 配置部署主机
 
@@ -12,9 +12,9 @@
 | 中间件 | 根据部署目标设置 `ECOM_MINIO_ENABLED`、`ECOM_KAFKA_ENABLED` 和 `ECOM_ES_ENABLED`。环境示例给出功能开关，容器启动顺序由 Compose 编排定义。 |
 | 持久化 | 保证容器可写 `data/`。生产资料保存在对象存储或私有附件目录，部署主机保管数据库和运行记录。 |
 
-[运行配置示例](../.env.example) · [数据目录说明](../data/README.md)
+[运行配置示例](../../.env.example) · [数据目录说明](../../data/README.md)
 
-网关基础地址使用 HTTPS。应用请求 `/stock/{sku_id}` 或 `/orders/{order_id}` 时，带上 `X-Org-Tag`、`X-User-Id` 与令牌。响应使用 `tenant_id`、`node_id`、对应对象编号和带时区的 `as_of`，订单状态字段为 `status`。返回字段会按可访问范围裁剪。[业务网关契约](../src/taozhi/infrastructure/business_gateway.py)
+网关基础地址使用 HTTPS。应用请求 `/stock/{sku_id}` 或 `/orders/{order_id}` 时，带上 `X-Org-Tag`、`X-User-Id` 与令牌。响应使用 `tenant_id`、`node_id`、对应对象编号和带时区的 `as_of`，订单状态字段为 `status`。返回字段会按可访问范围裁剪。[业务网关契约](../../src/taozhi/infrastructure/business_gateway.py)
 
 ## 对外入口与端口
 
@@ -53,7 +53,7 @@ curl -fsS http://127.0.0.1:18555/health
 
 1. 确认 `migrate` 退出码为 `0`，API 和向量服务返回健康状态。
 2. 准备目标租户及公司组织根，执行 `docker compose exec api python scripts/manage_database.py bootstrap-owner` 创建首位老板账号。
-3. 用测试身份核对资料的阅读与下载权限，提交知识问答并在轨迹中台检查执行节点。首次使用第三方 PDF 时核对页码和引用。 [问答验收](knowledge-base.md)
+3. 用测试身份核对资料的阅读与下载权限，提交知识问答并在轨迹中台检查执行节点。首次使用第三方 PDF 时核对页码和引用。 [问答验收](../knowledge-base/)
 
 ## 常见运维入口
 
@@ -63,4 +63,4 @@ curl -fsS http://127.0.0.1:18555/health
 | 工具、模型 API 或资料核验失败 | 在任务的「执行轨迹」查节点、问题日志和 Trace ID，再关联进程日志。 |
 | 备份与恢复演练 | 数据库和本地私有附件可使用仓库备份脚本，MinIO 对象另行备份。 |
 
-[备份与恢复脚本](../scripts/backup_database.py) · [数据库模型](database.md)
+[备份与恢复脚本](../../scripts/backup_database.py) · [数据库模型](../database/)
