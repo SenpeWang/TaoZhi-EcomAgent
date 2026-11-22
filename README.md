@@ -49,4 +49,6 @@
 
 ## 许可证
 
-仓库尚未提供项目级许可证。第三方资料的署名和适用许可随语料登记。[PDF 署名与许可](data/accessory_pdfs/README.md)
+本项目代码以 **GNU Affero General Public License v3.0** 发布，全文见 [LICENSE](LICENSE)；网络提供服务时同样适用，需向使用者提供对应源码。
+
+第三方组件保留各自许可：PyMuPDF 采用 AGPL-3.0 或 Artifex 商业授权，RapidOCR 与 OpenCV 采用 Apache-2.0，onnxruntime、LangChain 与 FastAPI 采用 MIT。语料资料的署名与适用许可随条目登记，见 [PDF 署名与许可](data/accessory_pdfs/README.md)。
