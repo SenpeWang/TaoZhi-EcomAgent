@@ -1,10 +1,11 @@
 PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python3)
 PHOENIX_PY ?= $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
 PROJECT_ROOT := $(CURDIR)
+IMPORT_ARGS ?=
 TEST_ENV := ECOM_MODE=test PYTHONPATH=$(PROJECT_ROOT)/src
 COMPOSE := docker compose
 
-.PHONY: help start rebuild stop status logs test migrate-test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
+.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -21,6 +22,7 @@ help:
 	@echo "make logs           实时跟踪容器日志"
 	@echo "make test           在共享测试环境运行离线回归（含 evals 单元测试）"
 	@echo "make migrate-test   把共享测试环境的数据库迁移到最新版本"
+	@echo "make import-corpus  按目录导入 data/ 语料并生成向量（IMPORT_ARGS 传参）"
 	@echo "make evals-tests    只跑评估代码自身的单元测试（不需要在线服务）"
 	@echo "make evals-agent-replay  使用合成执行记录验证 Agent 判定与报告"
 	@echo "make evals-quick    评估：检索+对抗层（需企业服务在线；对比基线并过门禁）"
@@ -54,6 +56,9 @@ test:
 
 migrate-test:
 	$(TEST_ENV) $(PYTHON) -m alembic -c alembic.ini upgrade head
+
+import-corpus:
+	PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) scripts/import_corpus.py $(IMPORT_ARGS)
 
 check:
 	$(PYTHON) -m compileall -q src scripts migrations tests
