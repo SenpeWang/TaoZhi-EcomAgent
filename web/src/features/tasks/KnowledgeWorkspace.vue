@@ -61,6 +61,16 @@ const canRefine = computed(
       result.value?.answer_basis === 'insufficient_evidence' || result.value?.missing?.length,
     ),
 )
+const scopeHint = computed(() =>
+  form.allow_public_reference
+    ? '企业政策、商品承诺与经营数据须有内部依据；通用术语可查内置官方参考。'
+    : '仅依据授权内部资料或业务数据作答，依据不足时直接拒答。',
+)
+const externalHint = computed(() =>
+  form.allow_external
+    ? '仅将已获外发许可的资料送交外部模型整理；涉密资料仍禁止外发。'
+    : '不调用外部模型，仅在本地检索并返回授权原文片段。',
+)
 const running = computed(() => props.task && ['queued', 'running'].includes(props.task.state))
 const examples = ['本店的退货运费由谁承担？', '什么是 USB PD？']
 const waitingMessage: Record<string, string> = {
@@ -170,16 +180,20 @@ function submit(): void {
               name="knowledge-scope"
               type="radio"
               :value="true"
-            />企业资料与官方公开参考</label
+            />企业资料与官方参考</label
           >
-          <p>通用概念可查内置官方参考。企业政策、商品承诺与经营数据须有授权内部依据。</p>
+          <p>{{ scopeHint }}</p>
         </fieldset>
-        <div class="knowledge-checks">
+        <fieldset class="knowledge-scope">
+          <legend>外部模型处理</legend>
           <label
-            ><input v-model="form.allow_external" type="checkbox" />允许外部 AI
-            处理已获外发许可的资料</label
+            ><input
+              v-model="form.allow_external"
+              type="checkbox"
+            />允许外部模型处理已授权资料</label
           >
-        </div>
+          <p>{{ externalHint }}</p>
+        </fieldset>
         <details class="knowledge-options" :open="refining">
           <summary>任务设置与业务编号</summary>
           <div class="knowledge-fields">
