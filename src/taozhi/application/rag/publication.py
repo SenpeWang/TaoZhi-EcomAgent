@@ -1,10 +1,23 @@
 """按授权原文、已核验结论或公开参考发布知识答复。"""
 from __future__ import annotations
 
-from taozhi.application.common.task_guard import validate_task_execution
-from taozhi.domain.knowledge_answer import AnswerBasis, PublicSource, resolve_evidence_gap
+from contextlib import closing
+
+from taozhi.ai.client import LLMClient, ModelTier
+from taozhi.ai.observability import usage_scope
+from taozhi.application.common.task_guard import merge_token_usage, validate_task_execution
+from taozhi.config import get_settings
+from taozhi.domain.knowledge_answer import (
+    AnswerBasis,
+    PublicSource,
+    allows_general_knowledge_fallback,
+    current_shanghai_clock,
+    resolve_evidence_gap,
+)
+from taozhi.domain.privacy import redact
 from taozhi.domain.question_context import recalls_previous_evidence, refers_to_previous_question
 from taozhi.domain.rag_verification import cited_paragraphs, document_addresses_question
+from taozhi.observability.tracing import record_diagnostic
 from .state import State
 
 _BUSINESS_FIELDS = {
@@ -31,6 +44,38 @@ def _snapshot_text(snapshot: dict) -> str:
     return "实时业务数据：\n" + "\n".join(rows)
 
 
+def _answer_with_general_knowledge(question: str, state: State) -> tuple[str, dict] | None:
+    """在非企业专有事项且已授权外部模型时，使用通用模型能力补充回答。"""
+    if not get_settings().has_llm:
+        return None
+    system = (
+        f"你是通用知识助手。当前系统时间为 {current_shanghai_clock()}。\n"
+        "请基于通用常识客观、简洁地回答用户问题。\n"
+        "注意：你没有访问任何企业内部资料，严禁冒充企业官方政策、商品价格、售后承诺或经营数据。"
+    )
+    with usage_scope() as usage:
+        try:
+            with closing(LLMClient()) as llm:
+                reply = llm.chat(
+                    redact(question),
+                    tier=ModelTier.FAST,
+                    system=system,
+                    max_tokens=1024,
+                    allow_overseas=False,
+                ).strip()
+        except Exception as exc:
+            record_diagnostic("model.general_fallback", "skipped", exc)
+            return None
+    if not reply:
+        return None
+    merged_usage = merge_token_usage(
+        state.get("token_usage"),
+        "general_knowledge",
+        usage.to_dict(),
+    )
+    return reply, merged_usage
+
+
 def publish_node(state: State) -> dict:
     """确保公开参考、人工核验原文和内部结论各有明确来源与审核状态。"""
     _, job = validate_task_execution(state, "发布前校验权限与来源", 95)
@@ -49,6 +94,8 @@ def publish_node(state: State) -> dict:
             if document_addresses_question(question, doc["quote"], doc["title"])
         ][:5]
     basis: AnswerBasis
+    extra_token_usage = None
+    extra_model_calls = 0
     if state["findings"] and not state["hard_block"] and not state["external_blocked"]:
         basis = "internal_evidence"
         answer = "".join(cited_paragraphs(question, evidence, state["findings"]))
@@ -77,15 +124,38 @@ def publish_node(state: State) -> dict:
         basis, answer, guidance, public_sources = gap["answer_basis"], gap["answer"], gap["guidance"], gap["public_sources"]
         if basis == "public_reference":
             missing = []
+        elif (
+            job["payload"].get("allow_general_knowledge", False)
+            and job["payload"].get("allow_external", True)
+            and job["input_level"] < 3
+            and not business
+            and not state.get("live_fields")
+            and not state.get("prior_question_id")
+            and not state.get("has_recalled_context")
+            and not refers_to_previous_question(question)
+            and not recalls_previous_evidence(question, "")
+            and allows_general_knowledge_fallback(question)
+        ):
+            general = _answer_with_general_knowledge(question, state)
+            if general is not None:
+                answer, extra_token_usage = general
+                basis = "general_knowledge"
+                guidance = "以下内容由大模型通用能力生成，与企业内部知识库及官方参考无关，不作为本店政策或商品承诺依据。"
+                missing = []
+                extra_model_calls = 1
 
     parts = [answer, *snapshots, *(item["message"] for item in business if not item.get("available"))]
     substantive = basis != "insufficient_evidence" or bool(snapshots)
     levels = [job["input_level"], *(item["level"] for item in evidence),
               *(item.get("source", {}).get("level", 1) for item in business)]
-    return {
+    output = {
         "answer": "\n\n".join(part for part in parts if part), "input_level": max(levels),
         "answer_basis": basis, "guidance": guidance, "public_sources": public_sources, "missing": missing,
         "excerpt_indices": excerpt_indices,
-        "hard_block": state["hard_block"] and basis != "public_reference",
+        "hard_block": state["hard_block"] and basis not in ("public_reference", "general_knowledge"),
         "review": bool(job["payload"].get("require_review") and (substantive or not state["hard_block"])),
     }
+    if extra_token_usage is not None:
+        output["token_usage"] = extra_token_usage
+        output["model_calls"] = int(state.get("model_calls", 0)) + extra_model_calls
+    return output

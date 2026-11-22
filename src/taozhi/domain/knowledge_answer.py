@@ -4,10 +4,18 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal, TypedDict
+from zoneinfo import ZoneInfo
 
-
-AnswerBasis = Literal["internal_evidence", "business_snapshot", "source_excerpt", "public_reference", "insufficient_evidence"]
+AnswerBasis = Literal[
+    "internal_evidence",
+    "business_snapshot",
+    "source_excerpt",
+    "public_reference",
+    "general_knowledge",
+    "insufficient_evidence",
+]
 VerificationIssue = Literal["model_unconfigured", "budget_exhausted", "model_unavailable"]
 
 
@@ -91,6 +99,22 @@ _EVIDENCE_GUIDANCE = (
     (r"制度|流程|审批|报销|负责|归属|部门|组织|员工|休假|考勤|年假",
      "请说明适用部门和时间，请制度负责人提供现行制度、组织职责表或已批准的流程文件，再核对适用条款。"),
 )
+
+
+_ENTERPRISE_ONLY_HINT = re.compile(r"本店|我店|我司|本公司|我们公司|内部|员工|客户|会员|仓库")
+
+
+def allows_general_knowledge_fallback(question: str) -> bool:
+    """判定未命中内部资料的问题是否属于可交由通用模型回答的非企业专有事项。"""
+    normalized = "".join(unicodedata.normalize("NFKC", question).casefold().split()).rstrip("。?!")
+    if _ENTERPRISE_ONLY_HINT.search(normalized):
+        return False
+    return not any(re.search(pattern, normalized) for pattern, _ in _EVIDENCE_GUIDANCE)
+
+
+def current_shanghai_clock() -> str:
+    """返回东八区当前日期与时间，供通用问答时间校准使用。"""
+    return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S (Asia/Shanghai)")
 
 
 def resolve_evidence_gap(question: str, *, allow_public_reference: bool) -> EvidenceGapAnswer:

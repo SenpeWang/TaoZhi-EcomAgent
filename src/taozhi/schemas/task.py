@@ -27,6 +27,7 @@ class Question(Input):
     require_review: bool = False
     allow_external: bool = True
     allow_public_reference: bool = True
+    allow_general_knowledge: bool = False
     sku_id: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     order_id: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     keyword: str = Field(default="", max_length=100)

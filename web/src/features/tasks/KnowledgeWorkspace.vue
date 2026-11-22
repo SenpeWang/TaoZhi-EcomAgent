@@ -36,6 +36,7 @@ const form = reactive<KnowledgeQuestion>({
   require_review: false,
   allow_external: !props.user.is_boss,
   allow_public_reference: true,
+  allow_general_knowledge: false,
   sku_id: '',
   order_id: '',
 })
@@ -66,10 +67,21 @@ const scopeHint = computed(() =>
     ? '企业政策、商品承诺与经营数据须有内部依据；通用术语可查内置官方参考。'
     : '仅依据授权内部资料或业务数据作答，依据不足时直接拒答。',
 )
-const externalHint = computed(() =>
-  form.allow_external
-    ? '仅将已获外发许可的资料送交外部模型整理；涉密资料仍禁止外发。'
-    : '不调用外部模型，仅在本地检索并返回授权原文片段。',
+const externalHint = computed(() => {
+  if (!form.allow_external) {
+    return '不调用外部模型，仅在本地检索并返回授权原文片段。'
+  }
+  if (form.allow_general_knowledge) {
+    return '已开启外部模型与通用能力补充；非企业专有事项在无内库依据时可由模型作答，并声明与知识库无关。'
+  }
+  return '仅将已获外发许可的资料送交外部模型整理；涉密资料仍禁止外发。'
+})
+
+watch(
+  () => form.allow_external,
+  (allowed) => {
+    if (!allowed) form.allow_general_knowledge = false
+  },
 )
 const running = computed(() => props.task && ['queued', 'running'].includes(props.task.state))
 const examples = ['本店的退货运费由谁承担？', '什么是 USB PD？']
@@ -116,6 +128,7 @@ function newQuestion(refine: boolean): void {
     form.node_id = ''
     form.allow_public_reference = false
     form.allow_external = false
+    form.allow_general_knowledge = false
   }
   emit('reset')
 }
@@ -191,6 +204,13 @@ function submit(): void {
               v-model="form.allow_external"
               type="checkbox"
             />允许外部模型处理已授权资料</label
+          >
+          <label
+            ><input
+              v-model="form.allow_general_knowledge"
+              type="checkbox"
+              :disabled="!form.allow_external"
+            />无匹配资料时允许模型通用能力补充</label
           >
           <p>{{ externalHint }}</p>
         </fieldset>

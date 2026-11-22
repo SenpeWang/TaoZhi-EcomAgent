@@ -13,6 +13,7 @@ export interface KnowledgeQuestion {
   node_id: string
   allow_external: boolean
   allow_public_reference: boolean
+  allow_general_knowledge: boolean
   require_review: boolean
   sku_id: string
   order_id: string
@@ -45,6 +46,7 @@ export interface TaskResult {
     | 'business_snapshot'
     | 'source_excerpt'
     | 'public_reference'
+    | 'general_knowledge'
     | 'insufficient_evidence'
   guidance?: string
   public_sources?: { title: string; url: string }[]

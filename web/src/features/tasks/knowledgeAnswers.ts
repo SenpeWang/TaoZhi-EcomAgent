@@ -5,6 +5,7 @@ const answerLabels: Record<string, string> = {
   business_snapshot: '实时业务快照',
   source_excerpt: '授权原文摘录',
   public_reference: '官方公开参考',
+  general_knowledge: '大模型通用答复',
   insufficient_evidence: '依据不足',
 }
 
