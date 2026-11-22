@@ -9,7 +9,7 @@ import threading
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
-from ...knowledge.db import fetch_all, fetch_one
+from taozhi.infrastructure.persistence.database import fetch_all, fetch_one
 from taozhi.infrastructure.persistence.access_repo import sources_valid
 from taozhi.domain.privacy import redact
 from taozhi.domain.question_context import recalls_previous_evidence

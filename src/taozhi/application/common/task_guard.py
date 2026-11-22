@@ -10,7 +10,7 @@ from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import load_principal, sources_valid
 from taozhi.infrastructure.persistence.job_repo import get_job_by_id, update_job_stage
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure.persistence.database import database_connection
 from taozhi.observability.tracing import node_span
 
 

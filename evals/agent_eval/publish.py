@@ -204,7 +204,7 @@ def project_report(raw: dict) -> tuple[dict, list[dict]]:
 
 def publish_report(path: Path, tenant_id: str, owner_id: str) -> bool:
     from taozhi.infrastructure.persistence.evaluation_repo import insert_report
-    from taozhi.knowledge.db import database_connection
+    from taozhi.infrastructure.persistence.database import database_connection
 
     raw = json.loads(path.read_text(encoding="utf-8"))
     run, rows = project_report(raw)

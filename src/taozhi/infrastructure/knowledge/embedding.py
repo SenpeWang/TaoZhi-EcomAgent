@@ -19,8 +19,8 @@ import httpx
 import numpy as np
 from openinference.semconv.trace import RerankerAttributes, SpanAttributes
 
-from ..config import load_config
-from ..observability.tracing import node_span
+from taozhi.config import load_config
+from taozhi.observability.tracing import node_span
 
 _lock = threading.Lock()
 _state = {"checked_at": 0.0, "ok": False, "model": "", "dim": 0}

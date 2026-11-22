@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from ..config import load_config
+from taozhi.config import load_config
 
 _LOG = logging.getLogger(__name__)
 FALLBACK_ANALYZER="cjk"

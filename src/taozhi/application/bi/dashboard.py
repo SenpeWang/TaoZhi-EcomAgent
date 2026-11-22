@@ -4,19 +4,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from taozhi.application.services import document_service
+from taozhi.application.documents.service import list_documents
 from taozhi.config import get_settings, load_config
 from taozhi.domain.access import can_task
 from taozhi.domain.entities import Principal
 from taozhi.infrastructure.persistence import bi_repo, job_repo
 from taozhi.infrastructure.persistence.access_repo import batch_sources_validity, can_read_metric
-from taozhi.knowledge import metrics as metrics_mod
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure.persistence import metric_execution
+from taozhi.infrastructure.persistence.database import database_connection
 
 
 def get_dashboard_summary(p: Principal) -> dict[str, Any]:
     """汇总工作台文档、问答任务与模型/业务系统就绪度统计。"""
-    docs = document_service.list_documents(p)
+    docs = list_documents(p)
     with database_connection() as c:
         jobs = job_repo.list_ask_jobs(c, p.tenant_id)
         permitted = [r for r in jobs if can_task(p, r)]
@@ -44,10 +44,10 @@ def get_bi_dashboard(p: Principal, days: int) -> dict[str, Any]:
             if not m or not can_read_metric(c, p, m):
                 return None
             try:
-                cols, rows, meta = metrics_mod.execute_metric(c, p, m, intent or {})
+                cols, rows, meta = metric_execution.execute_metric(c, p, m, intent or {})
                 return dict(
                     columns=cols,
-                    rows=metrics_mod.jsonable_rows(rows),
+                    rows=metric_execution.jsonable_rows(rows),
                     meta=meta,
                     name=m["name"],
                     unit=m["unit"],

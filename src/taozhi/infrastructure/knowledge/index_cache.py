@@ -30,10 +30,10 @@ from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
-from ..knowledge.db import fetch_all
-from ..knowledge.embedding import digest, embedding_input, encode_passages, model_signature, to_vector
+from taozhi.infrastructure.persistence.database import fetch_all
+from taozhi.infrastructure.knowledge.embedding import digest, embedding_input, encode_passages, model_signature, to_vector
 
-from ..observability.tracing import record_diagnostic
+from taozhi.observability.tracing import record_diagnostic
 
 
 def _lookup(conn, tenant_id: str, tag: str, digests: Sequence[str],

@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from taozhi.config import load_config, resolve_runtime_dir
-from taozhi.knowledge.db import database_connection, fetch_one
+from taozhi.infrastructure.persistence.database import database_connection, fetch_one
 from taozhi.domain.passwords import hash_password
 from taozhi.infrastructure.persistence.job_repo import generate_id
 

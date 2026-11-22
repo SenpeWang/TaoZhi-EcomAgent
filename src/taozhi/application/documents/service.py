@@ -1,19 +1,17 @@
-"""资料上传、解析入库、版本编辑、权限策略与知识地图应用服务。"""
+"""资料上传、版本编辑、权限策略与知识地图应用服务。"""
 from __future__ import annotations
-from taozhi.domain.roles import is_system_admin
 
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_LOG = logging.getLogger(__name__)
-
 from taozhi.config import load_config
 from taozhi.domain.access import evaluate_download_permission, evaluate_read_permission, evaluate_write_permission
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
+from taozhi.domain.roles import is_system_admin
 from taozhi.infrastructure.persistence import admin_repo, document_repo, job_repo
 from taozhi.infrastructure.persistence.access_repo import (
     audit,
@@ -23,12 +21,13 @@ from taozhi.infrastructure.persistence.access_repo import (
     require_document_read,
     require_system,
 )
-from taozhi.knowledge import es_index
-from taozhi.knowledge.db import database_connection
-from taozhi.knowledge.index_cache import encode_index
-from taozhi.knowledge.ingest import parse, split, validate_upload
-from taozhi.knowledge.semantic_cache import get_semantic_cache
-from taozhi.knowledge.storage import get_blob_store
+from taozhi.infrastructure.knowledge import es_index
+from taozhi.infrastructure.persistence.database import database_connection
+from taozhi.infrastructure.knowledge.ingest import validate_upload
+from taozhi.infrastructure.knowledge.semantic_cache import get_semantic_cache
+from taozhi.infrastructure.knowledge.storage import get_blob_store
+
+_LOG = logging.getLogger(__name__)
 
 _MIME_EXT_MAP = {
     "application/pdf": "pdf",
@@ -363,62 +362,3 @@ def list_knowledge_map(p: Principal) -> list[dict[str, Any]]:
     """读取当前用户可见的已发布文档实体关联图谱。"""
     with database_connection() as c:
         return document_repo.list_visible_mentions(c, p)
-
-
-def process_ingestion_job(job: dict[str, Any]) -> None:
-    """执行文档解析、语义切片、向量编码与发布审批流提交。"""
-    from taozhi.application.common.task_guard import validate_task_execution
-
-    state = {"job_id": job["id"], "run_version": job["run_version"]}
-    p, _ = validate_task_execution(state, "解析资料与登记来源", 35)
-    with database_connection() as c:
-        d = get_document(c, p, job["payload"]["document_id"])
-        if not can_write(c, p, d) or d["current_version"] != job["payload"]["version"]:
-            raise Denied("资料版本或写权限已变化", "STALE", 409)
-        v = document_repo.get_document_version(c, d["id"], d["current_version"])
-    if v["blob_name"]:
-        body, pages = parse(get_blob_store().open_blob(p.tenant_id, v["blob_name"]), v["mime_type"])
-    else:
-        body, pages = v["body"], [(0, v["body"])]
-    chunks = split(pages, d["id"], d["current_version"])
-    with database_connection() as c:
-        vectors = encode_index(c, p.tenant_id, [(d["title"], ch["text"]) for ch in chunks])
-    validate_task_execution(state, "建立版本索引与发布申请", 75)
-    with database_connection() as c:
-        locked = job_repo.get_job_by_id(c, job["id"], for_update=True)
-        d = get_document(c, p, d["id"])
-        if (
-            not locked
-            or locked["run_version"] != job["run_version"]
-            or locked["state"] != "running"
-            or d["current_version"] != v["version"]
-        ):
-            raise Denied("执行版本已失效", "STALE", 409)
-        document_repo.replace_version_chunks_and_mentions(
-            c,
-            tenant_id=p.tenant_id,
-            doc_id=d["id"],
-            version=v["version"],
-            body=body,
-            chunks=chunks,
-            vectors=vectors,
-        )
-        document_repo.mark_document_review(c, d["id"])
-        required = "boss" if d["level"] == 3 or d["scope"] == "company" else "leader"
-        admin_repo.create_approval(
-            c,
-            p,
-            "publish",
-            d["id"],
-            dict(expected_acl=d["acl_version"], expected_version=v["version"]),
-            d["node_id"],
-            required,
-        )
-        job_repo.complete_job(
-            c,
-            tenant_id=p.tenant_id,
-            job_id=job["id"],
-            run_version=job["run_version"],
-            state="completed",
-            stage="解析完成，等待发布审核",
-        )

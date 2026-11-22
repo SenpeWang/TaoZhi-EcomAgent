@@ -14,8 +14,8 @@ search_amazon = importlib.import_module("taozhi.core.tools.search_amazon")
 from taozhi.domain.errors import Denied
 from taozhi.domain.url_guard import validate_public_http_url
 from taozhi.infrastructure.persistence import job_repo
-from taozhi.knowledge import queue
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure import task_queue
+from taozhi.infrastructure.persistence.database import database_connection
 
 
 def test_url_guard_and_web_scraper_block_ssrf_and_internal_redirects():
@@ -118,10 +118,10 @@ def test_database_connection_reuses_outer_connection_and_pool():
 
 
 def test_queue_relay_loop_respects_external_stop_event():
-    """传递外部 STOP 信号后，queue.relay_loop 应立即安全退出。"""
+    """传递外部 STOP 信号后，task_queue.relay_loop 应立即安全退出。"""
     stop = threading.Event()
     stop.set()
-    queue.relay_loop(stop_event=stop)
+    task_queue.relay_loop(stop_event=stop)
 
 
 def test_published_document_search_loads_only_the_current_users_active_grants_once():
@@ -208,14 +208,14 @@ def test_batch_sources_validity_matches_single_checks():
 def test_semantic_cache_invalidates_across_processes_on_epoch_bump():
     """跨进程 tenants.epoch 递增时，Worker 内存 SemanticCache 必须自动驱逐旧纪元缓存。"""
     import numpy as np
-    from taozhi.knowledge.semantic_cache import SemanticCache
+    from taozhi.infrastructure.knowledge.semantic_cache import SemanticCache
 
     vec = np.ones((1, 512), dtype="float32")
     vec /= np.linalg.norm(vec)
     sc = SemanticCache(similarity_threshold=0.90, ttl_seconds=600)
     with (
-        patch("taozhi.knowledge.semantic_cache.embedding_available", return_value=True),
-        patch("taozhi.knowledge.semantic_cache.encode_query", return_value=vec),
+        patch("taozhi.infrastructure.knowledge.semantic_cache.embedding_available", return_value=True),
+        patch("taozhi.infrastructure.knowledge.semantic_cache.encode_query", return_value=vec),
     ):
         assert sc.put("t1", "钢化膜厚度是多少", "0.33mm", [], [{"kind": "document", "document_id": "d1"}], input_level=1, epoch=10)
         assert sc.get("t1", "钢化膜厚度是多少", input_level=1, epoch=10) is not None

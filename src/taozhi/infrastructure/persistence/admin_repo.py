@@ -5,7 +5,7 @@ from typing import Any
 
 from taozhi.infrastructure.persistence.access_repo import audit
 from taozhi.infrastructure.persistence.job_repo import generate_id
-from taozhi.knowledge.db import as_jsonb, fetch_all, fetch_one
+from taozhi.infrastructure.persistence.database import as_jsonb, fetch_all, fetch_one
 
 
 def invalidate_authorization(conn: Any, tenant_id: str, user_id: str | None = None) -> None:

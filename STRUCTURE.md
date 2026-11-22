@@ -16,8 +16,9 @@
 | `src/` | Python 源码根目录 |
 | `src/taozhi/` | 淘智 (TaoZhi) 智能体工程核心根包 |
 | `src/taozhi/domain/` | 领域层：核心实体、权限规则、口令策略、注入防线、排序切片与数学/引文校验（零外部框架） |
-| `src/taozhi/infrastructure/` | 基础设施层：数据库仓储、向量库、MCP 服务与任务队列适配 |
-| `src/taozhi/infrastructure/persistence/` | 租户、组织、审批、文档、指标、任务和访问控制的 SQL 仓储，以及工作流的 PostgreSQL 检查点 |
+| `src/taozhi/infrastructure/` | 基础设施层：数据库、知识、MCP、Kafka 队列及实时业务网关 |
+| `src/taozhi/infrastructure/persistence/` | PostgreSQL 连接、业务仓储、受控指标 SQL 和工作流检查点 |
+| `src/taozhi/infrastructure/knowledge/` | 文档解析、附件存储、混合检索、索引与语义缓存 |
 | `src/taozhi/infrastructure/mcp/` | 电商与情报类标准 MCP 协议服务端（tools/list & tools/call）与智能体客户端适配器 |
 | `src/taozhi/observability/` | 在线任务的 OpenTelemetry 采集、中文诊断和 Span 批量投递 |
 | `src/taozhi/ai/` | 大模型客户端、用量统计与结构化输出解析 |
@@ -28,14 +29,14 @@
 | `src/taozhi/application/` | 应用层：业务用例服务、RAG 问答工作流与多智能体自主调研执行图 |
 | `src/taozhi/application/bi/` | 指标意图识别、受控问数工作流、工作台概览与经营看板查询 |
 | `src/taozhi/application/common/` | 应用层公共任务守卫、Token 用量聚合与 OpenTelemetry 节点埋点 |
-| `src/taozhi/application/rag/` | 问答任务执行入口，按问题选择知识检索或受控问数，校验来源并保存结果 |
+| `src/taozhi/application/documents/` | 文档上传、版本、授权和审批用例，包含 Worker 的解析索引与送审 |
+| `src/taozhi/application/rag/` | 知识问答工作流、受控问数分发、查询扩展与引文发布 |
 | `src/taozhi/application/research/` | 调研任务执行、会话查询与中途干预，包含协调器、并行子智能体和研报合成 |
-| `src/taozhi/application/services/` | 账号审批、文档与任务生命周期、流式输出、工具调用和轨迹查询 |
+| `src/taozhi/application/services/` | 账号审批、任务生命周期、流式输出、工具调用、轨迹与评测查询 |
 | `src/taozhi/orchestration/` | 编排辅助层：知识问答确定性控制器与离散决策引擎 |
 | `src/taozhi/schemas/` | 接口 DTO 层：Pydantic 请求验证模型（认证、管理、文档、任务与工具） |
 | `src/taozhi/server/` | 接口适配层：FastAPI 应用装配、Session/CSRF 认证与 Worker 租约守护进程 |
 | `src/taozhi/server/routers/` | 接口路由层：系统监控、认证、组织审批、文档与任务 SSE 分领域 HTTP 路由 |
-| `src/taozhi/knowledge/` | 知识检索与存储适配层：切片解析、混合检索器、语义缓存、ES/MinIO/Kafka/DB |
 | `evals/` | 评估模块（独立单元）：口径说明、数据集、指标、运行器、基线与报告 |
 | `evals/rag_eval/` | 企业知识库 RAG 三层评测运行器、质量门禁与实战测评记录（`测评记录.md`） |
 | `evals/agent_eval/` | 自治多智能体能力、工具调用、可观测评测体系与实战测评记录（`测评记录.md`） |
@@ -48,7 +49,7 @@
 | `evals/reports/` | 运行产物不入库（.gitignore 全忽略） |
 | `evals/tests/` | 评估代码自身的单元测试，必须进 CI |
 | `tests/` | 单元与企业边界验收，测试事实自行构造 |
-| `data/` | 业务资料与评测夹具：语料原文、私有附件、归档快照、问答金标与运行产物 |
+| `data/` | 公开配件 PDF、演示与评测资产，以及各环境的数据存放位置 |
 | `web/` | 前端依赖、锁与构建配置 |
 | `web/src/` | Vue 页面、类型、样式与 API 调用 |
 | `web/src/assets/` | 静态图片与品牌图标资源 |
@@ -61,10 +62,11 @@ README.md 为 GitHub 项目介绍。Makefile 是统一维护命令，Dockerfile 
 
 AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；两者都不跟踪或提交，公开文档不链接或依赖它们。维护者在本机维护这些文件，克隆仓库无需取得它们。
 
-## 私有数据（整个 data 忽略）
+## 资料与运行数据
 
 | 用途 | 本机位置 |
 | --- | --- |
+| 公开配件 PDF 与许可清单 | data/accessory_pdfs/ |
 | 待授权入库资料 | data/incoming/<tenant_id>/ |
 | 本机演示语料 | data/corpus/<category>/ |
 | 已入库私有原件 | data/private/<mode>/ |
@@ -74,14 +76,12 @@ AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；
 | 旧业务数据库迁移来源 | data/archive/ |
 | 明确请求的备份 | data/backups/ |
 
-无需提前创建空目录。企业文档和生成物统一进入 data/；放入目录不自动授予阅读、发布、下载或模型处理权限。不得把资料移到源码、测试、软件说明或静态公开目录来逃避忽略规则。
-
-虚拟环境、node_modules、web/dist、私有 .env* 和主机用户运行时也不提交。业务数据库不使用 Git 保存。
+公开 PDF 随来源和许可清单提交。企业附件、业务数据库和各环境生成物由对应环境保管。文档的阅读、下载和外部模型处理由应用权限控制。[数据用途与导入](data/README.md)
 
 ## 依赖与同步
 
-页面调用统一 API，API 加载当前会话并使用业务服务；权限判定集中在 taozhi/domain/access.py（纯规则），数据库取数与仓储在 taozhi/infrastructure/persistence/access_repo.py；Worker 和 Agent 使用同一权限与来源门禁。PostgreSQL 保存在线状态、任务队列和 outbox；附件原件存 MinIO 桶 ecom-private（knowledge/storage.py，可回落本地私有目录）；任务事件经 Kafka ecom.tasks 主题分发（knowledge/queue.py，outbox 发布 + 幂等认领，轮询兜底）；检索切片同步 ES 索引 chunks（knowledge/es_index.py，ES 仅中文 BM25，ANN 语义走 PG pgvector HNSW，双路 RRF 融合并前置权限过滤，可回落本地五信号链路）。
+FastAPI 和 Worker 进入应用用例。应用层调用领域规则及基础设施。领域层接收业务数据并完成权限和事实判定，数据库、网络与模型访问由基础设施处理。文档的解析、审批和发布共用现有版本和权限门禁，HyDE 的许可及模型预算由问答用例核对。
 
-原模块仍用于共享或离线回归；删除前检查全部引用。新在线能力不得另起旧 JWT、SQLite 或平行授权路径。
+PostgreSQL 保存在线状态、任务队列和 outbox。原件存入 MinIO 的 `ecom-private` 桶或本机私有目录。Kafka 的 `ecom.tasks` 分发任务编号，Worker 可通过数据库轮询领取。文档检索先圈定当前用户可读资料，再融合 Elasticsearch BM25 和 pgvector ANN 结果，并保留本地检索路径。
 
-新增目录先明确职责和数据属性，再归位并登记。接口、角色、字段、配置、迁移、命名或脚本变更同步前后端、测试、启动和软件说明。代码、契约、文档和验证一致才算完成。
+新增目录时登记职责。路径调整时同步更新接口、脚本、评测和测试的引用。CI 使用实际提交树校对目录登记。

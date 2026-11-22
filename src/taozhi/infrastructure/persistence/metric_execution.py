@@ -12,8 +12,8 @@ from __future__ import annotations
 import re
 import time
 
-from ..config import load_config
-from ..knowledge.db import fetch_all
+from taozhi.config import load_config
+from taozhi.infrastructure.persistence.database import fetch_all
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import can_read_metric
 

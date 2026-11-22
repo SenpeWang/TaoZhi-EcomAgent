@@ -18,9 +18,9 @@ import sys
 from collections import defaultdict
 
 from taozhi.config import load_config
-from taozhi.knowledge.db import database_connection, fetch_all
-from taozhi.knowledge.embedding import available as embed_available
-from taozhi.knowledge.index_cache import encode_index
+from taozhi.infrastructure.persistence.database import database_connection, fetch_all
+from taozhi.infrastructure.knowledge.embedding import available as embed_available
+from taozhi.infrastructure.knowledge.index_cache import encode_index
 
 QUERY = """
 SELECT c.id, c.tenant_id, c.text, d.title

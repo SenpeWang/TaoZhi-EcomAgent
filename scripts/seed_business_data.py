@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from taozhi.knowledge.db import database_connection, fetch_one
+from taozhi.infrastructure.persistence.database import database_connection, fetch_one
 
 SEED = 20261015
 DAYS_BACK = 183

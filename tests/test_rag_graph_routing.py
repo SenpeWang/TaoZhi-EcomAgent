@@ -11,7 +11,7 @@ from taozhi.application.rag import intent, publication, retrieval, specialists, 
 from taozhi.application.rag.execution import _build_question_result
 from taozhi.core.memory import service as memory_service
 from taozhi.infrastructure.persistence.job_repo import conversation_question_reference
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure.persistence.database import database_connection
 
 
 def _document(chunk_id="primary", *, allowed=True, score=0.1, rerank_score=None):

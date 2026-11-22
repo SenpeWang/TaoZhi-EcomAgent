@@ -8,7 +8,7 @@ from typing import Any
 from psycopg.types.json import Jsonb
 
 from taozhi.domain.trace_activity import CHAIN_CATEGORY_BY_NAME
-from taozhi.knowledge.db import fetch_all, fetch_one
+from taozhi.infrastructure.persistence.database import fetch_all, fetch_one
 
 
 _ACTIVITY_CATEGORY = "CASE WHEN kind='CHAIN' THEN COALESCE((%s::jsonb)->>name,kind) ELSE kind END"

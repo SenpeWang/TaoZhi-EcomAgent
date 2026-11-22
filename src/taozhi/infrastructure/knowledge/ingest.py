@@ -84,7 +84,7 @@ def parse(data: bytes, mime: str) -> Tuple[str, List[Tuple[int, str]]]:
 
 def _chunk_limits() -> Tuple[int, int]:
     """从运行时配置读取切片尺寸与重叠；单测无库环境回落 Config 类定义默认值。"""
-    from ..config import Config, load_config
+    from taozhi.config import Config, load_config
 
     try:
         cfg = load_config()

@@ -21,10 +21,10 @@ from taozhi.infrastructure.persistence.access_repo import (
     get_document,
     require_system,
 )
-from taozhi.knowledge import es_index
-from taozhi.knowledge.db import database_connection
-from taozhi.knowledge.embedding import available as embed_available
-from taozhi.knowledge.semantic_cache import get_semantic_cache
+from taozhi.infrastructure.knowledge import es_index
+from taozhi.infrastructure.persistence.database import database_connection
+from taozhi.infrastructure.knowledge.embedding import available as embed_available
+from taozhi.infrastructure.knowledge.semantic_cache import get_semantic_cache
 
 
 def public_user(row: dict) -> dict[str, Any]:

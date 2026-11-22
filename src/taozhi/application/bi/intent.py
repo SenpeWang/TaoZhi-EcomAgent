@@ -6,7 +6,7 @@ from typing import Any
 
 from taozhi.domain.ranking import tokenize_zh
 from taozhi.infrastructure.persistence.bi_repo import list_published_metrics, load_bi_dimensions
-from taozhi.knowledge import metrics as metrics_mod
+from taozhi.infrastructure.persistence import metric_execution
 
 _DATA_KEYWORDS = re.compile(
     "销售额|销量|GMV|营业额|成交|订单量|单量|退货率|退款率|售后率|售后工单|退换货数量"
@@ -67,7 +67,7 @@ def detect_data_intent(conn: Any, p: Any, q: str) -> dict | None:
     all_m = list_published_metrics(conn, p.tenant_id)
     if not all_m:
         return None
-    visible = metrics_mod.list_metrics(conn, p)
+    visible = metric_execution.list_metrics(conn, p)
     visible_ids = {m["id"] for m in visible}
     strong = []
     for m in all_m:

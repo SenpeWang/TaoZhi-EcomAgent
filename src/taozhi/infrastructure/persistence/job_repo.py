@@ -16,7 +16,7 @@ from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
 from taozhi.infrastructure.persistence.access_repo import audit, sources_valid
-from taozhi.knowledge.db import as_jsonb, database_connection, fetch_all, fetch_one
+from taozhi.infrastructure.persistence.database import as_jsonb, database_connection, fetch_all, fetch_one
 
 
 def generate_id(prefix: str) -> str:

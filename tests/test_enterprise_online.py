@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from taozhi.config import load_config
-from taozhi.knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
+from taozhi.infrastructure.persistence.database import database_connection,fetch_one,fetch_all,as_jsonb
 from taozhi.server.api import app
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import load_principal, can_read
@@ -22,7 +22,7 @@ setup=importlib.util.module_from_spec(spec);spec.loader.exec_module(setup)
 def reset(monkeypatch):
     assert load_config().mode=="test" and load_config().dsn.endswith("/ecom_test")
     with database_connection() as c:c.execute("TRUNCATE tenants CASCADE");c.execute("TRUNCATE login_attempts")
-    from taozhi.knowledge.semantic_cache import get_semantic_cache
+    from taozhi.infrastructure.knowledge.semantic_cache import get_semantic_cache
     get_semantic_cache().clear()
     monkeypatch.setattr(setup,"corpus",lambda:{"synthetic_product":[{
         "doc_id":"synthetic_product","doc_name":"合成商品测试说明",
@@ -649,7 +649,7 @@ def test_span_semantics_migration_on_existing_rows():
 def test_vector_fallback_keeps_outer_transaction_usable():
     """向量通道失败后仍能在同一事务中查询词法候选。"""
     import psycopg
-    from taozhi.knowledge.retriever import _pg_ann
+    from taozhi.infrastructure.knowledge.retriever import _pg_ann
 
     with database_connection() as conn:
         with pytest.raises(psycopg.DataError):
@@ -662,7 +662,7 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
     from collections import Counter, OrderedDict
     import httpx
     import taozhi.config as cfg
-    from taozhi.knowledge import embedding
+    from taozhi.infrastructure.knowledge import embedding
     from taozhi.observability import flush_spans
     from taozhi.orchestration.decision import get_decision_engine
 
@@ -1125,7 +1125,7 @@ def test_admin_permission_metadata_excludes_secret_body(clients):
 def test_business_row_scope_and_field_masks(monkeypatch,clients):
     import httpx
     import taozhi.config as cfg
-    from taozhi.knowledge.business import lookup
+    from taozhi.infrastructure.business_gateway import lookup
     from datetime import datetime,timezone
     users,nodes=ids()
     settings=cfg.get_settings().model_copy(update={"business_api_url":"https://business.invalid/api","business_api_token":"offline-placeholder"})
@@ -1226,7 +1226,7 @@ def test_document_exception_cannot_grant_employee_or_cross_team_write(clients):
 def test_business_nested_fields_cannot_smuggle_private_payload(monkeypatch,clients):
     import httpx
     import taozhi.config as cfg
-    from taozhi.knowledge.business import lookup
+    from taozhi.infrastructure.business_gateway import lookup
     from datetime import datetime,timezone
     users,nodes=ids()
     settings=cfg.get_settings().model_copy(update={"business_api_url":"https://business.invalid/api","business_api_token":"offline-placeholder"})
@@ -1248,8 +1248,8 @@ def _principal():
 
 def test_semantic_retrieval_degrades_to_lexical(monkeypatch,clients):
     """嵌入服务不可用时检索自动降级为词法两路：仍能命中、分数降序、不抛错。"""
-    import taozhi.knowledge.embedding as emb
-    from taozhi.knowledge.retriever import search_documents
+    import taozhi.infrastructure.knowledge.embedding as emb
+    from taozhi.infrastructure.knowledge.retriever import search_documents
     monkeypatch.setenv("ECOM_EMBED_SERVICE_URL","http://127.0.0.1:9")
     monkeypatch.setattr(emb,"_state",{"checked_at":0.0,"ok":False})
     assert not emb.available()
@@ -1261,8 +1261,8 @@ def test_semantic_retrieval_degrades_to_lexical(monkeypatch,clients):
 
 def test_semantic_retrieval_backfills_and_scores(monkeypatch,clients):
     """嵌入服务在线时：语义路参与融合，存量切片向量被惰性补算，未授权内容不出现。"""
-    import taozhi.knowledge.embedding as emb
-    from taozhi.knowledge.retriever import search_documents
+    import taozhi.infrastructure.knowledge.embedding as emb
+    from taozhi.infrastructure.knowledge.retriever import search_documents
     monkeypatch.delenv("ECOM_EMBED_SERVICE_URL",raising=False)
     monkeypatch.setattr(emb,"_state",{"checked_at":0.0,"ok":False})
     if not emb.available():pytest.skip("本地嵌入服务未运行")
@@ -1277,7 +1277,7 @@ def test_semantic_retrieval_backfills_and_scores(monkeypatch,clients):
 def test_ann_distance_gate_blocks_irrelevant():
     """ANN 距离闸门单元行为：超距剔除、无向量豁免、无查询向量不生效、阈值全放过。"""
     import numpy as np
-    from taozhi.knowledge.retriever import _ann_gate
+    from taozhi.infrastructure.knowledge.retriever import _ann_gate
     chunks=[{"id":"close"},{"id":"far"},{"id":"novector"}]
     vecs=[np.ones(512,dtype="float32"),np.zeros(512,dtype="float32"),None]
     qv=np.ones(512,dtype="float32")
@@ -1295,7 +1295,7 @@ def test_docx_header_footer_and_pdf_upload_ingestion_and_search(clients):
     import io
     import pymupdf
     from docx import Document
-    from taozhi.knowledge.retriever import search_documents
+    from taozhi.infrastructure.knowledge.retriever import search_documents
 
     boss = clients["boss"]
     _, nodes = ids()
@@ -1369,7 +1369,7 @@ def test_rag_cache_only_reuses_verified_answers_on_the_allowed_route(monkeypatch
     """同一问题从无模型降级恢复后能重新核验，要求仅看原文时仍走受限路径。"""
     import numpy as np
     from taozhi import config
-    from taozhi.knowledge import semantic_cache
+    from taozhi.infrastructure.knowledge import semantic_cache
 
     monkeypatch.setattr(semantic_cache, "embedding_available", lambda: True)
     monkeypatch.setattr(semantic_cache, "encode_query", lambda query: np.ones((1, 8), dtype="float32"))
@@ -1468,7 +1468,7 @@ def test_metric_results_follow_current_grants(monkeypatch, clients):
             INSERT INTO metric_grants(tenant_id,metric_id,user_id,effect,granted_by)
             VALUES('tenant_test','sales_metric',%s,'allow',%s)
         """, (users["staff"], users["boss"]))
-    monkeypatch.setattr(workflow.metrics_mod, "execute_metric", lambda *args: (["金额"], [[123]], {"unit": "元"}))
+    monkeypatch.setattr(workflow.metric_execution, "execute_metric", lambda *args: (["金额"], [[123]], {"unit": "元"}))
     monkeypatch.setattr(execution, "get_semantic_cache", lambda: pytest.fail("实时指标访问了问答缓存"))
     staff = clients["staff"]
     complete = task_id(staff, "测试销售额是多少")
@@ -1495,7 +1495,7 @@ def test_metric_results_follow_current_grants(monkeypatch, clients):
 def test_semantic_cache_invalidated_on_delete_and_stale_worker_check(monkeypatch, clients):
     """删除文档时清理语义缓存；worker 命中来源失效缓存条目时主动逐出，不阻塞新查询。"""
     import numpy as np
-    from taozhi.knowledge import semantic_cache as sc
+    from taozhi.infrastructure.knowledge import semantic_cache as sc
 
     monkeypatch.setattr(sc, "embedding_available", lambda: True)
     monkeypatch.setattr(sc, "encode_query", lambda q: np.ones((1, 512), dtype="float32"))

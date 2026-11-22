@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import numpy as np
 import pytest
 
-from taozhi.knowledge import semantic_cache as sc
-from taozhi.knowledge.semantic_cache import SemanticCache
+from taozhi.infrastructure.knowledge import semantic_cache as sc
+from taozhi.infrastructure.knowledge.semantic_cache import SemanticCache
 
 PHONE = "13812345678"
 RAW_ANSWER = f"客户联系电话 {PHONE}，可以正常退货。"

@@ -4,7 +4,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from taozhi.application.bi.dashboard import get_bi_dashboard, get_dashboard_summary
-from taozhi.application.services import admin_service, document_service
+from taozhi.application.documents.service import list_knowledge_map
+from taozhi.application.services import admin_service
 from taozhi.server.auth import identity
 
 router = APIRouter(prefix="/api", tags=["system"])
@@ -49,4 +50,4 @@ def bi_dashboard(days: int = Query(30, ge=7, le=365), p=Depends(identity)):
 @router.get("/knowledge-map")
 def knowledge_map(p=Depends(identity)):
     """查询用户可见的已发布文档实体关系图谱。"""
-    return {"items": document_service.list_knowledge_map(p)}
+    return {"items": list_knowledge_map(p)}

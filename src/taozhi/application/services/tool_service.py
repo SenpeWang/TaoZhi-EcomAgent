@@ -4,8 +4,8 @@ from __future__ import annotations
 from typing import Any
 
 from taozhi.domain.entities import Principal
-from taozhi.knowledge.business import lookup
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure.business_gateway import lookup
+from taozhi.infrastructure.persistence.database import database_connection
 
 
 def execute_tool(p: Principal, *, name: str, query: str, identifier: str) -> dict[str, Any]:
@@ -13,6 +13,6 @@ def execute_tool(p: Principal, *, name: str, query: str, identifier: str) -> dic
     with database_connection() as c:
         if name in ("query_stock", "query_order"):
             return lookup(c, p, "stock" if name == "query_stock" else "orders", identifier)
-        from taozhi.knowledge.retriever import search_documents
+        from taozhi.infrastructure.knowledge.retriever import search_documents
 
         return {"items": search_documents(c, p, query, 8)}

@@ -10,7 +10,7 @@ from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence import job_repo
 from taozhi.infrastructure.persistence.access_repo import load_principal
 from taozhi.infrastructure.persistence.checkpoints import postgres_checkpointer
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure.persistence.database import database_connection
 
 
 def process_research_job(job: dict[str, Any]) -> None:

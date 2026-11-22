@@ -9,7 +9,7 @@ from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
 from taozhi.infrastructure.persistence import job_repo
 from taozhi.infrastructure.persistence.access_repo import load_principal, sources_valid
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure.persistence.database import database_connection
 
 _PAGE_SIZE = 48
 _TERMINAL_STATES = {"completed", "review", "cancelled", "failed", "rejected", "legacy"}

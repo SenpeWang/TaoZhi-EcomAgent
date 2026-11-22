@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import time
-from contextlib import closing
 from typing import Any, Dict, List, Optional
 
 
@@ -34,20 +33,16 @@ from taozhi.domain.ranking import (
 )
 from taozhi.infrastructure.persistence.document_repo import readable_published_documents
 from taozhi.observability.tracing import node_span, record_diagnostic
-from ..config import Config, load_config
-from ..knowledge.db import fetch_all, fetch_one
-from ..knowledge.embedding import to_vector
-from ..knowledge.index_cache import encode_index
+from taozhi.config import Config, load_config
+from taozhi.infrastructure.persistence.database import database_connection, fetch_all
+from taozhi.infrastructure.knowledge.embedding import to_vector
+from taozhi.infrastructure.knowledge.index_cache import encode_index
 
 RRF_FLOOR = 0.0022
 BACKFILL_LIMIT = 256
 SEMANTIC_DIM = 512
 GATE_MARGIN = 0.06
 
-_HYDE_SYSTEM = (
-    "你是商品资料检索助手。根据用户问题，写一段可能出现在商品资料库中的正文段落："
-    "陈述句、含型号、参数或步骤等具体细节。允许内容与事实不符，禁止任何解释、前言或标题，只输出段落正文。"
-)
 
 
 def _ranks(scores):
@@ -55,92 +50,6 @@ def _ranks(scores):
     ranks = np.empty(len(scores), dtype=np.int64)
     ranks[order] = np.arange(1, len(scores) + 1)
     return ranks
-
-
-def build_hyde_vector(
-    query: str,
-    *,
-    conn: Any = None,
-    p: Any = None,
-    job: Optional[Dict[str, Any]] = None,
-    trace_out: Optional[Dict[str, Any]] = None,
-) -> Optional[np.ndarray]:
-    """脱敏后生成假设性答案并编码为检索向量（生产与离线评测共用同一口径）。"""
-    tr: Dict[str, Any] = {
-        "used": False,
-        "elapsed_ms": 0,
-        "prompt_tokens": 0,
-        "completion_tokens": 0,
-        "total_tokens": 0,
-        "cost_usd": 0.0,
-        "llm_attempts": 0,
-        "failover_count": 0,
-        "outcome": "skipped",
-    }
-    try:
-        cfg = load_config()
-        if not cfg.hyde_enabled:
-            return None
-        if job is not None:
-            if not (job.get("payload") or {}).get("allow_external", True) or int(job.get("input_level", 1)) >= 3:
-                return None
-            if conn is not None:
-                with conn.transaction():
-                    row = fetch_one(conn, "SELECT count(*) AS n FROM model_calls WHERE job_id=%s", (job["id"],))
-                if row and row["n"] >= cfg.max_model_calls:
-                    return None
-        from ..ai.client import LLMClient, ModelTier
-        from ..ai.observability import usage_scope
-        from ..knowledge.embedding import available as embed_available, encode_passages
-
-        if not embed_available():
-            return None
-        started = time.perf_counter()
-        outcome = "ok"
-        text = ""
-        hyde_max_tok = int(getattr(cfg, "hyde_max_tokens", Config.hyde_max_tokens))
-        hyde_chars = int(getattr(cfg, "hyde_passage_chars", Config.hyde_passage_chars))
-        with usage_scope() as hyde_usage:
-            try:
-                with closing(LLMClient(allow_overseas=False)) as client:
-                    text = client.chat(redact(query), tier=ModelTier.FAST, system=_HYDE_SYSTEM, max_tokens=hyde_max_tok)
-            except Exception:
-                outcome = "failed"
-                raise
-            finally:
-                elapsed_ms = int((time.perf_counter() - started) * 1000)
-                u = hyde_usage.to_dict()
-                tr.update(
-                    used=outcome == "ok",
-                    elapsed_ms=elapsed_ms,
-                    prompt_tokens=u["prompt_tokens"],
-                    completion_tokens=u["completion_tokens"],
-                    total_tokens=u["total_tokens"],
-                    cost_usd=u["cost_usd"],
-                    llm_attempts=u["llm_attempts"],
-                    failover_count=u["failover_count"],
-                    outcome=outcome,
-                )
-                if conn is not None and p is not None and job is not None:
-                    try:
-                        with conn.transaction():
-                            conn.execute(
-                                "INSERT INTO model_calls(tenant_id,job_id,role,elapsed_ms,prompt_tokens,completion_tokens,outcome) "
-                                "VALUES(%s,%s,'hyde',%s,%s,%s,%s)",
-                                (p.tenant_id, job["id"], elapsed_ms, u["prompt_tokens"], u["completion_tokens"], outcome),
-                            )
-                    except Exception as exc:
-                        record_diagnostic("storage.write", "skipped", exc)
-        if not text or len(text.strip()) < 20:
-            tr["outcome"] = "short_or_empty"
-            return None
-        return encode_passages([text.strip()[:hyde_chars]])[0]
-    except Exception as exc:
-        record_diagnostic("retrieval.hyde", "skipped", exc)
-        return None
-    finally:
-        if trace_out is not None:
-            trace_out.update(tr)
 
 
 def _semantic_matrix(conn, tenant_id, chunks, dim):
@@ -161,8 +70,6 @@ def _semantic_matrix(conn, tenant_id, chunks, dim):
             for i, v in zip(picked, vecs):
                 mats[i] = np.asarray(v, dtype="float32")
                 try:
-                    from ..knowledge.db import database_connection
-
                     with database_connection() as bc:
                         bc.execute("UPDATE chunks SET embedding=%s WHERE id=%s", (mats[i], chunks[i]["id"]))
                 except Exception as exc:
@@ -210,7 +117,7 @@ def _rerank_order(query, chunks, fused, allowed=None, trace_out: Optional[Dict[s
     cand = fused_order[: cfg.rerank_candidates]
     t0 = time.perf_counter()
     try:
-        from ..knowledge.embedding import rerank as rerank_client
+        from taozhi.infrastructure.knowledge.embedding import rerank as rerank_client
 
         rerank_texts = [
             _rerank_text(chunk_title(chunks[i], allowed), chunks[i]["text"], cfg.rerank_chars)
@@ -390,7 +297,7 @@ def _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, 
         hyde_rank = None
         t_emb = time.perf_counter()
         try:
-            from ..knowledge.embedding import available as embed_available, encode_query
+            from taozhi.infrastructure.knowledge.embedding import available as embed_available, encode_query
 
             if embed_available():
                 qv = encode_query(query)
@@ -403,7 +310,7 @@ def _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, 
 
         t_es = time.perf_counter()
         try:
-            from ..knowledge import es_index
+            from taozhi.infrastructure.knowledge import es_index
 
             if load_config().es_enabled:
                 bm25_rank = es_index.search_bm25(p.tenant_id, list(allowed), query)

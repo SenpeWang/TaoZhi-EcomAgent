@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from taozhi.config import load_config
 from taozhi.infrastructure.persistence import job_repo
-from taozhi.knowledge.db import database_connection, fetch_all
+from taozhi.infrastructure.persistence.database import database_connection, fetch_all
 
 _LOG = logging.getLogger(__name__)
 _GROUP = "ecom-workers"

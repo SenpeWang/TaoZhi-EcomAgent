@@ -4,10 +4,10 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
 from taozhi.config import load_config, resolve_runtime_dir
-from taozhi.knowledge.db import database_connection,fetch_one,fetch_all,as_jsonb
+from taozhi.infrastructure.persistence.database import database_connection,fetch_one,fetch_all,as_jsonb
 from taozhi.infrastructure.persistence.job_repo import generate_id
 from taozhi.domain.passwords import hash_password
-from taozhi.knowledge.ingest import split
+from taozhi.infrastructure.knowledge.ingest import split
 import psycopg
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo

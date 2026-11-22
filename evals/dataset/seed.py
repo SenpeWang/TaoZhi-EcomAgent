@@ -30,11 +30,11 @@ sys.path.insert(0, str(ROOT / "src"))
 import yaml
 
 from taozhi.config import load_config
-from taozhi.knowledge.db import database_connection, fetch_all, fetch_one
-from taozhi.knowledge.ingest import split
+from taozhi.infrastructure.persistence.database import database_connection, fetch_all, fetch_one
+from taozhi.infrastructure.knowledge.ingest import split
 from taozhi.domain.passwords import hash_password, verify_password
 from taozhi.infrastructure.persistence.access_repo import can_read, can_read_metric, load_principal
-from taozhi.knowledge.metrics import BUILTIN_BUSINESS_METRICS
+from taozhi.infrastructure.persistence.metric_execution import BUILTIN_BUSINESS_METRICS
 
 SPEC = Path(__file__).resolve().parent / "spec"
 GEN = ROOT / "evals/datasets/generated/latest"
@@ -153,12 +153,12 @@ def seed_users(conn, tenant_id, org):
 
 def seed_documents(conn, tenant_id, creator_id, docs, force: bool = False):
     """写入文档/版本/切片/向量/ES。切片与入库口径一致：嵌入输入带标题前缀。"""
-    from taozhi.knowledge.embedding import available as embed_available, encode_passages, embedding_input
+    from taozhi.infrastructure.knowledge.embedding import available as embed_available, encode_passages, embedding_input
     from taozhi.infrastructure.persistence.document_repo import index_mentions
     if not embed_available():
         print("嵌入服务不可用，终止（不留无向量文档）", file=sys.stderr)
         raise SystemExit(2)
-    from taozhi.knowledge import es_index
+    from taozhi.infrastructure.knowledge import es_index
     stats = {"inserted": 0, "updated": 0, "chunks": 0}
     for d in docs:
         body = d["body"]
@@ -320,7 +320,7 @@ def verify(conn, tenant_id, org, fixtures, user_ids):
 
 
 def clean(conn, tenant_id):
-    from taozhi.knowledge import es_index
+    from taozhi.infrastructure.knowledge import es_index
     conn.execute("DELETE FROM metrics WHERE tenant_id=%s AND left(id,11)=%s", (tenant_id, "SYN_METRIC_"))
     docs = [r["id"] for r in fetch_all(conn, "SELECT id FROM documents WHERE tenant_id=%s AND left(id,4)=%s", (tenant_id, "SYN_"))]
     for did in docs:

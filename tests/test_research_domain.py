@@ -253,8 +253,8 @@ def test_parallel_orchestrator_and_react_query_refinement():
     mock_llm.chat.return_value = "# 便携充气泵市场调研报告\n\n## 1. 市场需求与痛点\n散热噪音突出，零售 129 元；1688 出厂 38 元。"
 
     with _patch_llm(mock_llm):
-        with patch("taozhi.core.tools.search_web", side_effect=fake_search_web):
-            with patch("taozhi.core.tools.search_1688_wholesale", return_value=[{"title": "东莞充气泵源头厂", "price": 38}]):
+        with patch("taozhi.core.tools.search_web.search_web", side_effect=fake_search_web):
+            with patch("taozhi.core.tools.search_1688.search_1688_wholesale", return_value=[{"title": "东莞充气泵源头厂", "price": 38}]):
                 res = execute_autonomous_agents(
                     keyword="便携充气泵",
                     user_query="调研便携充气泵全网差评与1688出厂价",
@@ -291,7 +291,7 @@ def test_clock_reading_reaches_report_without_creating_market_data(timezone, wit
     llm = MagicMock()
     llm.chat_json.side_effect = steps
     llm.chat.side_effect = RuntimeError("触发基于观测的报告")
-    with _patch_llm(llm), patch("taozhi.core.tools.search_web", return_value=[]) as search:
+    with _patch_llm(llm), patch("taozhi.core.tools.search_web.search_web", return_value=[]) as search:
         result = execute_autonomous_agents(keyword="耳机", user_query=goal)
 
     evidence, = result["evidence_pool"]
@@ -332,7 +332,7 @@ def test_live_cancel_and_mid_flight_steering():
     ]
     cancel_checks = iter([False, True])
     with _patch_llm(mock_llm_cancel):
-        with patch("taozhi.core.tools.search_web", return_value=[{"title": "耳机", "snippet": "热销"}]):
+        with patch("taozhi.core.tools.search_web.search_web", return_value=[{"title": "耳机", "snippet": "热销"}]):
             res_cancel = execute_autonomous_agents(
                 keyword="无线耳机",
                 check_cancel_fn=lambda: next(cancel_checks, True),
@@ -689,7 +689,7 @@ def test_checkpoint_cross_version_resume_hydrates_evidence_and_route_history():
     mock_llm_v1.chat.return_value = "# V1 调研报告"
 
     with _patch_llm(mock_llm_v1):
-        with patch("taozhi.core.tools.search_web", return_value=[{"title": "测评", "snippet": "散热好"}]):
+        with patch("taozhi.core.tools.search_web.search_web", return_value=[{"title": "测评", "snippet": "散热好"}]):
             res_v1 = execute_autonomous_agents(
                 keyword="无线充电器",
                 job_id="job_ckpt_resume_1",

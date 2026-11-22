@@ -3,20 +3,28 @@ from __future__ import annotations
 
 import json
 import subprocess
-
-import httpx
 from typing import Any, Callable, Dict, List, Optional
 
-from taozhi.core.tools.current_time import DEFAULT_TIMEZONE
+import httpx
+
+from taozhi.core.tools import current_time, search_1688, search_amazon, search_web, web_scraper
 from taozhi.core.tools.outcome import ToolInvocationError
 from taozhi.domain.trace_diagnostic import CATALOG
 from taozhi.observability.tracing import record_diagnostic
-from ...core import tools
 from .protocol import McpCallToolResult, McpContentItem, McpToolDefinition
+
+
+_SEARCH_TOOL_MODULES = {
+    "search_amazon": search_amazon,
+    "search_1688_wholesale": search_1688,
+    "search_web": search_web,
+    "fetch_web_page": web_scraper,
+}
 
 
 def _build_handler(tool_name: str, arg_spec: tuple[tuple[str, tuple[str, ...], Any, Any], ...]) -> Callable[[Dict[str, Any]], Any]:
     """根据声明式参数规格构造标准 MCP 工具调用适配器。"""
+    module = _SEARCH_TOOL_MODULES[tool_name]
 
     def _handle(args: Dict[str, Any]) -> Any:
         kwargs: Dict[str, Any] = {}
@@ -27,7 +35,7 @@ def _build_handler(tool_name: str, arg_spec: tuple[tuple[str, tuple[str, ...], A
                     continue
                 raw_val = default_val
             kwargs[target_key] = caster(raw_val)
-        return getattr(tools, tool_name)(**kwargs)
+        return getattr(module, tool_name)(**kwargs)
 
     return _handle
 
@@ -112,13 +120,13 @@ class EcommerceMcpServer:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "timezone": {"type": "string", "default": DEFAULT_TIMEZONE,
+                        "timezone": {"type": "string", "default": current_time.DEFAULT_TIMEZONE,
                                      "description": "IANA 时区名称，如 Asia/Shanghai 或 UTC"},
                     },
                     "additionalProperties": False,
                 },
             ),
-            handler=lambda args: tools.get_current_time(**args),
+            handler=lambda args: current_time.get_current_time(**args),
         )
 
     def register_tool(

@@ -8,7 +8,7 @@ from typing import Iterator
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from taozhi.config import load_config
-from taozhi.knowledge.db import autocommit_connection
+from taozhi.infrastructure.persistence.database import autocommit_connection
 
 _CHECKPOINTER_SETUP_LOCK = threading.Lock()
 _CHECKPOINTER_SETUP_DSNS: set[str] = set()

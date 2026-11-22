@@ -26,6 +26,26 @@
 
 API 通过 SSE 将持久化的任务事件交给浏览器，断线后可携带 `Last-Event-ID` 续读。轨迹中台从同一租户数据库读取 OpenTelemetry 执行节点，可以在任务结束后回看模型、工具、检索和上下文的调用关系。[任务事件接口](src/taozhi/server/routers/tasks.py) · [轨迹查询接口](src/taozhi/server/routers/traces.py)
 
+### 代码分层
+
+```mermaid
+flowchart LR
+    subgraph Web["Vue 工作台"]
+        Shell["布局、会话与导航"] --> Features["业务页面、状态与接口契约"]
+        Features --> Shared["HTTP、SSE 与通用组件"]
+    end
+    subgraph Server["Python 服务"]
+        Http["FastAPI 路由"] --> UseCases["应用用例<br/>文档、问答、调研、评测与经营查询"]
+        Worker["Worker 任务入口"] --> UseCases
+        UseCases --> Domain["领域规则<br/>授权、事实核验与排序"]
+        UseCases --> Adapters["基础设施<br/>解析、检索、持久化与业务接口"]
+        Adapters --> Domain
+    end
+    Shared -->|"HTTP / SSE"| Http
+```
+
+结构检索从业务模块入口开始。文档应用模块负责上传、版本和发布审批，基础设施负责逐页提取、向量与附件存储。问答应用层控制 HyDE 的访问权限和模型预算。前端业务模块共享同一请求和事件流底层。[目录契约](STRUCTURE.md)
+
 ### 知识问答的执行路径
 
 文档问答最多分派给 3 位业务专家。首次检索证据不足，或启用自适应 HyDE 后精排置信度偏低时，工作流最多补查一次。两轮结果按倒数排名融合（RRF）保留至多 10 条文档证据。核验检查引文、机型和适用条件，结果页分别列出正文采用的来源和仅在检索中出现的资料。明确询问实时库存、现价或订单状态时，工作流按业务编号读取授权系统。轨迹中台记录本次实际经过的节点。[图定义](src/taozhi/application/rag/workflow.py) · [事实核验](src/taozhi/domain/rag_verification.py)

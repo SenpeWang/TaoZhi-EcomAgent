@@ -125,7 +125,7 @@ def test_pipeline_a_events_emitted_during_research():
         patch("taozhi.application.research.subagents.LLMClient", return_value=mock_llm),
         patch.object(LLMClient, "_client_for_endpoint", return_value=report_model),
     ):
-        with patch("taozhi.core.tools.search_web", return_value=[{"title": "保温杯测评", "snippet": "主流69元" + "x" * 2000}]):
+        with patch("taozhi.core.tools.search_web.search_web", return_value=[{"title": "保温杯测评", "snippet": "主流69元" + "x" * 2000}]):
             result = execute_autonomous_agents(
                 keyword="测试保温杯",
                 job_id="research_1",

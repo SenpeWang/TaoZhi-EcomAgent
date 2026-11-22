@@ -140,7 +140,7 @@ def lookup(
         结构化业务响应字典，包含 ``available``、``message`` 及脱敏后的 ``record`` / ``source``。
     """
     _ = conn
-    from ..config import get_settings
+    from taozhi.config import get_settings
 
     settings = get_settings()
     if not settings.business_api_url or not settings.business_api_token:

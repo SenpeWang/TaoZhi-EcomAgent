@@ -8,7 +8,7 @@
 from __future__ import annotations
 import io
 import logging
-from ..config import load_config
+from taozhi.config import load_config
 
 _LOG = logging.getLogger(__name__)
 

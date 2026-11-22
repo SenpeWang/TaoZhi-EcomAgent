@@ -13,7 +13,7 @@ from taozhi.domain.errors import Denied
 from taozhi.domain.privacy import redact
 from taozhi.infrastructure.persistence import job_repo
 from taozhi.infrastructure.persistence.access_repo import audit, batch_sources_validity
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure.persistence.database import database_connection
 
 _LOG = logging.getLogger(__name__)
 

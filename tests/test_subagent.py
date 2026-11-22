@@ -129,7 +129,7 @@ def test_full_multi_agent_research_flow():
 
     with _patch_llm(mock_llm):
         with patch(
-            "taozhi.core.tools.search_web",
+            "taozhi.core.tools.search_web.search_web",
             return_value=[{"title": "磁吸壳测评", "snippet": "热销39.9元"}],
         ):
             result = execute_autonomous_agents(keyword="磁吸手机壳", emit_event_fn=on_progress)
