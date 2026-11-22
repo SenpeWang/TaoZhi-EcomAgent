@@ -5,13 +5,14 @@ from fastapi import APIRouter, Depends, Path, Query
 
 from taozhi.application.services import evaluation_service
 from taozhi.schemas.evaluation import (
-    EvaluationCaseDetail, EvaluationCasePage, EvaluationComparison, EvaluationMode,
-    EvaluationRunDetail, EvaluationRunPage, EvaluationStatus,
+    EvaluationCaseDetail, EvaluationCasePage, EvaluationComparison, EvaluationDatasetPage,
+    EvaluationMode, EvaluationRunDetail, EvaluationRunPage, EvaluationStatus,
 )
 from taozhi.server.auth import identity
 
 
 router = APIRouter(prefix="/api/evaluations/runs", tags=["evaluations"])
+catalog = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
 Identifier = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 PageSize = Annotated[int, Query(ge=1, le=100)]
 
@@ -19,8 +20,15 @@ PageSize = Annotated[int, Query(ge=1, le=100)]
 @router.get("", response_model=EvaluationRunPage)
 def runs(owner_id: str | None = Query(None, min_length=1, max_length=128, pattern=r"^[^\x00]+$"),
          mode: EvaluationMode | None = None, gate_passed: bool | None = None,
+         dataset_id: str | None = Query(None, pattern=r"^[A-Za-z0-9_-]{1,128}$"),
          cursor: str | None = Query(None, max_length=256), limit: PageSize = 30, p=Depends(identity)):
-    return evaluation_service.list_runs(p, owner_id=owner_id, mode=mode, gate_passed=gate_passed, cursor=cursor, limit=limit)
+    return evaluation_service.list_runs(p, owner_id=owner_id, mode=mode, gate_passed=gate_passed,
+                                        dataset_id=dataset_id, cursor=cursor, limit=limit)
+
+
+@catalog.get("/datasets", response_model=EvaluationDatasetPage)
+def datasets(p=Depends(identity)):
+    return evaluation_service.list_datasets(p)
 
 
 @router.get("/{run_id}", response_model=EvaluationRunDetail)

@@ -19,6 +19,7 @@ from .reporting import FAILURE_LABELS, TOOL_OUTCOMES, TOOL_PARAMETERS, fingerpri
 Identifier = Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{1,128}$")]
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Count = Annotated[int, Field(ge=0, strict=True)]
+DATASET_NAME = "agent_research"
 Status = Literal["passed", "failed", "unassessable"]
 
 
@@ -97,6 +98,8 @@ class Metrics(BaseModel):
     parameter_accuracy: Ratio
     reference_fact_coverage: Ratio
     token_usage: Tokens
+    latency_p50_seconds: float | None = None
+    latency_p95_seconds: float | None = None
 
 
 class AgentReport(BaseModel):
@@ -149,6 +152,43 @@ def _verdict(check: Verdict) -> dict:
     }
 
 
+def dataset_identifier(mode: str, digest: str) -> str:
+    """由执行方式与用例集摘要生成稳定的数据集编号。
+
+    Args:
+        mode: 报告执行方式。
+        digest: 用例集 SHA-256 摘要。
+
+    Returns:
+        用于评测中心数据集登记的唯一编号。
+    """
+    return f"{DATASET_NAME}-{mode}-{digest[:12]}"
+
+
+def judge_summary(case_results: list) -> list[dict]:
+    """按判定器与维度汇总逐例结论，作为批次级指标入库。
+
+    Args:
+        case_results: 报告中通过校验的逐例结果。
+
+    Returns:
+        每个判定器与维度组合的通过、失败与不可判定计数。
+    """
+    buckets: dict[tuple[str, str], dict] = {}
+    for row in case_results:
+        for verdict in row.verdicts:
+            key = (verdict.judge, verdict.dimension)
+            bucket = buckets.setdefault(key, {"judge": verdict.judge, "dimension": verdict.dimension,
+                                              "passed": 0, "failed": 0, "unassessable": 0})
+            bucket[verdict.status] += 1
+    return [buckets[key] for key in sorted(buckets)]
+
+
+def _milliseconds(seconds: float | None) -> int | None:
+    """把报告中的秒级时延换算成毫秒整数。"""
+    return None if seconds is None else int(round(float(seconds) * 1000))
+
+
 def project_report(raw: dict) -> tuple[dict, list[dict]]:
     """校验汇总与明细，对所有可展示字段作投影，避免原始运行数据入库。"""
     report = AgentReport.model_validate(raw)
@@ -176,11 +216,26 @@ def project_report(raw: dict) -> tuple[dict, list[dict]]:
         if ratio.numerator > ratio.denominator:
             raise ValueError("指标分子不能超过可判定分母")
         metrics[key] = {**ratio.model_dump(), "rate": round(ratio.numerator / ratio.denominator, 4) if ratio.denominator else None}
+    scores = [row.score for row in report.case_results if row.score is not None]
+    usage = report.metrics.token_usage
+    prompt_tokens = usage.measured_prompt_tokens
+    completion_tokens = usage.measured_completion_tokens
+    total_tokens = (
+        None if prompt_tokens is None and completion_tokens is None else (prompt_tokens or 0) + (completion_tokens or 0)
+    )
+    selected = len(report.case_results)
     run = {
         "run_id": report.run_id, "created_at": created_at, "mode": report.mode, "git_sha": report.git_sha,
         "report_sha256": fingerprint(raw), "dataset_sha256": report.dataset_sha256, "judges_sha256": report.judges_sha256,
         "baseline_sha256": report.comparison.baseline_sha256 if report.comparison else None, "metrics": metrics,
         "gate_passed": report.gate.passed, **{s + "_cases": counts[s] for s in ("passed", "failed", "unassessable")},
+        "schema_version": report.schema_version, "dataset_name": DATASET_NAME,
+        "dataset_id": dataset_identifier(report.mode, report.dataset_sha256),
+        "pass_rate": round(counts["passed"] / selected, 4) if selected else None,
+        "mean_score": round(sum(scores) / len(scores), 4) if scores else None,
+        "latency_p50_ms": _milliseconds(report.metrics.latency_p50_seconds),
+        "latency_p95_ms": _milliseconds(report.metrics.latency_p95_seconds),
+        "total_tokens": total_tokens, "judges": judge_summary(report.case_results),
     }
     catalog = {(case["id"], fingerprint(case)): case for case in AGENT_BENCHMARK_CASES}
     rows = []
@@ -212,19 +267,81 @@ def publish_report(path: Path, tenant_id: str, owner_id: str) -> bool:
         return insert_report(conn, tenant_id, owner_id, run, rows)
 
 
+def resolve_owner(tenant_code: str, owner_username: str) -> tuple[str, str]:
+    """按租户编码与账号名解析入库归属。
+
+    Args:
+        tenant_code: 企业租户编码。
+        owner_username: 批次发起人的登录名。
+
+    Returns:
+        (租户编号, 发起人编号)。
+
+    Raises:
+        ValueError: 租户或账号不存在时抛出。
+    """
+    from taozhi.infrastructure.persistence.database import database_connection, fetch_one
+
+    with database_connection() as conn:
+        tenant = fetch_one(conn, "SELECT id FROM tenants WHERE code=%s", (tenant_code,))
+        if tenant is None:
+            raise ValueError(f"租户编码不存在：{tenant_code}")
+        user = fetch_one(conn, "SELECT id FROM users WHERE tenant_id=%s AND username=%s",
+                         (tenant["id"], owner_username))
+        if user is None:
+            raise ValueError(f"发起人账号不存在：{owner_username}")
+    return tenant["id"], user["id"]
+
+
+def pending_reports(reports_dir: Path) -> list[Path]:
+    """列出目录下尚未归档的批次报告，按时间升序。"""
+    return sorted(path for path in reports_dir.glob("agent_eval_report_*.json") if path.is_file())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("report", type=Path)
-    parser.add_argument("--tenant-id", required=True)
-    parser.add_argument("--owner-id", required=True)
+    parser.add_argument("report", type=Path, nargs="?")
+    parser.add_argument("--reports-dir", type=Path, help="批量导入目录，默认 evals/reports/agent_eval")
+    parser.add_argument("--tenant-id")
+    parser.add_argument("--owner-id")
+    parser.add_argument("--tenant-code", help="按租户编码解析归属，与 --owner-username 一起使用")
+    parser.add_argument("--owner-username", default="owner")
     args = parser.parse_args()
+    if args.report is None and args.reports_dir is None:
+        parser.error("请指定报告文件或 --reports-dir")
     try:
-        created = publish_report(args.report, args.tenant_id, args.owner_id)
-    except ValidationError:
-        parser.exit(2, "评测报告的版本或字段无效。\n")
-    except (OSError, ValueError) as exc:
-        parser.exit(2, f"报告导入失败（{type(exc).__name__}），请核对文件、租户、发起人与批次内容。\n")
-    print("评测批次已入库" if created else "相同批次已存在")
+        if args.tenant_id and args.owner_id:
+            tenant_id, owner_id = args.tenant_id, args.owner_id
+        else:
+            tenant_id, owner_id = resolve_owner(args.tenant_code or __import__("os").environ.get("ECOM_TENANT_CODE", "mofa"),
+                                                args.owner_username)
+        paths = [args.report] if args.report is not None else pending_reports(args.reports_dir)
+    except ValueError as exc:
+        parser.exit(2, f"归属解析失败（{exc}）\n")
+    created = duplicated = skipped = failed = 0
+    for path in paths:
+        try:
+            if publish_report(path, tenant_id, owner_id):
+                created += 1
+                print(f"已入库 {path.name}")
+            else:
+                duplicated += 1
+        except ValidationError:
+            skipped += 1
+            print(f"跳过字段不兼容的历史报告 {path.name}")
+        except ValueError as exc:
+            if "版本" in str(exc):
+                skipped += 1
+                print(f"跳过旧版本报告 {path.name}")
+            else:
+                failed += 1
+                print(f"导入失败 {path.name}（{exc}）")
+        except OSError:
+            failed += 1
+            print(f"读取失败 {path.name}")
+    print(f"入库完成：新增 {created}，已存在 {duplicated}，旧版本跳过 {skipped}，失败 {failed}")
+    if failed:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

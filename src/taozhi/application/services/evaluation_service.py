@@ -28,14 +28,22 @@ def _compare(conn, tenant_id: str, current: dict, baseline: dict | None) -> dict
 
 
 def list_runs(p: Principal, *, owner_id: str | None, mode: str | None, gate_passed: bool | None,
-              cursor: str | None, limit: int) -> dict:
+              dataset_id: str | None, cursor: str | None, limit: int) -> dict:
     owner = visible_owner_id(p, owner_id)
     before = decode_time_cursor(cursor)
     with database_connection() as conn:
-        rows = evaluation_repo.runs(conn, p.tenant_id, owner, mode=mode, gate=gate_passed, before=before, limit=limit + 1)
+        rows = evaluation_repo.runs(conn, p.tenant_id, owner, mode=mode, gate=gate_passed,
+                                    dataset_id=dataset_id, before=before, limit=limit + 1)
     items = rows[:limit]
     following = f"{items[-1]['created_at'].isoformat()}|{items[-1]['run_id']}" if len(rows) > limit else None
     return {"items": items, "next_cursor": following}
+
+
+def list_datasets(p: Principal) -> dict:
+    """汇总当前账号可见范围内的数据集与批次指标。"""
+    with database_connection() as conn:
+        rows = evaluation_repo.datasets(conn, p.tenant_id, visible_owner_id(p))
+    return {"items": rows}
 
 
 def get_run(p: Principal, run_id: str) -> dict:

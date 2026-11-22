@@ -42,6 +42,19 @@ def test_publish_projection_only_accepts_public_fields():
     assert rows[0]["verdicts"][0]["issues"][0]["reason"] == "实际调用了禁用工具"
 
 
+def test_batch_metrics_and_judge_summary_are_projected():
+    """批次指标与判定器汇总必须由逐例结果直接推导。"""
+    run, rows = project_report(record())
+    assert run["dataset_name"] == "agent_research"
+    assert run["dataset_id"] == "agent_research-live-" + ("a" * 64)[:12]
+    assert run["pass_rate"] == 0 and run["mean_score"] == 0
+    assert run["total_tokens"] is None and run["latency_p50_ms"] is None
+    assert run["judges"] == [
+        {"judge": "ToolBoundaryJudge", "dimension": "governance", "passed": 0, "failed": 1, "unassessable": 0}
+    ]
+    assert rows[0]["status"] == "failed"
+
+
 def test_unobserved_steps_do_not_bind_a_synthetic_trace():
     raw = record()
     raw.update(mode="synthetic_trace_regrade", transcript_sha256="0" * 64)

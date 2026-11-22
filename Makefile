@@ -2,10 +2,13 @@ PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo pyth
 PHOENIX_PY ?= $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
 PROJECT_ROOT := $(CURDIR)
 IMPORT_ARGS ?=
+EVAL_ARGS ?=
+REPORTS_DIR ?= $(PROJECT_ROOT)/evals/reports/agent_eval
+PUBLISH_ARGS ?=
 TEST_ENV := ECOM_MODE=test PYTHONPATH=$(PROJECT_ROOT)/src
 COMPOSE := docker compose
 
-.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
+.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -25,6 +28,8 @@ help:
 	@echo "make import-corpus  按目录导入 data/ 语料并生成向量（IMPORT_ARGS 传参）"
 	@echo "make evals-tests    只跑评估代码自身的单元测试（不需要在线服务）"
 	@echo "make evals-agent-replay  使用合成执行记录验证 Agent 判定与报告"
+	@echo "make evals-agent-publish 跑真实调研评测并把结果归档进评测中心"
+	@echo "make evals-publish   把 REPORTS_DIR 下的评测报告批量归档进评测中心"
 	@echo "make evals-quick    评估：检索+对抗层（需企业服务在线；对比基线并过门禁）"
 	@echo "make evals-full     评估：三层全跑（需企业服务在线；对比基线并过门禁）"
 	@echo "make evals-sync     评估集与最新报告同步到 Phoenix（旁路；Phoenix 离线只跳过）"
@@ -101,7 +106,14 @@ evals-baseline:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" PYTHONPATH=src $(PYTHON) evals/rag_eval/run.py --full --save-baseline
 
 evals-agent:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" PYTHONPATH=src $(PYTHON) -m evals.agent_eval.runner
+	$(PYTHON) scripts/run_with_env.py $(PYTHON) -m evals.agent_eval.runner $(EVAL_ARGS)
+
+evals-publish:
+	$(PYTHON) scripts/run_with_env.py $(PYTHON) -m evals.agent_eval.publish --reports-dir $(REPORTS_DIR) $(PUBLISH_ARGS)
+
+evals-agent-publish:
+	@$(MAKE) --no-print-directory evals-agent
+	@$(MAKE) --no-print-directory evals-publish
 
 evals-agent-replay:
 	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_web_replay.json

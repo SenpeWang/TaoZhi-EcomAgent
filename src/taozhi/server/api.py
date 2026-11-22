@@ -84,6 +84,7 @@ app.include_router(documents.router)
 app.include_router(tasks.router)
 app.include_router(traces.router)
 app.include_router(evaluations.router)
+app.include_router(evaluations.catalog)
 
 dist = ROOT / "web/dist"
 if (dist / "assets").exists():

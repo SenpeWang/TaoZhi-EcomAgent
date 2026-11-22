@@ -15,3 +15,4 @@
 | `check_repository.py` | 敏感文件、秘密与目录契约检查 |
 | `check_development.py` | 前端规范、暂存快照与提交信息校验 |
 | `archive_baseline.py`、`clean_cache.py` | 基线归档与缓存清理 |
+| `run_with_env.py` | 先载入本地 `.env` 再执行命令，供宿主侧评测与运维使用 |

@@ -173,6 +173,27 @@ make evals-archive-check  # 逐条比对 md5（校验在 evals/baseline/ARCHIVE.
   抓到。不是防人，是防"某次手改了基线却没人发现"；
 - 归档**只增不改**：要新基线就跑批后追加一条，旧快照一律保留。
 
+## 评测中心入库
+
+真实调研评测与合成回放都能归档到工作台的「运行分析 → 评测中心」。入库入口只有 `evals/agent_eval/publish.py`：先校验报告版本与逐例计数，再登记数据集、写入批次指标与逐例判定。
+
+```bash
+make evals-agent-publish                               # 跑真实调研评测并把结果归档
+make evals-agent EVAL_ARGS="--case AGENT-WEB-003"      # 只跑指定用例
+make evals-publish                                     # 把历史报告批量补录
+make evals-publish PUBLISH_ARGS="--tenant-code mofa --owner-username owner"
+```
+
+| 表或字段 | 落库内容 |
+| --- | --- |
+| `eval_datasets` | 数据集登记：名称、执行方式、已观测用例数、首次与最近入库时间 |
+| `eval_runs.pass_rate`、`mean_score` | 批次通过率与均分，由逐例状态和分数直接推导 |
+| `eval_runs.latency_p50_ms`、`latency_p95_ms` | 批次时延，由报告的秒级观测换算成毫秒 |
+| `eval_runs.total_tokens` | 已计量的提示与补全 Token 合计，未采集时为空 |
+| `eval_runs.judges` | 按判定器与维度汇总的通过、失败、不可判定计数 |
+
+读取接口：`GET /api/evaluations/runs` 支持 `dataset_id` 过滤；`GET /api/evaluations/datasets` 返回当前账号可见的数据集与批次汇总。归属按租户编码与账号名解析，也可显式传 `--tenant-id` 与 `--owner-id`。
+
 ## 评测台账留痕规范（增量追加，不覆盖历史）
 
 所有实验与评测记录文档**只允许在末尾增量追加，严禁覆盖或删改已有历史记录**，确保每次迭代的技术栈与指标完整保留、对外可追溯：

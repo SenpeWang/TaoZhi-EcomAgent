@@ -12,7 +12,7 @@
 | 异步任务 | `jobs`、`task_events`、`task_outbox`、`task_reviews`、`worker_heartbeats` | 任务按租户与发起人归属，执行版本和租约用于隔离重试。结果与事件按当前资料权限读取。 |
 | 经营数据 | `metrics`、`products`、`skus`、`channels`、`orders`、`after_sales`、`stock` | ChatBI 通过获授权的指标模板执行只读查询，结果保留指标来源。实时订单和库存也可经企业网关读取。 |
 | 审计与轨迹 | `audit_events`、`model_calls`、`task_spans` | 通过任务编号、执行版本和 Trace ID 查调用步骤、用量和诊断。 |
-| 评测 | `eval_runs`、`eval_case_results` | 批次记录发起人、版本和门禁，明细保留用例判定、预期和采集步骤。两者同事务写入，可按批次追溯。 |
+| 评测 | `eval_datasets`、`eval_runs`、`eval_case_results` | 数据集登记用例集版本与执行方式，批次记录发起人、门禁与通过率、均分、时延、Token 和判定器汇总，明细保留用例判定、预期和采集步骤。三者同事务写入，可按数据集和批次追溯。 |
 
 系统管理员可按发起人查本租户轨迹。资料正文和业务结果另行校验权限。[访问规则](../../src/taozhi/infrastructure/persistence/access_repo.py) · [轨迹查询](../../src/taozhi/application/services/trace_service.py)
 

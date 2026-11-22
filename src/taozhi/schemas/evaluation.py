@@ -9,6 +9,14 @@ EvaluationMode = Literal["live", "synthetic_trace_regrade"]
 EvaluationStatus = Literal["passed", "failed", "unassessable"]
 
 
+class EvaluationJudgeSummary(BaseModel):
+    judge: str
+    dimension: str
+    passed: int
+    failed: int
+    unassessable: int
+
+
 class EvaluationRun(BaseModel):
     run_id: str
     owner_id: str
@@ -26,6 +34,30 @@ class EvaluationRun(BaseModel):
     passed_cases: int
     failed_cases: int
     unassessable_cases: int
+    dataset_id: str | None = None
+    dataset_name: str | None = None
+    pass_rate: float | None = None
+    mean_score: float | None = None
+    latency_p50_ms: int | None = None
+    latency_p95_ms: int | None = None
+    total_tokens: int | None = None
+    judges: list[EvaluationJudgeSummary] | None = None
+
+
+class EvaluationDataset(BaseModel):
+    dataset_id: str
+    name: str
+    source: EvaluationMode
+    case_count: int
+    batch_count: int
+    last_run_at: datetime
+    avg_pass_rate: float | None
+    best_pass_rate: float | None
+    passed_batches: int
+
+
+class EvaluationDatasetPage(BaseModel):
+    items: list[EvaluationDataset]
 
 
 class EvaluationRunPage(BaseModel):

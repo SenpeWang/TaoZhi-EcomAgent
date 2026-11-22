@@ -1,6 +1,14 @@
 export type EvaluationMode = 'live' | 'synthetic_trace_regrade'
 export type EvaluationStatus = 'passed' | 'failed' | 'unassessable'
 
+export interface EvaluationJudgeSummary {
+  judge: string
+  dimension: string
+  passed: number
+  failed: number
+  unassessable: number
+}
+
 export interface EvaluationRun {
   run_id: string
   owner_id: string
@@ -18,6 +26,26 @@ export interface EvaluationRun {
   passed_cases: number
   failed_cases: number
   unassessable_cases: number
+  dataset_id: string | null
+  dataset_name: string | null
+  pass_rate: number | null
+  mean_score: number | null
+  latency_p50_ms: number | null
+  latency_p95_ms: number | null
+  total_tokens: number | null
+  judges: EvaluationJudgeSummary[] | null
+}
+
+export interface EvaluationDataset {
+  dataset_id: string
+  name: string
+  source: EvaluationMode
+  case_count: number
+  batch_count: number
+  last_run_at: string
+  avg_pass_rate: number | null
+  best_pass_rate: number | null
+  passed_batches: number
 }
 
 export interface EvaluationCase {
@@ -106,6 +134,35 @@ export interface EvaluationRunDetail {
   metrics: EvaluationMetrics
   run: EvaluationRun
   comparison: EvaluationComparison | null
+}
+
+/**
+ * 展示批次通过率或均分，缺失时给出占位文案。
+ * @param value - 0 到 1 之间的比例或分数。
+ * @returns 百分比文本或缺失提示。
+ */
+export function formatEvaluationPercent(value: number | null): string {
+  if (value === null) return '—'
+  return (value * 100).toFixed(1) + '%'
+}
+
+/**
+ * 展示毫秒级时延，缺失时给出占位文案。
+ * @param value - 毫秒数。
+ * @returns 秒级文本或缺失提示。
+ */
+export function formatEvaluationLatency(value: number | null): string {
+  if (value === null) return '—'
+  return (value / 1000).toFixed(1) + 's'
+}
+
+/**
+ * 展示数据集执行方式的中文名称。
+ * @param mode - 报告执行方式。
+ * @returns 面向工作台用户的执行方式名称。
+ */
+export function evaluationModeLabel(mode: EvaluationMode): string {
+  return evaluationModes[mode]
 }
 
 /**
