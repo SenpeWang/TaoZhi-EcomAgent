@@ -1,6 +1,7 @@
 PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python3)
 PHOENIX_PY ?= $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
 PROJECT_ROOT := $(CURDIR)
+TEST_ENV := ECOM_MODE=test PYTHONPATH=$(PROJECT_ROOT)/src
 COMPOSE := docker compose
 
 .PHONY: help start rebuild stop status logs test migrate-test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
@@ -49,10 +50,10 @@ logs:
 	$(COMPOSE) logs -f --tail=100
 
 test:
-	ECOM_MODE=test $(PYTHON) -m pytest tests evals/tests -m 'not slow' -q --disable-warnings
+	$(TEST_ENV) $(PYTHON) -m pytest tests evals/tests -m 'not slow' -q --disable-warnings
 
 migrate-test:
-	ECOM_MODE=test $(PYTHON) -m alembic -c alembic.ini upgrade head
+	$(TEST_ENV) $(PYTHON) -m alembic -c alembic.ini upgrade head
 
 check:
 	$(PYTHON) -m compileall -q src scripts migrations tests
@@ -83,7 +84,7 @@ check-commits:
 	python3 scripts/check_development.py commits --base "$(COMMIT_BASE)" --head "$(COMMIT_HEAD)"
 
 evals-tests:
-	ECOM_MODE=test $(PYTHON) -m pytest evals/tests -q
+	$(TEST_ENV) $(PYTHON) -m pytest evals/tests -q
 
 evals-quick:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" PYTHONPATH=src $(PYTHON) evals/rag_eval/run.py --quick --compare --gate
@@ -98,8 +99,8 @@ evals-agent:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" PYTHONPATH=src $(PYTHON) -m evals.agent_eval.runner
 
 evals-agent-replay:
-	ECOM_MODE=test $(PYTHON) -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_web_replay.json
-	ECOM_MODE=test $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json
+	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_web_replay.json
+	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json
 
 evals-sync:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
