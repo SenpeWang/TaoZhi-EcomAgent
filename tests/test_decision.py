@@ -70,3 +70,22 @@ def test_decision_offline_safe_fallback():
     res = engine.choice("用了一周边缘起泡开胶了，给换新吗？", SPECIALIST_OPTIONS, allow_llm=False)
     assert res.selected
     assert res.path in (DecisionPath.FAST_SEMANTIC, DecisionPath.HEURISTIC_FALLBACK)
+
+
+def test_decision_uses_model_client_for_structured_choice(monkeypatch):
+    """离线执行模型决策路径，验证结构化结果与正式客户端接线。"""
+    from taozhi.ai.client import LLMClient, ModelTier
+
+    def chat(_client, context, *, system, tier, max_tokens):
+        assert "钢化膜" in context
+        assert "product" in system
+        assert tier is ModelTier.FAST
+        assert max_tokens == 250
+        return '{"selected":["product"],"confidence":0.92}'
+
+    monkeypatch.setattr(LLMClient, "chat", chat)
+    result = get_decision_engine().choice("这款钢化膜有多厚？", SPECIALIST_OPTIONS, force_llm=True)
+
+    assert result.path is DecisionPath.FAST_LLM
+    assert result.selected == ["product"]
+    assert result.confidence == 0.92

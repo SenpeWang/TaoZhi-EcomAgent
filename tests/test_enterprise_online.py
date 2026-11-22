@@ -663,7 +663,7 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
     import httpx
     import taozhi.config as cfg
     from taozhi.infrastructure.knowledge import embedding
-    from taozhi.observability import flush_spans
+    from taozhi.observability.span_writer import flush_spans
     from taozhi.orchestration.decision import get_decision_engine
 
     seen_prompts = []

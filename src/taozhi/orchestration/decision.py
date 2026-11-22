@@ -213,7 +213,7 @@ class DecisionEngine:
         start_time: float,
     ) -> ChoiceResult:
         """调用结构化 Fast LLM 进行约束型离散决策。"""
-        from ..ai import LLMClient, ModelTier
+        from taozhi.ai.client import LLMClient, ModelTier
         from langchain_core.output_parsers import JsonOutputParser
 
         options_desc = "\n".join([f"- {k}: {v}" for k, v in options.items()])
