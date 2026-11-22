@@ -48,7 +48,7 @@ logs:
 	$(COMPOSE) logs -f --tail=100
 
 test:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" ECOM_MODE=test API_KEY= BAILIAN_API_KEY= DOTS_API_KEY= SENSENOVA_OVERSEAS_API_KEY= SENSENOVA_CN_SECONDARY_API_KEY= PYTHONPATH=src $(PYTHON) -m pytest tests evals/tests -m 'not slow' -q --disable-warnings
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" ECOM_MODE=test PYTHONPATH=src $(PYTHON) -m pytest tests evals/tests -m 'not slow' -q --disable-warnings
 
 check:
 	$(PYTHON) -m compileall -q src scripts migrations tests
@@ -79,7 +79,7 @@ check-commits:
 	python3 scripts/check_development.py commits --base "$(COMMIT_BASE)" --head "$(COMMIT_HEAD)"
 
 evals-tests:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" ECOM_MODE=test API_KEY= BAILIAN_API_KEY= DOTS_API_KEY= SENSENOVA_OVERSEAS_API_KEY= SENSENOVA_CN_SECONDARY_API_KEY= PYTHONPATH=src $(PYTHON) -m pytest evals/tests -q
+	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" ECOM_MODE=test PYTHONPATH=src $(PYTHON) -m pytest evals/tests -q
 
 evals-quick:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" PYTHONPATH=src $(PYTHON) evals/rag_eval/run.py --quick --compare --gate

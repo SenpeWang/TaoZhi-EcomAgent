@@ -672,7 +672,7 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
     users, nodes = ids()
     settings = cfg.get_settings().model_copy(update={
         "api_key": "offline-test-placeholder", "base_url": "https://model.invalid/v1",
-        "model": model, "sensenova_overseas_api_key": "", "dots_api_key": "", "sensenova_cn_secondary_api_key": "",
+        "model": model, "sensenova_overseas_api_key": "", "dots_api_key": "", "sensenova_cn_secondary_api_key": "", "bailian_api_key": "",
         "business_api_url": "https://business.invalid/api", "business_api_token": "offline-business-placeholder",
     })
     monkeypatch.setattr(cfg, "get_settings", lambda: settings)
