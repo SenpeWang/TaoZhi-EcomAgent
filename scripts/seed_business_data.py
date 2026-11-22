@@ -1,6 +1,6 @@
 """业务合成数据生成器（确定性、可复现、来源可审计）。
 
-用法：ECOM_ENV_FILE=.env.production .venv/bin/python scripts/seed_business_data.py
+用法：.venv/bin/python scripts/seed_business_data.py
 可选参数：--anchor-date YYYY-MM-DD（默认使用当前 UTC 日期作为窗口终点）
 
 设计原则（生产级学习项目）：

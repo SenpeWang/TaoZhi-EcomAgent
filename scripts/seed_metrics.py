@@ -1,6 +1,6 @@
 """种子指标：淘智自身运营指标（基于工作台真实表，零造假数据）。
 
-用法：ECOM_ENV_FILE=.env.production .venv/bin/python scripts/seed_metrics.py
+用法：.venv/bin/python scripts/seed_metrics.py
 
 指标口径模板约定（metrics.py 安全边界）：
 - 必须含 %(tenant_id)s；可含 %(since)s/%(until)s/%(filters)s；禁止自带 LIMIT/分号/注释；

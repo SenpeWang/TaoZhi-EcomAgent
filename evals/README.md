@@ -81,7 +81,7 @@ PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay ev
 
 ```bash
 # 前置：企业容器服务在线（make start），评估跑真实生产库；
-# 独立数据包夹具已灌库（PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed）
+# 独立数据包夹具已灌库（PYTHONPATH=src .venv/bin/python -m evals.dataset.seed）
 make evals-quick      # 检索 + 对抗，约 5 分钟
 make evals-full       # 三层全跑（180 例逐题 judge；对比基线 + 门禁，不过则退出码 1）
 make evals-baseline   # 三层全跑后锁定为基线
@@ -91,13 +91,13 @@ make evals-sync       # 评估集 + 最新报告 -> Phoenix（旁路；Phoenix �
 make evals-pipeline   # evals-full 之后自动同步；门禁不过也同步，失败样例要可见
 
 # 只重跑某一层（迭代判定规则/修复单层时用）
-ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --adversarial-only
-ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --behavior-only
+PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --adversarial-only
+PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --behavior-only
 # 只跑某几类（冒烟/坏例定位；类别名见 cases.jsonl 的 category 字段）
-ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --behavior-only --only robust,multi_turn,parsing
+PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --behavior-only --only robust,multi_turn,parsing
 
 # 直接调用（与 make 等价）
-ECOM_ENV_FILE="$PWD/.env.production" PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --quick --compare
+PYTHONPATH=src .venv/bin/python evals/rag_eval/run.py --quick --compare
 ```
 
 结果落盘 `evals/reports/<时间戳>-<git短SHA>.json`；`--compare` 与基线逐项对比、下降项报警。

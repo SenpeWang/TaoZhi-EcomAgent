@@ -6,8 +6,8 @@
 语料不会重复消耗嵌入算力。
 
 用法（项目根目录，生产口径）：
-  PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python scripts/backfill_embeddings.py --dry-run
-  PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python scripts/backfill_embeddings.py
+  PYTHONPATH=src .venv/bin/python scripts/backfill_embeddings.py --dry-run
+  PYTHONPATH=src .venv/bin/python scripts/backfill_embeddings.py
 
 - 嵌入服务不可用时直接失败退出（不留半成品向量），修复后重跑即可；
 - 单事务写入：中途失败整体回滚，可安全重跑；只更新 embedding 列；

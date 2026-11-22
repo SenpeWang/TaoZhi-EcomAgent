@@ -1,6 +1,6 @@
 """业务指标注册（数据中台语义层）：销售 / 售后 / 库存 / 成本四域。
 
-用法：ECOM_ENV_FILE=.env.production .venv/bin/python scripts/seed_business_metrics.py
+用法：.venv/bin/python scripts/seed_business_metrics.py
 
 口径约定（metrics.py 安全边界）：
 - 模板 = 内层明细子查询（输出列带别名）+ 外层 WHERE 1=1 %(filters)s + GROUP BY 聚合；

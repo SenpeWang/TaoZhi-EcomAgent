@@ -3,7 +3,7 @@ import os,sys,json,secrets,subprocess,hashlib
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
-from taozhi.config import load_config, resolve_runtime_dir
+from taozhi.config import load_config, resolve_env_file, resolve_runtime_dir
 from taozhi.infrastructure.persistence.database import database_connection,fetch_one,fetch_all,as_jsonb
 from taozhi.infrastructure.persistence.job_repo import generate_id
 from taozhi.domain.passwords import hash_password
@@ -97,10 +97,10 @@ def _load_cfg_for_env(env_path: Path):
 def provision():
     """针对已运行的 PostgreSQL（如 Docker postgres 服务）执行建库（如权限允许）与 Alembic 迁移。"""
     env_files = [Path(os.environ["ECOM_ENV_FILE"])] if os.environ.get("ECOM_ENV_FILE") else [
-        path for path in (ROOT / ".env.production", ROOT / ".env.test") if path.is_file()
+        resolve_env_file(os.environ.get("ECOM_MODE", "production"))
     ]
-    if not env_files:
-        raise RuntimeError("未找到环境配置文件（请设置 ECOM_ENV_FILE 或准备 .env.production）")
+    if not env_files[0].is_file():
+        raise RuntimeError(f"未找到环境配置文件：{env_files[0]}（请检查 .env 或设置 ECOM_ENV_FILE）")
     for env_path in env_files:
         env = {**os.environ, "ECOM_ENV_FILE": str(env_path), "PYTHONPATH": str(ROOT / "src")}
         cfg = _load_cfg_for_env(env_path)

@@ -1,7 +1,7 @@
 """存量切片重建 Elasticsearch 索引（仅 BM25 文本字段；ANN 向量检索已迁 PG pgvector）。
 
 用法：
-    ECOM_ENV_FILE=.env.production .venv/bin/python scripts/rebuild_es_index.py [--drop]
+    .venv/bin/python scripts/rebuild_es_index.py [--drop]
 
 行为：
 - 确认 ES 可用且 es_enabled；--drop 时先删除整个索引再建；

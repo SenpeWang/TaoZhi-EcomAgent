@@ -48,7 +48,7 @@ def main() -> int:
 
     cfg = load_config()
     if cfg.mode != "production":
-        print(f"当前模式为 {cfg.mode}；生产账号请用 ECOM_ENV_FILE=.env.production 运行", file=sys.stderr)
+        print(f"当前模式为 {cfg.mode}；生产账号请用生产模式配置运行", file=sys.stderr)
 
     result = {}
     with database_connection() as c:

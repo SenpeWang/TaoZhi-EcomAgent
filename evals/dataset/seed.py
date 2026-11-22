@@ -6,9 +6,9 @@
 权限测试空转。本脚本 + spec/ 让夹具可重建、可校验、可清除。
 
 用法（项目根目录，生产口径）：
-  PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed
-  PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed --verify
-  PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed --clean
+  PYTHONPATH=src .venv/bin/python -m evals.dataset.seed
+  PYTHONPATH=src .venv/bin/python -m evals.dataset.seed --verify
+  PYTHONPATH=src .venv/bin/python -m evals.dataset.seed --clean
 
 设计约束：
 - 幂等：重复执行结果一致（文档按 content_hash 判断是否需要重建切片）；

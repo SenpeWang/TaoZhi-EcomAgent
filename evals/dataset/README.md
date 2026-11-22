@@ -52,11 +52,11 @@ PYTHONPATH=src .venv/bin/python -m evals.dataset.generate
 PYTHONPATH=src .venv/bin/python -m evals.dataset.schema
 
 # 3. 灌库（生产口径；幂等，可反复执行）
-PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed
+PYTHONPATH=src .venv/bin/python -m evals.dataset.seed
 
 # 4. 只校验不写入 / 清除全部夹具
-PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed --verify
-PYTHONPATH=src ECOM_ENV_FILE=.env.production .venv/bin/python -m evals.dataset.seed --clean
+PYTHONPATH=src .venv/bin/python -m evals.dataset.seed --verify
+PYTHONPATH=src .venv/bin/python -m evals.dataset.seed --clean
 ```
 
 ## 设计约束
