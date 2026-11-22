@@ -74,7 +74,7 @@
 
 README.md 提供项目入口和文档索引，CONTRIBUTING.md 提供开发与提交规范。LICENSE 声明项目采用 AGPL-3.0。Makefile 提供维护命令，Dockerfile 定义构建目标，Compose 文件描述应用及中间件拓扑。Alembic 管理表结构版本，依赖锁文件用于复现验证。代码、格式和提交消息由 ESLint、Prettier、Commitlint 及仓库检查脚本验证。[部署手册](documentation/deployment/) · [GitHub CI](.github/workflows/ci.yml)
 
-AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；两者都不跟踪或提交，公开文档不链接或依赖它们。维护者在本机维护这些文件，克隆仓库无需取得它们。
+AGENTS.md 是维护者的协作约定，随仓库版本化；本机个人学习文档放在已被整体忽略的 docs 私有子目录，公开文档不链接私有目录。`config/test.env` 是本地与远端 CI 共用的测试环境定义，库里只有模式、租户与免密连接串，口令由宿主的 `PGPASSWORD` 注入。
 
 ## 资料与运行数据
 

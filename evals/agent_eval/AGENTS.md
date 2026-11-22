@@ -1,8 +1,8 @@
-# evals/agent_eval/ — 自治多智能体调研系统评测维护约定与记录路由（仅本机）
+# evals/agent_eval/ — 自治多智能体调研系统评测维护约定与记录路由
 
 > 本文件仅用于维护**第二套：市场调研自治多智能体系统**（`src/taozhi/application/research/`、`src/taozhi/core/`、`evals/agent_eval/`）的评测标准。  
-> 与**第一套：企业知识库问答 & 受控问数 Workflow**（`src/taozhi/application/rag/`、`src/taozhi/knowledge/`、`../rag_eval/`、`../rag_eval/测评记录.md`）**完全独立、互不混用数据集、判定器与基线**。  
-> 按仓库边界规则，本 `AGENTS.md` 仅在本机留存，不纳入 Git 提交。
+> 与**第一套：企业知识库问答 & 受控问数 Workflow**（`src/taozhi/application/rag/`、`src/taozhi/infrastructure/knowledge/`、`../rag_eval/`、`../rag_eval/测评记录.md`）**完全独立、互不混用数据集、判定器与基线**。  
+> 本文件随仓库版本化，作为该子系统的评测维护约定。
 
 ---
 

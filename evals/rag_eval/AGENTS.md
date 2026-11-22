@@ -1,8 +1,8 @@
-# evals/rag_eval/ — 企业知识文档（RAG）评测维护约定与记录路由（仅本机）
+# evals/rag_eval/ — 企业知识文档（RAG）评测维护约定与记录路由
 
-> 本文件仅用于维护**第一套：企业知识库问答 & 受控问数 Workflow**（`src/taozhi/application/rag/`、`src/taozhi/knowledge/`、`evals/rag_eval/`）的评测标准。  
+> 本文件仅用于维护**第一套：企业知识库问答 & 受控问数 Workflow**（`src/taozhi/application/rag/`、`src/taozhi/infrastructure/knowledge/`、`evals/rag_eval/`）的评测标准。  
 > 与**第二套：市场调研自治 Agent 系统**（`src/taozhi/application/research/`、`evals/agent_eval/`、`../agent_eval/测评记录.md`）**完全独立、互不混用数据集、指标与基线**。  
-> 按仓库边界规则，本 `AGENTS.md` 仅在本机留存，不纳入 Git 提交。
+> 本文件随仓库版本化，作为该子系统的评测维护约定。
 
 ---
 
@@ -25,7 +25,7 @@
 
 - **唯一问答测评记录文件**：[`./测评记录.md`](./测评记录.md)（相对路由 `./测评记录.md`）
 - **强制更新触发条件**：
-  1. 对 `src/taozhi/knowledge/`、`src/taozhi/application/rag/`、`src/taozhi/server/worker.py`（入库/问答分支）、`evals/metrics.py`、`evals/rag_eval/` 进行任何功能或口径修改；
+  1. 对 `src/taozhi/infrastructure/knowledge/`、`src/taozhi/application/rag/`、`src/taozhi/server/worker.py`（入库/问答分支）、`evals/metrics.py`、`evals/rag_eval/` 进行任何功能或口径修改；
   2. 运行任意 `evals.rag_eval.run`（`--quick` / `--full` / `--behavior-only` / `--adversarial-only`）或通过 `make evals-baseline` 刷新基线。
 
 ---

@@ -33,4 +33,5 @@ erDiagram
 
 - `documents.current_version` 指向当前版本。`acl_version` 用于判断历史引用及缓存的权限有效性。原件由附件存储适配器按租户保存。
 - `chunks.embedding` 使用 pgvector，页面引用按切片的文档版本和页码展示。文本检索和向量检索使用同一份可读文档范围。[向量迁移](../../migrations/versions/006_pgvector.py) · [文档仓储](../../src/taozhi/infrastructure/persistence/document_repo.py)
+- 测试库 `ecom_test` 与生产库同构，连接串固定在 `config/test.env`，用 `make migrate-test` 迁移；集成测试会清空该库的租户与业务数据。
 - `jobs.run_version` 区分同一任务的尝试。SSE 通过递增事件编号恢复。`task_spans` 保存节点的父子关系与经过筛选的诊断，评测可以引用对应 Trace ID。[事件迁移](../../migrations/versions/017_task_output_events.py) · [轨迹迁移](../../migrations/versions/014_task_spans.py) · [评测迁移](../../migrations/versions/020_evaluation_center.py)

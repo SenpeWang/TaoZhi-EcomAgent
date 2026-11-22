@@ -10,6 +10,7 @@
 | 向量和精排 | `ECOM_MODELS_DIR` 指向模型父目录。启用对应服务时准备 `bge-small-zh-v1.5` 和 `bge-reranker-v2-m3`。Compose 默认使用 CPU，可叠加 GPU 配置。 |
 | 大模型与业务网关 | 按需设置 `BASE_URL`、`API_KEY` 和 `MODEL`；备用通道为 `SENSENOVA_OVERSEAS_*`、`DOTS_*`、`BAILIAN_*`，候选顺序依次为海外商用通道、Dots、阿里云百炼、国内主备。实时库存与订单使用 `BUSINESS_API_URL` 和 `BUSINESS_API_TOKEN`。 |
 | 中间件 | 根据部署目标设置 `ECOM_MINIO_ENABLED`、`ECOM_KAFKA_ENABLED` 和 `ECOM_ES_ENABLED`。环境示例给出功能开关，容器启动顺序由 Compose 编排定义。 |
+| 构建镜像 | 慢速网络下在 `.env` 里设置 `PIP_INDEX_URL`、`NPM_REGISTRY` 与 `APT_MIRROR`，`make rebuild` 会用它们加速后端依赖、前端依赖与系统包安装。 |
 | 持久化 | 保证容器可写 `data/`。生产资料保存在对象存储或私有附件目录，部署主机保管数据库和运行记录。 |
 
 [运行配置示例](../../.env.example) · [数据目录说明](../../data/README.md)

@@ -4,7 +4,8 @@ Vue 3 与 Vite 构建的企业工作台，产物由 `npm run build` 输出到 `d
 
 | 路径 | 用途 |
 | --- | --- |
-| `src/views/` | 业务页面：资料管理、权限表单、经营看板、智能体调研与轨迹分析 |
+| `src/app/` | 应用外壳：登录门户、工作台概览、会话接口与全局样式 |
+| `src/features/` | 业务页面：`administration`、`bi`、`documents`、`observability`、`tasks` |
 | `src/shared/` | 共享组合式逻辑与任务流订阅 |
 | `src/assets/` | 品牌图标与架构图 |
 | `eslint.config.js`、`.prettierrc.json` | 代码与格式规范 |
