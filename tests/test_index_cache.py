@@ -1,4 +1,6 @@
 """嵌入索引缓存：指纹命中就复用，未命中才调模型；口径变了必须重算。"""
+from collections import OrderedDict
+
 import numpy as np
 import pytest
 
@@ -11,10 +13,10 @@ DIM = 512
 
 
 @pytest.fixture(autouse=True)
-def _env():
+def _env(monkeypatch):
     cfg = load_config()
     assert cfg.mode == "test" and cfg.dsn.endswith("/ecom_test")
-    embedding.clear_query_cache()
+    monkeypatch.setattr(embedding, "_query_cache", OrderedDict())
 
 
 def _stub(monkeypatch, calls):
@@ -121,7 +123,6 @@ def test_query_embedding_cache_hits(monkeypatch):
     assert not np.allclose(first, other)
     assert len(calls) == 2
     assert all(instruct for _, instruct in calls)
-    assert embedding.query_cache_stats()["hits"] == 1
 
 
 def test_query_embedding_cache_evicts_oldest(monkeypatch):
@@ -134,5 +135,5 @@ def test_query_embedding_cache_evicts_oldest(monkeypatch):
         embedding.encode_query(f"问题{i}")
     embedding.encode_query("问题0")
     embedding.encode_query("问题5")
-    assert embedding.query_cache_stats()["size"] == 3
+    assert len(embedding._query_cache) == 3
     assert embedding.digest("问题1") not in " ".join(embedding._query_cache)

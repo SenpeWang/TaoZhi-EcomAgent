@@ -19,7 +19,6 @@ from taozhi.observability.tracing import node_span, record_diagnostic
 
 _ALLOWED_FIELDS = {
     "tenant_id",
-    "org_tag",
     "node_id",
     "sku_id",
     "order_id",
@@ -58,8 +57,7 @@ def _validate_and_redact_business_payload(
     """校验业务网关回传载荷合法性，并按当前主体角色执行最小必要脱敏。"""
     if not isinstance(raw, dict) or (set(raw) - _ALLOWED_FIELDS):
         raise ValueError("业务响应包含未登记字段")
-    tenant = raw.get("tenant_id") or raw.get("org_tag")
-    if tenant != p.tenant_id or raw.get("node_id") not in p.nodes:
+    if raw.get("tenant_id") != p.tenant_id or raw.get("node_id") not in p.nodes:
         raise ValueError("租户或组织归属不匹配")
     id_field = "sku_id" if kind == "stock" else "order_id"
     if raw.get(id_field) != identifier:
@@ -121,16 +119,14 @@ def _validate_and_redact_business_payload(
 
 
 def lookup(
-    conn: Any,
     p: Principal,
     kind: str,
     identifier: str,
-    transport: Any = None,
+    transport: httpx.BaseTransport | None = None,
 ) -> dict[str, Any]:
     """查询受控库存或订单实时状态，未配置或权限不符时安全降级。
 
     Args:
-        conn: 数据库连接占位参数（保持与仓内工具接口一致）。
         p: 当前请求主体。
         kind: 业务域名称（``stock`` 或 ``orders``）。
         identifier: 商品 SKU 或订单编号。
@@ -139,7 +135,6 @@ def lookup(
     Returns:
         结构化业务响应字典，包含 ``available``、``message`` 及脱敏后的 ``record`` / ``source``。
     """
-    _ = conn
     from taozhi.config import get_settings
 
     settings = get_settings()

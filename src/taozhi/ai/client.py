@@ -167,7 +167,7 @@ class LLMClient:
             usage["completion_tokens"],
             failover=failover,
         )
-        self._registry.record_success(ep, latency_ms)
+        self._registry.record_success(ep)
         self._record_route(
             {
                 "endpoint_id": ep.endpoint_id,
@@ -412,14 +412,3 @@ class LLMClient:
         """关闭底层同步 HTTP 连接池。"""
         for http_client in self._http_by_trust_env.values():
             http_client.close()
-
-
-_DEFAULT_CLIENT: Optional[LLMClient] = None
-
-
-def get_llm() -> LLMClient:
-    """获取全局默认 LLMClient 实例。"""
-    global _DEFAULT_CLIENT
-    if _DEFAULT_CLIENT is None:
-        _DEFAULT_CLIENT = LLMClient()
-    return _DEFAULT_CLIENT

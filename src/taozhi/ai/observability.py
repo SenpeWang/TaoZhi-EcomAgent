@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import os
 import threading
 from typing import Any, Dict, Iterator, List, Optional
@@ -44,10 +44,9 @@ class UsageAccumulator:
     cost_usd: float = 0.0
     llm_attempts: int = 0
     llm_errors: int = 0
-    failover_count: int = 0
+    failovers: int = 0
     json_parse_attempts: int = 0
     json_retries: int = 0
-    by_tier: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def add_call(
         self,
@@ -68,12 +67,7 @@ class UsageAccumulator:
         self.cost_usd += cost
         self.llm_attempts += 1
         if failover:
-            self.failover_count += 1
-        bucket = self.by_tier.setdefault(tier, {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0, "cost_usd": 0.0})
-        bucket["prompt_tokens"] += pt
-        bucket["completion_tokens"] += ct
-        bucket["calls"] += 1
-        bucket["cost_usd"] += cost
+            self.failovers += 1
 
     def add_error(self) -> None:
         """累计一次大模型调用失败计数。"""
@@ -95,7 +89,7 @@ class UsageAccumulator:
             "cost_usd": round(float(self.cost_usd), 6),
             "llm_attempts": int(self.llm_attempts),
             "llm_errors": int(self.llm_errors),
-            "failover_count": int(self.failover_count),
+            "failovers": int(self.failovers),
             "json_parse_attempts": int(self.json_parse_attempts),
             "json_retries": int(self.json_retries),
         }

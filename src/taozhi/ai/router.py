@@ -20,9 +20,9 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple
 
-from ..config import Settings, get_settings
-from ..observability import record_diagnostic
+from ..config import Settings
 from ..observability.diagnostics import http_status_of
+from ..observability.tracing import record_diagnostic
 
 RegionType = Literal["domestic", "overseas"]
 
@@ -55,10 +55,6 @@ class _CircuitRecord:
 
     open_until: float = 0.0
     consecutive_failures: int = 0
-    success_count: int = 0
-    last_error_reason: str = ""
-    last_latency_ms: int = 0
-    last_checked_at: float = 0.0
 
 
 class _RouteAuditRecorder:
@@ -207,18 +203,10 @@ class CircuitBreakerRegistry:
         cooling.sort(key=lambda item: (item[0], item[1]))
         return healthy + [item[2] for item in cooling]
 
-    def record_success(self, ep: SensenovaEndpoint, latency_ms: int) -> None:
+    def record_success(self, ep: SensenovaEndpoint) -> None:
         """记录成功调用并闭合（恢复）断路器。"""
-        now = time.monotonic()
-        key = self._state_key(ep)
         with self._lock:
-            rec = self._records.setdefault(key, _CircuitRecord())
-            rec.open_until = 0.0
-            rec.consecutive_failures = 0
-            rec.last_error_reason = ""
-            rec.success_count += 1
-            rec.last_latency_ms = latency_ms
-            rec.last_checked_at = now
+            self._records.pop(self._state_key(ep), None)
 
     def record_failure(self, ep: SensenovaEndpoint, reason: str, cooldown_seconds: int) -> None:
         """记录失败并打开（或延长）断路器冷却窗口。"""
@@ -229,38 +217,6 @@ class CircuitBreakerRegistry:
             rec.consecutive_failures += 1
             multiplier = 1 if reason == "rate_limit" else min(3, rec.consecutive_failures)
             rec.open_until = now + float(cooldown_seconds * multiplier)
-            rec.last_error_reason = reason
-            rec.last_checked_at = now
-
-    def snapshot(self, endpoints: List[SensenovaEndpoint]) -> List[Dict[str, Any]]:
-        """返回无密钥的健康快照供诊断或监控展示。"""
-        now = time.monotonic()
-        rows: List[Dict[str, Any]] = []
-        with self._lock:
-            for ep in endpoints:
-                rec = self._records.get(self._state_key(ep))
-                remaining = max(0.0, rec.open_until - now) if rec else 0.0
-                rows.append(
-                    {
-                        "endpoint_id": ep.endpoint_id,
-                        "label": ep.label,
-                        "region": ep.region,
-                        "base_url": ep.base_url,
-                        "model": ep.model,
-                        "state": "open" if remaining > 0 else "closed",
-                        "remaining_cooldown_s": round(remaining, 1),
-                        "consecutive_failures": rec.consecutive_failures if rec else 0,
-                        "success_count": rec.success_count if rec else 0,
-                        "last_error_reason": rec.last_error_reason if rec else "",
-                        "last_latency_ms": rec.last_latency_ms if rec else 0,
-                    }
-                )
-        return rows
-
-    def reset(self) -> None:
-        """清空全部熔断状态（仅供测试隔离使用）。"""
-        with self._lock:
-            self._records.clear()
 
 
 _GLOBAL_REGISTRY = CircuitBreakerRegistry()
@@ -362,10 +318,3 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
     )
 
     return endpoints
-
-
-def get_router_health(settings: Optional[Settings] = None) -> List[Dict[str, Any]]:
-    """查询当前配置的商汤全通道健康状态快照（无密钥明文）。"""
-    cfg = settings or get_settings()
-    endpoints = build_sensenova_endpoints(cfg)
-    return _GLOBAL_REGISTRY.snapshot(endpoints)

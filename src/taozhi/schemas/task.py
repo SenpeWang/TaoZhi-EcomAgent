@@ -35,6 +35,6 @@ class Question(Input):
 class Tool(Input):
     """直接受控工具调用请求体。"""
 
-    name: Literal["search_knowledge", "query_product_spec", "query_compatibility", "query_stock", "query_order"]
+    name: Literal["search_knowledge", "query_stock", "query_order"]
     query: str = Field(default="", max_length=4000)
     identifier: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")

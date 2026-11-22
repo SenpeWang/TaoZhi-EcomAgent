@@ -11,7 +11,7 @@ from opentelemetry import context as otel_context
 from opentelemetry.trace import StatusCode
 from pydantic import BaseModel, Field
 
-from taozhi.ai import LLMClient, ModelTier
+from taozhi.ai.client import LLMClient, ModelTier
 from taozhi.ai.observability import usage_scope
 from taozhi import config as taozhi_config
 from taozhi.domain.agent_catalog import agent_display_name
@@ -146,7 +146,7 @@ def domain_node(state: State) -> dict:
                 "cost_usd": usage_totals["cost_usd"],
                 "llm_attempts": usage_totals["llm_attempts"],
                 "llm_errors": usage_totals["llm_errors"],
-                "failovers": usage_totals["failover_count"],
+                "failovers": usage_totals["failovers"],
                 "json_retries": usage_totals["json_retries"],
             },
         }

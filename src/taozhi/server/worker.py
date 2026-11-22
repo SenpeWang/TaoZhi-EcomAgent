@@ -17,7 +17,8 @@ from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence import document_repo, job_repo
 from taozhi.infrastructure import task_queue
 from taozhi.infrastructure.persistence.database import close_pools, database_connection
-from taozhi.observability import flush_spans, job_trace, record_diagnostic, setup_tracing
+from taozhi.observability.span_writer import flush_spans
+from taozhi.observability.tracing import job_trace, record_diagnostic, setup_tracing
 
 _LOG = logging.getLogger(__name__)
 STOP = threading.Event()

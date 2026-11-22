@@ -38,7 +38,7 @@ def build_hyde_vector(
         "total_tokens": 0,
         "cost_usd": 0.0,
         "llm_attempts": 0,
-        "failover_count": 0,
+        "failovers": 0,
         "outcome": "skipped",
     }
     try:
@@ -81,7 +81,7 @@ def build_hyde_vector(
                     total_tokens=usage["total_tokens"],
                     cost_usd=usage["cost_usd"],
                     llm_attempts=usage["llm_attempts"],
-                    failover_count=usage["failover_count"],
+                    failovers=usage["failovers"],
                     outcome=outcome,
                 )
                 if conn is not None and principal is not None and job is not None:

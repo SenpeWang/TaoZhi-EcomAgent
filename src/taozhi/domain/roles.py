@@ -8,29 +8,11 @@ ROLE_LEVEL_BOSS = 3
 ROLE_LEVEL_LEADER = 2
 ROLE_LEVEL_STAFF = 1
 
-ROLE_HIERARCHY = {
-    "系统管理员": ROLE_LEVEL_ADMIN,
-    "admin": ROLE_LEVEL_ADMIN,
-    "老板": ROLE_LEVEL_BOSS,
+_MEMBERSHIP_LEVELS = {
     "boss": ROLE_LEVEL_BOSS,
-    "组长": ROLE_LEVEL_LEADER,
     "leader": ROLE_LEVEL_LEADER,
-    "员工": ROLE_LEVEL_STAFF,
-    "staff": ROLE_LEVEL_STAFF,
     "employee": ROLE_LEVEL_STAFF,
 }
-
-
-def get_role_level(role: str) -> int:
-    """把角色名称换算为层级数值。
-
-    Args:
-        role: 角色名称，中英文均可，大小写不敏感。
-
-    Returns:
-        层级数值：系统管理员 4、老板 3、组长 2、员工 1，未知角色为 0。
-    """
-    return ROLE_HIERARCHY.get(str(role or "").strip().lower(), 0)
 
 
 def derive_role_level(system_admin: bool, memberships: Iterable[dict[str, Any]]) -> int:
@@ -46,7 +28,7 @@ def derive_role_level(system_admin: bool, memberships: Iterable[dict[str, Any]])
     if system_admin:
         return ROLE_LEVEL_ADMIN
     return max(
-        (get_role_level(str(m.get("role") or "")) for m in memberships),
+        (_MEMBERSHIP_LEVELS.get(str(m.get("role", "")), 0) for m in memberships),
         default=ROLE_LEVEL_STAFF,
     )
 

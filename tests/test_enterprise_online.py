@@ -1042,7 +1042,9 @@ def test_research_history_derives_facts_only_from_visible_turns(clients):
     reply = staff.get(f"/api/research/conversation/{conv}")
     assert reply.status_code == 200, reply.text
     body = reply.json()
-    assert body["context_summary"] == "" and [f["object"] for f in body["memory_facts"]] == ["本轮可见事实"]
+    assert [f["object"] for f in body["memory_facts"]] == ["本轮可见事实"]
+    assert not {"context_summary", "context_tokens", "is_compacted"}.intersection(body)
+    assert all(isinstance(turn["events"], list) and "thinking_logs" not in turn for turn in body["turns"])
     assert all(secret not in reply.text for secret in ("保密洞察", "保密主题"))
     with database_connection() as conn:
         conn.execute("UPDATE jobs SET sources=%s WHERE id=%s", (as_jsonb([{"document_id": "已撤权"}]), first))
@@ -1134,15 +1136,19 @@ def test_business_row_scope_and_field_masks(monkeypatch,clients):
       "assigned_user_ids":[users["staff"]],"as_of":datetime.now(timezone.utc).isoformat(),"phone":"13812345678","address":"完整隐私地址","customer_name":"张三","purchase_cost_minor":800}
     transport=httpx.MockTransport(lambda req:httpx.Response(200,json=record))
     with database_connection() as c:
-        employee=lookup(c,load_principal(c,users["staff"]),"orders","ORDER01",transport)
-        manager=lookup(c,load_principal(c,users["boss"]),"orders","ORDER01",transport)
+        employee=lookup(load_principal(c,users["staff"]),"orders","ORDER01",transport)
+        manager=lookup(load_principal(c,users["boss"]),"orders","ORDER01",transport)
         assert employee["available"] and employee["record"]["phone"]=="138****5678"
         assert "purchase_cost_minor" not in employee["record"] and "完整隐私地址" not in json.dumps(employee)
         assert manager["record"]["purchase_cost_minor"]==800
+        alias_record = {**record, "org_tag": record["tenant_id"]}
+        del alias_record["tenant_id"]
+        alias_transport = httpx.MockTransport(lambda _: httpx.Response(200, json=alias_record))
+        assert not lookup(load_principal(c,users["staff"]), "orders", "ORDER01", alias_transport)["available"]
         record["assigned_user_ids"]=[]
-        assert not lookup(c,load_principal(c,users["staff"]),"orders","ORDER01",transport)["available"]
+        assert not lookup(load_principal(c,users["staff"]),"orders","ORDER01",transport)["available"]
         record["tenant_id"]="foreign"
-        assert not lookup(c,load_principal(c,users["boss"]),"orders","ORDER01",transport)["available"]
+        assert not lookup(load_principal(c,users["boss"]),"orders","ORDER01",transport)["available"]
 
 def test_malicious_document_not_sent_to_model(monkeypatch,clients):
     seen=[];fake_model(monkeypatch,seen);users,nodes=ids()
@@ -1237,9 +1243,9 @@ def test_business_nested_fields_cannot_smuggle_private_payload(monkeypatch,clien
         employee=load_principal(c,users["staff"])
         for malicious in ({"status":{"phone":"机密998877"}},{"assigned_user_ids":[users["staff"],{"secret":"机密998877"}]},{"phone":"sk-secret-key-private"}):
             transport=httpx.MockTransport(lambda req:httpx.Response(200,json={**base,**malicious}))
-            result=lookup(c,employee,"orders","ORDER01",transport)
+            result=lookup(employee,"orders","ORDER01",transport)
             assert not result["available"] and "998877" not in json.dumps(result)
-        result=lookup(c,employee,"orders","ORDER01",httpx.MockTransport(lambda req:httpx.Response(200,json=base)))
+        result=lookup(employee,"orders","ORDER01",httpx.MockTransport(lambda req:httpx.Response(200,json=base)))
         assert result["available"] and result["source"]["assigned_user_ids"]==[users["staff"]]
 
 def _principal():

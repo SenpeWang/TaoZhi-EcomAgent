@@ -51,6 +51,7 @@ export interface TaskResult {
   cache_hit?: boolean
   data?: unknown
   report?: string
+  keyword?: string
   outline?: string[]
   platforms?: ResearchPlatform[]
   subagents?: ResearchSubagent[]

@@ -488,6 +488,7 @@ def test_process_research_job_reads_budgets_from_settings():
         "tenant_id": "mofa",
         "run_version": 1,
         "question": "分析蓝牙耳机市场",
+        "conversation_id": "conversation_1",
         "payload": {"keyword": "蓝牙耳机"},
     }
     with (
@@ -509,6 +510,7 @@ def test_process_research_job_reads_budgets_from_settings():
     assert captured["max_parallel_subagents"] == 2
     assert captured["max_subagent_steps"] == 3
     assert captured["require_checkpointer"] is True
+    assert captured["conversation_id"] == "conversation_1"
 
 
 def test_sensenova_router_failover_circuit_and_compliance():
@@ -740,8 +742,8 @@ def test_usage_scope_isolates_concurrent_threads_and_tracks_json_retries():
     with ThreadPoolExecutor(max_workers=2) as pool:
         r1, r2 = list(pool.map(_worker, [(60, 20), (140, 40)]))
 
-    assert r1["prompt_tokens"] == 60 and r1["completion_tokens"] == 20 and r1["failover_count"] == 0
-    assert r2["prompt_tokens"] == 140 and r2["completion_tokens"] == 40 and r2["failover_count"] == 1
+    assert r1["prompt_tokens"] == 60 and r1["completion_tokens"] == 20 and r1["failovers"] == 0
+    assert r2["prompt_tokens"] == 140 and r2["completion_tokens"] == 40 and r2["failovers"] == 1
 
     c = LLMClient()
     with patch.object(c, "chat", side_effect=["not json", '{"ok": true}']):

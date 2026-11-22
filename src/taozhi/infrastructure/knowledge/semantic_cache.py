@@ -18,7 +18,7 @@ from taozhi.config import Config, load_config
 from taozhi.infrastructure.knowledge.embedding import available as embedding_available, encode_query
 from taozhi.domain.entity_extraction import extract_entities
 from taozhi.domain.privacy import redact
-from taozhi.observability import record_diagnostic
+from taozhi.observability.tracing import record_diagnostic
 
 logger = logging.getLogger("taozhi.server.semantic_cache")
 

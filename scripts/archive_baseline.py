@@ -72,7 +72,7 @@ def gate_summary(report: dict) -> str:
     faith = (six.get("faithfulness") or {}).get("micro")
     relev = (six.get("answer_accuracy") or {}).get("relevant_rate")
     recall = six.get("recall@k") or {}
-    recall8 = recall.get(8, recall.get("8"))
+    recall8 = recall.get("8")
     parts = []
     if faith is not None:
         parts.append(f"faith {faith:.3f}{'✅' if faith >= 0.85 else '⛔'}")

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -253,3 +254,13 @@ def test_sut_token_slo_and_throughput_reports():
     tp = throughput_report(4.0, 8, 4, [1.0, 2.0])
     assert tp["qps"] == pytest.approx(2.0)
     assert tp["concurrency"] == 4
+
+
+def test_recall_cutoff_format_matches_gate_before_and_after_archiving():
+    from evals.rag_eval.run import gate_check, six_metrics
+
+    metrics = six_metrics({"retrieval": {"recall@8": 0.75}})
+    assert metrics["recall@k"]["8"] == 0.75
+    expected = ([], [("context_recall@8", 0.75, 0.80)])
+    assert gate_check(metrics) == expected
+    assert gate_check(json.loads(json.dumps(metrics))) == expected

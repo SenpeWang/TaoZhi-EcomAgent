@@ -35,25 +35,24 @@ def process_research_job(job: dict[str, Any]) -> None:
             return list(((r or {}).get("payload") or {}).get("steering_inputs") or [])
 
     settings = get_settings()
-    conv_id = job.get("conversation_id") or (job.get("payload") or {}).get("conversation_id") or ""
-    keyword = (job.get("payload") or {}).get("keyword") or job["question"]
-    initial_steering = (job.get("payload") or {}).get("steering_inputs") or []
+    payload = job["payload"]
+    keyword = payload.get("keyword") or job["question"]
 
     with postgres_checkpointer() as saver:
         result = execute_autonomous_agents(
             keyword=keyword,
             user_query=job["question"],
             job_id=job["id"],
-            tenant_id=job.get("tenant_id") or "default",
-            run_version=job.get("run_version") or 1,
-            conversation_id=conv_id,
+            tenant_id=job["tenant_id"],
+            run_version=job["run_version"],
+            conversation_id=job["conversation_id"],
             checkpointer=saver,
             require_checkpointer=True,
             emit_event_fn=emit,
             result_delta_fn=lambda text: task_output.publish_report_delta(job["id"], job["run_version"], text),
             result_reset_fn=lambda: task_output.publish_report_delta(job["id"], job["run_version"], None),
             model_call_fn=record_model_call,
-            initial_steering=initial_steering,
+            initial_steering=payload.get("steering_inputs", []),
             timeout_seconds=max(240.0, float(settings.llm_timeout or 90.0) * 2.5),
             max_turns=int(settings.research_max_turns),
             max_parallel_subagents=int(settings.research_max_parallel_subagents),

@@ -1,65 +1,53 @@
 /** 统一任务进度 SSE 事件流订阅载荷 */
-export interface TaskStreamEventRow {
+interface TaskStreamEventRow {
   id?: number
   stage?: string
   progress?: number
   status?: string
-  run_version?: number
 }
 
 /** 统一任务 SSE 订阅回调契约 */
-export interface TaskStreamHandlers {
+interface TaskStreamHandlers {
   onMessage: (row: TaskStreamEventRow) => void
   onResult?: (text: string) => void
-  onDone?: (payload: { id?: string }) => void
+  onDone?: () => void
   onError?: () => void
 }
 
 /** 终态任务轮询配置与回调契约 */
-export interface TaskPollingOptions<T extends { state: string }> {
+interface TaskPollingOptions<T extends { state: string }> {
   fetchTask: () => Promise<T>
-  terminalStates?: readonly string[]
   maxAttempts?: number
-  intervalMs?: number
   signal?: AbortSignal
   onTick?: (task: T) => void
-  onError?: (err: unknown) => void
 }
+
+const terminalStates = new Set(['completed', 'review', 'failed', 'cancelled', 'rejected'])
 
 /**
  * 在 SSE 断连或降级时按固定间隔轮询任务直至进入终态。
- * @param options - 拉取函数、终态集合、重试上限与周期回调配置。
+ * @param options - 拉取函数、重试上限、取消信号与周期回调。
  * @returns 进入终态后的最新任务对象；超过最大轮询次数且始终失败时返回 null。
  */
 export async function pollTaskUntilTerminal<T extends { state: string }>(
   options: TaskPollingOptions<T>,
 ): Promise<T | null> {
-  const terminalStates = options.terminalStates ?? [
-    'completed',
-    'review',
-    'failed',
-    'cancelled',
-    'rejected',
-  ]
   const maxAttempts = options.maxAttempts ?? 45
-  const intervalMs = options.intervalMs ?? 2000
   let latest: T | null = null
 
   for (let i = 0; i < maxAttempts && !options.signal?.aborted; i++) {
     if (i > 0) {
-      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+      await new Promise((resolve) => setTimeout(resolve, 2000))
     }
     try {
       if (options.signal?.aborted) return null
       latest = await options.fetchTask()
       if (options.signal?.aborted) return null
       options.onTick?.(latest)
-      if (terminalStates.includes(latest.state)) {
+      if (terminalStates.has(latest.state)) {
         return latest
       }
-    } catch (err: unknown) {
-      options.onError?.(err)
-    }
+    } catch {}
   }
   return latest
 }
@@ -135,7 +123,6 @@ export function openTaskEventStream(taskId: string, handlers: TaskStreamHandlers
       stage: row.stage,
       progress: typeof row.progress === 'number' ? row.progress : undefined,
       status: typeof row.status === 'string' ? row.status : undefined,
-      run_version: runVersion,
     })
   }
   source.addEventListener('result_delta', (event) => {
@@ -168,11 +155,11 @@ export function openTaskEventStream(taskId: string, handlers: TaskStreamHandlers
     if (!closed && draft && row?.run_version === runVersion) handlers.onResult?.(draft)
   })
   source.addEventListener('done', (event) => {
-    if (closed) return
     const row = eventData(event)
+    if (row?.id !== taskId || !selectRun(row.run_version)) return
     close()
     handlers.onResult?.('')
-    handlers.onDone?.({ id: typeof row?.id === 'string' ? row.id : taskId })
+    handlers.onDone?.()
   })
   /** 断线时隐藏草稿，保留续传所需的缓冲区。 */
   source.onerror = () => {

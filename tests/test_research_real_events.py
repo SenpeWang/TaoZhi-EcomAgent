@@ -195,5 +195,5 @@ def test_zero_fake_thinking_in_frontend():
     vue_file = Path(__file__).resolve().parents[1] / "web/src/features/tasks/ResearchChatView.vue"
     content = vue_file.read_text(encoding="utf-8")
 
-    assert "thinkingLogs: ['思考\\n总指挥" not in content
-    assert "thinkingLogs: []" in content
+    assert "thinkingLogs" not in content and "thinking_logs" not in content
+    assert "events: []" in content and 'turns.value = res.turns' in content

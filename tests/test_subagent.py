@@ -5,7 +5,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-from taozhi.core.agent import SubagentContext, WorkspaceMode
+from taozhi.core.agent.context import SubagentContext
+from taozhi.core.agent.protocol import WorkspaceMode
 from taozhi.core.tools.search_web import search_web
 from taozhi.application.research.graph import execute_autonomous_agents
 

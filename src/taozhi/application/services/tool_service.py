@@ -10,9 +10,10 @@ from taozhi.infrastructure.persistence.database import database_connection
 
 def execute_tool(p: Principal, *, name: str, query: str, identifier: str) -> dict[str, Any]:
     """执行前端直接调用的受控业务查询或企业文档检索工具。"""
-    with database_connection() as c:
-        if name in ("query_stock", "query_order"):
-            return lookup(c, p, "stock" if name == "query_stock" else "orders", identifier)
-        from taozhi.infrastructure.knowledge.retriever import search_documents
+    if name in ("query_stock", "query_order"):
+        return lookup(p, "stock" if name == "query_stock" else "orders", identifier)
 
+    from taozhi.infrastructure.knowledge.retriever import search_documents
+
+    with database_connection() as c:
         return {"items": search_documents(c, p, query, 8)}

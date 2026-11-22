@@ -128,9 +128,8 @@ def require_document_read(conn: Any, p: Principal, d: dict[str, Any]) -> dict[st
     return grant
 
 
-def get_metric_grant(conn: Any, p: Principal, m: dict[str, Any] | str) -> dict[str, Any] | None:
+def get_metric_grant(conn: Any, p: Principal, metric_id: str) -> dict[str, Any] | None:
     """查询指定主体针对 BI 指标的显式个人特例授权记录。"""
-    metric_id = m.get("id") if isinstance(m, dict) else m
     return fetch_one(
         conn,
         "SELECT * FROM metric_grants WHERE tenant_id=%s AND metric_id=%s AND user_id=%s",
@@ -140,7 +139,7 @@ def get_metric_grant(conn: Any, p: Principal, m: dict[str, Any] | str) -> dict[s
 
 def can_read_metric(conn: Any, p: Principal, m: dict[str, Any]) -> bool:
     """判定主体是否有权访问或执行目标发布态 BI 指标。"""
-    g = get_metric_grant(conn, p, m)
+    g = get_metric_grant(conn, p, m["id"])
     return evaluate_metric_read_permission(p, m, g)
 
 
@@ -189,7 +188,7 @@ def source_valid(conn: Any, p: Principal, source: dict[str, Any], external: bool
             return False
         from taozhi.infrastructure.business_gateway import lookup
 
-        fresh = lookup(conn, p, source.get("resource"), source.get("identifier"))
+        fresh = lookup(p, source.get("resource"), source.get("identifier"))
         return bool(fresh.get("available"))
     d = fetch_one(conn, "SELECT * FROM documents WHERE tenant_id=%s AND id=%s", (p.tenant_id, source.get("document_id")))
     return bool(

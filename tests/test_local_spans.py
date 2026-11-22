@@ -177,7 +177,6 @@ def test_retrieval_model_spans_only_measure_real_requests(monkeypatch):
     monkeypatch.setattr(embedding, "load_config", lambda: SimpleNamespace(embed_service_url="http://local", rerank_timeout=5))
     monkeypatch.setattr(embedding, "model_signature", lambda: "encoder:2")
     monkeypatch.setattr(embedding, "_query_cache", embedding.OrderedDict())
-    monkeypatch.setattr(embedding, "_query_stats", {"hits": 0, "misses": 0})
     post = Mock(side_effect=[
         Mock(json=lambda: {"model": "encoder", "vectors": [[0.1, 0.2]]}),
         Mock(json=lambda: {"model": "reranker", "scores": [0.95]}),

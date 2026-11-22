@@ -43,7 +43,7 @@ def merge_token_usage(base: dict | None, role_key: str, u: dict) -> dict:
     cost = float(u.get("cost_usd", 0.0) or 0.0)
     att = int(u.get("llm_attempts", 0) or 0)
     err = int(u.get("llm_errors", 0) or 0)
-    fov = int(u.get("failovers", u.get("failover_count", 0)) or 0)
+    fov = int(u.get("failovers", 0) or 0)
     jrt = int(u.get("json_retries", 0) or 0)
     out["prompt_tokens"] += pt
     out["completion_tokens"] += ct

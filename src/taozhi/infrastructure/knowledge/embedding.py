@@ -29,7 +29,6 @@ FAIL_TTL = 10.0
 
 QUERY_CACHE_MAX = 2048
 _query_cache: OrderedDict = OrderedDict()
-_query_stats = {"hits": 0, "misses": 0}
 
 
 def _probe() -> Tuple[bool, str, int]:
@@ -77,12 +76,7 @@ def digest(text: str) -> str:
 
 
 def to_vector(raw) -> Optional[np.ndarray]:
-    """把库里读回的向量统一成 float32 数组；无法识别返回 None。
-
-    读回形态取决于 pgvector-python 是否注册：注册后为 Vector（可转 numpy），
-    未注册时为文本；历史 bytea 列也可能是字节串。放这里是为了让"向量怎么存、
-    怎么读"只有一个实现。
-    """
+    """将 pgvector 原生向量或文本表示归一为 float32 数组。"""
     if raw is None:
         return None
     if isinstance(raw, np.ndarray):
@@ -93,8 +87,6 @@ def to_vector(raw) -> Optional[np.ndarray]:
             return to_numpy().astype("float32", copy=False)
         except Exception:
             return None
-    if isinstance(raw, (bytes, bytearray, memoryview)) and len(raw) % 4 == 0:
-        return np.frombuffer(raw, dtype="float32")
     if isinstance(raw, str) and raw.startswith("[") and raw.endswith("]"):
         try:
             return np.fromstring(raw[1:-1], sep=",", dtype="float32")
@@ -151,9 +143,7 @@ def encode_query(query: str) -> np.ndarray:
         hit = _query_cache.get(key)
         if hit is not None:
             _query_cache.move_to_end(key)
-            _query_stats["hits"] += 1
             return hit
-        _query_stats["misses"] += 1
     vec = _post([query], instruct=True)
     with _lock:
         _query_cache[key] = vec
@@ -177,20 +167,3 @@ def rerank(query: str, texts: list[str]) -> list[float]:
         if span is not None and payload.get("model"):
             span.set_attribute(RerankerAttributes.RERANKER_MODEL_NAME, payload["model"])
         return [float(score) for score in payload["scores"]]
-
-
-def query_cache_stats() -> dict:
-    """查询向量缓存的命中情况，供观测与回归测试断言。"""
-    with _lock:
-        hits, misses = _query_stats["hits"], _query_stats["misses"]
-        size = len(_query_cache)
-    total = hits + misses
-    return {"hits": hits, "misses": misses, "size": size,
-            "hit_rate": round(hits / total, 4) if total else 0.0}
-
-
-def clear_query_cache() -> None:
-    """清空查询向量缓存。换模型或做对照实验时用。"""
-    with _lock:
-        _query_cache.clear()
-        _query_stats.update(hits=0, misses=0)

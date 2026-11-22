@@ -121,12 +121,12 @@ def retry_retrieval(state: State) -> dict:
     }
 
 
-def _business_record(conn, principal, kind: str, identifier: str, fields: tuple[str, ...] | list[str]) -> dict:
+def _business_record(principal, kind: str, identifier: str, fields: tuple[str, ...] | list[str]) -> dict:
     if not identifier:
         message = ("查询实时库存或现价需要商品编号；未接入业务系统时不能提供实时数据" if kind == "stock"
                    else "查询真实订单需要订单编号，并接入企业订单系统")
         return {"available": False, "message": message}
-    item = lookup(conn, principal, kind, identifier)
+    item = lookup(principal, kind, identifier)
     if not item.get("available"):
         return item
     row = item["record"]
@@ -147,29 +147,28 @@ def read_business_snapshot(state: State) -> dict:
     other_subjects = fact_subjects(state["question"])
     if "售后" in state["question"] and not other_subjects.intersection({"保修条件", "退换与退款"}):
         other_subjects.add("售后政策")
-    with database_connection() as conn:
-        for kind, requests in state["live_fields"].items():
-            fields = []
-            for field, reason in requests.items():
-                label, subject = fields_by_name[field]
-                other_subjects.discard(subject)
-                if reason:
-                    missing.append(f"{label}：{reason}")
-                else:
-                    fields.append(field)
-            if not fields:
-                continue
-            id_field = "sku_id" if kind == "stock" else "order_id"
-            item = _business_record(conn, principal, kind, job["payload"].get(id_field, ""), fields)
-            if item.get("available"):
-                for field in fields:
-                    if field not in item["record"]:
-                        label = fields_by_name[field][0]
-                        missing.append(f"业务系统未返回{label}，无法确认该值。")
+    for kind, requests in state["live_fields"].items():
+        fields = []
+        for field, reason in requests.items():
+            label, subject = fields_by_name[field]
+            other_subjects.discard(subject)
+            if reason:
+                missing.append(f"{label}：{reason}")
             else:
-                labels = "、".join(fields_by_name[field][0] for field in fields)
-                missing.append(f"{labels}：{item['message']}")
-            records.append(item)
+                fields.append(field)
+        if not fields:
+            continue
+        id_field = "sku_id" if kind == "stock" else "order_id"
+        item = _business_record(principal, kind, job["payload"].get(id_field, ""), fields)
+        if item.get("available"):
+            for field in fields:
+                if field not in item["record"]:
+                    label = fields_by_name[field][0]
+                    missing.append(f"业务系统未返回{label}，无法确认该值。")
+        else:
+            labels = "、".join(fields_by_name[field][0] for field in fields)
+            missing.append(f"{labels}：{item['message']}")
+        records.append(item)
     missing.extend(f"本次查询的业务快照不包含{subject}，请另行核对适用的授权资料。" for subject in sorted(other_subjects))
     sources = [item["source"] for item in records if item.get("available")]
     return {
@@ -195,7 +194,7 @@ def prepare_evidence(state: State) -> dict:
             extra = [doc for doc in recalled if doc["chunk_id"] not in seen and not detect_injection(doc["quote"])[0]]
             evidence = (extra + evidence)[:_EVIDENCE_LIMIT]
 
-        business = [_business_record(conn, p, kind, identifier, _OVERVIEW_FIELDS[kind])
+        business = [_business_record(p, kind, identifier, _OVERVIEW_FIELDS[kind])
                     for kind, identifier in requested_business_resources(question, job["payload"]).items()
                     if requests_record_overview(question, kind)]
 

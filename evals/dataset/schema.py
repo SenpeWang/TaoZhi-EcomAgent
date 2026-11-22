@@ -51,10 +51,6 @@ REQUIRED_FIELDS = ("case_id", "category", "dataset", "test_identity", "question"
 IDENTITY_FIELDS = ("logical_id", "username")
 
 
-class SchemaError(Exception):
-    pass
-
-
 def load_spec():
     import yaml
     org = yaml.safe_load((SPEC / "org.yaml").read_text(encoding="utf-8"))

@@ -28,7 +28,7 @@ let errors = 0
 const close = openTaskEventStream('turn/1', {
   onMessage: (row) => progress.push(row.stage),
   onResult: (draft) => drafts.push(draft),
-  onDone: (payload) => done.push(payload.id),
+  onDone: () => done.push('completed'),
   onError: () => errors++,
 })
 const delta = (id, text, run_version = 1) => stream.receive('result_delta', {id, text, run_version})
@@ -57,11 +57,14 @@ assert.equal(drafts.at(-1), '')
 delta(8, '新结果', 2)
 stream.receive('result_reset', {run_version: 2})
 assert.equal(drafts.at(-1), '')
-stream.receive('done', {id:'turn/1'})
+stream.receive('done', {id:'turn/1', run_version: 1})
+stream.receive('done', {id:'another-turn', run_version: 2})
+assert.deepEqual(done, [])
+stream.receive('done', {id:'turn/1', run_version: 2})
 delta(9, '迟到', 2)
 assert.equal(drafts.at(-1), '')
 assert.deepEqual(progress, ['开始撰写', '重试'])
-assert.deepEqual(done, ['turn/1'])
+assert.deepEqual(done, ['completed'])
 assert.equal(stream.readyState, Source.CLOSED)
 close()
 """

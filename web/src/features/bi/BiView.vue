@@ -339,7 +339,6 @@ echarts.use([
 type MetricBlock = {
   columns: string[]
   rows: unknown[][]
-  denied?: boolean
   name: string
   unit: string
   level: number
@@ -381,7 +380,7 @@ type Message = {
   progress?: number
   data?: MetricBlock & { metric_name: string }
 }
-const props = defineProps<{ user: { id: string; display_name: string }; api: ApiClient }>()
+const props = defineProps<{ api: ApiClient }>()
 
 const COLUMN_LABEL_MAP: Record<string, string> = {
   channel_name: '销售渠道',
@@ -949,6 +948,12 @@ async function ask(q: string): Promise<void> {
  * @param pending - 界面中等待完成的消息。
  */
 function followTask(taskId: string, pending: Message): void {
+  /** 回源获取经权限筛查的最新结果。 */
+  function loadResult(): void {
+    closeStream = null
+    void finish(taskId, pending)
+  }
+
   closeStream?.()
   closeStream = openTaskEventStream(taskId, {
     /**
@@ -966,20 +971,8 @@ function followTask(taskId: string, pending: Message): void {
     onResult: (text) => {
       pending.text = text
     },
-    /**
-     * 监听终态事件：清理句柄并拉取结果。
-     */
-    onDone: () => {
-      closeStream = null
-      void finish(taskId, pending)
-    },
-    /**
-     * SSE 断连兜底：清空句柄并转入轮询拉取终态。
-     */
-    onError: () => {
-      closeStream = null
-      void finish(taskId, pending)
-    },
+    onDone: loadResult,
+    onError: loadResult,
   })
 }
 
@@ -1002,9 +995,7 @@ async function finish(taskId: string, pending: Message): Promise<void> {
        */
       fetchTask: () => props.api<BiTaskResult>('/tasks/' + taskId),
       signal: viewLifetime.signal,
-      terminalStates: ['completed', 'review', 'failed', 'cancelled', 'rejected'],
       maxAttempts: 30,
-      intervalMs: 2000,
     })
     if (viewLifetime.signal.aborted) return
     if (!job) throw new Error('查询连接已中断')
@@ -1013,23 +1004,14 @@ async function finish(taskId: string, pending: Message): Promise<void> {
       return
     }
     const res = job.result
-    if (res?.data && !res.data.denied && res.data.columns?.length) {
-      messages.value.splice(messages.value.indexOf(pending), 1, {
-        role: 'system',
-        data: res.data,
-      })
-      return
+    pending.pending = false
+    if (res?.data?.columns?.length) {
+      pending.data = res.data
     } else if (res?.answer && /无权查看|受限指标/.test(res.answer)) {
-      messages.value.splice(messages.value.indexOf(pending), 1, {
-        role: 'system',
-        denied: true,
-        text: res.answer.split('\n')[0],
-      })
+      pending.denied = true
+      pending.text = res.answer.split('\n')[0]
     } else {
-      messages.value.splice(messages.value.indexOf(pending), 1, {
-        role: 'system',
-        text: res?.answer || '暂未匹配到相关指标数据，请换个问法，或前往知识文档检索资料。',
-      })
+      pending.text = res?.answer || '暂未匹配到相关指标数据，请换个问法，或前往知识文档检索资料。'
     }
   } catch (e: unknown) {
     const raw = e instanceof Error ? e.message : String(e)
@@ -1037,10 +1019,8 @@ async function finish(taskId: string, pending: Message): Promise<void> {
       raw && /[\u4e00-\u9fff]/.test(raw)
         ? raw
         : '结果获取异常：' + (raw || '未知错误').slice(0, 120)
-    messages.value.splice(messages.value.indexOf(pending), 1, {
-      role: 'system',
-      text: detail + '，请稍后重试。',
-    })
+    pending.pending = false
+    pending.text = detail + '，请稍后重试。'
   } finally {
     if (!viewLifetime.signal.aborted && !closeStream) asking.value = false
     await scrollBottom()

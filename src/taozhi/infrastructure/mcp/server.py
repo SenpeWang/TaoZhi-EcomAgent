@@ -22,28 +22,29 @@ _SEARCH_TOOL_MODULES = {
 }
 
 
-def _build_handler(tool_name: str, arg_spec: tuple[tuple[str, tuple[str, ...], Any, Any], ...]) -> Callable[[Dict[str, Any]], Any]:
-    """根据声明式参数规格构造标准 MCP 工具调用适配器。"""
+_ARGUMENT_TYPES = {"string": (str,), "integer": (int,), "number": (int, float)}
+
+
+def _build_search_handler(tool_name: str, schema: dict[str, Any]) -> Callable[[dict[str, Any]], Any]:
+    """按工具公开参数契约校验调用，再交给对应采集器。"""
     module = _SEARCH_TOOL_MODULES[tool_name]
+    properties = schema["properties"]
+    required = set(schema["required"])
 
-    def _handle(args: Dict[str, Any]) -> Any:
-        kwargs: Dict[str, Any] = {}
-        for target_key, source_keys, default_val, caster in arg_spec:
-            raw_val = next((args.get(k) for k in source_keys if args.get(k) is not None), None)
-            if raw_val is None:
-                if default_val is None:
-                    continue
-                raw_val = default_val
-            kwargs[target_key] = caster(raw_val)
-        return getattr(module, tool_name)(**kwargs)
+    def handle(arguments: dict[str, Any]) -> Any:
+        if not required <= arguments.keys() or arguments.keys() - properties.keys():
+            raise ToolInvocationError("tool.invalid_arguments")
+        if any(type(value) not in _ARGUMENT_TYPES[properties[key]["type"]] for key, value in arguments.items()):
+            raise ToolInvocationError("tool.invalid_arguments")
+        return getattr(module, tool_name)(**arguments)
 
-    return _handle
+    return handle
 
 
 class EcommerceMcpServer:
     """电商与市场情报类 MCP 服务端（支持 tools/list 与 tools/call）。"""
 
-    _SEARCH_TOOL_SPECS: tuple[tuple[str, str, Dict[str, Any], tuple[tuple[str, tuple[str, ...], Any, Any], ...]], ...] = (
+    _SEARCH_TOOL_SPECS: tuple[tuple[str, str, dict[str, Any]], ...] = (
         (
             "search_amazon",
             "在亚马逊全球站 (https://www.amazon.com/) 检索跨境商品、零售价($)、ASIN、评分与买家评论。",
@@ -55,8 +56,8 @@ class EcommerceMcpServer:
                     "timeout": {"type": "number", "description": "可选单次超时时间（秒）", "default": 12.0},
                 },
                 "required": ["query"],
+                "additionalProperties": False,
             },
-            (("query", ("query",), "", str), ("limit", ("limit",), 10, int), ("timeout", ("timeout",), None, float)),
         ),
         (
             "search_1688_wholesale",
@@ -69,8 +70,8 @@ class EcommerceMcpServer:
                     "timeout": {"type": "number", "description": "可选单次超时时间（秒）", "default": 90.0},
                 },
                 "required": ["keyword"],
+                "additionalProperties": False,
             },
-            (("keyword", ("keyword", "query"), "", str), ("limit", ("limit",), 20, int), ("timeout", ("timeout",), None, float)),
         ),
         (
             "search_web",
@@ -83,8 +84,8 @@ class EcommerceMcpServer:
                     "timeout": {"type": "number", "description": "可选单次超时时间（秒）", "default": 12.0},
                 },
                 "required": ["query"],
+                "additionalProperties": False,
             },
-            (("query", ("query",), "", str), ("limit", ("limit",), 10, int), ("timeout", ("timeout",), None, float)),
         ),
         (
             "fetch_web_page",
@@ -97,8 +98,8 @@ class EcommerceMcpServer:
                     "timeout": {"type": "number", "description": "可选单次超时时间（秒）", "default": 10.0},
                 },
                 "required": ["url"],
+                "additionalProperties": False,
             },
-            (("url", ("url",), "", str), ("max_chars", ("max_chars",), 4000, int), ("timeout", ("timeout",), None, float)),
         ),
     )
 
@@ -108,10 +109,10 @@ class EcommerceMcpServer:
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
-        for name, desc, schema, arg_spec in self._SEARCH_TOOL_SPECS:
+        for name, desc, schema in self._SEARCH_TOOL_SPECS:
             self.register_tool(
                 McpToolDefinition(name=name, description=desc, inputSchema=schema),
-                handler=_build_handler(name, arg_spec),
+                handler=_build_search_handler(name, schema),
             )
         self.register_tool(
             McpToolDefinition(

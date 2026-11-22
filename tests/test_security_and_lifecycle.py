@@ -12,10 +12,30 @@ from taozhi.core.tools import web_scraper
 
 search_amazon = importlib.import_module("taozhi.core.tools.search_amazon")
 from taozhi.domain.errors import Denied
+from taozhi.domain.roles import derive_role_level
 from taozhi.domain.url_guard import validate_public_http_url
 from taozhi.infrastructure.persistence import job_repo
 from taozhi.infrastructure import task_queue
 from taozhi.infrastructure.persistence.database import database_connection
+from taozhi.schemas.task import Tool
+
+
+def test_membership_role_names_cannot_grant_undeclared_privileges():
+    assert derive_role_level(False, []) == 1
+    assert derive_role_level(False, [{"role": "employee"}, {"role": "leader"}]) == 2
+    assert derive_role_level(False, [{"role": "boss"}]) == 3
+    assert derive_role_level(True, [{"role": "employee"}]) == 4
+    for old_role in ("admin", "系统管理员", "老板", "staff", " Boss "):
+        assert derive_role_level(False, [{"role": old_role}]) == 0
+
+
+def test_knowledge_lookup_has_one_public_tool_name():
+    from pydantic import ValidationError
+
+    assert Tool(name="search_knowledge", query="规格").name == "search_knowledge"
+    for old_name in ("query_product_spec", "query_compatibility"):
+        with pytest.raises(ValidationError):
+            Tool(name=old_name, query="规格")
 
 
 def test_url_guard_and_web_scraper_block_ssrf_and_internal_redirects():

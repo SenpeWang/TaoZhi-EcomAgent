@@ -42,12 +42,11 @@ def get_research_conversation(p: Principal, conversation_id: str) -> dict[str, A
     with database_connection() as c:
         rows = job_repo.list_research_conversation_turns(c, p.tenant_id, p.id, conversation_id)
         if not rows:
-            return {"conversation_id": conversation_id, "turns": [], "context_summary": "", "memory_facts": []}
+            return {"conversation_id": conversation_id, "turns": [], "memory_facts": []}
         turns = []
         facts = {}
         for r in rows:
             pj = job_repo.present_job(c, p, r, True)
-            pj["thinking_logs"] = [e["stage"] for e in pj["events"] if e.get("stage")]
             visible_result = pj["result"] or {}
             calc_elapsed = (
                 round((r["finished_at"] - r["started_at"]).total_seconds(), 1)
@@ -63,16 +62,12 @@ def get_research_conversation(p: Principal, conversation_id: str) -> dict[str, A
                         summary = str(item["summary"])[:300]
                         facts[(subject, role)] = {"subject": subject, "predicate": role, "object": summary if p.boss else redact(summary)}
             turns.append(pj)
-        latest_res = turns[-1]["result"] or {}
         first = turns[0]
         kw = first["question"] if first["restricted"] else (rows[0].get("payload") or {}).get("keyword") or first["question"]
     return {
         "conversation_id": conversation_id,
         "keyword": kw,
         "turns": turns,
-        "context_summary": latest_res.get("context_summary", ""),
-        "context_tokens": latest_res.get("context_tokens", 0),
-        "is_compacted": latest_res.get("is_compacted", False),
         "memory_facts": list(facts.values())[-20:],
     }
 

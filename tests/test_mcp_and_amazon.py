@@ -99,7 +99,7 @@ def test_search_amazon_execution_and_data_structure():
     assert item["url"] == f"{AMAZON_BASE_URL}dp/B0REAL0001"
 
 
-def test_mcp_server_call_tool_and_alias():
+def test_mcp_server_enforces_canonical_tool_names_and_parameters():
     """测试 MCP 服务端 tools/call 执行、规范命名及未知工具报错。"""
     server = EcommerceMcpServer()
 
@@ -121,8 +121,16 @@ def test_mcp_server_call_tool_and_alias():
     with patch(
         "taozhi.core.tools.search_1688.search_1688_wholesale",
         return_value=[{"title": "东莞源头厂保温杯", "price": 18.5}],
-    ):
+    ) as search:
         ws_res = server.call_tool("search_1688_wholesale", {"keyword": "保温杯", "limit": 2})
+        for invalid_arguments in (
+            {"query": "保温杯"},
+            {"keyword": "保温杯", "query": "其他搜索词"},
+            {"keyword": "保温杯", "limit": "2"},
+        ):
+            invalid = server.call_tool("search_1688_wholesale", invalid_arguments)
+            assert invalid.isError and "参数不符合" in invalid.content[0].text
+        search.assert_called_once_with(keyword="保温杯", limit=2)
     assert not ws_res.isError
     ws_parsed = json.loads(ws_res.content[0].text)
     assert ws_parsed[0]["title"] == "东莞源头厂保温杯"

@@ -19,13 +19,10 @@ from taozhi.observability.tracing import current_trace_id, node_span, record_dia
 
 
 def _elapsed_ms(start_dt: datetime | None, end_dt: datetime | None = None) -> int:
-    """计算两个时间戳之间的毫秒差，兼容时区缺失场景。"""
+    """计算 PostgreSQL 带时区时间戳之间的毫秒差。"""
     if start_dt is None:
         return 0
-    if end_dt is None:
-        end_dt = datetime.now(timezone.utc) if start_dt.tzinfo else datetime.now()
-    elif bool(start_dt.tzinfo) != bool(end_dt.tzinfo):
-        end_dt = end_dt.replace(tzinfo=start_dt.tzinfo)
+    end_dt = end_dt if end_dt is not None else datetime.now(timezone.utc)
     return max(0, int((end_dt - start_dt).total_seconds() * 1000))
 
 

@@ -463,7 +463,7 @@ def phase_retrieval():
                 "cost_usd": float(hyde_tr.get("cost_usd") or 0.0),
                 "llm_attempts": int(hyde_tr.get("llm_attempts") or 0),
                 "llm_errors": 1 if hyde_tr.get("outcome") == "failed" else 0,
-                "failovers": int(hyde_tr.get("failover_count") or 0),
+                "failovers": int(hyde_tr.get("failovers") or 0),
                 "json_retries": 0,
                 "cache_hit": False,
                 "by_role": {"hyde": {
@@ -1210,10 +1210,10 @@ def six_metrics(result: dict) -> dict:
     ret_deg = (ret.get("slo") or {}).get("degraded_rates") or {}
 
     return {
-        "recall@k": {k: ret.get(f"recall@{k}") for k in (1, 3, 8)},
-        "precision@k": {k: ret.get(f"precision@{k}") for k in (1, 3, 8)},
+        "recall@k": {str(k): ret.get(f"recall@{k}") for k in (1, 3, 8)},
+        "precision@k": {str(k): ret.get(f"precision@{k}") for k in (1, 3, 8)},
         "mrr": ret.get("mrr"),
-        "ndcg@k": {k: ret.get(f"ndcg@{k}") for k in (1, 3, 8)},
+        "ndcg@k": {str(k): ret.get(f"ndcg@{k}") for k in (1, 3, 8)},
         "faithfulness": beh.get("faithfulness"),
         "ci95": ret.get("ci95"),
         "mrr_ci95": ret.get("mrr_ci95"),
@@ -1301,11 +1301,11 @@ def print_six(six: dict) -> None:
         v = ci.get(key)
         return "" if not v or v[0] is None else f" [{v[0]:.2f}, {v[1]:.2f}]"
     print("\n=== 六项核心指标（RAGAS 口径）===")
-    print(f"1 Recall@K      @1 {f(r.get(1))} | @3 {f(r.get(3))} | @8 {f(r.get(8))}{ci_s('recall@8')}")
-    print(f"  ContextPrec   @1 {f(pr.get(1))} | @3 {f(pr.get(3))} | @8 {f(pr.get(8))}{ci_s('precision@8')}"
+    print(f"1 Recall@K      @1 {f(r.get('1'))} | @3 {f(r.get('3'))} | @8 {f(r.get('8'))}{ci_s('recall@8')}")
+    print(f"  ContextPrec   @1 {f(pr.get('1'))} | @3 {f(pr.get('3'))} | @8 {f(pr.get('8'))}{ci_s('precision@8')}"
           f" | ContextRel {f(qe.get('context_relevancy'))}")
     print(f"2 MRR           {f(six['mrr'])}")
-    print(f"3 NDCG@K        @1 {f(nd.get(1))} | @3 {f(nd.get(3))} | @8 {f(nd.get(8))}{ci_s('ndcg@8')}")
+    print(f"3 NDCG@K        @1 {f(nd.get('1'))} | @3 {f(nd.get('3'))} | @8 {f(nd.get('8'))}{ci_s('ndcg@8')}")
     print(f"4 答案准确率     {f(a.get('accuracy'))}"
           f"  (忠实 {f(a.get('grounded_rate'))} / 切题 {f(a.get('relevant_rate'))}"
           f" / 正确拒答 {f(a.get('abstain_rate'))}, n={a.get('n')})")
@@ -1354,20 +1354,6 @@ def print_six(six: dict) -> None:
     if l3c.get("blocked_n") or qe.get("canary_leaks") is not None:
         print(f"8 安全合规红线   金丝雀泄漏 {qe.get('canary_leaks') if qe.get('canary_leaks') is not None else '—'}"
               f" | L3零出境合规 {fpct(l3c.get('compliance_rate'))} (blocked_n={l3c.get('blocked_n', 0)})")
-
-
-def pick(d, k):
-    """取字典键，兼容 int key（内存对象）与 str key（JSON 反序列化后）。
-
-    这个兼容不是洁癖：six_metrics() 用 int 造键，写进 JSON 后全变字符串，
-    任何"从报告读回来复核门禁"的脚本用 .get(8) 都会拿到 None 而被静默跳过，
-    表现为"这项没跑过"。门禁漏判比报错更难发现。
-    """
-    if not d:
-        return None
-    if k in d:
-        return d[k]
-    return d.get(str(k))
 
 
 def _retrieval_series(layer: dict) -> dict:
@@ -1472,7 +1458,7 @@ def gate_check(six: dict) -> tuple:
         "l3_compliance": l3c,
         "canary_zero_leak": (1.0 if leaks == 0 else 0.0) if leaks is not None else None,
         "answer_relevancy": (six.get("answer_accuracy") or {}).get("relevant_rate"),
-        "context_recall@8": pick(six.get("recall@k"), 8),
+        "context_recall@8": (six.get("recall@k") or {}).get("8"),
     }
     floors = [(k, v, HARD_FLOORS[k]) for k, v in observed.items()
               if k in HARD_FLOORS and v is not None and v < HARD_FLOORS[k]]

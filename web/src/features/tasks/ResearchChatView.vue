@@ -1,94 +1,40 @@
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { ResearchSubagent, TaskEventItem } from './types'
-import type { User } from '../administration/types'
+import type { ResearchSubagent, Task, TaskEventItem } from './types'
 import { stateText } from '../../shared/labels'
 import robotUrl from '../../assets/robot.svg'
 import MarkdownReport from '../../shared/MarkdownReport.vue'
 import { openTaskEventStream, pollTaskUntilTerminal } from '../../shared/taskStream'
 import type { ApiClient, CreatedResource, Items } from '../../shared/apiTypes'
+import ResearchStageList from './ResearchStageList.vue'
 
-interface MemoryFact {
-  subject: string
-  predicate: string
-  object: string
-  confidence?: number
-}
-
-interface ResearchTaskResult {
-  report?: string
-  outline?: string[]
-  subagents?: ResearchSubagent[]
-  turn_type?: string
-  context_summary?: string
-  context_tokens?: number
-  is_compacted?: boolean
-  memory_facts?: MemoryFact[]
-  keyword?: string
+interface ResearchSnapshot extends Pick<
+  Task,
+  'id' | 'question' | 'created_at' | 'state' | 'stage' | 'progress' | 'restricted' | 'result'
+> {
+  events: TaskEventItem[]
   elapsed?: number
 }
 
-interface ResearchTurn {
-  id: string
-  question: string
-  created_at: string
-  state: string
-  stage: string
-  progress: number
-  thinkingLogs: string[]
-  events?: TaskEventItem[]
-  restricted?: boolean
+interface ResearchTurn extends ResearchSnapshot {
   draft?: string
   streamError?: boolean
-  thinkingSeconds?: number
-  result?: ResearchTaskResult
 }
 
 interface ConversationItem {
   conversation_id: string
   title: string
   turns: number
-  started_at: string
-  last_active: string
-  latest_state: string
-}
-
-interface ConversationTurnDto {
-  id: string
-  question: string
-  created_at: string
-  state: string
-  stage: string
-  progress: number
-  elapsed?: number
-  thinking_logs?: string[]
-  events?: TaskEventItem[]
-  result?: ResearchTaskResult
 }
 
 interface ConversationDetailResponse {
-  conversation_id: string
-  keyword: string
-  turns: ConversationTurnDto[]
-  context_summary: string
-  context_tokens: number
-  is_compacted: boolean
-  memory_facts: MemoryFact[]
-}
-
-interface FormattedThinkingStep {
-  type: 'agent' | 'turn' | 'tool' | 'data' | 'security' | 'steering' | 'done' | 'thought' | 'plain'
-  label: string
-  icon: string
-  content: string
+  keyword?: string
+  turns: ResearchSnapshot[]
 }
 
 const emit = defineEmits<{ (e: 'inspect', taskId: string): void }>()
-const props = defineProps<{
-  user?: User | null
-  api: ApiClient
-}>()
+const props = defineProps<{ api: ApiClient }>()
 
 const STORAGE_ACTIVE_KEY = 'ecom_active_research_conv'
 
@@ -128,75 +74,6 @@ function participatingRoleNames(agents: ResearchSubagent[]): string[] {
   const names = new Set<string>()
   for (const agent of agents) names.add(agent.display_name)
   return [...names]
-}
-
-/**
- * 将原始步骤日志解析为结构化标签与内容。
- * @param log - 原始日志字符串
- * @returns 格式化后的步骤对象
- */
-function parseStep(log: string): FormattedThinkingStep {
-  if (log.startsWith('[agent_start]')) {
-    return { type: 'agent', label: '任务启动', icon: 'STEP', content: log.slice(13).trim() }
-  }
-  if (log.startsWith('[agent_handoff]')) {
-    return { type: 'agent', label: '任务交接', icon: 'FLOW', content: log.slice(15).trim() }
-  }
-  if (log.startsWith('[turn_start]')) {
-    return { type: 'turn', label: '调度轮次', icon: 'TURN', content: log.slice(12).trim() }
-  }
-  if (log.startsWith('[tool_execution_start]')) {
-    return { type: 'tool', label: '工具调用', icon: 'TOOL', content: log.slice(22).trim() }
-  }
-  if (log.startsWith('[tool_execution_end]')) {
-    return { type: 'data', label: '采集完成', icon: 'DATA', content: log.slice(20).trim() }
-  }
-  if (log.startsWith('[tool_result]')) {
-    return { type: 'security', label: '合规核验', icon: 'CHECK', content: log.slice(13).trim() }
-  }
-  if (log.startsWith('[system]')) {
-    const body = log.slice(8).trim()
-    if (body.includes('模型容灾')) {
-      return {
-        type: 'security',
-        label: '模型容灾',
-        icon: 'ROUTE',
-        content: body.replace(/^\[模型容灾\]\s*/, '').trim(),
-      }
-    }
-    if (body.includes('检查点')) {
-      return {
-        type: 'turn',
-        label: '断点恢复',
-        icon: 'CKPT',
-        content: body.replace(/^\[检查点恢复\]\s*/, '').trim(),
-      }
-    }
-    return { type: 'plain', label: '系统事件', icon: 'SYS', content: body }
-  }
-  if (log.includes('用户中途追加干预指令') || log.startsWith('[steering]')) {
-    return {
-      type: 'steering',
-      label: '指令干预',
-      icon: 'STEER',
-      content: log.replace(/^\[steering\]\s*/, '').trim(),
-    }
-  }
-  if (log.startsWith('[agent_end]')) {
-    return { type: 'done', label: '阶段完成', icon: 'DONE', content: log.slice(11).trim() }
-  }
-  if (log.startsWith('思考\n') || log.startsWith('💭 ')) {
-    return {
-      type: 'thought',
-      label: '分析推演',
-      icon: 'THINK',
-      content: log
-        .replace(/^思考\n/, '')
-        .replace(/^💭\s*/, '')
-        .trim(),
-    }
-  }
-  return { type: 'plain', label: '执行状态', icon: 'INFO', content: log }
 }
 
 /**
@@ -276,18 +153,7 @@ async function selectConversation(convId: string): Promise<void> {
   try {
     const res = await props.api<ConversationDetailResponse>(`/research/conversation/${convId}`)
     if (version !== conversationVersion) return
-    turns.value = (res.turns || []).map((t) => ({
-      id: t.id,
-      question: t.question,
-      created_at: t.created_at,
-      state: t.state,
-      stage: t.stage,
-      progress: t.progress,
-      events: t.events,
-      thinkingLogs: t.thinking_logs || (t.stage ? [t.stage] : []),
-      thinkingSeconds: t.result?.elapsed || t.elapsed || 0,
-      result: t.result,
-    }))
+    turns.value = res.turns
     currentKeyword.value = res.keyword || ''
     for (const turn of turns.value) {
       if (turn.state === 'queued' || turn.state === 'running') streamTaskEvents(turn)
@@ -357,7 +223,7 @@ async function deleteConversation(convId: string, e: MouseEvent): Promise<void> 
 function streamTaskEvents(turn: ResearchTurn): void {
   turn.streamError = false
   const taskId = turn.id
-  const stageIds = new Set(turn.events?.map((event) => event.id))
+  const stageIds = new Set(turn.events.map((event) => event.id))
   subscriptions.get(taskId)?.abort()
   const controller = new AbortController()
   subscriptions.set(taskId, controller)
@@ -367,24 +233,18 @@ function streamTaskEvents(turn: ResearchTurn): void {
    * 合并服务器确认的状态和最终可见结果。
    * @param task - 经过权限过滤的任务快照。
    */
-  function applyTask(task: ResearchTurn & { elapsed?: number }): void {
+  function applyTask(task: ResearchSnapshot): void {
     if (signal.aborted) return
     turn.question = task.question
     turn.state = task.state
     turn.stage = task.stage
     turn.progress = task.progress
     turn.result = task.result
-    if (task.events) {
-      turn.events = task.events
-      turn.thinkingLogs = task.events.map((event) => event.stage)
-    }
-    if (task.restricted) turn.draft = ''
-    turn.thinkingSeconds = task.result?.elapsed ?? task.elapsed ?? elapsedSeconds(turn)
+    turn.events = task.events
+    turn.restricted = task.restricted
+    if (turn.restricted) turn.draft = ''
+    turn.elapsed = task.result?.elapsed ?? task.elapsed ?? elapsedSeconds(turn)
     if (task.result?.keyword) currentKeyword.value = task.result.keyword
-    const conversation = conversations.value.find(
-      (item) => item.conversation_id === activeConvId.value,
-    )
-    if (conversation && turn === turns.value.at(-1)) conversation.latest_state = task.state
     scrollToBottom(false)
   }
 
@@ -398,7 +258,7 @@ function streamTaskEvents(turn: ResearchTurn): void {
        * 读取此轮任务的权限过滤快照。
        * @returns 调研状态及可展示结果。
        */
-      const fetchTask = () => props.api<ResearchTurn & { elapsed?: number }>(`/tasks/${taskId}`)
+      const fetchTask = () => props.api<ResearchSnapshot>(`/tasks/${taskId}`)
       const latest = poll
         ? await pollTaskUntilTerminal({ fetchTask, onTick: applyTask, signal })
         : await fetchTask()
@@ -426,14 +286,12 @@ function streamTaskEvents(turn: ResearchTurn): void {
         turn.stage = row.stage
         if (row.id !== undefined && !stageIds.has(row.id)) {
           stageIds.add(row.id)
-          turn.events ??= []
           turn.events.push({
             id: row.id,
             stage: row.stage,
             status: row.status ?? 'running',
             progress: row.progress ?? 0,
           })
-          turn.thinkingLogs.push(row.stage)
         }
       }
       if (typeof row.progress === 'number') turn.progress = row.progress
@@ -464,7 +322,6 @@ function streamTaskEvents(turn: ResearchTurn): void {
  */
 async function handleSteer(): Promise<void> {
   const version = conversationVersion
-  const turn = activeTurn.value
   const steerText = inputPrompt.value.trim()
   if (!steerText || !activeRunningTaskId.value) return
 
@@ -473,9 +330,6 @@ async function handleSteer(): Promise<void> {
       input: steerText,
     })
     if (version !== conversationVersion) return
-    if (turn) {
-      turn.thinkingLogs.push(`【用户中途追加干预指令】：${steerText}`)
-    }
     ElMessage.success('已将补充要求发送给调研团队')
     inputPrompt.value = ''
     scrollToBottom()
@@ -510,9 +364,6 @@ async function handleSend(): Promise<void> {
       conversation_id: activeConvId.value,
       title: kw,
       turns: 1,
-      started_at: new Date().toISOString(),
-      last_active: new Date().toISOString(),
-      latest_state: 'running',
     })
   }
 
@@ -523,7 +374,8 @@ async function handleSend(): Promise<void> {
     state: 'running',
     stage: '正在准备调研任务…',
     progress: 5,
-    thinkingLogs: [],
+    events: [],
+    restricted: false,
   })
   turns.value.push(tempTurn)
   inputPrompt.value = ''
@@ -544,11 +396,7 @@ async function handleSend(): Promise<void> {
     const conversation = conversations.value.find(
       (item) => item.conversation_id === activeConvId.value,
     )
-    if (conversation) {
-      conversation.turns = turns.value.length
-      conversation.last_active = tempTurn.created_at
-      conversation.latest_state = 'running'
-    }
+    if (conversation) conversation.turns = turns.value.length
   } catch (err: unknown) {
     if (version !== conversationVersion) return
     tempTurn.state = 'failed'
@@ -724,26 +572,17 @@ onUnmounted(() => {
                       >正在调研 · 已用时 {{ elapsedSeconds(turn) }}s</span
                     >
                   </div>
-                  <details v-if="turn.thinkingLogs.length" :open="!turn.draft">
-                    <summary>执行步骤（{{ turn.thinkingLogs.length }}）</summary>
-                    <div class="live-steps-stream">
-                      <div
-                        v-for="(step, idx) in turn.thinkingLogs.map(parseStep)"
-                        :key="idx"
-                        class="trace-step-entry"
-                        :class="[{ current: idx === turn.thinkingLogs.length - 1 }, step.type]"
-                      >
-                        <div class="trace-step-header">
-                          <span class="trace-step-icon" aria-hidden="true">{{ step.icon }}</span>
-                          <span class="trace-step-type">{{ step.label }}</span>
-                        </div>
-                        <div class="trace-step-text">{{ step.content }}</div>
-                      </div>
-                    </div>
+                  <details v-if="turn.events.length" :open="!turn.draft">
+                    <summary>执行步骤（{{ turn.events.length }}）</summary>
+                    <ResearchStageList
+                      class="live-steps-stream"
+                      :events="turn.events"
+                      highlight-latest
+                    />
                   </details>
                 </div>
 
-                <div v-else-if="turn.thinkingLogs?.length" class="completed-thinking-accordion">
+                <div v-else-if="turn.events.length" class="completed-thinking-accordion">
                   <button
                     class="accordion-header"
                     type="button"
@@ -754,24 +593,15 @@ onUnmounted(() => {
                       thinkingCollapsed[turn.id] ? '▾' : '▸'
                     }}</span>
                     <span class="accordion-title">
-                      任务阶段（{{ turn.thinkingLogs.length }} 条 · 耗时
-                      {{ turn.thinkingSeconds || turn.result?.elapsed || 0 }}s）
+                      任务阶段（{{ turn.events.length }} 条 · 耗时
+                      {{ turn.elapsed ?? turn.result?.elapsed ?? 0 }}s）
                     </span>
                   </button>
-                  <div v-show="thinkingCollapsed[turn.id]" class="accordion-body">
-                    <div
-                      v-for="(step, idx) in turn.thinkingLogs.map(parseStep)"
-                      :key="idx"
-                      class="trace-step-entry"
-                      :class="step.type"
-                    >
-                      <div class="trace-step-header">
-                        <span class="trace-step-icon" aria-hidden="true">{{ step.icon }}</span>
-                        <span class="trace-step-type">{{ step.label }}</span>
-                      </div>
-                      <div class="trace-step-text">{{ step.content }}</div>
-                    </div>
-                  </div>
+                  <ResearchStageList
+                    v-show="thinkingCollapsed[turn.id]"
+                    class="accordion-body"
+                    :events="turn.events"
+                  />
                 </div>
 
                 <div v-if="turn.draft || turn.result?.report" class="response-markdown-body">
@@ -874,49 +704,6 @@ onUnmounted(() => {
 .send-circle-btn.steer-mode:hover {
   background: #fde68a;
 }
-.trace-step-entry.steering .trace-step-type {
-  color: #d97706;
-}
-.trace-step-entry.steering .trace-step-text {
-  color: #b45309;
-  font-weight: 600;
-}
-
-.trace-step-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 3px;
-}
-.trace-step-icon {
-  font-size: 10px;
-  font-weight: 700;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: #f1f5f9;
-  color: #475569;
-  letter-spacing: 0.4px;
-}
-.trace-step-entry.agent .trace-step-type {
-  color: #2563eb;
-}
-.trace-step-entry.turn .trace-step-type {
-  color: #475569;
-}
-.trace-step-entry.tool .trace-step-type {
-  color: #7c3aed;
-}
-.trace-step-entry.data .trace-step-type {
-  color: #0284c7;
-}
-.trace-step-entry.security .trace-step-type {
-  color: #059669;
-}
-.trace-step-entry.done .trace-step-type {
-  color: #16a34a;
-}
-
 .chat-history-sidebar {
   width: 240px;
   background: #f8fafc;
@@ -1207,31 +994,6 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-.trace-step-entry {
-  display: flex;
-  flex-direction: column;
-}
-.trace-step-type {
-  font-size: 11.5px;
-  font-weight: 700;
-  color: #64748b;
-  letter-spacing: 0.5px;
-  margin-bottom: 2px;
-}
-.trace-step-text {
-  font-size: 12.5px;
-  color: #334155;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.trace-step-entry.current .trace-step-type {
-  color: #0f172a;
-}
-.trace-step-entry.current .trace-step-text {
-  color: #0f172a;
-  font-weight: 500;
 }
 
 .completed-thinking-accordion {
