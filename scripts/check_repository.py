@@ -10,11 +10,6 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_FILE_BYTES = 1024 * 1024
-LOCAL_AGENT_POLICY_REASON = "本机维护约束文件"
-PRE_LOCAL_AGENT_POLICY_COMMITS = frozenset({
-    "5018289c07b4a086f5470442d878fcc8eaca784a",
-    "2b071e5b087099cd0a4683c4394a4b972282b652",
-})
 FORBIDDEN_DIRECTORIES = {
     "node_modules", "__pycache__", ".venv", "venv",
     ".pytest_cache", ".mypy_cache", ".ruff_cache", ".idea", ".vscode",
@@ -44,10 +39,8 @@ def blocked_path(path: str) -> str | None:
     item = PurePosixPath(path)
     if any(part in FORBIDDEN_DIRECTORIES for part in item.parts):
         return "私有数据、依赖或缓存目录"
-    if item.name.casefold() == "agents.md":
-        return LOCAL_AGENT_POLICY_REASON
-    if path == "项目说明.md":
-        return "个人学习说明"
+    if path.startswith("docs/private/"):
+        return "私有文档目录"
     if path.startswith("web/dist/") or any(part.startswith(".build-") for part in item.parts):
         return "构建产物"
     if item.name.startswith(".env") and item.name != ".env.example":
@@ -108,10 +101,6 @@ def inspect_tree(revision: str | None) -> list[str]:
         return ["没有可检查的已跟踪文件"]
     problems = []
     blobs = {}
-    legacy_agent_policy = revision is not None and (
-        git("rev-parse", "--verify", revision + "^{commit}").decode().strip()
-        in PRE_LOCAL_AGENT_POLICY_COMMITS
-    )
     for path, mode, sha in entries:
         if mode not in {"100644", "100755"}:
             problems.append(f"{path}: 不允许符号链接或外部子模块")
@@ -119,8 +108,6 @@ def inspect_tree(revision: str | None) -> list[str]:
         content = git("cat-file", "blob", sha)
         blobs[path] = content
         reasons = inspect_blob(path, content)
-        if legacy_agent_policy and PurePosixPath(path).name.casefold() == "agents.md":
-            reasons = [reason for reason in reasons if reason != LOCAL_AGENT_POLICY_REASON]
         problems.extend(f"{path}: {reason}" for reason in reasons)
     structure = blobs.get("STRUCTURE.md", b"").decode("utf-8", errors="replace")
     registered = set(re.findall(r"\x60([^\x60\n]+/)\x60", structure))

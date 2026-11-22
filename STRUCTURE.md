@@ -11,6 +11,7 @@
 | `.github/workflows/` | main 推送触发的最小权限 CI，不自动部署 |
 | `.githooks/` | 每份克隆主动启用的提交与推送门禁 |
 | `documentation/` | 使用手册根目录，每篇手册为独立子目录，入口统一为 `README.md` |
+| `docs/` | 公开运维文档与索引；私有文档放在 private 子目录并整体忽略 |
 | `documentation/quickstart/` | 本地快速开始与首次体验手册 |
 | `documentation/knowledge-base/` | 资料准备、入库与答复依据手册 |
 | `documentation/database/` | 数据模型、索引与迁移手册 |

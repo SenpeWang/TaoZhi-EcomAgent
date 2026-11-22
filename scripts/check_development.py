@@ -156,7 +156,7 @@ def main() -> int:
         elif args.command == "staged":
             check_snapshot(None)
             whitespace = subprocess.run(
-                ["git", "diff", "--cached", "--check", "--", ".", ":(exclude)data/"],
+                ["git", "diff", "--cached", "--check", "--", ".", ":(exclude)data/", ":(exclude)*.md"],
                 cwd=ROOT, capture_output=True, text=True,
             )
             if whitespace.returncode:

@@ -13,10 +13,10 @@ spec.loader.exec_module(guard)
 
 
 @pytest.mark.parametrize("path", [
-    "项目说明.md", ".env.production",
+    ".env.production",
     "web/node_modules/a.js", "web/dist/index.html", "database-secrets.json",
     "plan.bak.20261007", "customer.docx",
-    "AGENTS.md", "agents.md", "docs/AGENTS.md", "web/aGeNtS.Md",
+    "docs/private/RUNBOOK.md", "docs/private/nested/notes.md",
     "data/runtime/secret.pem", "data/runtime/access.token",
     "data/private/accessory_pdfs/manual.pdf", "data/private/accessory_pdfs/manifest.json",
 ])
@@ -31,6 +31,7 @@ def test_example_and_software_docs_are_allowed():
     assert guard.blocked_path("data/README.md") is None
     assert guard.blocked_path("data/accessory_pdfs/manual.pdf") is None
     assert guard.blocked_path("data/runtime/accounts.json") is None
+    assert guard.blocked_path("AGENTS.md") is None
 
 
 def test_data_secrets_are_still_blocked():

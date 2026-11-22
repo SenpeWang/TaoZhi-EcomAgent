@@ -1,6 +1,4 @@
-/项目说明.md
 /面试文档.md
-[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
 
 .env
 .env.*
@@ -42,9 +40,11 @@ Thumbs.db
 *.orig
 *.swp
 .maintenance-*
-/docs/
 /data/private/accessory_pdfs/
 
 # 运行态产物与测试上传夹具，不进版本库
 /data/runtime/
 /data/private/test/
+
+# 私有文档目录整体忽略
+/docs/private/
