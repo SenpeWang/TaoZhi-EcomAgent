@@ -1528,6 +1528,10 @@ def main():
     path = OUT_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{result['git']}.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"结果已存档: {path}")
+    from evals.history_log import append_rag_eval_record
+
+    log_file = append_rag_eval_record(result, path)
+    print(f"台账已增量追加: {log_file}")
     stat_rows = []
     if args.compare and BASELINE.exists():
         baseline = json.loads(BASELINE.read_text(encoding="utf-8"))

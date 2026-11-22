@@ -56,7 +56,8 @@ def read_synthetic_replay(path: Path, known_ids: set[str]) -> tuple[dict, dict]:
 def run_agent_evaluations(cases: list[dict], *,
                           replay_file: Path | None = None, reports_dir: Path | None = None,
                           catalog: list[dict] | None = None, compare_file: Path | None = None,
-                          counterexamples_file: Path | None = None, publish_to: tuple[str, str] | None = None) -> dict:
+                          counterexamples_file: Path | None = None, publish_to: tuple[str, str] | None = None,
+                          log_path: Path | None = None) -> dict:
     """通过同一组判定器评估实际运行或已有记录，将来源写入独立报告。"""
     dataset = cases if catalog is None else catalog
     validate_cases(dataset)
@@ -153,6 +154,11 @@ def run_agent_evaluations(cases: list[dict], *,
     temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     temporary.replace(report_path)
     print(f"门禁{'通过' if report['gate']['passed'] else '未通过'}，评测报告 {report_path}")
+    if (reports_dir is None and replay_file is None) or log_path is not None:
+        from evals.history_log import append_agent_eval_record
+
+        appended = append_agent_eval_record(report, report_path, log_path=log_path)
+        print(f"台账已增量追加: {appended}")
     if publish_to is not None:
         from .publish import publish_report
 
