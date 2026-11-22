@@ -47,7 +47,16 @@ function openCitation(number: number): void {
         {{ answerBasisLabel(result.answer_basis) || (result.data ? '经营指标答复' : '问答结果') }}
       </h3>
       <span v-if="result.cache_hit" class="knowledge-meta">复用已核验答复</span>
+      <span v-else-if="result.answer_basis === 'general_knowledge'" class="knowledge-meta"
+        >与企业知识库无关</span
+      >
     </div>
+    <p
+      v-if="result.answer_basis === 'general_knowledge' && result.guidance"
+      class="knowledge-notice"
+    >
+      {{ result.guidance }}
+    </p>
     <template v-for="(paragraph, index) in paragraphs" :key="index">
       <MarkdownReport
         v-if="paragraph.text"
@@ -66,7 +75,12 @@ function openCitation(number: number): void {
         [{{ paragraph.citation }}] 查看引文
       </button>
     </template>
-    <div v-if="result.missing?.length || result.guidance" class="knowledge-guidance">
+    <div
+      v-if="
+        result.missing?.length || (result.guidance && result.answer_basis !== 'general_knowledge')
+      "
+      class="knowledge-guidance"
+    >
       <strong>{{ result.missing?.length ? '待核实事项' : '使用说明' }}</strong>
       <ul v-if="result.missing?.length">
         <li v-for="(item, index) in result.missing" :key="index">{{ item }}</li>

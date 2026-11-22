@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from taozhi.application.rag import publication
+from taozhi.application.rag import execution, publication
 from taozhi.domain.knowledge_answer import allows_general_knowledge_fallback
 
 
@@ -82,6 +82,17 @@ def test_publish_node_uses_general_knowledge_only_when_allowed_and_non_enterpris
     assert out["hard_block"] is False
     assert out["missing"] == []
     assert out["model_calls"] == 1
+
+    built = execution._build_question_result(
+        {
+            **_base_state("今天是什么日期？", allow_general_knowledge=True),
+            **out,
+            "selected_agents": ["product"],
+            "usage": [],
+            "token_usage": out["token_usage"],
+        }
+    )
+    assert built["specialists"] == []
 
 
 def test_publish_node_still_refuses_enterprise_question_even_with_general_knowledge(monkeypatch) -> None:

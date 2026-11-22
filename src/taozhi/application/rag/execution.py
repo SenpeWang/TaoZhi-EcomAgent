@@ -106,7 +106,11 @@ def _build_question_result(state: dict[str, Any]) -> dict[str, Any]:
         guidance=state["guidance"],
         citations=[{**{field: item[field] for field in citation_fields}, "cited": index in used}
                    for index, item in enumerate(state["evidence"])],
-        specialists=[{"name": role, "count": finding_counts[role]} for role in state["selected_agents"]],
+        specialists=[
+            {"name": role, "count": finding_counts[role]}
+            for role in state["selected_agents"]
+            if finding_counts[role] > 0
+        ],
         missing=state["missing"],
         hard_block=state["hard_block"],
         external_blocked=state["external_blocked"],
