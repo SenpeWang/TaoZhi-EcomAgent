@@ -1175,7 +1175,9 @@ def test_model_budget_is_shared_across_retry_attempts(monkeypatch,clients):
     assert not seen
     with database_connection() as c:assert fetch_one(c,"SELECT count(*) AS n FROM model_calls WHERE job_id=%s",(tid,))["n"]==6
 def test_production_forbids_demo_password(monkeypatch,clients):
+    dsn=load_config().dsn
     monkeypatch.setenv("ECOM_MODE","production")
+    monkeypatch.setenv("ECOM_DATABASE_URL",dsn)
     monkeypatch.setenv("ECOM_QUICK_LOGIN","false")
     monkeypatch.setenv("ECOM_QUICK_LOGIN_PASSWORD","")
     r=clients["staff"].post("/api/auth/login",json={"username":"staff","password":"123456"})

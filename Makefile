@@ -66,6 +66,9 @@ install-hooks:
 check-repository:
 	python3 scripts/check_repository.py --tracked
 
+check-ci-config:
+	$(PYTHON) scripts/check_ci_config.py
+
 lint-web:
 	python3 scripts/check_development.py lint
 
