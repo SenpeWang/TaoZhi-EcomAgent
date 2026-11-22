@@ -32,6 +32,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --timeout 60 --retries 10 ${PIP_INDEX_URL:+--index-url "$PIP_INDEX_URL"} -r requirements.txt
 
 COPY alembic.ini .env.example ./
+COPY config ./config
 COPY migrations ./migrations
 COPY src ./src
 COPY scripts ./scripts
