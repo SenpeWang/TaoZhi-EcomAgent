@@ -121,7 +121,7 @@ def resolve_revision(value: str) -> str:
 def commit_revisions(base: str, head: str) -> list[str]:
     """检查同一分支的新增提交；历史初始化提交不追溯改写。"""
     first, last = resolve_revision(base), resolve_revision(head)
-    return repository.git("rev-list", "--reverse", f"{first}..{last}").decode().splitlines()
+    return repository.git("rev-list", "--reverse", "--no-merges", f"{first}..{last}").decode().splitlines()
 
 
 def check_commits(revisions: list[str], include_frontend: bool = False) -> None:
@@ -130,8 +130,13 @@ def check_commits(revisions: list[str], include_frontend: bool = False) -> None:
         problems = repository.inspect_tree(revision)
         if problems:
             raise RuntimeError(f"{revision[:12]} 内容检查失败：\n" + "\n".join(problems))
-        message = repository.git("show", "-s", "--format=%B", revision).decode()
-        check_message(message, revision[:12] + " 提交信息")
+        commit_object = repository.git("cat-file", "commit", revision).decode()
+        parent_count = sum(
+            line.startswith("parent ") for line in commit_object.splitlines()
+        )
+        if parent_count <= 1:
+            message = repository.git("show", "-s", "--format=%B", revision).decode()
+            check_message(message, revision[:12] + " 提交信息")
         if include_frontend:
             check_snapshot(revision)
     print(f"新增提交检查通过（{len(revisions)} 项）：提交信息、秘密、资料和目录登记")

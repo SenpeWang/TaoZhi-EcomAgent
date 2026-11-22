@@ -215,6 +215,23 @@ def test_range_scans_secret_deleted_in_later_commit(workspace):
         development.check_commits(development.commit_revisions(base, "HEAD"))
 
 
+def test_commit_range_excludes_merge_commits(workspace):
+    root, git = workspace
+    git("commit", "-m", "chore: 初始化合成仓库")
+    base = git("rev-parse", "HEAD")
+    git("switch", "-c", "feature/check")
+    (root / "feature.txt").write_text("合成功能\n")
+    git("add", "feature.txt")
+    git("commit", "-m", "feat(check): 增加合成功能")
+    git("switch", "main")
+    git("merge", "--no-ff", "-m", "Merge branch feature/check", "feature/check")
+    merge_commit = git("rev-parse", "HEAD")
+    revisions = development.commit_revisions(base, "HEAD")
+    assert merge_commit not in revisions
+    assert len(revisions) == 1
+    development.check_commits([merge_commit])
+
+
 @pytest.mark.parametrize("name", ["AGENTS.md", "agents.md", "docs/AGENTS.md"])
 def test_local_agent_policy_cannot_enter_snapshot(workspace, name):
     """强制暂存也必须拒绝维护文件；检查不删除本机规则。"""
