@@ -1,8 +1,6 @@
 """PDF 文本层与 OCR 回退的行为测试。"""
 from __future__ import annotations
 
-import io
-
 import fitz
 
 from taozhi.infrastructure.knowledge import ingest

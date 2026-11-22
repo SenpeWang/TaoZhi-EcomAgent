@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import importlib
 import json
-import sys
 
 import httpx
-import pytest
 
 from taozhi.infrastructure.mcp import remote_search as rs
 

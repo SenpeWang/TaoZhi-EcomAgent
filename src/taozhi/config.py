@@ -36,8 +36,6 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    log_level: str = "INFO"
-
     base_url: str = Field(default="https://token.sensenova.cn/v1", alias="BASE_URL")
     api_key: str = Field(default="", alias="API_KEY")
     model: str = Field(default="sensenova-6.8-flash", alias="MODEL")
