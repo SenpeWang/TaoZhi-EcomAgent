@@ -1,2 +1,0 @@
-{"step_index": 1, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-11-01T11:13:12.487672+00:00", "content": "查询客户档案", "metadata": {"role": "客户数据核查员", "type_name": "test_agent", "depth": 1}}
-{"step_index": 2, "source": "SYSTEM", "type": "ERROR", "status": "ERROR", "created_at": "2026-11-01T11:13:12.488540+00:00", "content": "AttributeError: TOOL_EXEC_START"}

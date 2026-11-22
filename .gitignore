@@ -44,3 +44,7 @@ Thumbs.db
 .maintenance-*
 /docs/
 /data/private/accessory_pdfs/
+
+# 运行态产物与测试上传夹具，不进版本库
+/data/runtime/
+/data/private/test/

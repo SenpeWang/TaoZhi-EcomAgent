@@ -1,2 +1,0 @@
-{"step_index": 1, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-10-24T12:24:46.875202+00:00", "content": "验证【智能水杯】零售价 89 元与 1688 批发价 25 元的利润空间", "metadata": {"role": "验真分析师", "type_name": "data_verifier", "depth": 1}}
-{"step_index": 2, "source": "SYSTEM", "type": "ERROR", "status": "ERROR", "created_at": "2026-10-24T12:24:46.893449+00:00", "content": "OpenAIError: Missing credentials. Please pass an `api_key`, `workload_identity`, `admin_api_key`, or set the `OPENAI_API_KEY` or `OPENAI_ADMIN_KEY` environment variable."}

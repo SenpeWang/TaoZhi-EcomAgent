@@ -1,2 +1,0 @@
-{"step_index": 1, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-11-01T14:21:39.433871+00:00", "content": "测试闸门崩溃", "metadata": {"role": "故障测试", "type_name": "test_agent", "depth": 1}}
-{"step_index": 2, "source": "SYSTEM", "type": "ERROR", "status": "ERROR", "created_at": "2026-11-01T14:21:39.434171+00:00", "content": "PermissionError: 权限系统配置损坏"}
