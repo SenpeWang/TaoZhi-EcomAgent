@@ -6,9 +6,9 @@ from taozhi.config import load_config
 from taozhi.core.memory.service import get_followup_context
 from taozhi.core.tools.search_web import extract_search_keyword
 from taozhi.domain.entities import Principal
-from taozhi.domain.question_context import refers_to_previous_question, requested_business_resources
+from taozhi.domain.question_context import refers_to_previous_question, requested_business_resources, requests_record_overview
 from taozhi.domain.ranking import fuse_evidence_rounds
-from taozhi.domain.rag_verification import RetrievalDecision, is_finance_evidence
+from taozhi.domain.rag_verification import RetrievalDecision, fact_subjects, is_finance_evidence
 from taozhi.domain.text_guard import detect_injection
 from taozhi.infrastructure.persistence.access_repo import sources_valid
 from taozhi.infrastructure.persistence.job_repo import conversation_question_reference
@@ -21,6 +21,7 @@ from .state import State
 
 
 _EVIDENCE_LIMIT = 10
+_OVERVIEW_FIELDS = {"stock": ("available", "price_minor"), "orders": ("status",)}
 
 
 def _query_context(conn, p: Principal, job: dict, state: State, retry: bool) -> tuple[str, str | None, bool]:
@@ -115,6 +116,63 @@ def retry_retrieval(state: State) -> dict:
     }
 
 
+def _business_record(conn, principal, kind: str, identifier: str, fields: tuple[str, ...] | list[str]) -> dict:
+    if not identifier:
+        message = ("查询实时库存或现价需要商品编号；未接入业务系统时不能提供实时数据" if kind == "stock"
+                   else "查询真实订单需要订单编号，并接入企业订单系统")
+        return {"available": False, "message": message}
+    item = lookup(conn, principal, kind, identifier)
+    if not item.get("available"):
+        return item
+    row = item["record"]
+    if not any(field in row for field in fields):
+        return {"available": False, "message": "业务系统未返回所需字段。"}
+    allowed = {"sku_id" if kind == "stock" else "order_id", "as_of", *fields}
+    if "price_minor" in fields and "price_minor" in row:
+        allowed.add("currency")
+    return {**item, "record": {key: value for key, value in row.items() if key in allowed}}
+
+
+def read_business_snapshot(state: State) -> dict:
+    """仅从授权业务系统读取本次请求的字段，保留数据时间与记录标识。"""
+    principal, job = validate_task_execution(state, "读取授权业务快照", 38)
+    records = []
+    missing = []
+    fields_by_name = {"available": ("可用库存", "库存"), "price_minor": ("销售价格", "价格"), "status": ("订单状态", "订单状态")}
+    other_subjects = fact_subjects(state["question"])
+    if "售后" in state["question"] and not other_subjects.intersection({"保修条件", "退换与退款"}):
+        other_subjects.add("售后政策")
+    with database_connection() as conn:
+        for kind, requests in state["live_fields"].items():
+            fields = []
+            for field, reason in requests.items():
+                label, subject = fields_by_name[field]
+                other_subjects.discard(subject)
+                if reason:
+                    missing.append(f"{label}：{reason}")
+                else:
+                    fields.append(field)
+            if not fields:
+                continue
+            id_field = "sku_id" if kind == "stock" else "order_id"
+            item = _business_record(conn, principal, kind, job["payload"].get(id_field, ""), fields)
+            if item.get("available"):
+                for field in fields:
+                    if field not in item["record"]:
+                        label = fields_by_name[field][0]
+                        missing.append(f"业务系统未返回{label}，无法确认该值。")
+            else:
+                labels = "、".join(fields_by_name[field][0] for field in fields)
+                missing.append(f"{labels}：{item['message']}")
+            records.append(item)
+    missing.extend(f"本次查询的业务快照不包含{subject}，请另行核对适用的授权资料。" for subject in sorted(other_subjects))
+    sources = [item["source"] for item in records if item.get("available")]
+    return {
+        "business": records, "evidence": [], "sources": sources, "hard_block": not sources,
+        "external_blocked": not job["payload"].get("allow_external", True), "missing": missing,
+    }
+
+
 def prepare_evidence(state: State) -> dict:
     """汇集合规会话与业务依据，并确定进入专家核验或直接发布。"""
     p, job = validate_task_execution(state, "准备授权证据与业务快照", 38)
@@ -132,14 +190,9 @@ def prepare_evidence(state: State) -> dict:
             extra = [doc for doc in recalled if doc["chunk_id"] not in seen and not detect_injection(doc["quote"])[0]]
             evidence = (extra + evidence)[:_EVIDENCE_LIMIT]
 
-        business = []
-        for kind, identifier in requested_business_resources(question, job["payload"]).items():
-            if identifier:
-                business.append(lookup(conn, p, kind, identifier))
-            else:
-                message = ("查询实时库存或现价需要商品编号；未接入业务系统时不能提供实时数据" if kind == "stock"
-                           else "查询真实订单需要订单编号，并接入企业订单系统")
-                business.append({"available": False, "message": message})
+        business = [_business_record(conn, p, kind, identifier, _OVERVIEW_FIELDS[kind])
+                    for kind, identifier in requested_business_resources(question, job["payload"]).items()
+                    if requests_record_overview(question, kind)]
 
         sources = _document_sources(evidence)
         sources.extend(item["source"] for item in business if item.get("available"))
@@ -163,13 +216,14 @@ def prepare_evidence(state: State) -> dict:
     update = {
         "evidence": evidence, "sources": sources, "business": business,
         "hard_block": hard_block, "external_blocked": blocked, "retrieval_decision": decision,
+        "has_recalled_context": bool(recalled or recalled_sources),
         "degraded": {**state["degraded"], "ann_blocked": not evidence and state["degraded"]["ann_blocked"]},
     }
     if hard_block or blocked:
         if decision == "no_finance_evidence":
             message = "缺少已授权的财务或经营分析资料，不能推测经营数据"
         elif blocked:
-            message = "机密资料未获外部 AI 处理许可，以下仅提供原文。"
+            message = "当前资料未获外部 AI 处理许可，无法自动核验。"
         else:
             message = "缺少可靠资料，无法给出事实结论。"
         update.update(missing=[message], review=bool(job["payload"].get("require_review") and not hard_block))

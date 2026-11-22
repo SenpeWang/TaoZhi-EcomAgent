@@ -724,11 +724,12 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
         c.execute("UPDATE document_versions SET body=body||' 不得泄露机密标记' WHERE document_id='test_doc_boss'")
         c.execute("UPDATE chunks SET text=text||' 不得泄露机密标记' WHERE document_id='test_doc_boss'")
     staff, admin = clients["staff"], clients["admin"]
-    tid = task_id(staff, "MC-500 的切幅是多少？发货需要多久？", sku_id="SKU97", order_id="ORDER97")
+    tid = task_id(staff, "MC-500 的切幅是多少？发货需要多久？请附上这两个编号的业务概览。", sku_id="SKU97", order_id="ORDER97")
     assert process_next_job()
     task = staff.get(f"/api/tasks/{tid}")
     assert task.json()["state"] == "completed", task.text
     assert seen_prompts and all("不得泄露机密标记" not in prompt for prompt in seen_prompts)
+    assert all("业务快照" not in prompt and "SKU97" not in prompt and "ORDER97" not in prompt for prompt in seen_prompts)
     assert "不得泄露机密标记" not in task.text
     assert flush_spans()
 
@@ -1392,10 +1393,34 @@ def test_rag_cache_only_reuses_verified_answers_on_the_allowed_route(monkeypatch
     assert any(role["count"] for role in verified["specialists"])
     cached = ask()
     assert cached["cache_hit"] and cached["answer"] == verified["answer"]
+    assert cached["answer_basis"] == verified["answer_basis"] == "internal_evidence"
+    assert any(ref["cited"] for ref in cached["citations"])
 
     restricted = ask(allow_external=False)
     assert restricted["external_blocked"] and not restricted["cache_hit"]
     assert restricted["model_calls"] == 0 and "授权原文" in restricted["answer"]
+    assert restricted["answer_basis"] == "source_excerpt" and not restricted["public_sources"]
+
+
+def test_empty_knowledge_public_result_obeys_task_review(monkeypatch, clients):
+    """空库通用题可采用公开出处，送审前提交人读不到答复正文。"""
+    from taozhi.application.rag import retrieval
+
+    monkeypatch.setattr(retrieval, "search_documents", lambda *args, **kwargs: [])
+    staff = clients["staff"]
+    job = task_id(staff, "什么是 USB PD？", require_review=True, allow_external=False)
+    assert process_next_job()
+    pending = staff.get(f"/api/tasks/{job}").json()
+    assert pending["state"] == "review" and pending["result"] is None
+    assert clients["boss"].post(f"/api/tasks/{job}/review", json={"approve": True}).status_code == 200
+    result = staff.get(f"/api/tasks/{job}").json()["result"]
+    assert result["answer_basis"] == "public_reference" and not result["citations"]
+    assert result["public_sources"][0]["url"].startswith("https://www.usb.org/")
+    policy = task_id(staff, "请上网查本店的保修年限", allow_public_reference=True, allow_external=False)
+    assert process_next_job()
+    lacking = staff.get(f"/api/tasks/{policy}").json()["result"]
+    assert lacking["answer_basis"] == "insufficient_evidence" and not lacking["public_sources"]
+    assert "售后" in lacking["guidance"]
 
 
 def test_migration_binds_old_bi_results_to_original_metrics(monkeypatch):

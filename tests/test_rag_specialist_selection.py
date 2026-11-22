@@ -18,7 +18,7 @@ from taozhi.orchestration.decision import DecisionPath
     ("这批订单的毛利如何结算？", ["finance"]),
     ("上架文案里的卖点是什么？", ["operations"]),
     ("售后运费由谁承担？", ["after_sales"]),
-    ("什么时候有现货？", ["supply"]),
+    ("日常供货流程有哪些？", ["supply"]),
     ("请列出型号、适配机型和保修期", ["product", "compatibility", "after_sales"]),
     ("这是什么？", ["product"]),
 ])

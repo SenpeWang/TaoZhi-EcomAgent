@@ -112,6 +112,10 @@ def traced_node(name: str, func: Callable[[Any], Any], span_prefix: str = "pipel
             try:
                 if span is not None:
                     r = result or {}
+                    if "answer_basis" in r:
+                        span.set_attribute("rag.answer_basis", r["answer_basis"])
+                    if "verification_issue" in r:
+                        span.set_attribute("rag.verification_issue", r["verification_issue"])
                     if "retrieval_decision" in r:
                         span.set_attribute("rag.retrieval_decision", r["retrieval_decision"])
                     if "retrieval_search_count" in r:

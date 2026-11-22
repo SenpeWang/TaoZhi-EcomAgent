@@ -47,6 +47,11 @@ const retrievalDecisions: Record<string, string> = {
   external_processing_blocked: '未获外发许可，跳过专家核验',
   no_finance_evidence: '缺少授权财务依据，跳过专家核验',
 }
+const verificationIssues: Record<string, string> = {
+  model_unconfigured: '尚未配置核验模型',
+  budget_exhausted: '已用完本次核验的调用预算',
+  model_unavailable: '核验模型暂时不可用',
+}
 
 /**
  * 根据实际执行的节点与工具名称生成动作描述，并保留采集到的技术标识。
@@ -141,6 +146,10 @@ export function activityResult(entry: TraceActivity): string {
   const decision = attrs['rag.retrieval_decision']
   if (typeof decision === 'string' && Object.hasOwn(retrievalDecisions, decision)) {
     details.push(retrievalDecisions[decision])
+  }
+  const issue = attrs['rag.verification_issue']
+  if (typeof issue === 'string' && Object.hasOwn(verificationIssues, issue)) {
+    details.push(verificationIssues[issue])
   }
   if (entry.name === 'research.orchestrator') {
     switch (attrs['research.next_action']) {

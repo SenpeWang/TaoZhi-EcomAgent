@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from taozhi.application.rag import intent, retrieval, specialists, workflow
+from taozhi.application.rag import intent, publication, retrieval, specialists, workflow
 from taozhi.application.rag.execution import _build_question_result
 from taozhi.core.memory import service as memory_service
 from taozhi.infrastructure.persistence.job_repo import conversation_question_reference
@@ -25,7 +25,7 @@ def rag(monkeypatch):
     """运行真实编译图和检查点，仅替换数据库、检索及模型依赖。"""
     job = dict(id="job", question="资料说明", input_level=1, payload={}, created_at=datetime.now(timezone.utc))
     principal = SimpleNamespace(id="owner", tenant_id="tenant", boss=False)
-    for module in (intent, retrieval, specialists, workflow):
+    for module in (intent, retrieval, specialists, publication):
         monkeypatch.setattr(module, "validate_task_execution", lambda *_: (principal, job))
     decision = SimpleNamespace(selected=["product"], path=intent.DecisionPath.FAST_SEMANTIC)
     monkeypatch.setattr(intent, "get_decision_engine", lambda: SimpleNamespace(choice=lambda **_: decision))
@@ -56,6 +56,108 @@ def test_sufficient_evidence_skips_retry_and_handles_missing_model(rag):
     assert state["retrieval_decision"] == "run_specialists" and not state["hard_block"]
     assert _build_question_result(state)["model_calls"] == 0 and "尚未配置" in state["missing"][0]
     rag.hyde.assert_not_called()
+
+
+@pytest.mark.parametrize("question,allow,basis", [
+    ("什么是 USB PD？", True, "public_reference"),
+    ("什么是 USB PD？", False, "insufficient_evidence"),
+    ("什么是 USB PD，本店这款能保证快充吗？", True, "insufficient_evidence"),
+    ("帮我上网看看本店保修多久？", True, "insufficient_evidence"),
+])
+def test_empty_knowledge_base_keeps_public_definitions_separate(rag, question, allow, basis):
+    rag.job.update(question=question, payload={"allow_public_reference": allow, "require_review": True})
+    rag.search.return_value = []
+    updates, state = rag.run()
+    result = _build_question_result(state)
+    assert "specialists" not in updates and result["answer_basis"] == basis
+    assert result["guidance"] and not result["citations"]
+    assert bool(result["public_sources"]) == (basis == "public_reference")
+    assert state["review"] == (basis == "public_reference")
+    assert state["hard_block"] == (basis == "insufficient_evidence")
+
+
+def test_live_values_require_the_matching_business_field(rag, monkeypatch):
+    rag.job.update(question="这个商品的实时库存和当前售价？", payload={"sku_id": "SKU-1"})
+    source = {"kind": "business", "level": 1}
+    record = {"sku_id": "SKU-1", "available": 0, "purchase_cost_minor": 120, "as_of": "2026-01-01"}
+    monkeypatch.setattr(retrieval, "lookup", lambda *_: {"available": True, "source": source, "record": record})
+    updates, state = rag.run()
+    result = _build_question_result(state)
+    assert list(updates) == ["planning", "business_snapshot", "publication"]
+    assert result["answer_basis"] == "business_snapshot" and "可用库存：0" in result["answer"]
+    assert "采购成本" not in result["answer"] and "销售价格" in result["missing"][0]
+    assert not result["citations"] and state["sources"] == [source]
+    rag.search.assert_not_called()
+
+
+def test_current_order_status_without_identifier_never_uses_documents(rag):
+    rag.job.update(question="帮我查订单状态", payload={"allow_public_reference": True})
+    _, state = rag.run()
+    assert state["answer_basis"] == "insufficient_evidence" and "订单编号" in state["answer"]
+    assert not state["public_sources"] and not state["findings"]
+    rag.search.assert_not_called()
+
+
+@pytest.mark.parametrize("question,reason", [
+    ("昨天这款商品售价是多少？", "指定时点"),
+    ("昨天订单发货了吗？", "指定时点"),
+    ("明天有货吗？", "指定时点"),
+    ("昨天这件多少钱？", "指定时点"),
+    ("预计下周库存多少？", "指定时点"),
+    ("什么时候有现货？", "指定时点"),
+    ("这款商品的供应商报价为多少，采购价格是多少？", "报价单"),
+])
+def test_current_snapshot_cannot_replace_historical_forecast_or_special_price(rag, monkeypatch, question, reason):
+    rag.job.update(question=question, payload={"sku_id": "SKU-1", "allow_public_reference": True})
+    lookup = Mock()
+    monkeypatch.setattr(retrieval, "lookup", lookup)
+    updates, state = rag.run()
+    assert list(updates) == ["planning", "business_snapshot", "publication"]
+    assert state["answer_basis"] == "insufficient_evidence" and state["hard_block"]
+    assert any(reason in item for item in state["missing"])
+    assert not state["sources"] and not state["public_sources"]
+    lookup.assert_not_called()
+    rag.search.assert_not_called()
+
+
+@pytest.mark.parametrize("policy,missing", [
+    ("可以退货吗、保修多久？", ["退换与退款", "保修条件"]),
+    ("售后政策如何？", ["售后政策"]),
+])
+def test_live_price_reports_unanswered_policy_separately(rag, monkeypatch, policy, missing):
+    rag.job.update(question=f"这款商品现在卖多少钱？{policy}", payload={"sku_id": "SKU-1"})
+    record = {"sku_id": "SKU-1", "price_minor": 0, "currency": "CNY", "available": 55}
+    snapshot = {"available": True, "record": record, "source": {"kind": "business", "level": 1}}
+    monkeypatch.setattr(retrieval, "lookup", lambda *_: snapshot)
+    updates, state = rag.run()
+    assert list(updates) == ["planning", "business_snapshot", "publication"]
+    assert state["answer_basis"] == "business_snapshot" and "销售价格（分）：0" in state["answer"]
+    assert "55" not in state["answer"]
+    assert all(any(subject in gap for gap in state["missing"]) for subject in missing)
+
+
+@pytest.mark.parametrize("question,record", [
+    ("资料说明", {"sku_id": "SKU-1", "as_of": "2026-01-01"}),
+    ("这个商品的保修条件具体有哪些？", {"available": 5}),
+])
+def test_snapshot_without_responsive_fields_is_not_an_answer(rag, monkeypatch, question, record):
+    rag.job.update(question=question, payload={"sku_id": "SKU-1"})
+    rag.search.return_value = []
+    snapshot = {"available": True, "record": record, "source": {"kind": "business", "level": 1}}
+    lookup = Mock(return_value=snapshot)
+    monkeypatch.setattr(retrieval, "lookup", lookup)
+    _, state = rag.run()
+    assert state["answer_basis"] == "insufficient_evidence" and "实时业务数据" not in state["answer"]
+    if "保修" in question:
+        lookup.assert_not_called()
+
+
+def test_manual_excerpt_retains_late_eligibility_conditions(rag):
+    rag.job.update(question="保修条件是什么？", payload={"allow_external": False})
+    text = "保修规定。" + "请核对购买凭证。" * 72 + "仅限直营渠道，第三方店铺除外。"
+    rag.search.return_value = [{**_document(), "quote": text}]
+    _, state = rag.run()
+    assert state["answer_basis"] == "source_excerpt" and text in state["answer"]
 
 
 @pytest.mark.parametrize("adaptive,score,rerank,reason", [
@@ -95,8 +197,9 @@ def test_retry_merges_new_evidence_and_accounts_for_hyde_once(rag, monkeypatch, 
     (True, True, "finance", "no_finance_evidence", True, False),
 ])
 def test_no_model_routes_keep_review_and_publish_contract(rag, has_evidence, allow_external, role, reason, hard, review):
+    rag.job["question"] = "商品背板颜色是什么？"
     rag.job["payload"].update(allow_external=allow_external, require_review=True)
-    rag.search.return_value = [_document()] if has_evidence else []
+    rag.search.return_value = [{**_document(), "quote": "商品背板颜色为黑色。"}] if has_evidence else []
     rag.decision.selected = [role]
     updates, state = rag.run()
     result = _build_question_result(state)
@@ -112,14 +215,33 @@ def test_no_model_routes_keep_review_and_publish_contract(rag, has_evidence, all
         rag.search.assert_called_once()
 
 
+@pytest.mark.parametrize("allow_external", [True, False])
+def test_model_free_graph_shows_only_applicable_manual_excerpts(rag, allow_external):
+    rag.job.update(question="MC-500 的切幅是多少？", payload={"allow_external": allow_external, "require_review": True})
+    rag.search.return_value = [
+        {**_document("other-model"), "quote": "MC-501 切幅为 220mm。"},
+        {**_document("right-model"), "quote": "MC-500 切幅为 120mm，仅适用于合成批次。"},
+    ]
+    updates, state = rag.run()
+    result = _build_question_result(state)
+    assert ("specialists" in updates) == allow_external
+    assert state["review"] and result["answer_basis"] == "source_excerpt" and not result["public_sources"]
+    assert result["model_calls"] == 0 and not state["findings"] and not result["cache_hit"]
+    assert [citation["cited"] for citation in result["citations"]] == [False, True]
+    assert state["evidence"][1]["quote"] + " [2]" in result["answer"] and "220mm" not in result["answer"]
+
+
 def test_authorized_business_snapshot_is_evidence_with_no_documents(rag, monkeypatch):
     rag.job["payload"].update(sku_id="test-item", require_review=True)
     rag.search.return_value = []
     source = {"kind": "business", "level": 1}
-    monkeypatch.setattr(retrieval, "lookup", lambda *_: {"available": True, "source": source, "record": {"available": 7}})
+    record = {"available": 7, "phone": "保密电话", "address": "保密地址", "purchase_cost_minor": 941}
+    monkeypatch.setattr(retrieval, "lookup", lambda *_: {"available": True, "source": source, "record": record})
     updates, state = rag.run()
     assert "specialists" in updates and not state["hard_block"] and state["review"]
     assert state["sources"] == [source] and "可用库存：7" in state["answer"]
+    assert state["business"][0]["record"] == {"available": 7}
+    assert "保密" not in state["answer"] and "941" not in state["answer"]
 
 
 @pytest.mark.parametrize("allow_external,input_level", [(False, 1), (True, 3)])
@@ -165,7 +287,8 @@ def test_postgres_previous_question_respects_owner_tenant_conversation_and_order
         ):
             created = datetime.fromisoformat(time).replace(tzinfo=timezone.utc)
             conn.execute("INSERT INTO jobs VALUES(%s,%s,%s,%s,%s,'ask',%s,'合成问题',2,'{\"allow_external\":false}',"
-                         "jsonb_build_object('citations',jsonb_build_array(jsonb_build_object('chunk_id',%s::text))),'[]')",
+                         "jsonb_build_object('citations',jsonb_build_array(jsonb_build_object('chunk_id',%s::text,'cited',true),"
+                         "jsonb_build_object('chunk_id','candidate','cited',false),jsonb_build_object('chunk_id','unmarked'))),'[]')",
                          (identifier, tenant, owner, conversation, created, status, identifier))
         row = conversation_question_reference(conn, "t", "u", "c", before)
         assert row["id"] == "before" and row["allow_external"] is False

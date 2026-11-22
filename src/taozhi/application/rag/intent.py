@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from taozhi.application.common.task_guard import empty_token_usage, validate_task_execution
 from taozhi.domain.privacy import redact
+from taozhi.domain.question_context import business_field_requests
 from taozhi.domain.rag_verification import SPECIALIST_AGENTS
 from taozhi.orchestration.decision import DecisionPath, get_decision_engine
 from .state import State
@@ -19,10 +20,7 @@ _ROLE_TERMS = {
 }
 
 
-def plan_node(state: State) -> dict:
-    """意图理解与多智能体路由规划（零外部模型调用）。"""
-    _, job = validate_task_execution(state, "动态意图理解与多智能体路由规划", 10)
-    question = job["question"]
+def _select_specialists(question: str) -> list[str]:
     options = {role_id: f"{title}：{guidance}" for role_id, (title, guidance) in SPECIALIST_AGENTS.items()}
     decision = get_decision_engine().choice(
         context=redact(question),
@@ -36,10 +34,18 @@ def plan_node(state: State) -> dict:
     if decision.path == DecisionPath.FAST_SEMANTIC or not matched:
         selected.extend(role for role in decision.selected if role in SPECIALIST_AGENTS)
     selected.extend(matched)
+    return list(dict.fromkeys(selected))[:3] or ["product"]
 
+
+def plan_node(state: State) -> dict:
+    """为实时业务字段选择权威系统，知识问题按主题分派专家。"""
+    _, job = validate_task_execution(state, "识别问题与答复依据", 10)
+    question = job["question"]
+    live_fields = business_field_requests(question)
     return dict(
         question=question,
-        selected_agents=list(dict.fromkeys(selected))[:3] or ["product"],
+        live_fields=live_fields,
+        selected_agents=[] if live_fields else _select_specialists(question),
         model_calls=0,
         missing=[],
         findings=[],

@@ -103,6 +103,17 @@ export interface Citation {
   title: string
   version: number
   quote: string
+  cited?: boolean
+  page?: number | null
+}
+export interface KnowledgeQuestion {
+  question: string
+  node_id: string
+  allow_external: boolean
+  allow_public_reference: boolean
+  require_review: boolean
+  sku_id: string
+  order_id: string
 }
 export interface ResearchPlatform {
   name: string
@@ -124,6 +135,16 @@ export interface ResearchSubagent {
 }
 export interface TaskResult {
   answer?: string
+  answer_basis?:
+    | 'internal_evidence'
+    | 'business_snapshot'
+    | 'source_excerpt'
+    | 'public_reference'
+    | 'insufficient_evidence'
+  guidance?: string
+  public_sources?: { title: string; url: string }[]
+  cache_hit?: boolean
+  data?: unknown
   report?: string
   outline?: string[]
   platforms?: ResearchPlatform[]

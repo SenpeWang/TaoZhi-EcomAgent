@@ -46,6 +46,8 @@ assert.equal(activityResult({...context, attributes:{'context.input_chars':2000,
 const retrieval = {...context, name:'pipeline.retrieval', category:'CHAIN',
   attributes:{'rag.retrieval_decision':'retry_weak_evidence'}}
 assert.equal(activityResult(retrieval), '首轮证据不足，进入补查')
+assert.equal(activityResult({...retrieval, name:'pipeline.specialists',
+  attributes:{'rag.verification_issue':'model_unavailable'}}), '核验模型暂时不可用')
 for (const [count, expected] of [[1,'未执行第二次检索'], [2,'已执行第二次检索']]) {
   const retry = {...retrieval, name:'pipeline.retrieval_retry', attributes:{'rag.retrieval_search_count':count}}
   assert.equal(activityResult(retry), expected)

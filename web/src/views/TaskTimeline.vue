@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { visibleTaskResult } from '../knowledgeAnswers'
 import { ElMessage } from 'element-plus'
 import type { Task } from '../types'
 import { formatStage, levelText, stateTag, stateText } from '../labels'
 import MarkdownReport from './MarkdownReport.vue'
+import KnowledgeAnswer from './KnowledgeAnswer.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -23,14 +25,15 @@ const emit = defineEmits<{
 }>()
 
 const steerInput = ref('')
+const result = computed(() => visibleTaskResult(props.task))
 
 /**
  * 复制当前调研研报到剪贴板。
  */
 async function copyReport(): Promise<void> {
-  if (!props.task?.result?.report) return
+  if (!result.value?.report) return
   try {
-    await navigator.clipboard.writeText(props.task.result.report)
+    await navigator.clipboard.writeText(result.value.report)
     ElMessage.success('已复制调研研报 Markdown')
   } catch {
     ElMessage.warning('复制失败，可选中报告正文手动复制')
@@ -55,7 +58,7 @@ function onSteer() {
     @update:model-value="emit('update:modelValue', $event)"
   >
     <template v-if="task">
-      <h3>{{ task.question }}</h3>
+      <h3>{{ task.restricted ? '受限提问' : task.question }}</h3>
       <div class="detail-meta">
         <el-tag>{{ stateText(task.state) }}</el-tag>
         <span>{{ formatStage(task.stage) }}</span>
@@ -116,7 +119,7 @@ function onSteer() {
         :closable="false"
       />
 
-      <template v-if="task.result">
+      <template v-if="result">
         <template v-if="task.kind === 'research'">
           <div class="research-header-row">
             <h3>选品调研报告</h3>
@@ -126,28 +129,28 @@ function onSteer() {
           </div>
           <div class="detail-meta">
             <el-tag
-              v-for="pl in task.result.platforms || []"
+              v-for="pl in result.platforms || []"
               :key="pl.name"
               :type="pl.state === 'ok' ? 'success' : 'info'"
               effect="plain"
             >
               {{ pl.label }} · {{ pl.state_label }}
             </el-tag>
-            <el-tag v-if="task.result.elapsed" type="warning" effect="plain">
-              用时 {{ task.result.elapsed }}s
+            <el-tag v-if="result.elapsed" type="warning" effect="plain">
+              用时 {{ result.elapsed }}s
             </el-tag>
-            <el-tag v-if="task.result.model_calls" type="info" effect="plain">
-              模型调用 {{ task.result.model_calls }} 次
+            <el-tag v-if="result.model_calls" type="info" effect="plain">
+              模型调用 {{ result.model_calls }} 次
             </el-tag>
           </div>
 
-          <div v-if="task.result.subagents?.length" class="subagents-roster-box">
+          <div v-if="result.subagents?.length" class="subagents-roster-box">
             <div class="roster-header">
-              <strong>调研执行记录（{{ task.result.subagents.length }} 次）</strong>
+              <strong>调研执行记录（{{ result.subagents.length }} 次）</strong>
             </div>
             <div class="subagents-card-grid">
               <div
-                v-for="researchAgent in task.result.subagents"
+                v-for="researchAgent in result.subagents"
                 :key="researchAgent.id"
                 class="subagent-roster-card"
               >
@@ -165,10 +168,10 @@ function onSteer() {
             </div>
           </div>
 
-          <div v-if="task.result.outline?.length" class="research-outline-bar">
+          <div v-if="result.outline?.length" class="research-outline-bar">
             <span class="outline-label">报告大纲：</span>
             <el-tag
-              v-for="(ch, idx) in task.result.outline"
+              v-for="(ch, idx) in result.outline"
               :key="idx"
               size="small"
               effect="light"
@@ -178,10 +181,10 @@ function onSteer() {
             </el-tag>
           </div>
 
-          <div v-if="task.result.artifacts?.length" class="artifacts-bar">
+          <div v-if="result.artifacts?.length" class="artifacts-bar">
             <span class="artifact-label">附件输出：</span>
             <el-tag
-              v-for="(art, idx) in task.result.artifacts"
+              v-for="(art, idx) in result.artifacts"
               :key="idx"
               size="small"
               type="info"
@@ -192,52 +195,16 @@ function onSteer() {
           </div>
 
           <div class="answer-body research-markdown-view">
-            <MarkdownReport
-              :content="task.result.report || ''"
-              :id-prefix="'task-' + task.id"
-              compact
-            />
+            <MarkdownReport :content="result.report || ''" :id-prefix="'task-' + task.id" compact />
           </div>
         </template>
 
-        <template v-else>
-          <h3>检索结果</h3>
-          <div class="detail-meta">
-            <el-tag
-              v-for="specialist in task.result.specialists || []"
-              :key="specialist.name"
-              effect="plain"
-            >
-              {{ specialist.display_name }} ·
-              {{ specialist.count ? '匹配 ' + specialist.count + ' 条依据' : '暂无匹配依据' }}
-            </el-tag>
-          </div>
-          <div class="answer-body answer-markdown-view">
-            <MarkdownReport
-              :content="task.result.answer || ''"
-              :id-prefix="'ans-' + task.id"
-              :show-outline="false"
-              compact
-            />
-          </div>
-          <div v-if="task.result.missing?.length" class="missing-box">
-            <strong>待补充确认</strong>
-            <p v-for="m in task.result.missing" :key="m">{{ m }}</p>
-          </div>
-          <h3 v-if="task.result.citations?.length">参考依据来源</h3>
-          <el-collapse>
-            <el-collapse-item
-              v-for="(c, i) in task.result.citations"
-              :key="c.chunk_id"
-              :title="'[' + (Number(i) + 1) + '] ' + c.title + ' · V' + c.version"
-            >
-              <pre class="quote-body">{{ c.quote }}</pre>
-              <el-button text type="primary" @click="emit('openDoc', c.document_id)">
-                查看原文文档
-              </el-button>
-            </el-collapse-item>
-          </el-collapse>
-        </template>
+        <KnowledgeAnswer
+          v-else
+          :task-id="task.id"
+          :result="result"
+          @open-doc="emit('openDoc', $event)"
+        />
       </template>
 
       <el-empty v-else-if="task.state === 'review'" description="待负责人审核后发布结果" />

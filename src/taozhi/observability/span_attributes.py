@@ -9,6 +9,7 @@ from typing import get_args
 from openinference.semconv.trace import RerankerAttributes, SpanAttributes
 
 from taozhi.domain.privacy import redact
+from taozhi.domain.knowledge_answer import AnswerBasis, VerificationIssue
 from taozhi.domain.rag_verification import RetrievalDecision
 
 SPAN_KINDS = {"CHAIN", "AGENT", "LLM", "TOOL", "RETRIEVER", "EMBEDDING", "RERANKER", "INTERNAL"}
@@ -42,6 +43,10 @@ def safe_attributes(attrs: Mapping | None) -> dict:
         elif key == "research.next_action" and value in ("dispatch_subagents", "synthesizer", "final_node"):
             clean[key] = value
         elif key == "rag.retrieval_decision" and value in get_args(RetrievalDecision):
+            clean[key] = value
+        elif key == "rag.answer_basis" and value in get_args(AnswerBasis):
+            clean[key] = value
+        elif key == "rag.verification_issue" and value in get_args(VerificationIssue):
             clean[key] = value
         elif key == SpanAttributes.OPENINFERENCE_SPAN_KIND and isinstance(value, str) and value in SPAN_KINDS:
             clean[key] = value

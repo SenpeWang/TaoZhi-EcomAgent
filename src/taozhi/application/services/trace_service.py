@@ -46,7 +46,8 @@ _TRACE_OPERATIONS = {
     **CHAIN_OPERATIONS["GUARDRAIL"],
 }
 _KEY_ACTIVITY_STEPS = (
-    "worker.semantic_cache_hit", "pipeline.planning", "pipeline.retrieval", "pipeline.retrieval_retry", "pipeline.publication",
+    "worker.semantic_cache_hit", "pipeline.planning", "pipeline.retrieval", "pipeline.retrieval_retry",
+    "pipeline.specialists", "pipeline.publication",
     "bi.bi_intent", "bi.bi_publish", "research.final_node", *CHAIN_CATEGORY_BY_NAME,
 )
 _TOOL_OUTCOMES = {

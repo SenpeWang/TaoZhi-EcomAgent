@@ -113,7 +113,9 @@
           </template>
           <template v-for="field in spanFields(row.span)" :key="field.key">
             <dt :title="field.key">{{ field.label }}</dt>
-            <dd>{{ field.value }}</dd>
+            <dd>
+              {{ field.key === 'rag.answer_basis' ? answerBasisLabel(field.value) : field.value }}
+            </dd>
           </template>
         </dl>
       </div>
@@ -128,6 +130,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { answerBasisLabel } from '../knowledgeAnswers'
 import { preciseTraceTime } from '../labels'
 import TraceDiagnosticLog from './TraceDiagnosticLog.vue'
 import {

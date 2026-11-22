@@ -299,94 +299,27 @@
           @inspect="openTrace"
         />
 
-        <template v-else-if="currentPage === '知识问答'">
-          <section class="question-grid">
-            <div class="panel">
-              <div class="section-head">
-                <div>
-                  <h3>企业知识库检索</h3>
-                  <p class="section-sub">
-                    基于当前账号权限检索企业内部文档，输出结论附带可核验的原文出处。
-                  </p>
-                </div>
-              </div>
-              <el-form label-position="top">
-                <el-form-item label="咨询问题">
-                  <el-input
-                    v-model="askForm.question"
-                    type="textarea"
-                    :rows="5"
-                    placeholder="请输入制度流程、合同条款、供应商政策等相关问题..."
-                  />
-                </el-form-item>
-                <div class="form-columns">
-                  <el-form-item label="检索部门范围">
-                    <el-select v-model="askForm.node_id">
-                      <el-option
-                        v-for="organization in organizations"
-                        :key="organization.id"
-                        :label="organization.name"
-                        :value="organization.id"
-                      />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item label="数据密级">
-                    <div class="account-level-badge">
-                      <span class="level-pill" :class="`level-${currentUserLevel}`">
-                        {{ levelText(currentUserLevel) }}
-                      </span>
-                      <span class="level-hint">按当前账号职级匹配</span>
-                    </div>
-                  </el-form-item>
-                </div>
-                <el-checkbox v-model="askForm.allow_external">
-                  允许非机密文档经外部 AI 模型辅助分析（机密文档默认仅内网处理）
-                </el-checkbox>
-                <el-alert
-                  v-if="currentUserLevel === 3"
-                  type="info"
-                  :closable="false"
-                  show-icon
-                  title="机密（L3）文档默认禁止向外部 AI 服务传输，如需使用须经负责人单独授权。"
-                />
-                <el-button
-                  class="submit-question"
-                  type="primary"
-                  size="large"
-                  :loading="busy"
-                  @click="submitQuestion"
-                >
-                  提交查询
-                </el-button>
-              </el-form>
-            </div>
-
-            <div class="panel">
-              <h3>检索与审核流程</h3>
-              <div class="pipeline-step">
-                <span>01</span>
-                <div>
-                  <strong>权限范围校验</strong>
-                  <small>系统自动过滤当前账号所属部门及密级允许访问的文档内容。</small>
-                </div>
-              </div>
-              <div class="pipeline-step">
-                <span>02</span>
-                <div>
-                  <strong>文档提取与核验</strong>
-                  <small>提取关键业务条文并比对原文依据，确保答复内容真实可追溯。</small>
-                </div>
-              </div>
-              <div class="pipeline-step">
-                <span>03</span>
-                <div>
-                  <strong>审核与版本留痕</strong>
-                  <small>引用结果绑定文档版本号；源文档失效或权限变更时自动停止展示。</small>
-                </div>
-              </div>
-            </div>
-          </section>
-        </template>
+        <KnowledgeWorkspace
+          v-else-if="currentPage === '知识问答' && !user.must_change"
+          :key="user.id"
+          :user="user"
+          :organizations="organizations"
+          :input-level="currentUserLevel"
+          :tasks="tasks"
+          :task="inlineQuestion ? activeTask : null"
+          :loading-answer="inlineQuestion && !activeTask"
+          :draft="inlineQuestion ? taskDraft : ''"
+          :busy="busy"
+          @submit="submitQuestion"
+          @select="selectQuestion"
+          @reset="newQuestion"
+          @browse="navigate('知识文档')"
+          @inspect="openTrace"
+          @open-doc="documentManager?.openDocument($event)"
+          @cancel="cancelTask"
+          @retry="retryTask"
+          @review="reviewTask"
+        />
 
         <TaskCenter
           v-else-if="currentPage === '我的任务' || currentPage === '团队审核'"
@@ -703,6 +636,7 @@ import AccountCenter from './views/AccountCenter.vue'
 import BiView from './views/BiView.vue'
 import DocumentManager from './views/DocumentManager.vue'
 import LoginPortal from './views/LoginPortal.vue'
+import KnowledgeWorkspace from './views/KnowledgeWorkspace.vue'
 import PolicyMatrix from './views/PolicyMatrix.vue'
 import ResearchChatView from './views/ResearchChatView.vue'
 import TaskCenter from './views/TaskCenter.vue'
@@ -719,6 +653,7 @@ import type {
   DocumentListItem,
   Items,
   LoginResponse,
+  KnowledgeQuestion,
   Organization,
   OrganizationTree,
   QuickAccount,
@@ -759,12 +694,15 @@ let session = new AbortController()
 let workspaceRequest = 0
 
 const loginForm = reactive({ username: '', password: '' })
-const askForm = reactive({ question: '', node_id: '', input_level: 1, allow_external: false })
 
 const inspectedTrace = ref<{ taskId: string; traceId: string | null } | null>(null)
 const taskOpen = ref(false)
 const activeTask = ref<Task | null>(null)
 const taskDraft = ref('')
+const inlineQuestion = ref(false)
+const taskVisible = computed(
+  () => taskOpen.value || (inlineQuestion.value && currentPage.value === '知识问答'),
+)
 let taskSelection = 0
 
 const accountOpen = ref(false)
@@ -969,8 +907,7 @@ function clearSession(): void {
   activeTask.value = null
   dashboard.value = emptyDashboard
   currentPage.value = '工作概览'
-  askForm.question = ''
-  askForm.node_id = ''
+  inlineQuestion.value = false
   loginForm.password = ''
   accountForm.password = resetForm.new_password = ''
   taskDraft.value = ''
@@ -1027,7 +964,6 @@ async function load(): Promise<void> {
   tasks.value = taskPage.items
   approvals.value = approvalPage.items
   users.value = userPage.items
-  if (!askForm.node_id && organizations.value.length) askForm.node_id = organizations.value[0].id
 }
 
 /**
@@ -1044,8 +980,6 @@ async function signIn(): Promise<void> {
     user.value = signedUser
     loginForm.password = ''
     currentPage.value = signedUser.must_change ? '个人中心' : '工作概览'
-    askForm.input_level = signedUser.is_boss ? 3 : signedUser.is_leader ? 2 : 1
-    askForm.allow_external = !signedUser.is_boss
     await load()
   })
 }
@@ -1090,6 +1024,7 @@ async function navigate(name: string): Promise<void> {
     .flatMap((group) => group.items)
     .find((item) => item.page === name)
   if (!destination) return
+  if (currentPage.value === '知识问答' && destination.page !== currentPage.value) newQuestion()
   currentPage.value = destination.page
   if (name === '轨迹中台' || name === '评测中心') return
   if (name === '系统状态') {
@@ -1105,27 +1040,46 @@ async function navigate(name: string): Promise<void> {
   }
 }
 
+/** 清除当前所选答复，作废先前请求和正在显示的草稿。 */
+function newQuestion(): void {
+  taskSelection++
+  inlineQuestion.value = false
+  activeTask.value = null
+  taskDraft.value = ''
+}
+
 /**
- * 提交知识库问答任务并开启实时进度监听。
+ * 在问答工作区读取已选的个人提问。
+ * @param id - 历史任务编号。
  */
-async function submitQuestion(): Promise<void> {
-  if (!askForm.question.trim()) {
-    ElMessage.warning('请先填写咨询问题')
-    return
+async function selectQuestion(id: string): Promise<void> {
+  newQuestion()
+  const selection = taskSelection
+  inlineQuestion.value = true
+  try {
+    await action(() => showTask(id, selection, true))
+  } finally {
+    if (selection === taskSelection && !activeTask.value) inlineQuestion.value = false
   }
-  askForm.input_level = currentUserLevel.value
+}
+
+/**
+ * 创建知识提问，在工作区内订阅执行进度和回答。
+ * @param question - 问题、业务编号及本次授权选择。
+ */
+async function submitQuestion(question: KnowledgeQuestion): Promise<void> {
+  if (busy.value || !question.question.trim()) return
   const selection = ++taskSelection
   await action(async () => {
-    const r = await api<CreatedResource>('/tasks', 'POST', askForm)
-    await showTask(r.id, selection)
-    ElMessage.success('任务已提交')
+    const result = await api<CreatedResource>('/tasks', 'POST', question)
+    if (selection === taskSelection) await showTask(result.id, selection, true)
     await load()
   })
 }
 
 watch(
   () =>
-    taskOpen.value &&
+    taskVisible.value &&
     activeTask.value &&
     !activeTask.value.restricted &&
     ['queued', 'running'].includes(activeTask.value.state)
@@ -1166,7 +1120,7 @@ watch(
       onDone: () => {
         void api<Task>('/tasks/' + taskId)
           .then((task) => {
-            if (selected && activeTask.value?.id === taskId) activeTask.value = task
+            if (selected && activeTask.value?.id === taskId) applyTaskSnapshot(task)
           })
           .catch(() => {})
       },
@@ -1189,6 +1143,20 @@ function openTrace(taskId: string, traceId: string | null = null): void {
 }
 
 /**
+ * 同步可见详情和对应的历史摘要，权限变更时同时更新两处展示。
+ * @param snapshot - 刚通过服务端权限校验的任务快照。
+ */
+function applyTaskSnapshot(snapshot: Task): void {
+  activeTask.value = snapshot
+  const summary = tasks.value.find((item) => item.id === snapshot.id)
+  if (summary) {
+    summary.question = snapshot.question
+    summary.state = snapshot.state
+    summary.restricted = snapshot.restricted
+  }
+}
+
+/**
  * 加载并展示指定任务详情。
  * @param id - 任务 ID。
  */
@@ -1201,12 +1169,21 @@ async function openTask(id: string): Promise<void> {
  * 仅展示最近选择的任务，避免切换任务或登出后的旧响应覆盖界面。
  * @param id - 所选任务编号。
  * @param selection - 本次选择的顺序编号。
+ * @param inline - 在知识问答工作区内查看该任务。
  */
-async function showTask(id: string, selection: number): Promise<void> {
+async function showTask(id: string, selection: number, inline = false): Promise<void> {
   const snapshot = await api<Task>('/tasks/' + id)
   if (selection !== taskSelection || !user.value) return
-  activeTask.value = snapshot
-  taskOpen.value = true
+  if (
+    inline &&
+    (currentPage.value !== '知识问答' ||
+      snapshot.kind !== 'ask' ||
+      snapshot.owner_id !== user.value.id)
+  )
+    return
+  applyTaskSnapshot(snapshot)
+  inlineQuestion.value = inline
+  taskOpen.value = !inline
 }
 
 /**
@@ -1218,7 +1195,8 @@ async function reviewTask(taskId: string, approve: boolean): Promise<void> {
   await action(async () => {
     await api('/tasks/' + taskId + '/review', 'POST', { approve, comment: '' })
     ElMessage.success(approve ? '已通过并发布' : '已驳回')
-    if (taskOpen.value && activeTask.value?.id === taskId) await showTask(taskId, taskSelection)
+    if (taskVisible.value && activeTask.value?.id === taskId)
+      await showTask(taskId, taskSelection, inlineQuestion.value)
     await load()
   })
 }
@@ -1246,7 +1224,8 @@ async function retryTask(taskId?: string): Promise<void> {
   if (!tid) return
   await action(async () => {
     await api('/tasks/' + tid + '/retry', 'POST')
-    if (taskOpen.value && activeTask.value?.id === tid) await openTask(tid)
+    if (taskVisible.value && activeTask.value?.id === tid)
+      await showTask(tid, taskSelection, inlineQuestion.value)
     ElMessage.success('已重新发起任务')
     await load()
   })
@@ -1479,19 +1458,24 @@ onMounted(async () => {
   try {
     const me = await api<User>('/auth/me')
     user.value = me
-    askForm.input_level = me.is_boss ? 3 : me.is_leader ? 2 : 1
-    askForm.allow_external = !me.is_boss
     await load()
   } catch {}
   timer = setInterval(async () => {
     if (!user.value || user.value.must_change) return
+    const selected = activeTask.value
+    if (!taskVisible.value || !selected) return
     try {
-      if (taskOpen.value && activeTask.value) {
-        const selected = activeTask.value
-        const snapshot = await api<Task>('/tasks/' + selected.id)
-        if (taskOpen.value && activeTask.value === selected) activeTask.value = snapshot
+      const snapshot = await api<Task>('/tasks/' + selected.id)
+      if (!taskVisible.value || activeTask.value !== selected) return
+      applyTaskSnapshot(snapshot)
+    } catch {
+      if (taskVisible.value && activeTask.value === selected) {
+        taskOpen.value = false
+        newQuestion()
+        ElMessage.warning('暂时无法复核当前任务，请从最新任务列表重新打开。')
+        await action(load)
       }
-    } catch {}
+    }
   }, 2500)
 })
 

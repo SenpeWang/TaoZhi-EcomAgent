@@ -156,10 +156,20 @@ def test_cross_entity_query_does_not_collide(cache):
         )
         is None
     )
-    same = cache.get(
+    unspecified_wattage = cache.get(
         "t1",
         "用 LX-20 充电器搭配 iPhone 15 行不行？",
         input_level=1,
         boss=False,
     )
+    assert unspecified_wattage is None
+    same = cache.get("t1", "用 LX-20 65W 氮化镓充电器搭配 iPhone 15 兼容性结论是什么?", input_level=1, boss=False)
     assert same is not None and "65W" in same["answer"]
+
+
+def test_policy_cache_preserves_channel_and_time_conditions(cache):
+    source = [{"kind": "document", "document_id": "policy"}]
+    cache.put("t1", "本店线上渠道的保修期？", "以所引线上条款为准", [], source, redacted=True)
+    assert cache.get("t1", "本店线下渠道的保修期？") is None
+    assert cache.get("t1", "本店线上渠道的保修期是否变更？") is None
+    assert cache.get("t1", "本店线上渠道的保修期?")["answer"] == "以所引线上条款为准"

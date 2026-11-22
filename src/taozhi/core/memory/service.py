@@ -74,7 +74,8 @@ def get_followup_context(
         if not past["result"] or past["input_level"] > input_level or not sources_valid(conn, p, past["sources"]):
             continue
         evidence = []
-        for citation in past["result"].get("citations", [])[:5]:
+        citations = [item for item in past["result"].get("citations", []) if item.get("cited") is True]
+        for citation in citations[:5]:
             chunk = fetch_one(
                 conn,
                 "SELECT c.*,d.title,d.node_id,d.level,d.ai_allowed,d.acl_version FROM chunks c JOIN documents d ON d.id=c.document_id WHERE c.tenant_id=%s AND c.id=%s AND d.current_version=c.version AND d.state='published'",

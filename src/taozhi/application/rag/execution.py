@@ -63,6 +63,9 @@ def _try_answer_from_semantic_cache(job: dict[str, Any], cache: Any, queue_wait_
         e2e_ms = _elapsed_ms(job.get("created_at"))
         result = dict(
             answer=cached["answer"],
+            answer_basis="internal_evidence",
+            public_sources=[],
+            guidance="",
             citations=cached["citations"],
             specialists=[{"name": "semantic_cache", "count": 1}],
             missing=[],
@@ -97,9 +100,15 @@ def _build_question_result(state: dict[str, Any]) -> dict[str, Any]:
     """将 RAG 问答工作流终态裁剪组装为前端与报告可消费的结果负载。"""
     citation_fields = ("document_id", "version", "title", "quote", "page", "chunk_id")
     finding_counts = Counter(finding["role"] for finding in state["findings"])
+    used = {finding["evidence_index"] for finding in state["findings"]}
+    used.update(state.get("excerpt_indices", ()))
     return dict(
         answer=state["answer"],
-        citations=[{field: evidence[field] for field in citation_fields} for evidence in state["evidence"]],
+        answer_basis=state["answer_basis"],
+        public_sources=state["public_sources"],
+        guidance=state["guidance"],
+        citations=[{**{field: item[field] for field in citation_fields}, "cited": index in used}
+                   for index, item in enumerate(state["evidence"])],
         specialists=[{"name": role, "count": finding_counts[role]} for role in state["selected_agents"]],
         missing=state["missing"],
         hard_block=state["hard_block"],
@@ -123,7 +132,7 @@ def process_question_job(job: dict[str, Any]) -> None:
         or refers_to_previous_question(question)
     )
     data_intent: dict[str, Any] | None = None
-    if not any(business.values()) and may_request_metric(question):
+    if not business and may_request_metric(question):
         try:
             with database_connection() as c:
                 p_init = load_principal(c, job["owner_id"])
