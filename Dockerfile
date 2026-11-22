@@ -17,8 +17,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s#deb.debian.org#$APT_MIRROR#g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    fi \
+    && apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates postgresql-client \
+        libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g "${APP_GID}" appuser \
     && useradd -m -u "${APP_UID}" -g "${APP_GID}" appuser

@@ -1,7 +1,9 @@
 """文档入库校验、统一文本抽取与结构感知切片。"""
 from __future__ import annotations
 
+import importlib.util
 import io
+import os
 import zipfile
 from typing import List, Optional, Tuple
 
@@ -39,14 +41,70 @@ def validate_upload(name: str, data: bytes) -> str:
     raise Denied("支持 PDF、Word、文本和 Markdown 附件", "UPLOAD_FORMAT", 400)
 
 
+OCR_PAGE_MIN_CHARS = 20
+OCR_DPI = 150
+
+
+def _ocr_available() -> bool:
+    """判断当前环境是否启用并具备 OCR 能力。
+
+    Returns:
+        OCR 开关打开且识别库可导入时返回 True。
+    """
+    if os.environ.get("ECOM_OCR_ENABLED", "true").lower() not in ("1", "true", "yes"):
+        return False
+    return importlib.util.find_spec("rapidocr_onnxruntime") is not None
+
+
+def _ocr_pdf_pages(data: bytes, pages: int) -> List[Tuple[int, str]]:
+    """对无文本层的 PDF 逐页渲染并识别文字。
+
+    Args:
+        data: PDF 字节流。
+        pages: 需要识别的页数上限。
+
+    Returns:
+        按页的识别文本；识别库不可用时返回空列表。
+    """
+    import fitz
+    from rapidocr_onnxruntime import RapidOCR
+
+    engine = RapidOCR()
+    results: List[Tuple[int, str]] = []
+    with fitz.open(stream=data, filetype="pdf") as pdf:
+        for index in range(min(pages, len(pdf))):
+            pixmap = pdf[index].get_pixmap(dpi=OCR_DPI)
+            outcome, _ = engine(pixmap.tobytes("png"))
+            text = "\n".join(item[1] for item in (outcome or []))
+            results.append((index + 1, text))
+    return results
+
+
 def extract_pdf_pages_bytes(data: bytes, enforce_limits: bool = True) -> List[Tuple[int, str]]:
-    """使用 PyMuPDF 按页提取 PDF 文本，返回 [(1-based 页码, 文本), ...]。"""
+    """按页提取 PDF 文本；文本层不足时回退到 OCR 识别。
+
+    Args:
+        data: PDF 字节流。
+        enforce_limits: 是否限制加密与页数上限。
+
+    Returns:
+        [(1-based 页码, 文本), ...]。
+    """
     import fitz
 
     with fitz.open(stream=data, filetype="pdf") as pdf:
         if enforce_limits and (pdf.is_encrypted or len(pdf) > 200):
             raise Denied("暂不支持加密或超过 200 页的 PDF", "PARSE_LIMIT", 400)
-        return [(i + 1, pdf[i].get_text("text")) for i in range(len(pdf))]
+        pages = [(i + 1, pdf[i].get_text("text")) for i in range(len(pdf))]
+    empty_pages = [number for number, text in pages if len(text.strip()) < OCR_PAGE_MIN_CHARS]
+    if not empty_pages or not _ocr_available():
+        return pages
+    ocr_pages = {number: text for number, text in _ocr_pdf_pages(data, len(pages))}
+    merged = [(number, ocr_pages.get(number, text) if number in empty_pages else text)
+              for number, text in pages]
+    if not any(text.strip() for _, text in merged):
+        return pages
+    return merged
 
 
 def extract_docx_text_bytes(data: bytes, table_sep: str = " | ") -> str:
