@@ -7,30 +7,33 @@ from typing import Any
 
 
 def _collect_tech_stack() -> dict[str, str]:
-    """从当前运行配置动态读取技术栈与模型环境信息，不硬编码。"""
-    stack: dict[str, str] = {
-        "orchestration": "LangGraph + FastAPI + PostgreSQL (pgvector)",
-    }
-    try:
-        from taozhi.config import get_settings, load_config
+    """从当前运行配置动态读取技术栈与模型环境信息。"""
+    from taozhi.config import get_settings, load_config
 
-        settings = get_settings()
-        stack["llm_model"] = settings.model or "-"
-        stack["llm_fast_model"] = settings.llm_fast_model or "-"
-        stack["llm_strong_model"] = settings.llm_strong_model or "-"
-        try:
-            cfg = load_config()
-            stack["retrieval_stack"] = (
-                f"ES={'on' if cfg.es_enabled else 'off'} + pgvector HNSW + "
-                f"AdaptiveHyDE={'on' if cfg.adaptive_hyde else 'off'} + "
-                f"Rerank={'on' if cfg.rerank_enabled else 'off'}"
-            )
-            stack["semantic_cache"] = f"threshold={cfg.semantic_cache_threshold}, ttl={cfg.semantic_cache_ttl}s"
-        except Exception:
-            stack["retrieval_stack"] = os.environ.get("ECOM_MODE", "unconfigured")
-    except Exception:
-        pass
-    return stack
+    settings = get_settings()
+    cfg = load_config()
+    return {
+        "orchestration": "LangGraph + FastAPI + PostgreSQL (pgvector)",
+        "llm_model": settings.model,
+        "llm_fast_model": settings.llm_fast_model,
+        "llm_strong_model": settings.llm_strong_model,
+        "retrieval_stack": (
+            f"ES={'on' if cfg.es_enabled else 'off'} + pgvector HNSW + "
+            f"AdaptiveHyDE={'on' if cfg.adaptive_hyde else 'off'} + "
+            f"Rerank={'on' if cfg.rerank_enabled else 'off'}"
+        ),
+        "semantic_cache": f"threshold={cfg.semantic_cache_threshold}, ttl={cfg.semantic_cache_ttl}s",
+    }
+
+
+def _stack_header_lines(stack: dict[str, str], report_path: Path, extra_line: str) -> list[str]:
+    """生成评测记录共用的技术栈与报告归档信息行。"""
+    return [
+        extra_line,
+        f"- **报告归档**：`{_rel_path(report_path)}`",
+        f"- **编排与存储栈**：`{stack['orchestration']}`",
+        f"- **模型栈**：主模型 `{stack['llm_model']}` / Fast `{stack['llm_fast_model']}` / Strong `{stack['llm_strong_model']}`",
+    ]
 
 
 def _append_markdown_block(log_path: Path, block: str) -> Path:
@@ -84,11 +87,12 @@ def append_rag_eval_record(
         "",
         "### 1. 测试元信息与技术栈",
         f"- **测试时间**：`{result.get('at', '-')}` | **Git SHA**：`{result.get('git', '-')}`",
-        f"- **运行配置**：`repeat={cfg.get('repeat', 1)}`, `concurrency={cfg.get('concurrency', 1)}`, `corpus_scope={cfg.get('corpus_scope', 'all')}`",
-        f"- **报告归档**：`{_rel_path(report_path)}`",
-        f"- **编排与存储栈**：`{stack.get('orchestration', '-')}`",
-        f"- **模型栈**：主模型 `{stack.get('llm_model', '-')}` / Fast `{stack.get('llm_fast_model', '-')}` / Strong `{stack.get('llm_strong_model', '-')}`",
-        f"- **检索与缓存配置**：`{stack.get('retrieval_stack', '-')}`；`{stack.get('semantic_cache', '-')}`",
+        *_stack_header_lines(
+            stack,
+            report_path,
+            f"- **运行配置**：`repeat={cfg.get('repeat', 1)}`, `concurrency={cfg.get('concurrency', 1)}`, `corpus_scope={cfg.get('corpus_scope', 'all')}`",
+        ),
+        f"- **检索与缓存配置**：`{stack['retrieval_stack']}`；`{stack['semantic_cache']}`",
         "",
         "### 2. 本次实测核心指标",
         "",
@@ -143,10 +147,11 @@ def append_agent_eval_record(
         f"## 自动评测记录（{report.get('timestamp', '-')} · Run `{report.get('run_id', '-')}`）",
         "",
         "### 1. 测试元信息与技术栈",
-        f"- **评测模式**：`{report.get('mode', '-')}` | **Git SHA**：`{report.get('git_sha') or '-'}`",
-        f"- **报告归档**：`{_rel_path(report_path)}`",
-        f"- **编排与工具栈**：`{stack.get('orchestration', '-')}` + MCP 工具白名单 + 6 类确定性 Judges",
-        f"- **模型栈**：主模型 `{stack.get('llm_model', '-')}` / Fast `{stack.get('llm_fast_model', '-')}` / Strong `{stack.get('llm_strong_model', '-')}`",
+        *_stack_header_lines(
+            stack,
+            report_path,
+            f"- **评测模式**：`{report.get('mode', '-')}` | **Git SHA**：`{report.get('git_sha') or '-'}`",
+        ),
         "",
         "### 2. 本次实测核心指标",
         "",

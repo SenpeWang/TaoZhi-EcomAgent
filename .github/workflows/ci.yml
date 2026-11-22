@@ -14,22 +14,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
+  repo_and_commits:
+    name: 仓检与提交规范
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    services:
-      postgres:
-        image: pgvector/pgvector:pg18
-        env:
-          POSTGRES_DB: ecom_test
-          POSTGRES_USER: ecom_test
-          POSTGRES_PASSWORD: ci-only-placeholder
-        ports: ['15432:5432']
-        options: >-
-          --health-cmd "pg_isready -U ecom_test -d ecom_test"
-          --health-interval 10s --health-timeout 5s --health-retries 5
-    env:
-      PGPASSWORD: ci-only-placeholder
+    timeout-minutes: 10
     steps:
       - name: 读取完整分支历史
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -39,14 +27,6 @@ jobs:
           persist-credentials: false
       - name: 公开内容与目录检查
         run: make check-repository
-      - name: Python 环境
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
-        with:
-          python-version: '3.10'
-          cache: pip
-          cache-dependency-path: requirements.lock.txt
-      - name: 安装锁定后端依赖
-        run: python -m pip install -r requirements.lock.txt
       - name: Node 环境
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
@@ -65,13 +45,92 @@ jobs:
             CHECK_BASE="$(git merge-base origin/main "$CHECK_HEAD")"
           fi
           make check-commits COMMIT_BASE="$CHECK_BASE" COMMIT_HEAD="$CHECK_HEAD"
+
+  frontend_checks:
+    name: 前端规范与生产构建
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Node 环境
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 安装锁定前端依赖
+        working-directory: web
+        run: npm ci --no-audit --no-fund
       - name: 前端规范与生产构建
         run: make lint-web check-format build-web
+
+  python_and_replay:
+    name: Python 语法与 Agent 轨迹回放
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Python 环境
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - name: 安装锁定后端依赖
+        run: python -m pip install -r requirements.lock.txt
       - name: Python 语法检查
         run: make check
+      - name: Agent 合成轨迹回归
+        run: make evals-agent-replay
+
+  backend_tests:
+    name: 测试库迁移与离线回归
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_DB: ecom_test
+          POSTGRES_USER: ecom_test
+          POSTGRES_PASSWORD: ci-only-placeholder
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ecom_test -d ecom_test"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      PGPASSWORD: ci-only-placeholder
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Python 环境
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - name: 安装锁定后端依赖
+        run: python -m pip install -r requirements.lock.txt
+      - name: Node 环境
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 安装锁定前端依赖与构建产物
+        run: cd web && npm ci --no-audit --no-fund && cd .. && make build-web
       - name: 测试库迁移
         run: make migrate-test
       - name: 离线回归与开发门禁
         run: make test
-      - name: Agent 合成轨迹回归
-        run: make evals-agent-replay

@@ -59,4 +59,4 @@ def test_append_agent_eval_record_accumulates_multiple_runs(tmp_path: Path) -> N
     assert "# Agent 历史记录\n" in content
     assert "Run `run_1`" in content
     assert "Run `run_2`" in content
-    assert "编排与工具栈" in content
+    assert "编排与存储栈" in content
