@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "accessed_on": "2026-11-22",
   "files": [
     {
@@ -612,400 +612,6 @@
         "attribution": "© 2025 Jay Harrison, Alan W. Archer-Boyd and Damian T. Murphy. Measurement of insertion loss and gain in variable hear-through and noise cancellation modes of true wireless earbuds. Acta Acustica 9:28. DOI 10.1051/aacus/2025013. Deposited by The University of York in White Rose Research Online.",
         "modified": false
       }
-    }
-  ],
-  "official_links": [
-    {
-      "title": "Samsung Galaxy Buds3 / Buds3 Pro 使用说明",
-      "publisher": "Samsung",
-      "kind": "user_guide",
-      "categories": [
-        "headphones"
-      ],
-      "models": [
-        "SM-R530",
-        "SM-R630"
-      ],
-      "version": "Rev. 1.4，2025-06",
-      "languages": [
-        "en"
-      ],
-      "markets": [
-        "EU"
-      ],
-      "source_page_url": "https://www.samsung.com/nz/support/model/SM-R630NZWAASA/",
-      "pdf_url": "https://downloadcenter.samsung.com/content/UM/202507/20250715141035883/SM-R530_R630_UG_EU_Eng_Rev.1.4_250625.pdf"
-    },
-    {
-      "title": "Sony WF-1000XM5 参考指南",
-      "publisher": "Sony",
-      "kind": "user_guide",
-      "categories": [
-        "headphones"
-      ],
-      "models": [
-        "WF-1000XM5"
-      ],
-      "version": "5-048-296-1M",
-      "languages": [
-        "en",
-        "fr",
-        "es"
-      ],
-      "markets": [
-        "US"
-      ],
-      "source_page_url": "https://www.sony.com/electronics/support/wireless-headphones-bluetooth-headphones/wf-1000xm5/manuals",
-      "pdf_url": "https://www.sony.com/electronics/support/res/manuals/5048/9bcf5db267bf28ccd9f1250acf4b817c/50482961M.pdf"
-    },
-    {
-      "title": "Belkin BoostCharge Pro 三合一 MagSafe 无线充电器安全说明",
-      "publisher": "Belkin",
-      "kind": "safety_guide",
-      "categories": [
-        "wireless_chargers"
-      ],
-      "models": [
-        "WIZ017"
-      ],
-      "version": "Rev. B00",
-      "languages": [
-        "en",
-        "fr"
-      ],
-      "markets": [
-        "EU",
-        "APAC"
-      ],
-      "source_page_url": "https://www.belkin.com/support-article/?articleNum=335049",
-      "pdf_url": "https://www.belkin.com/on/demandware.static/-/Sites-master-product-catalog-blk/default/dwba0ef3d0/datasheets/regulatory/INS_WIZ017xx_8850bt01611_8850-01611-IY_EU1_AP1_Rev_B00_BOOSTCHARGE_PRO_3-in-1%20Wireless%20Charging%20Stand%20with%20MagSafe_WEB.pdf"
-    },
-    {
-      "title": "Belkin Qi2 可转换充电底座英国符合性声明",
-      "publisher": "Belkin",
-      "kind": "declaration",
-      "categories": [
-        "wireless_chargers",
-        "phone_stands"
-      ],
-      "models": [
-        "WIA008"
-      ],
-      "version": null,
-      "languages": [
-        "en"
-      ],
-      "markets": [
-        "UK"
-      ],
-      "source_page_url": "https://www.belkin.com/uk/support-article/?articleNum=336819",
-      "pdf_url": "https://s3.belkin.com/support/assets/legal/psti/Belkin_UK_PSTI_Statement_of_Compliance_WIA008.pdf"
-    },
-    {
-      "title": "Apple MagSafe Charger 尺寸图",
-      "publisher": "Apple",
-      "kind": "dimension_drawing",
-      "categories": [
-        "wireless_chargers"
-      ],
-      "models": [
-        "MagSafe Charger"
-      ],
-      "version": "2026",
-      "languages": [
-        "en"
-      ],
-      "markets": [],
-      "source_page_url": "https://developer.apple.com/accessories/",
-      "pdf_url": "https://developer.apple.com/download/files/accessories/dimensional-drawings/apple-magsafe-charger.pdf"
-    },
-    {
-      "title": "Apple MagSafe Battery Pack 回收指南",
-      "publisher": "Apple",
-      "kind": "recycling_guide",
-      "categories": [
-        "power_banks"
-      ],
-      "models": [
-        "A2384"
-      ],
-      "version": "2023",
-      "languages": [
-        "en"
-      ],
-      "markets": [],
-      "source_page_url": "https://www.apple.com/recycling/",
-      "pdf_url": "https://www.apple.com/recycling/recycler-guides/pdf/products/accessories/MagSafe_Battery_Pack_Recycler_Guide_English.pdf"
-    },
-    {
-      "title": "OtterBox 标准移动电源快速指南",
-      "publisher": "OtterBox",
-      "kind": "user_guide",
-      "categories": [
-        "power_banks"
-      ],
-      "models": [
-        "Standard Power Bank"
-      ],
-      "version": "TR2305006-001 Rev. 1",
-      "languages": [
-        "en"
-      ],
-      "markets": [],
-      "source_page_url": "https://www.otterbox.com/pages/accessory-user-guides",
-      "pdf_url": "https://cdn.shopify.com/s/files/1/0681/4321/8875/files/20230612-Standard-Power-Bank-Quick-Start-Guide.pdf"
-    },
-    {
-      "title": "OtterBox 无线充电板快速指南",
-      "publisher": "OtterBox",
-      "kind": "user_guide",
-      "categories": [
-        "wireless_chargers"
-      ],
-      "models": [
-        "Wireless Charging Pad"
-      ],
-      "version": null,
-      "languages": [
-        "en"
-      ],
-      "markets": [],
-      "source_page_url": "https://www.otterbox.com/pages/accessory-user-guides",
-      "pdf_url": "https://cdn.shopify.com/s/files/1/0681/4321/8875/files/20201013-Wireless-Charging-Pad-Quick-Start-Guide.pdf"
-    },
-    {
-      "title": "OtterBox Multi Mount 磁吸移动电源安装说明",
-      "publisher": "OtterBox",
-      "kind": "user_guide",
-      "categories": [
-        "phone_stands",
-        "power_banks"
-      ],
-      "models": [
-        "Multi Mount Power Bank MagSafe"
-      ],
-      "version": null,
-      "languages": [
-        "en",
-        "fr"
-      ],
-      "markets": [],
-      "source_page_url": "https://www.otterbox.com/pages/accessory-user-guides",
-      "pdf_url": "https://cdn.shopify.com/s/files/1/0681/4321/8875/files/Multi-mount-installation.pdf"
-    },
-    {
-      "title": "OtterBox Amplify 屏幕保护膜及手机壳兼容表",
-      "publisher": "OtterBox",
-      "kind": "compatibility_table",
-      "categories": [
-        "screen_protectors",
-        "phone_cases"
-      ],
-      "models": [
-        "Amplify Edge2Edge"
-      ],
-      "version": "2019",
-      "languages": [
-        "en"
-      ],
-      "markets": [],
-      "source_page_url": "https://www.otterbox.com/pages/accessory-user-guides",
-      "pdf_url": "https://www.otterbox.com/on/demandware.static/-/Sites-ob_us-Library/default/dwf874cb5c/pdfs/installation-instructions/amplify-case-compatibility.pdf"
-    },
-    {
-      "title": "PINE64 PinePhone 键盘套件使用手册",
-      "publisher": "PINE64",
-      "kind": "user_guide",
-      "categories": [
-        "keyboards",
-        "phone_cases"
-      ],
-      "models": [
-        "PinePhone Keyboard"
-      ],
-      "version": "v2.0",
-      "languages": [
-        "en",
-        "de",
-        "fr",
-        "es"
-      ],
-      "markets": [],
-      "source_page_url": "https://pine64.org/documentation/Phone_Accessories/Keyboard/",
-      "pdf_url": "https://files.pine64.org/doc/PinePhone/USER%20MANUAL-KEYBOARD-V2-EN-DE-FR-ES.pdf"
-    },
-    {
-      "title": "USB-IF USB Type-C 数据线标识指南",
-      "publisher": "USB Implementers Forum",
-      "kind": "official_guidance",
-      "categories": [
-        "charging_cables"
-      ],
-      "models": [],
-      "version": null,
-      "languages": [
-        "en"
-      ],
-      "markets": [],
-      "source_page_url": "https://www.usb.org/logo-license",
-      "pdf_url": "https://www.usb.org/sites/default/files/usb_type-c_cable_logo_usage_guidelines_jan26_final.pdf"
-    },
-    {
-      "title": "飞利浦 Qi 无线车充与桌面支架规格书",
-      "publisher": "Philips",
-      "kind": "product_specification",
-      "categories": [
-        "car_chargers",
-        "phone_stands",
-        "wireless_chargers"
-      ],
-      "models": [
-        "DLK3532Q/00"
-      ],
-      "version": null,
-      "languages": [
-        "zh-CN"
-      ],
-      "markets": [
-        "CN"
-      ],
-      "source_page_url": "https://www.philips.com.cn/c-p/DLK3532Q_00/car-and-desk-mount",
-      "pdf_url": "https://www.documents.philips.com/assets/20231124/2cdd3dfbffd642f684f8b0c400aac3bc.pdf"
-    },
-    {
-      "title": "飞利浦 USB-C 移动电源规格书",
-      "publisher": "Philips",
-      "kind": "product_specification",
-      "categories": [
-        "power_banks"
-      ],
-      "models": [
-        "DLP9502G/93"
-      ],
-      "version": null,
-      "languages": [
-        "zh-CN"
-      ],
-      "markets": [
-        "CN"
-      ],
-      "source_page_url": "https://www.philips.com.cn/c-p/DLP9502G_93/9000-series-usb-c-power-bank",
-      "pdf_url": "https://www.documents.philips.com/assets/20250202/4d251a2c130341bfa558b278012c903d.pdf"
-    },
-    {
-      "title": "飞利浦 USB-A 转 USB-C 充电与数据线规格书",
-      "publisher": "Philips",
-      "kind": "product_specification",
-      "categories": [
-        "charging_cables"
-      ],
-      "models": [
-        "DLC1530C/97"
-      ],
-      "version": null,
-      "languages": [
-        "en"
-      ],
-      "markets": [],
-      "source_page_url": "https://www.documents.philips.com/assets/20231125/6cedcb6cf07d4a96aa01b0c500ac2bd5.pdf",
-      "pdf_url": "https://www.documents.philips.com/assets/20231125/6cedcb6cf07d4a96aa01b0c500ac2bd5.pdf"
-    },
-    {
-      "title": "Belkin BoostCharge 磁吸车载充电支架安装与合规说明",
-      "publisher": "Belkin",
-      "kind": "user_guide",
-      "categories": [
-        "car_chargers",
-        "phone_stands",
-        "wireless_chargers"
-      ],
-      "models": [
-        "WIC011",
-        "WIC010"
-      ],
-      "version": "Rev. A00",
-      "languages": [
-        "en",
-        "fr"
-      ],
-      "markets": [
-        "EU",
-        "APAC"
-      ],
-      "source_page_url": "https://www.belkin.com/support-article/?articleNum=337719",
-      "pdf_url": "https://www.belkin.com/on/demandware.static/-/Sites-master-product-catalog-blk/default/dw0c153f3e/datasheets/regulatory/INS_WIC011_8850-02169_8850-02169-IY_EU1_AP1_A00_BoostCharge_Magnetic%20Charging%20Car%20Dash%20Mount_WEB.pdf"
-    },
-    {
-      "title": "MOBILIS 通用手机钢化玻璃保护膜规格书",
-      "publisher": "MOBILIS",
-      "kind": "product_specification",
-      "categories": [
-        "screen_protectors"
-      ],
-      "models": [
-        "Universal Tempered Glass"
-      ],
-      "version": null,
-      "languages": [
-        "en"
-      ],
-      "markets": [],
-      "source_page_url": "https://www.mobiliscase.com/datasheets/uk/Data_tempered_glass_smartphone_universal_en.pdf",
-      "pdf_url": "https://www.mobiliscase.com/datasheets/uk/Data_tempered_glass_smartphone_universal_en.pdf"
-    },
-    {
-      "title": "Fairphone Fairbuds 随盒快速入门说明",
-      "publisher": "Fairphone",
-      "kind": "user_guide",
-      "categories": [
-        "headphones"
-      ],
-      "models": [
-        "Fairbuds"
-      ],
-      "version": "2024-01-19",
-      "languages": [
-        "en"
-      ],
-      "markets": [],
-      "source_page_url": "https://us.support.fairphone.com/hc/en-us/articles/37564056065298-How-to-use-your-Fairbuds",
-      "pdf_url": "https://us.support.fairphone.com/hc/en-us/article_attachments/37564088352658"
-    },
-    {
-      "title": "欧盟 CASP 市售充电器联合抽检报告",
-      "publisher": "欧盟委员会",
-      "kind": "regulatory_testing",
-      "categories": [
-        "wired_chargers"
-      ],
-      "models": [],
-      "version": "CASP 2019",
-      "languages": [
-        "en"
-      ],
-      "markets": [
-        "EU"
-      ],
-      "source_page_url": "https://ec.europa.eu/safety-gate/#/screen/pages/caspChargers",
-      "pdf_url": "https://mpo.gov.cz/assets/cz/ochrana-spotrebitele/bezpecnost-vyrobku/spolecne-kontrolni-akce-2019/2022/3/CASP_chargers_final_report.pdf"
-    },
-    {
-      "title": "美国 FAA 移动电源航空运输荷电状态实测报告",
-      "publisher": "美国联邦航空管理局",
-      "kind": "official_report",
-      "categories": [
-        "power_banks"
-      ],
-      "models": [],
-      "version": "DOT/FAA/TC-25/26，2025",
-      "languages": [
-        "en"
-      ],
-      "markets": [
-        "US"
-      ],
-      "source_page_url": "https://rosap.ntl.bts.gov/view/dot/86558",
-      "pdf_url": "https://rosap.ntl.bts.gov/view/dot/86558/dot_86558_DS1.pdf"
     },
     {
       "title": "Spigen 贴膜安装定位器技术披露",
@@ -1023,7 +629,271 @@
         "US"
       ],
       "source_page_url": "https://ppubs.uspto.gov/pubwebapp/",
-      "pdf_url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/10744705"
+      "pdf_url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/10744705",
+      "file": "uspto-spigen-screen-protector-installation-us10744705b2-en.pdf",
+      "size_bytes": 1294536,
+      "sha256": "6d8c804318dae21750387fa83b2139de2c57460adc49fc0304946c19730dcd66",
+      "pages": 23,
+      "requires_ocr": true,
+      "redistribution": {
+        "basis": "USPTO 专利公开文本及图样重用条款（原件未载版权保留声明）",
+        "terms_url": "https://www.uspto.gov/terms-use-uspto-websites",
+        "attribution": "United States Patent and Trademark Office (USPTO), US10744705B2, Screen protector installation device, Spigen Korea Co., Ltd., 2020.",
+        "modified": false
+      }
+    },
+    {
+      "file": "uk-opss-pom-p2g-q28-wt-recall-2026-en.pdf",
+      "title": "POM P2G-Q28-WT 磁吸无线充电宝召回报告",
+      "publisher": "UK Office for Product Safety and Standards (OPSS)",
+      "kind": "recall_notice",
+      "categories": [
+        "power_banks",
+        "wireless_chargers"
+      ],
+      "models": [
+        "POM P2G-Q28-WT"
+      ],
+      "version": "OPSS 2511-0112 · 2026-03-18",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "UK"
+      ],
+      "source_page_url": "https://www.gov.uk/product-safety-alerts-reports-recalls/product-recall-pom-portable-battery-and-magnetic-wireless-charger-sold-by-tk-maxx-2511-0112",
+      "pdf_url": "https://assets.publishing.service.gov.uk/media/69ba805def857f1696d12597/2511-0112-product-recall-POM-battery-pack-and-charger.pdf",
+      "size_bytes": 154923,
+      "pages": 1,
+      "sha256": "ea3efcc020c640036b3614afe4ac267f8cc57cba5fc9e36b04b45332599f5841",
+      "redistribution": {
+        "basis": "Open Government Licence v3.0 (GOV.UK Crown copyright)",
+        "terms_url": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+        "attribution": "Contains public sector information licensed under the Open Government Licence v3.0. Source: UK Office for Product Safety and Standards (OPSS), OPSS 2511-0112 · 2026-03-18.",
+        "modified": false
+      }
+    },
+    {
+      "file": "uk-opss-re-pd3506-safety-report-2026-en.pdf",
+      "title": "RE-PD3506 多端口充电器产品安全报告",
+      "publisher": "UK Office for Product Safety and Standards (OPSS)",
+      "kind": "product_safety_report",
+      "categories": [
+        "wired_chargers"
+      ],
+      "models": [
+        "RE-PD3506"
+      ],
+      "version": "OPSS 2608-0115 · 2026",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "UK"
+      ],
+      "source_page_url": "https://www.gov.uk/product-safety-alerts-reports-recalls/product-safety-report-wall-charger-re-pd3506-sold-via-amazon-2608-0115",
+      "pdf_url": "https://assets.publishing.service.gov.uk/media/6a8310bd3be22055c1aaa3c9/2608-0115-product-safety-report-wall-charger.pdf",
+      "size_bytes": 148321,
+      "pages": 1,
+      "sha256": "eb1376444896738f5752f16dc113e35fcdc9cf140c3a811af14cf23a968e411a",
+      "redistribution": {
+        "basis": "Open Government Licence v3.0 (GOV.UK Crown copyright)",
+        "terms_url": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+        "attribution": "Contains public sector information licensed under the Open Government Licence v3.0. Source: UK Office for Product Safety and Standards (OPSS), OPSS 2608-0115 · 2026.",
+        "modified": false
+      }
+    },
+    {
+      "file": "uk-desnz-ecodesign-explanatory-memorandum-2026-en.pdf",
+      "title": "英国关于外部电源、无线充电器和 USB-C 线材生态设计要求的释义备忘录",
+      "publisher": "UK Department for Energy Security and Net Zero (DESNZ)",
+      "kind": "official_guidance",
+      "categories": [
+        "wired_chargers",
+        "wireless_chargers",
+        "charging_cables"
+      ],
+      "models": [],
+      "version": "C(2025)6759 & 7938 · 2026-01-19",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "UK-NIR",
+        "EU"
+      ],
+      "source_page_url": "https://www.gov.uk/government/publications/em-on-power-supply-ecodesign-requirements-c20256759-7938",
+      "pdf_url": "https://assets.publishing.service.gov.uk/media/696e686a091f0cc41e81a298/EM_EU_Delegated_regulation_-_Assessment_of_Commission_Regulation_EU_20191782.pdf",
+      "size_bytes": 168167,
+      "pages": 5,
+      "sha256": "ef4c909d5ca2cff51f240ba61db0c1b6bb61c03e367a2f5cb0381b0d4d67be54",
+      "redistribution": {
+        "basis": "Open Government Licence v3.0 (GOV.UK Crown copyright)",
+        "terms_url": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+        "attribution": "Contains public sector information licensed under the Open Government Licence v3.0. Source: UK Department for Energy Security and Net Zero (DESNZ), C(2025)6759 & 7938 · 2026-01-19.",
+        "modified": false
+      }
+    },
+    {
+      "title": "市售手机保护壳市场购样检测汇整表",
+      "publisher": "经济部标准检验局",
+      "kind": "regulatory_testing",
+      "categories": [
+        "phone_cases"
+      ],
+      "models": [
+        "Dapad iPhone 11 防摔保护壳",
+        "hoda iPhone 13 (6.1 英寸) 晶石保护壳",
+        "zeus N-00023 (Note 10)",
+        "三星 Galaxy A20/A30 抗震保护壳"
+      ],
+      "version": "2022 年公开，2022 年购样",
+      "source_page_url": "https://tainan.bsmi.gov.tw/wSite/ct?ctNode=8321&mp=58&xItem=105918",
+      "pdf_url": "https://www.bsmi.gov.tw/wSite/public/Attachment/f1672274174386.pdf",
+      "file": "bsmi-market-phone-case-tests-2022-zh-tw.pdf",
+      "languages": [
+        "zh-TW"
+      ],
+      "markets": [
+        "TW"
+      ],
+      "size_bytes": 376825,
+      "pages": 6,
+      "sha256": "adc2817d23fc96258d82c2f9b9d594c7265bcbb56ba8bad1bc4b774c4c20f044",
+      "redistribution": {
+        "basis": "标准检验局政府网站资料开放宣告，政府资料开放授权条款第 1 版",
+        "terms_url": "https://keelung.bsmi.gov.tw/wSite/ct?ctNode=8536&mp=4&xItem=76765",
+        "attribution": "經濟部標準檢驗局與財團法人中華民國消費者文教基金會，111年度「手機保護殼」市場購樣檢測結果彙整表，2022 年。",
+        "modified": false
+      }
+    },
+    {
+      "title": "市售手机保护壳检测标准与标示查核附表",
+      "publisher": "经济部标准检验局",
+      "kind": "regulatory_testing",
+      "categories": [
+        "phone_cases"
+      ],
+      "models": [],
+      "version": "2022 年公开，CNS 15503",
+      "source_page_url": "https://tainan.bsmi.gov.tw/wSite/ct?ctNode=8321&mp=58&xItem=105918",
+      "pdf_url": "https://www.bsmi.gov.tw/wSite/public/Attachment/f1672274161511.pdf",
+      "file": "bsmi-market-phone-case-testing-criteria-2022-zh-tw.pdf",
+      "languages": [
+        "zh-TW"
+      ],
+      "markets": [
+        "TW"
+      ],
+      "size_bytes": 216854,
+      "pages": 2,
+      "sha256": "c73e35244a1adc1cfff04aedeb5d42da128287e1bf5560533d2a4914ce574f7f",
+      "redistribution": {
+        "basis": "标准检验局政府网站资料开放宣告，政府资料开放授权条款第 1 版",
+        "terms_url": "https://keelung.bsmi.gov.tw/wSite/ct?ctNode=8536&mp=4&xItem=76765",
+        "attribution": "經濟部標準檢驗局與財團法人中華民國消費者文教基金會，市售「手機保護殼」商品檢測結果新聞稿附表，2022 年。",
+        "modified": false
+      }
+    },
+    {
+      "title": "市售无线充电器与车载无线充电支架购样检测汇整表",
+      "publisher": "经济部标准检验局",
+      "kind": "regulatory_testing",
+      "categories": [
+        "wireless_chargers",
+        "car_chargers",
+        "phone_stands"
+      ],
+      "models": [
+        "Q&T SY-W105",
+        "kolin KEX-DLCA03",
+        "Samsung EP-P2400",
+        "TRISTAR TS-PA12",
+        "RONEVER DE036",
+        "MYCEII MY-QI-019"
+      ],
+      "version": "2023 年公开，2022 年购样",
+      "source_page_url": "https://www.bsmi.gov.tw/wSite/ct?ctNode=9686&mp=2&xItem=111677",
+      "pdf_url": "https://www.bsmi.gov.tw/wSite/record/file_act.jsp?ixCuAttach=34252",
+      "file": "bsmi-market-wireless-charger-tests-2023-zh-tw.pdf",
+      "languages": [
+        "zh-TW"
+      ],
+      "markets": [
+        "TW"
+      ],
+      "size_bytes": 361884,
+      "pages": 6,
+      "sha256": "123ee20235322db7a2200ce5b3b8f7320fdfc806687566ea8a94bdfcb79c3a42",
+      "redistribution": {
+        "basis": "标准检验局政府网站资料开放宣告，政府资料开放授权条款第 1 版",
+        "terms_url": "https://keelung.bsmi.gov.tw/wSite/ct?ctNode=8536&mp=4&xItem=76765",
+        "attribution": "經濟部標準檢驗局，111年度「無線充電器（無線充電盤）」市場購樣檢測結果彙整表，2023 年。",
+        "modified": false
+      }
+    },
+    {
+      "title": "市售蓝牙耳机专项购样检测汇整表（10 件）",
+      "publisher": "经济部标准检验局",
+      "kind": "regulatory_testing",
+      "categories": [
+        "headphones"
+      ],
+      "models": [
+        "Hawk ATW768WH",
+        "RONEVER MOE315"
+      ],
+      "version": "2023 年公开，2022 年购样",
+      "source_page_url": "https://www.bsmi.gov.tw/bsmiGIP/wSite/ct?ctNode=9885&mp=1&xItem=106426",
+      "pdf_url": "https://www.bsmi.gov.tw/wSite/public/Attachment/f1675124689792.pdf",
+      "file": "bsmi-market-bluetooth-earbud-tests-2023-zh-tw.pdf",
+      "languages": [
+        "zh-TW"
+      ],
+      "markets": [
+        "TW"
+      ],
+      "size_bytes": 322516,
+      "pages": 3,
+      "sha256": "d2e2d34c3f5481feb4c4f8939f8b055f829d4713a7ec52e7502900d31841b346",
+      "redistribution": {
+        "basis": "标准检验局政府网站资料开放宣告，政府资料开放授权条款第 1 版",
+        "terms_url": "https://keelung.bsmi.gov.tw/wSite/ct?ctNode=8536&mp=4&xItem=76765",
+        "attribution": "經濟部標準檢驗局與財團法人中華民國消費者文教基金會，111年度「藍牙耳機」專案購樣檢測結果彙整表，2023 年。",
+        "modified": false
+      }
+    },
+    {
+      "title": "市售蓝牙耳机市场购样检测汇整表（18 件）",
+      "publisher": "经济部标准检验局",
+      "kind": "regulatory_testing",
+      "categories": [
+        "headphones"
+      ],
+      "models": [
+        "Audio-Technica ATH-S200BT",
+        "TCSTAR TCE8820",
+        "INTOPIC JAZZ-BT28"
+      ],
+      "version": "2020 年公开，2019 年购样",
+      "source_page_url": "https://www.bsmi.gov.tw/wSite/fp?ctNode=9686&mp=1&xItem=92058",
+      "pdf_url": "https://www.bsmi.gov.tw/wSite/public/Attachment/f1608609248696.pdf",
+      "file": "bsmi-market-bluetooth-earbud-tests-2020-zh-tw.pdf",
+      "languages": [
+        "zh-TW"
+      ],
+      "markets": [
+        "TW"
+      ],
+      "size_bytes": 258332,
+      "pages": 5,
+      "sha256": "51a979fb2b9e3baf9c043555bf7dbdcc68cdd1cac8dd7d59c9614c8503cbae3a",
+      "redistribution": {
+        "basis": "标准检验局政府网站资料开放宣告，政府资料开放授权条款第 1 版",
+        "terms_url": "https://keelung.bsmi.gov.tw/wSite/ct?ctNode=8536&mp=4&xItem=76765",
+        "attribution": "經濟部標準檢驗局與財團法人中華民國消費者文教基金會，108年「藍芽耳機」市場購樣檢測結果彙整表，2020 年。",
+        "modified": false
+      }
     }
   ]
 }

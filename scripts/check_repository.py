@@ -55,6 +55,8 @@ def blocked_path(path: str) -> str | None:
     if item.name in {"database-secrets.json", "initdb-password"} or item.name.startswith("bootstrap-owner-"):
         return "私有身份凭据"
     if item.parts and item.parts[0] == "data":
+        if item.parts[:3] == ("data", "private", "accessory_pdfs"):
+            return "本地保管的配件资料"
         if item.suffix.lower() in {".pem", ".key", ".p12", ".pfx", ".token"}:
             return "私钥或凭据文件"
         return None

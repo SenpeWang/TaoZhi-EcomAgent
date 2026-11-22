@@ -10,27 +10,25 @@ import pytest
 CORPUS = Path(__file__).resolve().parents[1] / "data" / "accessory_pdfs"
 MANIFEST = json.loads((CORPUS / "manifest.json").read_text(encoding="utf-8"))
 PDF_FILES = MANIFEST["files"]
-OFFICIAL_LINKS = MANIFEST["official_links"]
 
 
-def test_corpus_lists_originals_and_official_links():
-    assert MANIFEST["schema_version"] == 1
+def test_corpus_indexes_only_local_pdf_files():
+    assert set(MANIFEST) == {"schema_version", "accessed_on", "files"}
+    assert MANIFEST["schema_version"] == 2
+    assert PDF_FILES
     files = [item["file"] for item in PDF_FILES]
     hashes = [item["sha256"] for item in PDF_FILES]
     assert len(files) == len(set(files))
     assert len(hashes) == len(set(hashes))
     assert set(files) == {path.name for path in CORPUS.glob("*.pdf")}
-    assert OFFICIAL_LINKS
     pdf_urls = set()
-    for item in PDF_FILES + OFFICIAL_LINKS:
+    for item in PDF_FILES:
         assert item["title"] and item["publisher"] and item["categories"] and item["languages"]
         for key in ("source_page_url", "pdf_url"):
             url = urlsplit(item[key])
             assert url.scheme == "https" and url.hostname and url.username is None
         assert item["pdf_url"] not in pdf_urls
         pdf_urls.add(item["pdf_url"])
-    for item in OFFICIAL_LINKS:
-        assert "file" not in item and "redistribution" not in item
 
 
 @pytest.mark.parametrize("item", PDF_FILES, ids=[item["file"] for item in PDF_FILES])
@@ -52,11 +50,14 @@ def test_original_pdf_bytes_and_permission(item):
 
 
 @pytest.mark.parametrize("item", PDF_FILES, ids=[item["file"] for item in PDF_FILES])
-def test_original_pdf_text_can_be_ingested(item):
+def test_original_pdf_declares_its_text_extraction_requirements(item):
     import fitz
 
     with fitz.open(CORPUS / item["file"]) as pdf:
         assert not pdf.is_encrypted
         assert 1 <= len(pdf) == item["pages"] <= 200
-        body = "\n\n".join(page.get_text("text") for page in pdf)
-        assert body.strip() and len(body) <= 200_000
+        body = "\n\n".join(page.get_text("text") for page in pdf).strip()
+        if item.get("requires_ocr") is True:
+            assert not body and all(page.get_image_info() for page in pdf)
+        else:
+            assert 0 < len(body) <= 200_000

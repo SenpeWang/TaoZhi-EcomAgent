@@ -43,3 +43,4 @@ Thumbs.db
 *.swp
 .maintenance-*
 /docs/
+/data/private/accessory_pdfs/

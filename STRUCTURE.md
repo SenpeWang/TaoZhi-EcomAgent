@@ -74,6 +74,7 @@ AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；
 | 用途 | 本机位置 |
 | --- | --- |
 | 公开配件 PDF 与许可清单 | data/accessory_pdfs/ |
+| 厂商配件参考原件与内部清单 | data/private/accessory_pdfs/ |
 | 待授权入库资料 | data/incoming/<tenant_id>/ |
 | 本机演示语料 | data/corpus/<category>/ |
 | 已入库私有原件 | data/private/<mode>/ |
@@ -83,7 +84,7 @@ AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；
 | 旧业务数据库迁移来源 | data/archive/ |
 | 明确请求的备份 | data/backups/ |
 
-公开 PDF 随来源和许可清单提交。企业附件、业务数据库和各环境生成物由对应环境保管。文档的阅读、下载和外部模型处理由应用权限控制。[数据用途与导入](data/README.md)
+公开 PDF 随来源和许可清单提交。厂商参考资料的本机副本、企业附件、业务数据库和各环境生成物由对应环境保管。工作台中文档的阅读、下载和外部模型处理由应用权限控制。[数据用途与导入](data/README.md)
 
 ## 依赖与同步
 

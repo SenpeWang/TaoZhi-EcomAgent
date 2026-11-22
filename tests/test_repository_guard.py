@@ -18,6 +18,7 @@ spec.loader.exec_module(guard)
     "plan.bak.20261007", "customer.docx",
     "AGENTS.md", "agents.md", "docs/AGENTS.md", "web/aGeNtS.Md",
     "data/runtime/secret.pem", "data/runtime/access.token",
+    "data/private/accessory_pdfs/manual.pdf", "data/private/accessory_pdfs/manifest.json",
 ])
 def test_private_paths_are_blocked(path):
     assert guard.blocked_path(path)
@@ -28,6 +29,7 @@ def test_example_and_software_docs_are_allowed():
     assert guard.blocked_path("docs/STRUCTURE.md") is None
     assert guard.blocked_path("data/corpus/产品.md") is None
     assert guard.blocked_path("data/README.md") is None
+    assert guard.blocked_path("data/accessory_pdfs/manual.pdf") is None
     assert guard.blocked_path("data/runtime/accounts.json") is None
 
 
