@@ -25,13 +25,18 @@
 - **绝对禁止提交**：`.env*`（除 `.env.example`）、密钥凭据（API Key / Token / 私钥 / 数据库密码）、`docs/private/` 私有文档目录以及未在 `STRUCTURE.md` 登记的目录。
 - **资料无敏感限制**：`data/` 与 `docs/` 为演示与评测内容，除 API Key 与私钥凭据外均可入库；本机运维手册、个人说明与历史归档统一存放于被忽略的 `docs/private/`；密钥由 `scripts/check_repository.py` 扫描拦截。
 
-## 5. 推送前 5 重校验与推送纪律
-- **推送前本地必须 100% 绿灯**：
-  1. `python3 scripts/check_repository.py --tracked`（敏感与目录检查）
-  2. `make check`（Python 语法编译）
-  3. `make lint-web check-format`（前端 ESLint/Prettier/组件规范）
-  4. `make test`（全量测试回归 100% 通过）
-  5. 前端 `npm run build`（TypeScript 类型与生产构建）
+## 5. 门禁类型与推送纪律
+
+- **门禁分七类，本地只跑快的四类**：
+  1. 仓库边界：`make check-repository`（敏感信息、未登记目录、大文件与二进制）
+  2. 语法与规范：`make check`（Python 编译）、`make lint-web check-format`（前端 ESLint/Prettier）
+  3. 生产构建：`make build-web`（TypeScript 类型检查与产物构建）
+  4. 配置契约：`make test` 中的纯配置断言（`tests/test_test_environment.py`，秒级）
+  5. 全量回归：`make test`（离线权限、流程、开发门禁与评估单元测试）
+  6. 迁移与轨迹回归：`make migrate-test`、`make evals-agent-replay`
+  7. 提交范围：`make check-commits`
+- **权威判定在 GitHub CI**：第 5-7 类需要干净依赖、独立测试库与真实容器，统一由远端 Actions 执行；本地不复刻远端环境，不建镜像、不摆第二套变量、不搭临时工作区，第 1-4 类绿灯即可推送。
+- **推送后必须跟进**：`gh run list --limit 1` 取 run id，`gh run watch <id> --exit-status` 等到变绿才算完成；失败必须贴出失败步骤与真实报错原文再修，不得重跑碰运气，也不得删测试、加 skip、改 `continue-on-error` 或关工作流让红灯变绿。
 - **推送确认**：推送前向 Senpe 完整展示 commit 摘要与 SHA 哈希；严禁私自推送、绕过钩子（`--no-verify`）或强推（`--force`）。
 - **远端推送通道（只用 SSH）**：WSL 直连 `github.com` 不通（`curl` 返回 FAILED），推送统一经本地代理走 SSH：在 `~/.ssh/config` 的 `Host github.com` 段配置本地代理后直接 `git push origin main`；不使用 HTTPS 令牌旁路。直连失败症状为 pack 写满 100% 后无回执、最终 `sideband packet` 断开。
 
@@ -66,4 +71,5 @@
 - **命令集只有一份定义**：CI 直接调用 `make check-repository / check / lint-web / check-format / build-web / migrate-test / test / evals-agent-replay`，与推送前校验完全一致；新增步骤先加 Makefile 目标，不允许在 workflow 里手写等价命令。
 - **测试模式固定独立库**：`config/test.env` 的 DSN 必须指向 `/ecom_test`，端口与 CI 服务映射一致（`15432`）；用例若切 production 模式必须自行注入 DSN，不得依赖宿主恰好存在某个变量。
 - **推送后必须跟进结论**：推送后用 `gh run list --limit 1` 取 run id，`gh run watch <id> --exit-status` 等到变绿才算完成；失败必须贴出失败步骤与真实报错原文再修，不得重跑碰运气。
+- **本地不复刻远端环境**：需要干净依赖、独立测试库或真实容器的验证一律交给 GitHub CI；本地只跑第 1-4 类快检，避免重复搭建环境拖慢节奏。
 - **禁止妥协式变绿**：不得通过删测试、加 skip、改 `continue-on-error`、关闭工作流或放宽校验让红灯变绿。
