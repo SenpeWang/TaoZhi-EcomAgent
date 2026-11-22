@@ -8,8 +8,8 @@ def test_readable_trace_actions():
     root = Path(__file__).resolve().parents[1]
     script = """
 import assert from 'node:assert/strict'
-import { activityCategoryLabels, spanFields } from './web/src/traceWaterfall.ts'
-import { activityAction, activityResult, actorInstanceLabels } from './web/src/traceActivity.ts'
+import { activityCategoryLabels, spanFields } from './web/src/features/observability/traceWaterfall.ts'
+import { activityAction, activityResult, actorInstanceLabels } from './web/src/features/observability/traceActivity.ts'
 
 const actor = {kind: 'agent', span_id: '1000000000000000', display_name: '市场调研员'}
 const base = {actor, kind: 'TOOL', name: 'mcp.call_tool', display_name: 'search_web', status: 'ok', error_type: null,

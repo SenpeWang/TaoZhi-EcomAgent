@@ -166,12 +166,26 @@ def test_key_comment_and_function_naming(workspace, source):
 def test_template_comment_and_unescaped_html_are_rejected(workspace):
     """在模板和 Markdown 渲染边界分别拒绝普通注释及未转义的表达式。"""
     root, _ = workspace
-    view = root / "web/src/views/MarkdownReport.vue"
+    view = root / "web/src/shared/MarkdownReport.vue"
     view.parent.mkdir()
     for template in ("<div><!-- 普通注释 --></div>", '<div v-html="rawInput" />'):
         view.write_text(f"<template>\n  {template}\n</template>\n")
         with pytest.raises(RuntimeError, match="eslint"):
             development.frontend(root / "web")
+
+
+@pytest.mark.parametrize(("folder", "dependency"), [
+    ("shared", "../features/tasks/types"),
+    ("features/tasks", "../../app/workspaceApi"),
+])
+def test_frontend_modules_do_not_depend_on_their_callers(workspace, folder, dependency):
+    """防止公共工具依赖业务代码，以及业务模块反向导入工作台。"""
+    root, _ = workspace
+    source = root / "web/src" / folder / "invalidDependency.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text(f"import '{dependency}'\n")
+    with pytest.raises(RuntimeError, match="eslint"):
+        development.frontend(root / "web")
 
 
 def test_missing_dependencies_fail_without_install(workspace):

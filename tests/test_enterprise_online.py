@@ -556,8 +556,8 @@ def test_research_activities_order_and_actor_across_pages(clients):
         ["node", "--experimental-strip-types", "--input-type=module", "--eval", """
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { requestApi } from './web/src/api.ts'
-import { activityAction, activityResult } from './web/src/traceActivity.ts'
+import { requestApi } from './web/src/app/workspaceApi.ts'
+import { activityAction, activityResult } from './web/src/features/observability/traceActivity.ts'
 const url = process.argv[1]
 globalThis.fetch = async (requested) => {
   assert.equal(requested, url)

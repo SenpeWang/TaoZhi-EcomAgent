@@ -51,10 +51,16 @@
 | `tests/` | 单元与企业边界验收，测试事实自行构造 |
 | `data/` | 公开配件 PDF、演示与评测资产，以及各环境的数据存放位置 |
 | `web/` | 前端依赖、锁与构建配置 |
-| `web/src/` | Vue 页面、类型、样式与 API 调用 |
+| `web/src/` | Vue 工作台入口与前端源码 |
+| `web/src/app/` | 工作台装配、会话、导航及全局样式 |
 | `web/src/assets/` | 静态图片与品牌图标资源 |
-| `web/src/composables/` | 前端共享响应式组合式逻辑（如 `useTaskStream` 统一 SSE 任务进度订阅） |
-| `web/src/views/` | 资料管理与权限表单、经营看板、智能体调研和轨迹分析等业务视图 |
+| `web/src/shared/` | 同源 HTTP、SSE、游标分页和通用展示组件 |
+| `web/src/features/` | 按业务组织的页面、状态和接口契约 |
+| `web/src/features/administration/` | 账号、组织、审批及权限管理 |
+| `web/src/features/bi/` | 经营看板与指标图表 |
+| `web/src/features/documents/` | 资料上传、版本、详情和授权入口 |
+| `web/src/features/observability/` | 执行轨迹、诊断及评测中心 |
+| `web/src/features/tasks/` | 任务列表、知识问答、调研会话与任务事件订阅 |
 
 ## 根文件
 
@@ -81,6 +87,8 @@ AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；
 ## 依赖与同步
 
 FastAPI 和 Worker 进入应用用例。应用层调用领域规则及基础设施。领域层接收业务数据并完成权限和事实判定，数据库、网络与模型访问由基础设施处理。文档的解析、审批和发布共用现有版本和权限门禁，HyDE 的许可及模型预算由问答用例核对。
+
+Vue 工作台装配业务入口并管理当前会话。业务模块组合领域页面与状态，向公共 HTTP 和 SSE 层传入各自的响应契约。跨页面共享同一套会话取消、CSRF、分页和事件流机制。
 
 PostgreSQL 保存在线状态、任务队列和 outbox。原件存入 MinIO 的 `ecom-private` 桶或本机私有目录。Kafka 的 `ecom.tasks` 分发任务编号，Worker 可通过数据库轮询领取。文档检索先圈定当前用户可读资料，再融合 Elasticsearch BM25 和 pgvector ANN 结果，并保留本地检索路径。
 

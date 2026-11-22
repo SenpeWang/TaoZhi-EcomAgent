@@ -192,7 +192,7 @@ def test_pipeline_a_events_emitted_during_research():
 
 def test_zero_fake_thinking_in_frontend():
     """验证前端 ResearchChatView.vue 彻底清除提交时预置的假日志占位符。"""
-    vue_file = Path(__file__).resolve().parents[1] / "web/src/views/ResearchChatView.vue"
+    vue_file = Path(__file__).resolve().parents[1] / "web/src/features/tasks/ResearchChatView.vue"
     content = vue_file.read_text(encoding="utf-8")
 
     assert "thinkingLogs: ['思考\\n总指挥" not in content

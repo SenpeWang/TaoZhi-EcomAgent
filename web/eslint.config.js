@@ -89,8 +89,40 @@ export default ts.config(
     languageOptions: { globals: globals.node },
   },
   {
-    files: ['src/views/MarkdownReport.vue'],
+    files: ['src/shared/MarkdownReport.vue'],
     rules: { 'vue/no-v-html': ['error', { ignorePattern: '^renderedReportHtml$' }] },
+  },
+  {
+    files: ['src/features/**/*.{ts,vue}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/App.vue', '**/app/**'],
+              message: '由工作台传入会话和导航，业务模块不反向依赖装配层',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/shared/**/*.{ts,vue}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/App.vue', '**/app/**', '**/features/**'],
+              message: '公共模块只依赖通用工具与基础类型',
+            },
+          ],
+        },
+      ],
+    },
   },
   prettier,
 )

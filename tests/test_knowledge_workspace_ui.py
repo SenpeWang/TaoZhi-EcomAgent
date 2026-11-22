@@ -16,7 +16,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 def test_knowledge_answer_presentation():
     script = """
 import assert from 'node:assert/strict'
-import { answerBasisLabel, citationGroups, publicSourceUrl, visibleTaskResult } from './web/src/knowledgeAnswers.ts'
+import { answerBasisLabel, citationGroups, publicSourceUrl, visibleTaskResult } from './web/src/features/tasks/knowledgeAnswers.ts'
 const answer = {answer:'已核验结论'}
 const snapshot = {state:'completed', can_review:false, restricted:false, result:answer}
 assert.equal(visibleTaskResult(snapshot),answer)
