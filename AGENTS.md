@@ -58,3 +58,12 @@
 - **禁止兼容分支**：不得用旧字段是否存在的判断维持两种写法并存。
 - **过渡必须登记**：确需分阶段迁移时，在同一次提交说明里写明剩余步骤与截止条件，并尽快移除过渡代码。
 - **外部契约保持原样**：数据库列名、环境变量名、第三方接口字段属于数据源，不做改名；同一份内部数据不得以两个名称对外暴露。
+
+## 11. 本地与远端 CI 同源
+
+- **测试环境只有一份定义**：`config/test.env` 是唯一测试环境，`load_config()` 在 `ECOM_MODE=test` 时自动解析它；本地与远端 CI 因此取到同一份取值，禁止再把测试变量抄进 `.github/workflows/ci.yml`。
+- **凭证只走宿主环境**：`config/test.env` 不含任何口令，`load_config()` 拒绝内嵌口令的测试连接串；`PGPASSWORD` 由本地 `.env` 或 CI 服务占位符注入，连接串与口令分离。
+- **命令集只有一份定义**：CI 直接调用 `make check-repository / check / lint-web / check-format / build-web / migrate-test / test / evals-agent-replay`，与推送前校验完全一致；新增步骤先加 Makefile 目标，不允许在 workflow 里手写等价命令。
+- **测试模式固定独立库**：`config/test.env` 的 DSN 必须指向 `/ecom_test`，端口与 CI 服务映射一致（`15432`）；用例若切 production 模式必须自行注入 DSN，不得依赖宿主恰好存在某个变量。
+- **推送后必须跟进结论**：推送后用 `gh run list --limit 1` 取 run id，`gh run watch <id> --exit-status` 等到变绿才算完成；失败必须贴出失败步骤与真实报错原文再修，不得重跑碰运气。
+- **禁止妥协式变绿**：不得通过删测试、加 skip、改 `continue-on-error`、关闭工作流或放宽校验让红灯变绿。

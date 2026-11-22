@@ -15,29 +15,27 @@ npm --prefix web run build
 
 **2. 创建本地数据库与 `.env`**
 
-在新检出目录执行一次。以下命令生成随机数据库口令，把连接写入仅当前用户可读的 `.env`（从模板复制），并将数据库绑定到本机的 `15433` 端口。
+在新检出目录执行一次。以下命令生成随机数据库口令，只把口令写入仅当前用户可读的 `.env`，并把数据库绑定到 `15432` 端口。测试库连接串固定在 `config/test.env`，本地与远端 CI 共用同一份，换口令不需要改连接串。
 
 ```bash
 umask 077
 cp .env.example .env
 chmod 600 .env
 demo_password="$(.venv/bin/python -c 'import secrets; print(secrets.token_hex(24))')"
-docker run -d --name taozhi-demo-db -p 127.0.0.1:15433:5432 \
-  -e POSTGRES_USER=taozhi_demo -e POSTGRES_DB=ecom_test \
+docker run -d --name taozhi-demo-db -p 127.0.0.1:15432:5432 \
+  -e POSTGRES_USER=ecom_test -e POSTGRES_DB=ecom_test \
   -e POSTGRES_PASSWORD="$demo_password" pgvector/pgvector:pg18
-printf 'ECOM_MODE=test\nECOM_TENANT_CODE=mofa\nECOM_TEST_DATABASE_URL=postgresql://%s@127.0.0.1:15433/ecom_test\n' \
-  "taozhi_demo:$demo_password" >> .env
+printf 'PGPASSWORD=%s\n' "$demo_password" >> .env
 unset demo_password
-docker exec taozhi-demo-db pg_isready -h 127.0.0.1 -U taozhi_demo -d ecom_test
+docker exec taozhi-demo-db pg_isready -h 127.0.0.1 -U ecom_test -d ecom_test
 ```
 
-首次初始化可能需要片刻。重复执行最后一条就绪检查，看到 `accepting connections` 后，在仓库根目录运行迁移、导入测试账号与资料，并启动 API。
+首次初始化可能需要片刻。重复执行最后一条就绪检查，看到 `accepting connections` 后，在仓库根目录运行迁移、导入测试账号与资料，并启动 API。`ECOM_MODE=test` 时配置层自动读取 `config/test.env`，口令来自 `.env` 的 `PGPASSWORD`。
 
 ```bash
-export ECOM_ENV_FILE="$PWD/.env" ECOM_MODE=test PYTHONPATH=src
-.venv/bin/python -m alembic upgrade head
-.venv/bin/python -c 'from scripts.manage_database import seed_test; seed_test()'
-.venv/bin/python -m uvicorn taozhi.server.api:app --host 127.0.0.1 --port 18080
+make migrate-test
+ECOM_MODE=test .venv/bin/python -c 'from scripts.manage_database import seed_test; seed_test()'
+ECOM_MODE=test .venv/bin/python -m uvicorn taozhi.server.api:app --host 127.0.0.1 --port 18080
 ```
 
 **3. 启动 Worker 并体验第一条轨迹**
@@ -45,7 +43,7 @@ export ECOM_ENV_FILE="$PWD/.env" ECOM_MODE=test PYTHONPATH=src
 在第二个终端进入同一仓库根目录，启动处理异步任务的进程。
 
 ```bash
-ECOM_ENV_FILE="$PWD/.env.test" PYTHONPATH=src .venv/bin/python -m taozhi.server.worker
+ECOM_MODE=test .venv/bin/python -m taozhi.server.worker
 ```
 
 打开 [本机工作台](http://127.0.0.1:18080)。使用测试租户 `mofa`、员工账号 `staff` 和测试口令 `123456` 登录，在知识问答中提交「店铺运营组负责什么工作？」随后打开「轨迹中台」，选择这次提问，查看「执行记录」。切换为同一测试租户的 `admin` 账号，可按发起人查到员工的这次提问。未配置模型凭据时仍可查看检索步骤。要观察一次真实模型调用，在私有配置中填入 `BASE_URL`、`API_KEY` 和 `MODEL`，重启 API、Worker 后重新提问。[测试夹具](../../scripts/manage_database.py) · [配置示例](../../.env.example)
@@ -54,7 +52,7 @@ ECOM_ENV_FILE="$PWD/.env.test" PYTHONPATH=src .venv/bin/python -m taozhi.server.
 
 ## 开发检查
 
-准备锁定依赖后，在仓库根目录运行检查。企业集成测试会清空 `.env` 中 `ECOM_TEST_DATABASE_URL` 指定的测试库的租户和业务数据，测试模式只允许连接 `ecom_test` 库。
+准备锁定依赖后，在仓库根目录运行检查。企业集成测试会清空 `config/test.env` 指定的测试库的租户和业务数据，测试模式只允许连接 `ecom_test` 库；远端 CI 跑同一批 `make` 目标，取值也来自同一份 `config/test.env`。
 
 ```bash
 make check-repository

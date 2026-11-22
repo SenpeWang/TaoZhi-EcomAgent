@@ -1,14 +1,18 @@
 name: 企业工作台检查
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
 permissions:
   contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-24.04
@@ -20,22 +24,12 @@ jobs:
           POSTGRES_DB: ecom_test
           POSTGRES_USER: ecom_test
           POSTGRES_PASSWORD: ci-only-placeholder
-        ports: ['5432:5432']
+        ports: ['15432:5432']
         options: >-
           --health-cmd "pg_isready -U ecom_test -d ecom_test"
           --health-interval 10s --health-timeout 5s --health-retries 5
     env:
-      PYTHONPATH: src
-      ECOM_MODE: test
-      ECOM_TENANT_CODE: mofa
-      ECOM_TEST_DATABASE_URL: postgresql://ecom_test@127.0.0.1:5432/ecom_test
       PGPASSWORD: ci-only-placeholder
-      APP_ENV: dev
-      AUTH_ENABLED: 'false'
-      API_KEY: ''
-      EMBEDDING_API_KEY: ''
-      BUSINESS_API_URL: ''
-      BUSINESS_API_TOKEN: ''
     steps:
       - name: 读取完整分支历史
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -44,7 +38,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: 公开内容与目录检查
-        run: python3 scripts/check_repository.py --tracked
+        run: make check-repository
       - name: Python 环境
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
@@ -53,8 +47,6 @@ jobs:
           cache-dependency-path: requirements.lock.txt
       - name: 安装锁定后端依赖
         run: python -m pip install -r requirements.lock.txt
-      - name: 远端 CI 环境契约检查
-        run: python3 scripts/check_ci_config.py
       - name: Node 环境
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
@@ -72,21 +64,14 @@ jobs:
           if [ -z "$CHECK_BASE" ] || [ "$CHECK_BASE" = "0000000000000000000000000000000000000000" ]; then
             CHECK_BASE="$(git merge-base origin/main "$CHECK_HEAD")"
           fi
-          python3 scripts/check_development.py commits --base "$CHECK_BASE" --head "$CHECK_HEAD"
-      - name: ESLint、组件命名与 Prettier
-        run: |
-          make lint-web
-          make check-format
-      - name: 类型检查与前端构建
-        working-directory: web
-        run: npm run build
-      - name: 语法和数据库迁移
-        run: |
-          python -m compileall -q src scripts migrations tests
-          python -m alembic -c alembic.ini upgrade head
-      - name: 离线权限、流程与开发门禁回归
-        run: python -m pytest tests -m 'not slow' -q --disable-warnings
-      - name: 评估指标口径单元测试
-        run: python -m pytest evals/tests -q --disable-warnings
+          make check-commits COMMIT_BASE="$CHECK_BASE" COMMIT_HEAD="$CHECK_HEAD"
+      - name: 前端规范与生产构建
+        run: make lint-web check-format build-web
+      - name: Python 语法检查
+        run: make check
+      - name: 测试库迁移
+        run: make migrate-test
+      - name: 离线回归与开发门禁
+        run: make test
       - name: Agent 合成轨迹回归
         run: make evals-agent-replay

@@ -1,9 +1,9 @@
-PYTHON := .venv/bin/python
+PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python3)
 PHOENIX_PY ?= $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
 PROJECT_ROOT := $(CURDIR)
 COMPOSE := docker compose
 
-.PHONY: help start rebuild stop status logs test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
+.PHONY: help start rebuild stop status logs test migrate-test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -18,7 +18,8 @@ help:
 	@echo "make stop           停止并清理运行容器（保留持久化数据卷）"
 	@echo "make status         查看全部容器运行与健康状态"
 	@echo "make logs           实时跟踪容器日志"
-	@echo "make test           在独立测试库运行离线回归（含 evals 单元测试）"
+	@echo "make test           在共享测试环境运行离线回归（含 evals 单元测试）"
+	@echo "make migrate-test   把共享测试环境的数据库迁移到最新版本"
 	@echo "make evals-tests    只跑评估代码自身的单元测试（不需要在线服务）"
 	@echo "make evals-agent-replay  使用合成执行记录验证 Agent 判定与报告"
 	@echo "make evals-quick    评估：检索+对抗层（需企业服务在线；对比基线并过门禁）"
@@ -48,7 +49,10 @@ logs:
 	$(COMPOSE) logs -f --tail=100
 
 test:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" ECOM_MODE=test PYTHONPATH=src $(PYTHON) -m pytest tests evals/tests -m 'not slow' -q --disable-warnings
+	ECOM_MODE=test $(PYTHON) -m pytest tests evals/tests -m 'not slow' -q --disable-warnings
+
+migrate-test:
+	ECOM_MODE=test $(PYTHON) -m alembic -c alembic.ini upgrade head
 
 check:
 	$(PYTHON) -m compileall -q src scripts migrations tests
@@ -66,9 +70,6 @@ install-hooks:
 check-repository:
 	python3 scripts/check_repository.py --tracked
 
-check-ci-config:
-	$(PYTHON) scripts/check_ci_config.py
-
 lint-web:
 	python3 scripts/check_development.py lint
 
@@ -82,7 +83,7 @@ check-commits:
 	python3 scripts/check_development.py commits --base "$(COMMIT_BASE)" --head "$(COMMIT_HEAD)"
 
 evals-tests:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" ECOM_MODE=test PYTHONPATH=src $(PYTHON) -m pytest evals/tests -q
+	ECOM_MODE=test $(PYTHON) -m pytest evals/tests -q
 
 evals-quick:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" PYTHONPATH=src $(PYTHON) evals/rag_eval/run.py --quick --compare --gate
@@ -97,8 +98,8 @@ evals-agent:
 	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" PYTHONPATH=src $(PYTHON) -m evals.agent_eval.runner
 
 evals-agent-replay:
-	PYTHONPATH=src python3 -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_web_replay.json
-	PYTHONPATH=src python3 -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json
+	ECOM_MODE=test $(PYTHON) -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_web_replay.json
+	ECOM_MODE=test $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json
 
 evals-sync:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }

@@ -10,6 +10,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+os.environ.setdefault("ECOM_MODE", "test")
+
 os.environ.setdefault("APP_ENV","dev")
 os.environ.setdefault("AUTH_ENABLED","false")
 os.environ.setdefault("API_KEY","")

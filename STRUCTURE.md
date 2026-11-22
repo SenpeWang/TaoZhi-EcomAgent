@@ -10,6 +10,7 @@
 | `.github/ISSUE_TEMPLATE/` | 中文 Bug、功能、文档与使用问题表单 |
 | `.github/workflows/` | main 推送触发的最小权限 CI，不自动部署 |
 | `.githooks/` | 每份克隆主动启用的提交与推送门禁 |
+| `config/` | 本地与远端 CI 共用的测试环境定义，不含任何凭据 |
 | `documentation/` | 使用手册根目录，每篇手册为独立子目录，入口统一为 `README.md` |
 | `docs/` | 公开运维文档与索引；私有文档放在 private 子目录并整体忽略 |
 | `documentation/quickstart/` | 本地快速开始与首次体验手册 |

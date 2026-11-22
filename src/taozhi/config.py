@@ -1,8 +1,9 @@
 """淘智 (TaoZhi) 全局运行配置与环境加载中心。
 
 统一维护模型网关配置 (`Settings`) 与企业运行时配置 (`Config`)：
-1. `.env` —— LLM 服务层与科研预算配置；
-2. `ECOM_ENV_FILE` —— 企业数据库、存储、消息队列与检索调优配置。
+1. `.env` —— LLM 服务层、生产库连接与本地凭证；
+2. `config/test.env` —— 本地与远端 CI 共用的测试环境，随 `ECOM_MODE=test` 自动生效；
+3. `ECOM_ENV_FILE` —— 显式指定环境文件时的最高优先级覆盖。
 严格遵循 Google Python Style 规范。
 """
 
@@ -11,6 +12,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -119,6 +121,7 @@ class Config:
     private_dir: Path
     tenant_code: str
     cookie_secure: bool
+    env_file: Path = Path(".env")
     task_timeout: int = 600
     review_timeout: int = 86400
     lease_seconds: int = 45
@@ -185,24 +188,65 @@ def resolve_runtime_dir(env_values: dict[str, str | None] | None = None) -> Path
     return Path.home() / ".local" / "share" / "ecom-agent"
 
 
+def resolve_env_file(mode: str) -> Path:
+    """按显式覆盖、测试模式、本地默认的顺序解析环境文件。
+
+    Args:
+        mode: 运行模式，取值为 production 或 test。
+
+    Returns:
+        当前模式使用的环境文件路径。
+    """
+    explicit = os.environ.get("ECOM_ENV_FILE")
+    if explicit:
+        return Path(explicit)
+    if mode == "test":
+        return ROOT / "config" / "test.env"
+    return ROOT / ".env"
+
+
+def resolve_db_password(mode: str) -> str:
+    """解析并导出数据库口令，供 libpq 建立连接时使用。
+
+    Args:
+        mode: 运行模式；只有测试模式需要口令注入。
+
+    Returns:
+        测试库口令；生产模式返回空字符串。
+    """
+    if mode != "test":
+        return ""
+    password = os.environ.get("PGPASSWORD", "")
+    if not password:
+        local = ROOT / ".env"
+        password = str(dotenv_values(local).get("PGPASSWORD") or "") if local.is_file() else ""
+    if password:
+        os.environ["PGPASSWORD"] = password
+    return password
+
+
 def load_config() -> Config:
-    """从 ECOM_ENV_FILE 与进程环境变量加载企业在线运行时配置。
+    """按运行模式解析环境文件并加载企业在线运行时配置。
 
     Returns:
         校验通过的不可变 Config 对象。
 
     Raises:
-        RuntimeError: 当 ECOM_DATABASE_URL 缺失或 ECOM_MODE 非法时抛出。
+        RuntimeError: 连接串缺失、模式非法、测试库不在 ecom_test 或连接串内嵌口令时抛出。
     """
-    source = Path(os.environ.get("ECOM_ENV_FILE", ROOT / ".env"))
+    source = resolve_env_file(os.environ.get("ECOM_MODE", "production"))
     values = {**dotenv_values(source), **os.environ}
     mode = values.get("ECOM_MODE", "production")
     dsn_key = "ECOM_TEST_DATABASE_URL" if mode == "test" else "ECOM_DATABASE_URL"
     dsn = values.get(dsn_key, "")
     if not dsn or mode not in ("production", "test"):
         raise RuntimeError(f"企业数据库或运行环境未配置：缺少 {dsn_key}（仅支持 production / test）")
-    if mode == "test" and "/ecom_test" not in dsn:
-        raise RuntimeError("测试模式必须连接独立的 ecom_test 数据库，拒绝使用生产库")
+    if mode == "test":
+        if "/ecom_test" not in dsn:
+            raise RuntimeError("测试模式必须连接独立的 ecom_test 数据库，拒绝使用生产库")
+        if urlsplit(dsn).password:
+            raise RuntimeError("测试库连接串不得内嵌口令，请改用 PGPASSWORD 注入")
+        resolve_db_password(mode)
     private = Path(values.get("ECOM_PRIVATE_DIR", ROOT / "data/private" / mode / "private"))
     private.mkdir(parents=True, exist_ok=True, mode=0o700)
     minio_ep = values.get("ECOM_MINIO_ENDPOINT", "127.0.0.1:19000")
@@ -232,6 +276,7 @@ def load_config() -> Config:
         presign_ttl=int(values.get("ECOM_PRESIGN_TTL", "600")),
         blob_dual_write=values.get("ECOM_BLOB_DUAL_WRITE", "false") == "true",
         runtime_dir=runtime_dir,
+        env_file=source,
         kafka_enabled=values.get("ECOM_KAFKA_ENABLED", "false") == "true",
         kafka_brokers=values.get("ECOM_KAFKA_BROKERS", "127.0.0.1:9092"),
         kafka_topic=values.get("ECOM_KAFKA_TOPIC", "ecom.tasks"),
