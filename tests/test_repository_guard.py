@@ -13,10 +13,11 @@ spec.loader.exec_module(guard)
 
 
 @pytest.mark.parametrize("path", [
-    "data/corpus/产品.md", "data/README.md", "项目说明.md", ".env.production",
+    "项目说明.md", ".env.production",
     "web/node_modules/a.js", "web/dist/index.html", "database-secrets.json",
     "plan.bak.20261007", "customer.docx",
     "AGENTS.md", "agents.md", "docs/AGENTS.md", "web/aGeNtS.Md",
+    "data/runtime/secret.pem", "data/runtime/access.token",
 ])
 def test_private_paths_are_blocked(path):
     assert guard.blocked_path(path)
@@ -25,6 +26,15 @@ def test_private_paths_are_blocked(path):
 def test_example_and_software_docs_are_allowed():
     assert guard.inspect_blob(".env.example", b'API_KEY=""\n') == []
     assert guard.blocked_path("docs/STRUCTURE.md") is None
+    assert guard.blocked_path("data/corpus/产品.md") is None
+    assert guard.blocked_path("data/README.md") is None
+    assert guard.blocked_path("data/runtime/accounts.json") is None
+
+
+def test_data_secrets_are_still_blocked():
+    secret = b"sk-" + b"C" * 32
+    problems = guard.inspect_blob("data/runtime/config.json", b'{"api_key":"' + secret + b'"}')
+    assert problems
 
 
 def test_secret_errors_do_not_echo_credentials():

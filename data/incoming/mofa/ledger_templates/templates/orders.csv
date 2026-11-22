@@ -1,0 +1,1 @@
+order_id,sku_id,quantity,goods_amount_minor,paid_amount_minor,refunded_amount_minor,status,assigned_user_id,warehouse_id,created_at,paid_at,shipped_at,completed_at,exported_at

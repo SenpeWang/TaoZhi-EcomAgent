@@ -1,0 +1,41 @@
+[
+  {
+    "title": "Amazon's Choice: Overall Pick",
+    "price": "N/A",
+    "price_value": 0.0,
+    "currency": "USD",
+    "asin": "B00O2HYV7K",
+    "rating": "N/A",
+    "rating_score": 0.0,
+    "reviews_count": 0,
+    "url": "https://www.amazon.com/dp/B00O2HYV7K",
+    "is_prime": false,
+    "source": "amazon"
+  },
+  {
+    "title": "Small Business",
+    "price": "N/A",
+    "price_value": 0.0,
+    "currency": "USD",
+    "asin": "B00O2HYV7K",
+    "rating": "4.4 out of 5 stars",
+    "rating_score": 4.4,
+    "reviews_count": 2211,
+    "url": "https://www.amazon.com/dp/B00O2HYV7K",
+    "is_prime": false,
+    "source": "amazon"
+  },
+  {
+    "title": "Small Business",
+    "price": "N/A",
+    "price_value": 0.0,
+    "currency": "USD",
+    "asin": "B097CGPZV3",
+    "rating": "5.0 out of 5 stars",
+    "rating_score": 5.0,
+    "reviews_count": 3,
+    "url": "https://www.amazon.com/dp/B097CGPZV3",
+    "is_prime": false,
+    "source": "amazon"
+  }
+]

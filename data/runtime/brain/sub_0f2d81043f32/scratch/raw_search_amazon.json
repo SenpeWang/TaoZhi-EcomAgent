@@ -1,0 +1,28 @@
+[
+  {
+    "title": "Amazon's Choice: Overall Pick",
+    "price": "N/A",
+    "price_value": 0.0,
+    "currency": "USD",
+    "asin": "B005PO9T44",
+    "rating": "N/A",
+    "rating_score": 0.0,
+    "reviews_count": 0,
+    "url": "https://www.amazon.com/dp/B005PO9T44",
+    "is_prime": false,
+    "source": "amazon"
+  },
+  {
+    "title": "Small Business",
+    "price": "N/A",
+    "price_value": 0.0,
+    "currency": "USD",
+    "asin": "B005PO9T44",
+    "rating": "4.4 out of 5 stars",
+    "rating_score": 4.4,
+    "reviews_count": 592,
+    "url": "https://www.amazon.com/dp/B005PO9T44",
+    "is_prime": false,
+    "source": "amazon"
+  }
+]

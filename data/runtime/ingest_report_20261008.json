@@ -1,0 +1,808 @@
+{
+  "at": "2026-10-08 00:37:39",
+  "env": "http://127.0.0.1:18501",
+  "product_files": 81,
+  "policy_files": 32,
+  "product_published_approved": 81,
+  "approval_failures": [],
+  "tenant_totals": {
+    "published": 92,
+    "review": 32,
+    "other": 0
+  },
+  "skipped": [],
+  "errors": [],
+  "details": [
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/battery_apple_magsafe_pack.md",
+      "title": "Apple MagSafe 外接电池（官方资料采集）",
+      "ok": true,
+      "doc_id": "doc_9f53e9bd2f39b58d687ce9b1",
+      "task_id": "task_63dd2352c2aa66f1fad16087"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/cable_apple_usbc_lightning.md",
+      "title": "Apple USB-C 转闪电连接线（Lightning 转 USB-C，官方资料采集）",
+      "ok": true,
+      "doc_id": "doc_796e3cdc0ac6f5c9c34c740f",
+      "task_id": "task_78ee71c1210bae883eed2a46"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/cable_apple_usbc_usbc_60w.md",
+      "title": "Apple USB-C 转 USB-C 充电线 60W（编织款 1m，官方资料采集）",
+      "ok": true,
+      "doc_id": "doc_0abea60292fc41955b79620e",
+      "task_id": "task_5bb33e55984f9c03431104f8"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/case_apple_iphone16_clear.md",
+      "title": "Apple iPhone 16 透明保护壳（MagSafe，官方资料采集）",
+      "ok": true,
+      "doc_id": "doc_1ec50cad56034f9ae3a01d8f",
+      "task_id": "task_cbad3770b67c08d4421d1e7a"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/case_apple_iphone16_silicone.md",
+      "title": "Apple iPhone 16 硅胶保护壳（MagSafe，官方资料采集）",
+      "ok": true,
+      "doc_id": "doc_854842328ebb759b3a0c4501",
+      "task_id": "task_6188f0c1f600ef4cf1290869"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/charger_apple_20w_usbc.md",
+      "title": "Apple 20W USB-C 电源适配器（官方资料采集）",
+      "ok": true,
+      "doc_id": "doc_cfe136ee11fb297295b487f3",
+      "task_id": "task_0b979834060eda3199ab5d19"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/charger_apple_35w_dual_usbc.md",
+      "title": "Apple 35W 双 USB-C 端口电源适配器（官方资料采集）",
+      "ok": true,
+      "doc_id": "doc_7feac78012e90a5bf4f80c5b",
+      "task_id": "task_ae764606eb1b387ab79c30a5"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/charger_apple_35w_dual_usbc_compact.md",
+      "title": "Apple 35W 双 USB-C 端口小型电源适配器（紧凑型，官方资料采集）",
+      "ok": true,
+      "doc_id": "doc_c339257b64d08a8eef6f6366",
+      "task_id": "task_817814337e0227368c0be16d"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/charger_apple_magsafe.md",
+      "title": "Apple MagSafe 充电器（官方资料采集）",
+      "ok": true,
+      "doc_id": "doc_b5f6ec86b07e8c65e7152b49",
+      "task_id": "task_535c646f073fcaedd1f77ad0"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/charger_apple_magsafe_duo.md",
+      "title": "Apple MagSafe 双项充电器（官方资料采集）",
+      "ok": true,
+      "doc_id": "doc_6c4aba675d88fdcc5f2e2463",
+      "task_id": "task_4a0ecd50317820392eb60d48"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone11.md",
+      "title": "iPhone 11（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_58624914c5fb8ba70fe91487",
+      "task_id": "task_e675bfce5e35051200878139"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone12.md",
+      "title": "iPhone 12（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_5a09786d374d66b89eb8dc13",
+      "task_id": "task_3c17e102cba78148c941164b"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone13.md",
+      "title": "iPhone 13（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_9e2a74e106f55b43c84cdda9",
+      "task_id": "task_142f83dab2344c489a100e45"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone13pro.md",
+      "title": "iPhone 13 Pro（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_3254de98d5b5b30a6b4e2961",
+      "task_id": "task_37321745f8cc4dd92c7b82f8"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone14.md",
+      "title": "iPhone 14（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_f704bf42133398b935f30202",
+      "task_id": "task_8d474af1f0971177642cdaeb"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone14plus.md",
+      "title": "iPhone 14 Plus（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_8d189ed36155eff6090fcc11",
+      "task_id": "task_e642c7fa0af5195ee7059730"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone15.md",
+      "title": "iPhone 15（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_fe890283a034f0da04138418",
+      "task_id": "task_3234ddea7af29ba1c417b396"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone15plus.md",
+      "title": "iPhone 15 Plus（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_3cabb78be0705f3d49ef99e5",
+      "task_id": "task_ccefce2aaa09fb77c8ce6e5a"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone15pro.md",
+      "title": "iPhone 15 Pro（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_b3b398d155455d6271633f59",
+      "task_id": "task_3b92db1ccc4a9ec93a4540ea"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone15promax.md",
+      "title": "iPhone 15 Pro Max（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_86ab3e20c22b212f1a18d2e1",
+      "task_id": "task_c1a3fa7e717a202fb39f5ebe"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone16.md",
+      "title": "iPhone 16（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_7eb4bd46eb6921b147eaa501",
+      "task_id": "task_0be13f942c1dbd0d9edc9848"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/apple/phone_apple_iphone16pro.md",
+      "title": "iPhone 16 Pro（Apple 官方技术规格采集）",
+      "ok": true,
+      "doc_id": "doc_afdf5080ce09e1c993743d5b",
+      "task_id": "task_24a0400bc745def0e874caf3"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/acc_huawei_cable_6a_usbc.md",
+      "title": "华为 6A 数据线（USB Type-C 转 USB Type-C）",
+      "ok": true,
+      "doc_id": "doc_fd43291c2873b4198dba01b0",
+      "task_id": "task_923eab9fedef7979c6875837"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/acc_huawei_car_charger_66w.md",
+      "title": "华为超级快充车载充电器（Max 66 W）",
+      "ok": true,
+      "doc_id": "doc_3094be4befba7d674f1b3fa2",
+      "task_id": "task_ab7ef36d55788796608986d9"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/acc_huawei_charger_100w.md",
+      "title": "华为全能充电器（Max 100 W）",
+      "ok": true,
+      "doc_id": "doc_b49cf126967d30b9fc367d74",
+      "task_id": "task_f60a0c46e52d3671f47e84d5"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/acc_huawei_charger_40w.md",
+      "title": "华为超级快充充电器（Max 40 W）",
+      "ok": true,
+      "doc_id": "doc_0c129e6be2fa86c1f45dfb1c",
+      "task_id": "task_06110792e6ad972c49134670"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/acc_huawei_charger_66w.md",
+      "title": "华为全能充电器（Max 66 W）",
+      "ok": true,
+      "doc_id": "doc_37bae6bf2f635c7bbbe7464f",
+      "task_id": "task_b3e1eaa95e3728fbc1998cc3"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/acc_huawei_charger_88w.md",
+      "title": "华为全能充电器（Max 88 W）",
+      "ok": true,
+      "doc_id": "doc_68f5e0b153b5d742bef284e0",
+      "task_id": "task_eabd82a21b87463f5483f537"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/acc_huawei_phone_case.md",
+      "title": "华为原装手机壳（机型专属保护壳品类）",
+      "ok": true,
+      "doc_id": "doc_bf445edc0c7feef41e90dde4",
+      "task_id": "task_35ef15c6304ee73e3fe3cae0"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/acc_huawei_screen_protector.md",
+      "title": "华为原装保护膜（机型专属保护膜品类）",
+      "ok": true,
+      "doc_id": "doc_1e886c0e3d4e0f899f507b84",
+      "task_id": "task_895c2718e536db05e210a419"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/acc_huawei_wireless_charger_27w.md",
+      "title": "华为超级快充无线充电器（Max 27 W）",
+      "ok": true,
+      "doc_id": "doc_894d514b51b693234283fbdd",
+      "task_id": "task_cb747cb54c3bbc137225f0d3"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/acc_huawei_wireless_charger_50w.md",
+      "title": "华为超级快充立式无线充电器（Max 50 W）",
+      "ok": true,
+      "doc_id": "doc_9b23f3ee6e74634ea724dca7",
+      "task_id": "task_78679662150221aed6476ade"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_changxiang60pro.md",
+      "title": "华为畅享 60 Pro",
+      "ok": true,
+      "doc_id": "doc_4853be58e8cf70d2652216df",
+      "task_id": "task_702975b0bdcb96fb65fdaa92"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_changxiang70.md",
+      "title": "华为畅享 70",
+      "ok": true,
+      "doc_id": "doc_f0da6dada0c4c2df5c5f5048",
+      "task_id": "task_57b3a96bab62c820e968c20b"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_mate50.md",
+      "title": "HUAWEI Mate 50",
+      "ok": true,
+      "doc_id": "doc_eb4406414cb3acc9142de269",
+      "task_id": "task_645d0887a88d039b5b54610f"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_mate60.md",
+      "title": "HUAWEI Mate 60",
+      "ok": true,
+      "doc_id": "doc_c3335d24b855ef24e8df465d",
+      "task_id": "task_cb490225b557569b568c4964"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_mate60pro.md",
+      "title": "HUAWEI Mate 60 Pro",
+      "ok": true,
+      "doc_id": "doc_3ef0e4b0dc8940dcff5ca945",
+      "task_id": "task_8f83f6bbf54689e947ffc34c"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_matex5.md",
+      "title": "HUAWEI Mate X5",
+      "ok": true,
+      "doc_id": "doc_d393c2dff69c220b1dbef715",
+      "task_id": "task_e7296451983080c512e9f902"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_nova12.md",
+      "title": "HUAWEI nova 12",
+      "ok": true,
+      "doc_id": "doc_edda6a2f972b570738088327",
+      "task_id": "task_5b6be1440358e2eae427ffce"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_nova12pro.md",
+      "title": "HUAWEI nova 12 Pro",
+      "ok": true,
+      "doc_id": "doc_164c83c09b5175b59dd69c92",
+      "task_id": "task_4ec13f44d871226aa7b204e9"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_p60pro.md",
+      "title": "HUAWEI P60 Pro",
+      "ok": true,
+      "doc_id": "doc_47d82a54022f3af9d0838c4f",
+      "task_id": "task_969400d9ab79630a9b38affa"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_pocket2.md",
+      "title": "HUAWEI Pocket 2",
+      "ok": true,
+      "doc_id": "doc_34d2510143435b58c7e92629",
+      "task_id": "task_ae3fd760aeb521fe5f44b6bb"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_pura70.md",
+      "title": "HUAWEI Pura 70",
+      "ok": true,
+      "doc_id": "doc_c28aad781b52489070103296",
+      "task_id": "task_2ec97c9c2e37ceb5528bd867"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/huawei/phone_huawei_pura70pro.md",
+      "title": "HUAWEI Pura 70 Pro",
+      "ok": true,
+      "doc_id": "doc_ec220929ea87f6a77463043f",
+      "task_id": "task_ebeec4d9083704d77b92c8c4"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/other_brands/phone_honor_magic6.md",
+      "title": "荣耀 Magic6 官方参数采集",
+      "ok": true,
+      "doc_id": "doc_375e403baa4979c05f014e99",
+      "task_id": "task_d5ff6ebd613ee06a58561fba"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/other_brands/phone_oppo_find_x7.md",
+      "title": "OPPO Find X7 官方参数采集",
+      "ok": true,
+      "doc_id": "doc_6e390147e34c960b26afbe87",
+      "task_id": "task_b7ea76a9e1e5d1e14f8c3e34"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/other_brands/phone_samsung_galaxy_s24.md",
+      "title": "三星 Galaxy S24 官方参数采集",
+      "ok": true,
+      "doc_id": "doc_f65913a655f89508202894fe",
+      "task_id": "task_ee830e6b0850f97b1c6b3c06"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/other_brands/phone_vivo_x100.md",
+      "title": "vivo X100 官方参数采集",
+      "ok": true,
+      "doc_id": "doc_3bdbb3bf4df93749be10d044",
+      "task_id": "task_91c18c7bac538ae7c7e6cf67"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/other_brands/phone_xiaomi_14.md",
+      "title": "小米 14（Xiaomi 14）官方参数采集",
+      "ok": true,
+      "doc_id": "doc_578d3c1eda5ec862078cb171",
+      "task_id": "task_249f7870a4116b87b065954a"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/other_brands/phone_xiaomi_15.md",
+      "title": "小米 15（Xiaomi 15）官方参数采集",
+      "ok": true,
+      "doc_id": "doc_5055d342a0130a780f36c402",
+      "task_id": "task_5d87eab29e4c77d394cd99e5"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/cable_anker_240w_cc.md",
+      "title": "Anker USB-C to USB-C 数据线（240W 编织线）",
+      "ok": true,
+      "doc_id": "doc_0d8b29abfd8877b40dbe7ebf",
+      "task_id": "task_e22e1d3aa50f468e03c65085"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/cable_baseus_240w_cc.md",
+      "title": "倍思 USB-C 快充数据线 240W（PD3.1 双 C 编织线）",
+      "ok": true,
+      "doc_id": "doc_e0df37040b44a3bac5cc96ec",
+      "task_id": "task_f856cac3cd088250112e1a8c"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/cable_momax_240w_dc71d.md",
+      "title": "Momax Mag.Link 磁吸理线 USB-C to USB-C 数据线（240W，2m）",
+      "ok": true,
+      "doc_id": "doc_b94a92600c926aafb22e7bca",
+      "task_id": "task_1ae813bdd2a1d574155a380f"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/cable_momax_240w_usb4_dc63.md",
+      "title": "Momax Mag.Link USB4 磁吸数据线（240W，1.5m，40Gbps）",
+      "ok": true,
+      "doc_id": "doc_8bea2c7b85bb78620def28eb",
+      "task_id": "task_b93ab061706eaa3d2815ed36"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/cable_pisen_pro_cc11.md",
+      "title": "品胜 PISEN PRO C to C 彩色编织数据线（1m）",
+      "ok": true,
+      "doc_id": "doc_5f5ef61aa113ff5c424acaa9",
+      "task_id": "task_55cf3e20bc2443480dce1a09"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/cable_ugreen_240w_l532.md",
+      "title": "绿联 240W 快充线（PD3.1 双 C 口尼龙编织线）",
+      "ok": true,
+      "doc_id": "doc_674d9c953b106c3c40f3895f",
+      "task_id": "task_b6669bc4248e001a9307e2ff"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/cable_ugreen_240w_l701.md",
+      "title": "绿联全功能 Type-C 编织数据线（240W 快充，支持 4K 投屏）",
+      "ok": true,
+      "doc_id": "doc_c823185525692c6a67b6ad98",
+      "task_id": "task_f32e0bcc86cfa50fe9ccdf4b"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/car_baseus_cw01_wireless_mount.md",
+      "title": "倍思 CW01 MagSafe 磁吸车载无线充支架（15W）",
+      "ok": true,
+      "doc_id": "doc_25ffc22d99c73120d72dc243",
+      "task_id": "task_a8e33d3ee19f73c58d7aae16"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/car_baseus_vc2_flex_mount.md",
+      "title": "倍思 VC2 Flex 磁吸车载/桌面支架（720° 旋转）",
+      "ok": true,
+      "doc_id": "doc_5a7ea8a70533765d9964fed2",
+      "task_id": "task_ab8a3ac5f5545cd61404647f"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/car_momax_move_easy_cm22.md",
+      "title": "Momax MoVe Easy 磁吸车载支架（出风口）",
+      "ok": true,
+      "doc_id": "doc_2f97152eb13654fefb924c6e",
+      "task_id": "task_03cfda021622718a92311599"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/car_ugreen_cd130_pd.md",
+      "title": "绿联 PD 快充车载充电器（Type-C + USB 一拖二点烟器车充）",
+      "ok": true,
+      "doc_id": "doc_6fa742911134f6dec26dda30",
+      "task_id": "task_2847e364898611e5a775303a"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/charger_anker_736_nano_ii_100w.md",
+      "title": "Anker 736 充电器（Nano II 100W）",
+      "ok": true,
+      "doc_id": "doc_ef86612251c028ef8e7d2373",
+      "task_id": "task_6e2030bc9d7a768f4cff328d"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/charger_anker_prime_67w_gan.md",
+      "title": "Anker Prime 67W GaN 壁充充电器（3 口）",
+      "ok": true,
+      "doc_id": "doc_50c62a20ee57a389ccf7653a",
+      "task_id": "task_b780a5fcddfdd7f145ec0c77"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/charger_baseus_gan2_pro_120w.md",
+      "title": "倍思 GaN2 Pro 120W 三口 USB-C 快充充电器",
+      "ok": true,
+      "doc_id": "doc_2986ececc4c54f995b28c8be",
+      "task_id": "task_bb54a626bd8aa4465d03681c"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/charger_baseus_gan3_pro_65w.md",
+      "title": "倍思 GaN3 Pro 65W 桌面充电器（4 口）",
+      "ok": true,
+      "doc_id": "doc_8ac27794cd67aa6971cfb668",
+      "task_id": "task_d992ab2a2e91029c4fd13350"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/charger_baseus_gan5_pro_65w.md",
+      "title": "倍思 GaN5 Pro 65W 三口快充充电器（2C+U）",
+      "ok": true,
+      "doc_id": "doc_7376d6ebabb040d091fa389f",
+      "task_id": "task_e36323c0da04cbe5e0c9252d"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/charger_belkin_srz002_70w.md",
+      "title": "Belkin 2 插孔充电站（含 USB 口与 USB-C 线，70W GaN）",
+      "ok": true,
+      "doc_id": "doc_ac5486447cf0f462740b92bc",
+      "task_id": "task_f992147ebb27f78b5e897c29"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/charger_gongniu_au165n_65w.md",
+      "title": "公牛快充充电器 65W（1C+2A）",
+      "ok": true,
+      "doc_id": "doc_cd0cf4b0a17e667c0b4cb1f2",
+      "task_id": "task_4953567107c89268cea07c30"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/charger_ugreen_100w_x757.md",
+      "title": "绿联闪充湃 Pro 100W 三口氮化镓充电器套装（2C+A）",
+      "ok": true,
+      "doc_id": "doc_6a4aaa49539726daed6fb27b",
+      "task_id": "task_b6602459c567d18d547d1932"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/charger_ugreen_140w_x569.md",
+      "title": "绿联 140W 四口氮化镓充电器套装（3C+A）",
+      "ok": true,
+      "doc_id": "doc_dcdcc6b5199dc03714dca7fc",
+      "task_id": "task_21e1c1634e5fd99f441d992f"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/charger_ugreen_65w_x550.md",
+      "title": "绿联闪充湃 65W Type-C 氮化镓充电器（单 C 口）",
+      "ok": true,
+      "doc_id": "doc_263a3aaafb8ef81a6883a83c",
+      "task_id": "task_cea79d7607b5e57f95ca24cd"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/stand_anker_610_maggo_a25a0.md",
+      "title": "Anker 610 磁吸手机指环支架（MagGo）",
+      "ok": true,
+      "doc_id": "doc_e2720c429dd36e6eea6a2520",
+      "task_id": "task_d82cf78d7950896c52827701"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/stand_momax_1snap_go_kh20d.md",
+      "title": "Momax 1-Snap Go Auto 电动吸盘磁吸手机支架",
+      "ok": true,
+      "doc_id": "doc_23dc82a17ebde87f8c31883f",
+      "task_id": "task_742c10e7c1d626be2232d5c3"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/stand_ugreen_lp263.md",
+      "title": "绿联金属折叠桌面支架（手机平板两用）",
+      "ok": true,
+      "doc_id": "doc_73e2656e0898bbf8e084dd6c",
+      "task_id": "task_36fc4283879a77ef45fb1f42"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/stand_ugreen_lp778.md",
+      "title": "绿联桌面手机支架（360° 旋转升降折叠，平板支撑）",
+      "ok": true,
+      "doc_id": "doc_742879f71e4f1be75184127d",
+      "task_id": "task_3cc8a7b1748c407624ee24cb"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/usb_pd_standard.md",
+      "title": "USB Power Delivery（USB PD）标准专题",
+      "ok": true,
+      "doc_id": "doc_9e6d75bad012d7a73e99a9c1",
+      "task_id": "task_afb7fc6dc4095de2211c3e52"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/wireless_anker_maggo_dock_a25m4.md",
+      "title": "Anker MagGo 无线充电站（三合一立式底座，Qi2 15W）",
+      "ok": true,
+      "doc_id": "doc_d724cb61f9228d7fbe3d9d0a",
+      "task_id": "task_2f8d01fb3da60481077abbdd"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/wireless_anker_maggo_foldable_a2557.md",
+      "title": "Anker MagGo 无线充电站（三合一可折叠垫式，Qi2 15W）",
+      "ok": true,
+      "doc_id": "doc_3a8eb4b14930c956731d21ac",
+      "task_id": "task_128f2499a0f70da18091cef6"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/wireless_baseus_magpro_2in1_25w.md",
+      "title": "倍思 MagPro 二合一磁吸无线充电器（25W）",
+      "ok": true,
+      "doc_id": "doc_a679be58e0ff4cecddf64b5a",
+      "task_id": "task_0d70f987518ab62e20315fbe"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/wireless_momax_qmag_go_ud30.md",
+      "title": "Momax Q.Mag Go 二合一 MagSafe 磁吸无线充（15W）",
+      "ok": true,
+      "doc_id": "doc_ff7659ca73e6e674c4480a69",
+      "task_id": "task_0efd5a9848c32a61bb79cb02"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/incoming/待映射/products_official/thirdparty/wireless_ugreen_w703_15w.md",
+      "title": "绿联 Qi 认证 15W 手机磁吸无线充电器",
+      "ok": true,
+      "doc_id": "doc_228e55ca1070546c23b9c41b",
+      "task_id": "task_ad3b9d34924317936b9891b6"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_access_request.md",
+      "title": "权限申请与审批流程制度（草案）",
+      "ok": true,
+      "doc_id": "doc_1660121fbf19285567520bb2",
+      "task_id": "task_ca25712637955dd34e936152"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_account_lifecycle.md",
+      "title": "账号开通停用与交接制度（草案）",
+      "ok": true,
+      "doc_id": "doc_98145530bdad40dc22b84748",
+      "task_id": "task_e1d87bc0c65784445cbc6f01"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_activity_review.md",
+      "title": "店铺活动创建与审核",
+      "ok": true,
+      "doc_id": "doc_68c96135809fdf147142494b",
+      "task_id": "task_4b6dc0eb690af0205d99d050"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_admin_boundary.md",
+      "title": "系统维护职责边界制度（管理员，草案）",
+      "ok": true,
+      "doc_id": "doc_744270528e16041aea3c0616",
+      "task_id": "task_b464ea75ff6bba729caae441"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_aftersale_service.md",
+      "title": "售后客服处理规范",
+      "ok": true,
+      "doc_id": "doc_b4a42df33e5f288639e9f19d",
+      "task_id": "task_b8b42904bb4a07bef7e62878"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_business_report.md",
+      "title": "经营报表编制与发布制度（草案）",
+      "ok": true,
+      "doc_id": "doc_e418e2dd94526e4bbf616649",
+      "task_id": "task_3fc9f1a60482fbc65ee6d078"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_compatibility_publish.md",
+      "title": "兼容性结论发布规范",
+      "ok": true,
+      "doc_id": "doc_aa219897177fb98098be9d34",
+      "task_id": "task_ba3e0d8cc6fded5ef1891167"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_compatibility_verify.md",
+      "title": "适配核验流程",
+      "ok": true,
+      "doc_id": "doc_0f876ca8d4771c3514385d4a",
+      "task_id": "task_9b0063ef9f2c3d67b6f48ccf"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_complaint_escalation.md",
+      "title": "客户投诉升级处理",
+      "ok": true,
+      "doc_id": "doc_4da57143bf812f1e511b9003",
+      "task_id": "task_53699449567af0a24288548a"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_confirmation_checklist_part1.md",
+      "title": "制度草案确认清单（第 1 批，共 15 份制度）",
+      "ok": true,
+      "doc_id": "doc_ac4be9fcdd99656dccaab8dd",
+      "task_id": "task_dc0de62bf9aad27e7d033f5d"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_confirmation_checklist_part2.md",
+      "title": "制度草案确认清单（第 16-30 份）Part 2",
+      "ok": true,
+      "doc_id": "doc_6c594c6e18af5d7deb1cd4b3",
+      "task_id": "task_247c02fe89d891805321b082"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_cost_access.md",
+      "title": "成本数据查阅与授权制度（老板级示例文件，草案）",
+      "ok": true,
+      "doc_id": "doc_24f3c9af42f127c5e4ef36c1",
+      "task_id": "task_ec06413725a21fef8c17ff52"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_data_security_mask.md",
+      "title": "数据安全与客户信息脱敏制度（草案）",
+      "ok": true,
+      "doc_id": "doc_f2666afff55f17847794499c",
+      "task_id": "task_9d37e5ad3516ae5da3e13c2c"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_doc_classification.md",
+      "title": "文档密级与发布审核制度（草案）",
+      "ok": true,
+      "doc_id": "doc_17b68aa3917fd1d2b6e5fc4a",
+      "task_id": "task_2284475c36c1c6b9d9d87cb2"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_employee_handover.md",
+      "title": "员工入转调离交接制度（草案）",
+      "ok": true,
+      "doc_id": "doc_92f835ab32a279d7966fd45d",
+      "task_id": "task_ffba274e9b6c39fcd554c15d"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_finance_reconcile.md",
+      "title": "财务对账流程制度（草案）",
+      "ok": true,
+      "doc_id": "doc_134c1a269f8b74f805395e73",
+      "task_id": "task_e3e5dd72f6316e64132c430b"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_incoming_qc.md",
+      "title": "收货质检流程",
+      "ok": true,
+      "doc_id": "doc_4f549680b857b42a83ae5d95",
+      "task_id": "task_2d6050405d01e6dd6089bd6a"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_kb_maintenance.md",
+      "title": "知识库维护与内容巡检制度（草案）",
+      "ok": true,
+      "doc_id": "doc_e46ee64dddc948b7752e5d9d",
+      "task_id": "task_f27c8943db28db513a19294e"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_listing_review.md",
+      "title": "商品上架审核流程",
+      "ok": true,
+      "doc_id": "doc_ca638f9d160a6657bfff7349",
+      "task_id": "task_4f61b5ba80014fa757b13f1a"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_marketing_publish.md",
+      "title": "营销内容发布规范",
+      "ok": true,
+      "doc_id": "doc_f200f791284410e57ae4069e",
+      "task_id": "task_fffed2442602a8e0024c93e0"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_outbound_inbound.md",
+      "title": "仓储出入库管理制度（草案）",
+      "ok": true,
+      "doc_id": "doc_c1a542d5d950b29f8b57f3d6",
+      "task_id": "task_79a6b0cf8a4eb578d215926c"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_platform_rules_response.md",
+      "title": "平台规则响应流程制度（草案）",
+      "ok": true,
+      "doc_id": "doc_ebeaace1b150f257dea1dfd1",
+      "task_id": "task_d3ed4fdb2fe45c528a8d7b04"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_presale_qa.md",
+      "title": "售前客服问答规范",
+      "ok": true,
+      "doc_id": "doc_f6652330dddbb7ec877ea92a",
+      "task_id": "task_f139d59c60dbf87ffa99f2ed"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_product_change_version.md",
+      "title": "商品信息变更与版本管理",
+      "ok": true,
+      "doc_id": "doc_340764928a110ecbe317f7de",
+      "task_id": "task_0919bd05212e097c43ed6e7e"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_product_profiling.md",
+      "title": "商品建档规范",
+      "ok": true,
+      "doc_id": "doc_8302a03e0e9902d730bb6ba7",
+      "task_id": "task_d38c750babdc2d23d1f79956"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_purchase_apply.md",
+      "title": "采购申请与审批",
+      "ok": true,
+      "doc_id": "doc_0d722c602b147e08da468734",
+      "task_id": "task_cc6d46bb1042bb1831bff83d"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_qa_quality_audit.md",
+      "title": "应答质量抽检与考核制度（草案）",
+      "ok": true,
+      "doc_id": "doc_7499b9770f3a86224af84c93",
+      "task_id": "task_ac875f3f534afe1e00bba7fa"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_refund_approval.md",
+      "title": "退款审批与权限制度（草案）",
+      "ok": true,
+      "doc_id": "doc_eb88d00f0aa28ca602606be7",
+      "task_id": "task_7a54ac9aa44eee8ca591ffcd"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_return_exchange.md",
+      "title": "退换货处理流程",
+      "ok": true,
+      "doc_id": "doc_b23b3d0ea5ab5052e5691f1f",
+      "task_id": "task_4284c42b16890b661004424d"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_stockout_replenish.md",
+      "title": "缺货与补货处理制度（草案）",
+      "ok": true,
+      "doc_id": "doc_7f13734cc10b5dc6b07cca97",
+      "task_id": "task_28d8329bf3d752e4c6e2f26d"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_stocktake.md",
+      "title": "库存盘点操作规范",
+      "ok": true,
+      "doc_id": "doc_f8a2afd30db24f97434384f8",
+      "task_id": "task_93e7be369d8dfac6758b9646"
+    },
+    {
+      "file": "/home/quanyj/wsp-workspace/00_base/multi-agent/data/corpus/policies/policy_supplier_admission.md",
+      "title": "供应商准入与评估",
+      "ok": true,
+      "doc_id": "doc_219a30ba4a3e960e8382a8c2",
+      "task_id": "task_6453a3a0b1e876f8ce5ba24f"
+    }
+  ]
+}

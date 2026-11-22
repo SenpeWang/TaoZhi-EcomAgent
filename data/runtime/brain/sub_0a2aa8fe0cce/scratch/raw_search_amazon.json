@@ -1,0 +1,67 @@
+[
+  {
+    "title": "Amazon's Choice: Overall Pick",
+    "price": "N/A",
+    "price_value": 0.0,
+    "currency": "USD",
+    "asin": "B0FWB4VDQG",
+    "rating": "N/A",
+    "rating_score": 0.0,
+    "reviews_count": 0,
+    "url": "https://www.amazon.com/dp/B0FWB4VDQG",
+    "is_prime": false,
+    "source": "amazon"
+  },
+  {
+    "title": "Small Business",
+    "price": "N/A",
+    "price_value": 0.0,
+    "currency": "USD",
+    "asin": "B0FWB4VDQG",
+    "rating": "4.6 out of 5 stars",
+    "rating_score": 4.6,
+    "reviews_count": 28974,
+    "url": "https://www.amazon.com/dp/B0FWB4VDQG",
+    "is_prime": false,
+    "source": "amazon"
+  },
+  {
+    "title": "Clear, Tough, and Kind to the Planet",
+    "price": "N/A",
+    "price_value": 0.0,
+    "currency": "USD",
+    "asin": "B00O2HYV7K",
+    "rating": "4.5 out of 5 stars",
+    "rating_score": 4.5,
+    "reviews_count": 20,
+    "url": "https://www.amazon.com/dp/B00O2HYV7K",
+    "is_prime": false,
+    "source": "amazon"
+  },
+  {
+    "title": "Small Business",
+    "price": "N/A",
+    "price_value": 0.0,
+    "currency": "USD",
+    "asin": "B0DTB7CVYV",
+    "rating": "4.2 out of 5 stars",
+    "rating_score": 4.2,
+    "reviews_count": 1848,
+    "url": "https://www.amazon.com/dp/B0DTB7CVYV",
+    "is_prime": false,
+    "source": "amazon"
+  },
+  {
+    "title": "Small Business",
+    "price": "N/A",
+    "price_value": 0.0,
+    "currency": "USD",
+    "asin": "B097CGPZV3",
+    "rating": "3.9 out of 5 stars",
+    "rating_score": 3.9,
+    "reviews_count": 307,
+    "url": "https://www.amazon.com/dp/B097CGPZV3",
+    "is_prime": false,
+    "source": "amazon"
+  }
+]

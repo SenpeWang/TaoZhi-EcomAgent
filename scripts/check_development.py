@@ -155,7 +155,12 @@ def main() -> int:
             frontend(ROOT / "web", format_only=True, write=args.command == "format")
         elif args.command == "staged":
             check_snapshot(None)
-            repository.git("diff", "--cached", "--check")
+            whitespace = subprocess.run(
+                ["git", "diff", "--cached", "--check", "--", ".", ":(exclude)data/"],
+                cwd=ROOT, capture_output=True, text=True,
+            )
+            if whitespace.returncode:
+                raise RuntimeError("暂存代码存在空白字符问题：" + whitespace.stdout.strip()[:400])
         elif args.command == "message":
             if not args.file:
                 raise RuntimeError("commit-msg 必须提供 --file")

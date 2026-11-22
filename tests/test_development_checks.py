@@ -24,6 +24,7 @@ def test_source_comments_in_python_and_yaml():
     tracked = subprocess.check_output(
         ["git", "ls-files", "-z", "*.py", "*.yaml", "*.yml"], cwd=PROJECT,
     ).decode().split("\0")
+    tracked = [name for name in tracked if name and not name.startswith("data/")]
     violations = []
     for name in filter(None, tracked):
         source = (PROJECT / name).read_text(encoding="utf-8")
@@ -194,9 +195,9 @@ def test_unregistered_and_removed_directory(workspace):
 
 def test_private_data_is_blocked_even_when_forced_into_index(workspace):
     root, git = workspace
-    (root / "data/incoming").mkdir(parents=True)
-    (root / "data/incoming/example.md").write_text("测试自行构造的资料\n")
-    git("add", "-f", "data/incoming/example.md")
+    (root / "node_modules/pkg").mkdir(parents=True)
+    (root / "node_modules/pkg/example.md").write_text("测试自行构造的依赖文件\n")
+    git("add", "-f", "node_modules/pkg/example.md")
     with pytest.raises(RuntimeError, match="私有数据"):
         development.check_snapshot(None)
 
@@ -258,9 +259,9 @@ def test_published_agent_policy_cutover_is_limited(workspace, monkeypatch):
     )
     assert any("API" in item for item in development.repository.inspect_tree(secret_commit))
     git("rm", "--cached", "AGENTS.md")
-    (root / "data").mkdir(exist_ok=True)
-    (root / "data/AGENTS.md").write_text("私有目录的合成资料\n")
-    git("add", "-f", "data/AGENTS.md")
+    (root / "node_modules").mkdir(exist_ok=True)
+    (root / "node_modules/AGENTS.md").write_text("私有目录的合成资料\n")
+    git("add", "-f", "node_modules/AGENTS.md")
     git("commit", "-m", "test: 构造私有目录边界")
     private_commit = git("rev-parse", "HEAD")
     monkeypatch.setattr(

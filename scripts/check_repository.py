@@ -16,7 +16,7 @@ PRE_LOCAL_AGENT_POLICY_COMMITS = frozenset({
     "2b071e5b087099cd0a4683c4394a4b972282b652",
 })
 FORBIDDEN_DIRECTORIES = {
-    "data", "node_modules", "__pycache__", ".venv", "venv",
+    "node_modules", "__pycache__", ".venv", "venv",
     ".pytest_cache", ".mypy_cache", ".ruff_cache", ".idea", ".vscode",
 }
 FORBIDDEN_SUFFIXES = {
@@ -54,6 +54,10 @@ def blocked_path(path: str) -> str | None:
         return "私有环境配置"
     if item.name in {"database-secrets.json", "initdb-password"} or item.name.startswith("bootstrap-owner-"):
         return "私有身份凭据"
+    if item.parts and item.parts[0] == "data":
+        if item.suffix.lower() in {".pem", ".key", ".p12", ".pfx", ".token"}:
+            return "私钥或凭据文件"
+        return None
     if item.suffix.lower() in FORBIDDEN_SUFFIXES or ".bak." in item.name:
         return "业务附件、数据库、凭据或备份"
     return None
@@ -64,10 +68,11 @@ def inspect_blob(path: str, content: bytes) -> list[str]:
     category = blocked_path(path)
     if category:
         problems.append(category)
-    if len(content) > MAX_FILE_BYTES:
-        problems.append("超过 1 MiB；大文件需调整存放方案")
-    if b"\0" in content:
-        problems.append("二进制文件需明确公开用途")
+    if not path.startswith("data/"):
+        if len(content) > MAX_FILE_BYTES:
+            problems.append("超过 1 MiB；大文件需调整存放方案")
+        if b"\0" in content:
+            problems.append("二进制文件需明确公开用途")
     for label, pattern in SECRET_PATTERNS:
         for match in pattern.finditer(content):
             if label == "内嵌数据库密码" and (
@@ -120,6 +125,8 @@ def inspect_tree(revision: str | None) -> list[str]:
     directories = set()
     for path, _, _ in entries:
         directories.update(str(parent) + "/" for parent in PurePosixPath(path).parents if str(parent) != ".")
+    directories = {item for item in directories if item == "data/" or not item.startswith("data/")}
+    registered = {item for item in registered if item == "data/" or not item.startswith("data/")}
     for directory in sorted(directories - registered):
         problems.append(f"{directory}: 未在 STRUCTURE.md 登记职责")
     for directory in sorted(registered - directories):

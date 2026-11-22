@@ -1,0 +1,24 @@
+{
+  "version": "2.1.0",
+  "at_utc": "2026-10-07T07:50:26Z",
+  "employee_can_ask": true,
+  "employee_draft_withheld": true,
+  "boss_review_passed": true,
+  "employee_write_denied": true,
+  "private_hidden": true,
+  "selected_grant_passed": true,
+  "grant_revocation_passed": true,
+  "cross_tenant_denied": true,
+  "ui_chinese_login_passed": true,
+  "ui_first_password_screen_passed": true,
+  "ui_role_menus_passed": true,
+  "real_model_task": {
+    "id": "task_3ff7fea95990",
+    "status": "completed",
+    "model": "sensenova-6.8-flash-lite",
+    "elapsed_s": 17.83,
+    "citations": 12
+  },
+  "temporary_accounts_removed": true,
+  "test_documents_deleted": true
+}

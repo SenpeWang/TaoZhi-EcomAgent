@@ -1,0 +1,242 @@
+[
+  {
+    "id": "fact_5",
+    "tenant_id": "default",
+    "subject": "磁吸手机壳",
+    "predicate": "全景大纲",
+    "object": "市场概览；供应链价格；竞品痛点",
+    "confidence": 1.0,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-02T05:53:42.989365+00:00"
+  },
+  {
+    "id": "fact_5",
+    "tenant_id": "default",
+    "subject": "磁吸手机壳",
+    "predicate": "首轮研报摘要",
+    "object": "# 磁吸支架手机壳电商市场调研报告\n\n## 1. 市场概览\n全网需求旺盛...\n\n## 2. 供应链与毛利\n出厂成本 6.8 元，毛利极高。",
+    "confidence": 0.95,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-02T05:53:42.989812+00:00"
+  },
+  {
+    "id": "fact_5",
+    "tenant_id": "default",
+    "subject": "测试保温杯",
+    "predicate": "全景大纲",
+    "object": "市场概况；源头供应链；出海对标",
+    "confidence": 1.0,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-02T05:55:40.791459+00:00"
+  },
+  {
+    "id": "fact_5",
+    "tenant_id": "default",
+    "subject": "测试保温杯",
+    "predicate": "首轮研报摘要",
+    "object": "# 测试保温杯 · 电商市场调研报告\n\n**报告编号**：TZ-2026-001  \n**调研关键词**：测试保温杯  \n**报告生成时间**：基于当前采集数据  \n**数据完整性声明**：全网市场情报仅采集到 1 条记录且价格缺失；1688 货源数据 16 条（本体 11 条 + 配件 5 条）。本报告严格基于上述事实数据撰写，**未虚构任何价格、供应商或市场信息**。\n\n---\n\n## 一、市",
+    "confidence": 0.95,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-02T05:55:40.791912+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "测试保温杯",
+    "predicate": "全景调研大纲",
+    "object": "市场概况；消费者痛点；选品建议",
+    "confidence": 1.0,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-22T06:45:54.021328+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "测试保温杯",
+    "predicate": "全景调研报告摘要",
+    "object": "# 测试保温杯市场调研报告\n\n## 1. 市场概览\n需求旺盛。",
+    "confidence": 0.95,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-22T06:45:54.022203+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "磁吸手机壳",
+    "predicate": "全景调研大纲",
+    "object": "市场概览；竞品痛点；选品建议",
+    "confidence": 1.0,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-22T06:45:54.245550+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "磁吸手机壳",
+    "predicate": "全景调研报告摘要",
+    "object": "# 磁吸支架手机壳电商市场调研报告\n\n## 1. 市场概览\n全网需求旺盛。\n\n## 2. 选品建议\n紧扣核心卖点。",
+    "confidence": 0.95,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-22T06:45:54.246530+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "无线鼠标",
+    "predicate": "全景调研大纲",
+    "object": "市场概况与消费者痛点；竞品价格带与卖点格局；选品优化与落地建议",
+    "confidence": 1.0,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-22T06:45:53.705586+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "无线鼠标",
+    "predicate": "全景调研报告摘要",
+    "object": "# 无线鼠标研报\n已按动态干预补充核查 1688 出厂底价 18 元。",
+    "confidence": 0.95,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-22T06:45:53.706224+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "便携充气泵",
+    "predicate": "全景调研大纲",
+    "object": "市场需求与痛点；供应链成本结构；选品策略",
+    "confidence": 1.0,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-22T06:45:53.655279+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "便携充气泵",
+    "predicate": "全景调研报告摘要",
+    "object": "# 便携充气泵市场调研报告\n\n## 1. 市场需求与痛点\n散热噪音突出，零售 129 元；1688 出厂 38 元。",
+    "confidence": 0.95,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-22T06:45:53.656025+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "无线充电器",
+    "predicate": "全景调研大纲",
+    "object": "市场格局；断点续跑汇总",
+    "confidence": 1.0,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-22T06:45:53.848837+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "无线充电器",
+    "predicate": "全景调研报告摘要",
+    "object": "# V2 断点续跑报告\n已复用 V1 采集的磁吸快充实证。",
+    "confidence": 0.95,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-22T06:45:53.850387+00:00"
+  },
+  {
+    "id": "fact_20",
+    "tenant_id": "default",
+    "subject": "便携充气泵",
+    "predicate": "1688源头工厂采购专员",
+    "object": "1688源头工厂出厂价 38 元,起订量 50 个。",
+    "confidence": 0.8,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-20T15:39:53.466908+00:00"
+  },
+  {
+    "id": "fact_23",
+    "tenant_id": "default",
+    "subject": "便携充气泵",
+    "predicate": "全网差评深挖专员",
+    "object": "消费者高频痛点为散热噪音,主流零售价约 129 元。",
+    "confidence": 0.8,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-20T18:57:49.226999+00:00"
+  },
+  {
+    "id": "fact_20",
+    "tenant_id": "default",
+    "subject": "无线充电器",
+    "predicate": "全网痛点研究员",
+    "object": "磁吸快充散热需求高。",
+    "confidence": 0.8,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-20T15:39:53.694579+00:00"
+  },
+  {
+    "id": "fact_20",
+    "tenant_id": "default",
+    "subject": "测试保温杯",
+    "predicate": "全网市场情报分析专员",
+    "object": "全网主流保温杯定价 69-129 元。",
+    "confidence": 0.8,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-20T15:39:53.885532+00:00"
+  },
+  {
+    "id": "fact_23",
+    "tenant_id": "default",
+    "subject": "磁吸手机壳",
+    "predicate": "全网市场情报专员",
+    "object": "全网搜索发现:主流款式为超薄磁吸,热销价 39.9 元。",
+    "confidence": 0.8,
+    "source": "agent_discovery",
+    "updated_at": "2026-11-20T18:57:49.608884+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "便携充气泵",
+    "predicate": "1688 采购分析师",
+    "object": "1688源头工厂出厂价 38 元,起订量 50 个。",
+    "confidence": 0.8,
+    "source": "t1_sub2_b80b",
+    "updated_at": "2026-11-22T06:45:53.657386+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "无线充电器",
+    "predicate": "市场情报分析师",
+    "object": "磁吸快充散热需求高。",
+    "confidence": 0.8,
+    "source": "t1_sub1_5853",
+    "updated_at": "2026-11-22T06:45:53.852758+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "测试保温杯",
+    "predicate": "市场情报分析师",
+    "object": "全网主流保温杯定价 69-129 元。",
+    "confidence": 0.8,
+    "source": "t1_sub1_9aae",
+    "updated_at": "2026-11-22T06:45:54.023330+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "便携充气泵",
+    "predicate": "市场情报分析师",
+    "object": "消费者高频痛点为散热噪音,主流零售价约 129 元。",
+    "confidence": 0.8,
+    "source": "t1_sub1_0861",
+    "updated_at": "2026-11-22T06:45:53.658100+00:00"
+  },
+  {
+    "id": "fact_25",
+    "tenant_id": "default",
+    "subject": "磁吸手机壳",
+    "predicate": "市场情报分析师",
+    "object": "全网搜索发现:主流款式为超薄磁吸,热销价 39.9 元。",
+    "confidence": 0.8,
+    "source": "t1_sub1_615b",
+    "updated_at": "2026-11-22T06:45:54.248962+00:00"
+  }
+]

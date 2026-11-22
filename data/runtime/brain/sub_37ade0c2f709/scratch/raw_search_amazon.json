@@ -1,0 +1,15 @@
+[
+  {
+    "title": "Amazon Best Seller - 磁吸手机壳",
+    "price": "$19.99",
+    "price_value": 19.99,
+    "currency": "USD",
+    "asin": "B0AMZTEST1",
+    "rating": "4.5 out of 5 stars",
+    "rating_score": 4.5,
+    "reviews_count": 850,
+    "url": "https://www.amazon.com/dp/B0AMZTEST1",
+    "is_prime": true,
+    "source": "amazon"
+  }
+]
