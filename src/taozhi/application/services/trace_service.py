@@ -14,7 +14,7 @@ from taozhi.domain.privacy import redact
 from taozhi.domain.trace_activity import CHAIN_CATEGORY_BY_NAME, CHAIN_OPERATIONS, activity_category
 from taozhi.infrastructure.persistence import trace_repo
 from taozhi.infrastructure.persistence.access_repo import batch_sources_validity, sources_valid
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure.persistence.database import database_connection
 from taozhi.observability.diagnostics import safe_diagnostic
 from taozhi.observability.span_attributes import safe_attributes
 

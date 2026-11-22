@@ -2,8 +2,8 @@
 import time
 import pytest
 from taozhi.config import load_config
-from taozhi.knowledge.db import database_connection, fetch_one
-from taozhi.knowledge.queue import ensure_topic, publish_pending, claim_job_by_id
+from taozhi.infrastructure.persistence.database import database_connection, fetch_one
+from taozhi.infrastructure.task_queue import ensure_topic, publish_pending, claim_job_by_id
 
 
 def test_kafka_topic_and_outbox_relay():
@@ -69,16 +69,16 @@ def test_outbox_requires_broker_ack_before_deletion(monkeypatch):
     from contextlib import nullcontext
     from types import SimpleNamespace
     from unittest.mock import Mock
-    from taozhi.knowledge import queue
+    from taozhi.infrastructure import task_queue
 
     connection = Mock()
     producer = Mock()
     confirmed, failed = Mock(), Mock()
     failed.get.side_effect = RuntimeError("代理拒绝投递")
     producer.send.side_effect = [confirmed, failed]
-    monkeypatch.setattr(queue, "load_config", lambda: SimpleNamespace(kafka_topic="tasks"))
-    monkeypatch.setattr(queue, "database_connection", lambda: nullcontext(connection))
-    monkeypatch.setattr(queue, "fetch_all", lambda *_: [{"id": 1, "job_id": "a"}, {"id": 2, "job_id": "b"}])
+    monkeypatch.setattr(task_queue, "load_config", lambda: SimpleNamespace(kafka_topic="tasks"))
+    monkeypatch.setattr(task_queue, "database_connection", lambda: nullcontext(connection))
+    monkeypatch.setattr(task_queue, "fetch_all", lambda *_: [{"id": 1, "job_id": "a"}, {"id": 2, "job_id": "b"}])
 
     with pytest.raises(RuntimeError, match="代理拒绝投递"):
         publish_pending(producer)

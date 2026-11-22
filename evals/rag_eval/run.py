@@ -54,7 +54,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from taozhi.config import Config, load_config
 from taozhi.ai import observability as obs_metrics
-from taozhi.knowledge.db import database_connection, fetch_all, fetch_one
+from taozhi.infrastructure.persistence.database import database_connection, fetch_all, fetch_one
 from taozhi.infrastructure.persistence.access_repo import load_principal
 from evals.dataset import schema as dataset_schema
 from evals.dataset.seed import EVAL_PASSWORD
@@ -148,7 +148,7 @@ def preflight_check(*, need_http: bool = True, need_embedding: bool = True) -> N
             if not wb or int(wb["n"]) == 0:
                 raise SystemExit("未检测到近 120s 活跃的 worker-production 心跳，请确认 worker 容器/进程已启动")
     if need_embedding:
-        from taozhi.knowledge.embedding import available as embed_available
+        from taozhi.infrastructure.knowledge.embedding import available as embed_available
 
         if not embed_available():
             raise SystemExit(f"本地 embedding / rerank 服务不可用（{cfg.embed_service_url}），请先启动 embedding 服务")
@@ -355,7 +355,8 @@ def retrieval_evidence(case, rows, ranked, expected, *, ctx_rel=None, stage_timi
 
 
 def phase_retrieval():
-    from taozhi.knowledge.retriever import build_hyde_vector, search_documents
+    from taozhi.application.rag.query_expansion import build_hyde_vector
+    from taozhi.infrastructure.knowledge.retriever import search_documents
     cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
     if ONLY_CATS:
         cases = [c for c in cases if c["category"] in ONLY_CATS]
@@ -777,7 +778,7 @@ def _semantic_similarity(answer: str, reference: str) -> float | None:
         return None
     try:
         import numpy as np
-        from taozhi.knowledge.embedding import available as embed_available, encode_passages
+        from taozhi.infrastructure.knowledge.embedding import available as embed_available, encode_passages
 
         if not embed_available():
             return None

@@ -16,7 +16,7 @@ def _node() -> str:
 def test_session_csrf_and_unknown_response_contracts():
     """验证写请求、畸形身份、失效会话和网络失败的可观察行为。"""
     executable = _node()
-    module = (PROJECT / "web/src/api.ts").as_uri()
+    module = (PROJECT / "web/src/app/workspaceApi.ts").as_uri()
     source = """
 import assert from 'node:assert/strict'
 import { requestApi } from MODULE
@@ -146,7 +146,7 @@ assert.equal(cleared, 1)
 def test_markdown_report_rendering_and_xss_safety():
     """验证调研报告 Markdown 渲染器支持标题目录、表格、提示块与 XSS 防护。"""
     executable = _node()
-    module = (PROJECT / "web/src/markdown.ts").as_uri()
+    module = (PROJECT / "web/src/shared/markdown.ts").as_uri()
     source = """
 import assert from 'node:assert/strict'
 import { renderMarkdownReport } from MODULE
@@ -194,8 +194,8 @@ def test_trace_navigation_and_retry_analysis():
     """验证成员的轨迹入口、强制改密限制及成功执行中的异常子调用定位。"""
     source = """
 import assert from 'node:assert/strict'
-import { workspaceNavigation } from './web/src/workspaceNavigation.ts'
-import { analysisRows, buildWaterfall, runDuration, spanFields, spanSecondaryName } from './web/src/traceWaterfall.ts'
+import { workspaceNavigation } from './web/src/app/workspaceNavigation.ts'
+import { analysisRows, buildWaterfall, runDuration, spanFields, spanSecondaryName } from './web/src/features/observability/traceWaterfall.ts'
 
 const capabilities = { system: true, permissions: true, review: true, write: true }
 function pages(user) {
@@ -255,9 +255,9 @@ def test_evaluation_center_contracts_and_baseline_scope():
     """通过实际请求函数检验评测详情标识、回放缺测、受控轨迹链接和基线范围。"""
     source = """
 import assert from 'node:assert/strict'
-import { requestApi } from './web/src/api.ts'
-import { workspaceNavigation } from './web/src/workspaceNavigation.ts'
-import { evaluationMeasures, evaluationRunPath, evaluationSource, formatEvaluationRatio, isBaselineCandidate } from './web/src/evaluations.ts'
+import { requestApi } from './web/src/app/workspaceApi.ts'
+import { workspaceNavigation } from './web/src/app/workspaceNavigation.ts'
+import { evaluationMeasures, evaluationRunPath, evaluationSource, formatEvaluationRatio, isBaselineCandidate } from './web/src/features/observability/evaluationTypes.ts'
 
 const pages = workspaceNavigation({id:'member'}, {}, 0, 0).flatMap(group => group.items)
 assert.ok(pages.find(item => item.page === '评测中心'))

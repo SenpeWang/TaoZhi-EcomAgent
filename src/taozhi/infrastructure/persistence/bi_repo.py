@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-from taozhi.knowledge.db import fetch_all, fetch_one
+from taozhi.infrastructure.persistence.database import fetch_all, fetch_one
 
 _CHANNEL_ALIASES = {"淘宝": "天猫", "小程序": "微信小程序", "微信小店": "微信小程序"}
 _BI_DIM_CACHE: dict[str, tuple[float, dict[str, str], list[str]]] = {}

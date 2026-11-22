@@ -9,19 +9,19 @@ def test_document_selection_and_revocation_close_related_dialogs():
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { compileFunction } from 'node:vm'
 import { parse, compileScript } from 'vue/compiler-sfc'
 import { createRenderer, h, nextTick } from 'vue'
 
 const require = createRequire(resolve('package.json'))
-const file = resolve('src/views/DocumentManager.vue')
+const file = resolve('src/features/documents/DocumentManager.vue')
 const { descriptor, errors } = parse(readFileSync(file, 'utf8'), { filename: file })
 assert.deepEqual(errors, [])
 const script = compileScript(descriptor, { id: 'document-test', inlineTemplate: true,
   templateOptions: { compilerOptions: { hoistStatic: false } } })
 const { outputFiles } = require('esbuild').buildSync({
-  stdin: { contents: script.content, resolveDir: resolve('src/views'), loader: 'ts' },
+  stdin: { contents: script.content, resolveDir: dirname(file), loader: 'ts' },
   format: 'cjs', bundle: true, packages: 'external', platform: 'node', write: false,
 })
 const compiled = { exports: {} }

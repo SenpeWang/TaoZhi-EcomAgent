@@ -7,7 +7,7 @@ from typing import Any
 from taozhi.domain.access import evaluate_read_permission
 from taozhi.domain.entities import Principal
 from taozhi.domain.entity_extraction import extract_entities
-from taozhi.knowledge.db import as_jsonb, fetch_all, fetch_one
+from taozhi.infrastructure.persistence.database import as_jsonb, fetch_all, fetch_one
 
 
 _DOCUMENTS_WITH_USER_GRANT = (

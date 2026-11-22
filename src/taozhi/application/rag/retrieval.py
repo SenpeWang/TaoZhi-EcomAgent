@@ -4,19 +4,24 @@ from __future__ import annotations
 from taozhi.application.common.task_guard import merge_token_usage, validate_task_execution
 from taozhi.config import load_config
 from taozhi.core.memory.service import get_followup_context
-from taozhi.core.tools.search_web import extract_search_keyword
 from taozhi.domain.entities import Principal
-from taozhi.domain.question_context import refers_to_previous_question, requested_business_resources, requests_record_overview
+from taozhi.domain.question_context import (
+    extract_search_keyword,
+    refers_to_previous_question,
+    requested_business_resources,
+    requests_record_overview,
+)
 from taozhi.domain.ranking import fuse_evidence_rounds
 from taozhi.domain.rag_verification import RetrievalDecision, fact_subjects, is_finance_evidence
 from taozhi.domain.text_guard import detect_injection
 from taozhi.infrastructure.persistence.access_repo import sources_valid
 from taozhi.infrastructure.persistence.job_repo import conversation_question_reference
-from taozhi.knowledge.business import lookup
-from taozhi.knowledge.db import database_connection
-from taozhi.knowledge.retriever import build_hyde_vector, search_documents
+from taozhi.infrastructure.business_gateway import lookup
+from taozhi.infrastructure.persistence.database import database_connection
+from taozhi.infrastructure.knowledge.retriever import search_documents
 from taozhi.observability.tracing import node_span
 from taozhi.orchestration.controller import DeterministicController
+from .query_expansion import build_hyde_vector
 from .state import State
 
 
@@ -74,7 +79,7 @@ def retrieval_node(state: State) -> dict:
         query, prior_id, can_use_hyde = _query_context(conn, principal, job, state, retry=False)
         vector = None
         if not cfg.adaptive_hyde and can_use_hyde:
-            vector = build_hyde_vector(query, conn=conn, p=principal, job=job, trace_out=hyde)
+            vector = build_hyde_vector(query, conn=conn, principal=principal, job=job, trace_out=hyde)
         evidence = _collect_documents(conn, principal, query, vector, search)
 
     sufficient = any(doc.get("score", 0) >= 0.05 or len(doc["quote"]) > 40 for doc in evidence)
@@ -99,7 +104,7 @@ def retry_retrieval(state: State) -> dict:
         query, _, can_use_hyde = _query_context(conn, principal, job, state, retry=True)
         vector = None
         if load_config().adaptive_hyde and can_use_hyde:
-            vector = build_hyde_vector(query, conn=conn, p=principal, job=job, trace_out=hyde)
+            vector = build_hyde_vector(query, conn=conn, principal=principal, job=job, trace_out=hyde)
         candidate = extract_search_keyword(query)
         rewrite = query
         if candidate and not DeterministicController().detect_rewrite_deadlock(candidate, [state["question"]]):

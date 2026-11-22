@@ -70,3 +70,27 @@ def requests_record_overview(question: str, resource: str) -> bool:
     if re.search(r"业务(?:数据)?(?:概览|总览|快照)", question):
         return True
     return bool(re.fullmatch(r"(?:请)?(?:查看|提供)?(?:该编号的?)?(?:资料|记录)(?:概览|说明|详情)", question.strip(" ？?。")))
+
+
+def extract_search_keyword(user_query: str) -> str:
+    """从自然语言指令中提炼最精准的核心商品品类或搜索短语。
+
+    Args:
+        user_query: 用户原始的电商调研提问或检索诉求。
+
+    Returns:
+        提炼后的紧凑核心关键词。
+    """
+    q = re.sub(r"[，。！？、；：\"'“”‘’()（）【】\[\]]+", " ", user_query)
+    stop_phrases = [
+        "帮我", "请帮我", "调研一下", "调研", "分析一下", "分析", "市场趋势", "和", "与",
+        "竞争格局", "消费者痛点", "差评原因", "卖点", "怎么样", "如何", "我想了解",
+        "目前", "2026年", "2025年", "最新的", "行情", "情况", "数据", "搜一下",
+        "查一下", "查找", "检索", "市场", "电商", "行业", "怎么看", "值不值得",
+        "多少钱", "价格是多少", "是什么", "有哪些", "在", "上", "的", "怎么",
+        "适合", "能用吗", "可以用", "是不是", "推荐", "对比", "为什么",
+    ]
+    for sp in stop_phrases:
+        q = q.replace(sp, " ")
+    cleaned = re.sub(r"\s+", " ", q).strip()
+    return cleaned if len(cleaned) >= 2 else user_query.strip()[:30]

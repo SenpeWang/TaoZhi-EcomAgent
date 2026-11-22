@@ -19,7 +19,7 @@ from taozhi.domain.privacy import redact
 from taozhi.domain.rag_verification import SPECIALIST_AGENTS, cited_paragraphs, conflicting_findings, fact_subjects, is_finance_evidence, missing_models, norm_text, supported_finding_text
 from taozhi.domain.text_guard import detect_injection
 from taozhi.infrastructure.persistence.job_repo import count_model_calls, insert_model_call, lock_running_job, update_model_call
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure.persistence.database import database_connection
 from taozhi.observability.tracing import node_span, record_diagnostic
 from taozhi.application.common.task_guard import authorized_running_task, empty_token_usage, merge_token_usage, validate_task_execution
 from taozhi.application.services.task_output import publish_answer_delta

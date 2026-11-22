@@ -50,7 +50,7 @@ def test_detect_data_intent_skips_non_bi_and_flags_denied_metric():
     }
     with (
         patch("taozhi.application.bi.intent.list_published_metrics", return_value=[restricted_metric]),
-        patch("taozhi.application.bi.intent.metrics_mod.list_metrics", return_value=[]),
+        patch("taozhi.application.bi.intent.metric_execution.list_metrics", return_value=[]),
     ):
         denied = detect_data_intent(conn, principal, "近7天毛利率是多少？")
     assert denied is not None
@@ -81,7 +81,7 @@ def test_bi_workflow_executes_independently_end_to_end():
         patch("taozhi.application.bi.workflow.get_published_metric_by_id", return_value=metric),
         patch("taozhi.application.bi.workflow.can_read_metric", return_value=True),
         patch(
-            "taozhi.application.bi.workflow.metrics_mod.execute_metric",
+            "taozhi.application.bi.workflow.metric_execution.execute_metric",
             return_value=(["日期", "销售额"], [["2026-11-19", 12800]], {"unit": "元", "elapsed_ms": 12, "level": 1}),
         ),
     ):

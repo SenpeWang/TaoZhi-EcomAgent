@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from taozhi.domain.text_guard import strip_invalid_text
-from taozhi.knowledge.db import as_jsonb
+from taozhi.infrastructure.persistence.database import as_jsonb
 
 
 def test_strip_invalid_text_removes_nul_and_control_chars():

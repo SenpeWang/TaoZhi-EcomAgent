@@ -13,7 +13,7 @@ from taozhi.config import load_config
 from taozhi.domain.errors import Denied
 from taozhi.domain.passwords import WEAK_PASSWORDS, hash_password, verify_password
 from taozhi.infrastructure.persistence.access_repo import audit, load_principal
-from taozhi.knowledge.db import database_connection, fetch_one
+from taozhi.infrastructure.persistence.database import database_connection, fetch_one
 
 SESSION_COOKIE = "ecom_session_" + load_config().mode
 CSRF_COOKIE = "ecom_csrf_" + load_config().mode

@@ -1,7 +1,7 @@
 """批量持久化任务执行中或已结束的 OpenTelemetry Span。"""
 from __future__ import annotations
 
-from taozhi.knowledge.db import as_jsonb, database_connection
+from taozhi.infrastructure.persistence.database import as_jsonb, database_connection
 
 _UPSERT = """
     INSERT INTO task_spans

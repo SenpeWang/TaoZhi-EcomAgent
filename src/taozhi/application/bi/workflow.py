@@ -7,8 +7,8 @@ from taozhi.application.common.task_guard import empty_token_usage, traced_node,
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence.access_repo import can_read_metric
 from taozhi.infrastructure.persistence.bi_repo import get_published_metric_by_id
-from taozhi.knowledge import metrics as metrics_mod
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure.persistence import metric_execution
+from taozhi.infrastructure.persistence.database import database_connection
 from taozhi.observability.tracing import node_span
 from .intent import detect_data_intent
 from .state import BiState
@@ -45,13 +45,13 @@ def data_query_node(state: BiState) -> dict:
             else:
                 try:
                     with node_span("bi.query_metric", "RETRIEVER") as span:
-                        cols, rows, meta = metrics_mod.execute_metric(c, p, m, di.get("intent") or {})
+                        cols, rows, meta = metric_execution.execute_metric(c, p, m, di.get("intent") or {})
                         if span is not None:
                             span.set_attribute("retrieval.result_count", len(rows))
                     result = {
                         "denied": False,
                         "columns": cols,
-                        "rows": metrics_mod.jsonable_rows(rows),
+                        "rows": metric_execution.jsonable_rows(rows),
                         "meta": meta,
                         "metric_key": m["metric_key"],
                         "metric_name": m["name"],

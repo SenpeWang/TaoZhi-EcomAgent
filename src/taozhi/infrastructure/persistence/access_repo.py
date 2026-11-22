@@ -14,7 +14,7 @@ from taozhi.domain.access import (
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.domain.roles import derive_role_level
-from taozhi.knowledge.db import as_jsonb, fetch_all, fetch_one
+from taozhi.infrastructure.persistence.database import as_jsonb, fetch_all, fetch_one
 
 
 def get_tenant_epoch(conn: Any, tenant_id: str) -> int:
@@ -187,7 +187,7 @@ def source_valid(conn: Any, p: Principal, source: dict[str, Any], external: bool
             return False
         if external and source.get("level", 3) >= 3:
             return False
-        from taozhi.knowledge.business import lookup
+        from taozhi.infrastructure.business_gateway import lookup
 
         fresh = lookup(conn, p, source.get("resource"), source.get("identifier"))
         return bool(fresh.get("available"))

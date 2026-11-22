@@ -7,7 +7,7 @@ from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
 from taozhi.domain.evaluation_comparison import pair_case_results
 from taozhi.infrastructure.persistence import evaluation_repo
-from taozhi.knowledge.db import database_connection
+from taozhi.infrastructure.persistence.database import database_connection
 
 
 def _require_run(conn, p: Principal, run_id: str) -> dict:

@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from pydantic import BaseModel, Field
 
-from ..knowledge.embedding import available as embedding_available, encode_passages, encode_query
+from taozhi.infrastructure.knowledge.embedding import available as embedding_available, encode_passages, encode_query
 
 logger = logging.getLogger("taozhi.orchestration.decision")
 

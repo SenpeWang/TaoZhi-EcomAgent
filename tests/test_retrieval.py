@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from taozhi.knowledge import embedding as ent_embedding
-from taozhi.knowledge import retriever as ent_retriever
+from taozhi.infrastructure.knowledge import embedding as ent_embedding
+from taozhi.infrastructure.knowledge import retriever as ent_retriever
 from taozhi.domain.ranking import fuse_evidence_rounds
 
 
@@ -207,7 +207,7 @@ def test_recency_tiebreak_and_entity_diversity(monkeypatch):
 
 def test_search_documents_fast_path_runs_hyde_pg_ann_and_title_rerank(monkeypatch):
     """ES/PG 快道中 hyde_vector 应真实参与 _pg_ann 召回，且精选切片带标题送入 rerank。"""
-    from taozhi.knowledge import es_index
+    from taozhi.infrastructure.knowledge import es_index
 
     docs = [{"id": "d1", "title": "LX-30 规格", "scope": "company", "level": 1, "node_id": "n1", "ai_allowed": True, "acl_version": 1}]
     chunks = [{"id": "c_hyde", "tenant_id": "t1", "document_id": "d1", "version": 1, "ordinal": 0, "page": 1, "text": "120W 双 C 口", "doc_title": "LX-30 规格", "embedding": None}]
@@ -251,7 +251,7 @@ def test_search_documents_fast_path_runs_hyde_pg_ann_and_title_rerank(monkeypatc
 
 def test_ingest_split_preserves_markdown_table_blocks():
     """结构化切片在预算内不得把 Markdown 表格从行中劈断。"""
-    from taozhi.knowledge.ingest import split
+    from taozhi.infrastructure.knowledge.ingest import split
 
     doc = (
         "# 产品对比\n\n"

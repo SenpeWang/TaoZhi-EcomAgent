@@ -15,7 +15,7 @@
 
 | 不属于 | 实际情况 |
 |---|---|
-| `src/taozhi/knowledge/metrics.py` | 业务指标语义层（ChatBI 的 metric_key / dimensions / SQL 模板白名单），不是评估 |
+| `src/taozhi/infrastructure/persistence/metric_execution.py` | ChatBI 指标查询的 `metric_key`、维度和 SQL 模板白名单 |
 | `src/taozhi/observability/tracing.py` | 运行时 OpenTelemetry Span / token 观测链路 |
 | `migrations/versions/007_metrics.py`、`scripts/seed_*_metrics.py` | 建表迁移与业务数据灌入 |
 | `src/taozhi/orchestration/decision.py` | 运行时离散决策与路由引擎（`DecisionEngine`），不属于离线评测指标 |

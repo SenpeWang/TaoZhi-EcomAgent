@@ -6,7 +6,7 @@ from pathlib import Path
 def test_live_result_draft_follows_authorized_run():
     script = """
 import assert from 'node:assert/strict'
-import { openTaskEventStream } from './web/src/composables/useTaskStream.ts'
+import { openTaskEventStream } from './web/src/shared/taskStream.ts'
 let stream
 class Source extends EventTarget {
   static CLOSED = 2

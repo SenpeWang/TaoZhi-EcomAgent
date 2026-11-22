@@ -9,14 +9,14 @@ from contextlib import nullcontext
 
 from opentelemetry import context as otel_context
 
-from taozhi.application.services.document_service import process_ingestion_job
+from taozhi.application.documents.ingestion import process_ingestion_job
 from taozhi.application.rag.execution import process_question_job
 from taozhi.application.research.execution import process_research_job
 from taozhi.config import load_config
 from taozhi.domain.errors import Denied
 from taozhi.infrastructure.persistence import document_repo, job_repo
-from taozhi.knowledge import queue
-from taozhi.knowledge.db import close_pools, database_connection
+from taozhi.infrastructure import task_queue
+from taozhi.infrastructure.persistence.database import close_pools, database_connection
 from taozhi.observability import flush_spans, job_trace, record_diagnostic, setup_tracing
 
 _LOG = logging.getLogger(__name__)
@@ -115,9 +115,9 @@ def main() -> None:
     cfg = load_config()
     bg_threads: list[threading.Thread] = []
     if cfg.kafka_enabled:
-        relay_t = threading.Thread(target=queue.relay_loop, kwargs={"stop_event": STOP}, daemon=True)
+        relay_t = threading.Thread(target=task_queue.relay_loop, kwargs={"stop_event": STOP}, daemon=True)
         consume_t = threading.Thread(
-            target=queue.consume_forever,
+            target=task_queue.consume_forever,
             args=(run_job, sweep),
             kwargs={"worker_id": WORKER, "stop_event": STOP},
             daemon=True,

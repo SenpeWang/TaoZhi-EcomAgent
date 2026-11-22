@@ -1,0 +1,584 @@
+{
+  "schema_version": 1,
+  "accessed_on": "2026-11-22",
+  "files": [
+    {
+      "title": "欧盟通用充电器指令",
+      "publisher": "欧洲议会和欧盟理事会",
+      "kind": "regulation",
+      "categories": [
+        "wired_chargers",
+        "charging_cables",
+        "headphones"
+      ],
+      "models": [],
+      "version": "(EU) 2022/2380",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "EU"
+      ],
+      "source_page_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32022L2380",
+      "pdf_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX%3A32022L2380",
+      "file": "eu-common-charger-directive-2022-2380-en.pdf",
+      "size_bytes": 818317,
+      "pages": 14,
+      "sha256": "f67a41302af513e4696abeb86971cd909afb328c2ed60340a1bfb6bb90619192",
+      "redistribution": {
+        "basis": "EUR-Lex 公开法律文件重用政策",
+        "terms_url": "https://eur-lex.europa.eu/content/legal-notice/legal-notice.html?locale=en",
+        "attribution": "European Union, 欧盟通用充电器指令, (EU) 2022/2380. Source: EUR-Lex.",
+        "modified": false
+      }
+    },
+    {
+      "title": "欧盟通用充电器指令解释指南",
+      "publisher": "欧盟委员会",
+      "kind": "official_guidance",
+      "categories": [
+        "wired_chargers",
+        "charging_cables",
+        "headphones"
+      ],
+      "models": [],
+      "version": "C/2024/2997",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "EU"
+      ],
+      "source_page_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A52024XC02997",
+      "pdf_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX%3A52024XC02997",
+      "file": "eu-common-charger-guidance-2024-2997-en.pdf",
+      "size_bytes": 646480,
+      "pages": 15,
+      "sha256": "09b31114951306164d661574dcafc996cb70b346a8f1fc94287bf352181eb1a3",
+      "redistribution": {
+        "basis": "EUR-Lex 公开法律文件重用政策",
+        "terms_url": "https://eur-lex.europa.eu/content/legal-notice/legal-notice.html?locale=en",
+        "attribution": "European Union, 欧盟通用充电器指令解释指南, C/2024/2997. Source: EUR-Lex.",
+        "modified": false
+      }
+    },
+    {
+      "title": "欧盟外部电源、无线充电设备与 USB-C 线材生态设计规章",
+      "publisher": "欧盟委员会",
+      "kind": "regulation",
+      "categories": [
+        "wired_chargers",
+        "charging_cables",
+        "wireless_chargers"
+      ],
+      "models": [],
+      "version": "(EU) 2025/2052",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "EU"
+      ],
+      "source_page_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32025R2052",
+      "pdf_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX%3A32025R2052",
+      "file": "eu-external-power-supplies-ecodesign-2025-2052-en.pdf",
+      "size_bytes": 1005985,
+      "pages": 29,
+      "sha256": "354881008b737f6d116f8b551d2e0452ad6c70974aac02c2f21a429de5f0cd3c",
+      "redistribution": {
+        "basis": "EUR-Lex 公开法律文件重用政策",
+        "terms_url": "https://eur-lex.europa.eu/content/legal-notice/legal-notice.html?locale=en",
+        "attribution": "European Union, 欧盟外部电源、无线充电设备与 USB-C 线材生态设计规章, (EU) 2025/2052. Source: EUR-Lex.",
+        "modified": false
+      }
+    },
+    {
+      "title": "欧盟充电设备互操作性报告",
+      "publisher": "欧盟委员会",
+      "kind": "official_report",
+      "categories": [
+        "wired_chargers",
+        "wireless_chargers",
+        "charging_cables"
+      ],
+      "models": [],
+      "version": "COM(2026) 329 final",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "EU"
+      ],
+      "source_page_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A52026DC0329",
+      "pdf_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX%3A52026DC0329",
+      "file": "eu-charging-interoperability-report-2026-329-en.pdf",
+      "size_bytes": 356566,
+      "pages": 11,
+      "sha256": "f9e8e3c3e0860fdb4d9483f1d1a92befa9f600973e92d5080e8584543bf43131",
+      "redistribution": {
+        "basis": "EUR-Lex 公开法律文件重用政策",
+        "terms_url": "https://eur-lex.europa.eu/content/legal-notice/legal-notice.html?locale=en",
+        "attribution": "European Union, 欧盟充电设备互操作性报告, COM(2026) 329 final. Source: EUR-Lex.",
+        "modified": false
+      }
+    },
+    {
+      "title": "欧盟通用充电标识的使用指引",
+      "publisher": "欧盟委员会",
+      "kind": "official_guidance",
+      "categories": [
+        "wired_chargers",
+        "charging_cables"
+      ],
+      "models": [],
+      "version": "2025-11",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "EU"
+      ],
+      "source_page_url": "https://energy-efficient-products.ec.europa.eu/product-list/external-power-supplies/eps-regulation-20252052-new_en",
+      "pdf_url": "https://energy-efficient-products.ec.europa.eu/document/download/704e60fe-512c-4feb-8146-719e05ab5fdc_en?filename=CommonChargerLogo_do_do_not.pdf",
+      "file": "eu-common-charger-logo-guide-2025-en.pdf",
+      "size_bytes": 263599,
+      "pages": 1,
+      "sha256": "a0116873fb109f9c6b4a6da0586d2be0225b7ab20417b52388384d3a68eb5b4b",
+      "redistribution": {
+        "basis": "CC BY 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "© European Union, Common Charger Logo: Dos and Don'ts, November 2025.",
+        "modified": false
+      }
+    },
+    {
+      "title": "USB-C Bench PSU 开放硬件规格书",
+      "publisher": "TheRealEuaX",
+      "kind": "open_hardware_design",
+      "categories": [
+        "wired_chargers"
+      ],
+      "models": [
+        "USB-C Bench PSU"
+      ],
+      "version": "Rev. 1.0",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://github.com/TheRealEuaX/usb-c-bench-psu/tree/61c7b9eb048107e7529617cf80870ac23e8350bc#license",
+      "pdf_url": "https://raw.githubusercontent.com/TheRealEuaX/usb-c-bench-psu/61c7b9eb048107e7529617cf80870ac23e8350bc/Docs/USB-C_BENCH_PSU_Datasheet.pdf",
+      "file": "therealeuax-usb-c-bench-psu-datasheet-en.pdf",
+      "size_bytes": 296544,
+      "pages": 2,
+      "sha256": "c3275e56a93664416886aa233d3ed77e6845d8a72c42e27a1cea0da1ca0b07dc",
+      "redistribution": {
+        "basis": "CC BY-SA 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "attribution": "TheRealEuaX, USB-C Bench PSU Datasheet, Rev. 1.0.",
+        "modified": false
+      }
+    },
+    {
+      "title": "USB-C Bench PSU 开放硬件装配图",
+      "publisher": "TheRealEuaX",
+      "kind": "open_hardware_design",
+      "categories": [
+        "wired_chargers"
+      ],
+      "models": [
+        "USB-C Bench PSU"
+      ],
+      "version": "61c7b9e",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://github.com/TheRealEuaX/usb-c-bench-psu/tree/61c7b9eb048107e7529617cf80870ac23e8350bc#license",
+      "pdf_url": "https://raw.githubusercontent.com/TheRealEuaX/usb-c-bench-psu/61c7b9eb048107e7529617cf80870ac23e8350bc/Docs/USB-C_BENCH_PSU_Assembly_Drawing.pdf",
+      "file": "therealeuax-usb-c-bench-psu-assembly-en.pdf",
+      "size_bytes": 75575,
+      "pages": 3,
+      "sha256": "87193bb67a3b865567dd9388097e4e262f7f0cb3b7e4f7c93b18fa2b1484226d",
+      "redistribution": {
+        "basis": "CC BY-SA 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "attribution": "TheRealEuaX, USB-C Bench PSU Assembly Drawing, revision 61c7b9e.",
+        "modified": false
+      }
+    },
+    {
+      "title": "SafetyHub USB 集线器电路图",
+      "publisher": "Ploopy Corporation",
+      "kind": "open_hardware_design",
+      "categories": [
+        "usb_hubs"
+      ],
+      "models": [
+        "SafetyHub"
+      ],
+      "version": "2020-02-18",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://github.com/ploopyco/safetyhub/tree/786d417bf82d623d1c085c461ac8207a35620adf#under-what-license-is-this-released",
+      "pdf_url": "https://raw.githubusercontent.com/ploopyco/safetyhub/786d417bf82d623d1c085c461ac8207a35620adf/Electrical/HubSchematics.pdf",
+      "file": "ploopy-safetyhub-schematic-2020-en.pdf",
+      "size_bytes": 418329,
+      "pages": 9,
+      "sha256": "193ca492094f8e56b370e78762615638e9e93037ea46e953591a7a3c1b81ea63",
+      "redistribution": {
+        "basis": "CERN OHL v1.2",
+        "terms_url": "https://github.com/ploopyco/safetyhub/blob/786d417bf82d623d1c085c461ac8207a35620adf/LICENSE",
+        "attribution": "Copyright Ploopy Corporation 2020, SafetyHub HubSchematics.",
+        "modified": false,
+        "notice_file": "CERN-OHL-1.2-Ploopy-SafetyHub.txt"
+      }
+    },
+    {
+      "title": "ASKnet 开放硬件指南，含手机支架及 USB 太阳能充电",
+      "publisher": "ASKnet / r0g_agency",
+      "kind": "open_hardware_guide",
+      "categories": [
+        "phone_stands",
+        "wired_chargers"
+      ],
+      "models": [],
+      "version": "2024 年版",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://github.com/opencultureagency/Open-Hardware-Guide#license",
+      "pdf_url": "https://asknet.community/assets/docs/ASKnet_OHG_2024_web.pdf",
+      "file": "asknet-open-hardware-guide-2024-en.pdf",
+      "size_bytes": 3688645,
+      "pages": 2,
+      "sha256": "f6564547d40b9d61ab841e07a6d82176fbdb6125702120c783228b74e9d1f990",
+      "redistribution": {
+        "basis": "CC BY-SA 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "attribution": "ASKnet Open Hardware Guide, Berlin 2024. Editor: Jodi Rose. Content Development: Timm Wille. Design: Adam Ferns. Full credits are retained in the PDF.",
+        "modified": false
+      }
+    },
+    {
+      "title": "基于有限元仿真的手机支架结构参数优化",
+      "publisher": "汉斯出版社《建模与仿真》",
+      "kind": "published_study",
+      "categories": [
+        "phone_stands"
+      ],
+      "models": [],
+      "version": "2025 年第 14 卷第 1 期",
+      "languages": [
+        "zh-CN",
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://doi.org/10.12677/mos.2025.141084",
+      "pdf_url": "https://pdf.hanspub.org/mos2025141_842572074.pdf",
+      "file": "yao-phone-stand-structural-optimization-2025-zh-cn.pdf",
+      "size_bytes": 3336000,
+      "pages": 9,
+      "sha256": "2bce8e07824b52677a727ca1dd82edb59bffe6aeb9ebf432938c00cc6e45e600",
+      "redistribution": {
+        "basis": "CC BY 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "© 2025 姚委宏与汉斯出版社，基于有限元仿真的手机支架结构参数优化，DOI 10.12677/mos.2025.141084。",
+        "modified": false
+      }
+    },
+    {
+      "title": "便携式太阳能移动电源的实验室测试",
+      "publisher": "G-Tech: Jurnal Teknologi Terapan",
+      "kind": "published_study",
+      "categories": [
+        "power_banks"
+      ],
+      "models": [],
+      "version": "2024 年第 8 卷第 4 期",
+      "languages": [
+        "en",
+        "id"
+      ],
+      "markets": [],
+      "source_page_url": "https://doi.org/10.70609/gtech.v8i4.5412",
+      "pdf_url": "https://ejournal.uniramalang.ac.id/index.php/g-tech/article/download/5412/3377/33938",
+      "file": "stanlee-solar-portable-power-bank-study-2024-en.pdf",
+      "size_bytes": 287120,
+      "pages": 7,
+      "sha256": "5e08e2464f70455d76d85dc5c888611a783df073d27c9e703e3126d252a5d6f9",
+      "redistribution": {
+        "basis": "CC BY 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "Adrix Richard Stanlee, Fahmy Rinanda Saputri and Ricardo Linelson, Laboratory-Scale Testing of a Solar Panel-Based Portable Power Bank Design, G-Tech, 2024. DOI 10.70609/gtech.v8i4.5412.",
+        "modified": false
+      }
+    },
+    {
+      "title": "入耳式耳机薄膜 AMC 天线研究",
+      "publisher": "MDPI Sensors",
+      "kind": "published_study",
+      "categories": [
+        "headphones"
+      ],
+      "models": [],
+      "version": "2022 年第 22 卷第 12 期",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://doi.org/10.3390/s22124523",
+      "pdf_url": "https://mdpi-res.com/d_attachment/sensors/sensors-22-04523/article_deploy/sensors-22-04523.pdf",
+      "file": "seo-earbud-amc-antenna-study-2022-en.pdf",
+      "size_bytes": 4296658,
+      "pages": 18,
+      "sha256": "e7c65df029fc50dde89588ea80f8fcd97fb4ce9587dcdd187f23c26768185e0a",
+      "redistribution": {
+        "basis": "CC BY 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "© 2022 Yejune Seo, Inyeol Moon, Junghyun Cho, Yejin Lee, Jiyeon Jang, Morimoto Shohei, Kurosaki Toshifumi and Sungtek Kahng. Licensee MDPI. DOI 10.3390/s22124523.",
+        "modified": false
+      }
+    }
+  ],
+  "official_links": [
+    {
+      "title": "Samsung Galaxy Buds3 / Buds3 Pro 使用说明",
+      "publisher": "Samsung",
+      "kind": "user_guide",
+      "categories": [
+        "headphones"
+      ],
+      "models": [
+        "SM-R530",
+        "SM-R630"
+      ],
+      "version": "Rev. 1.4，2025-06",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "EU"
+      ],
+      "source_page_url": "https://www.samsung.com/nz/support/model/SM-R630NZWAASA/",
+      "pdf_url": "https://downloadcenter.samsung.com/content/UM/202507/20250715141035883/SM-R530_R630_UG_EU_Eng_Rev.1.4_250625.pdf"
+    },
+    {
+      "title": "Sony WF-1000XM5 参考指南",
+      "publisher": "Sony",
+      "kind": "user_guide",
+      "categories": [
+        "headphones"
+      ],
+      "models": [
+        "WF-1000XM5"
+      ],
+      "version": "5-048-296-1M",
+      "languages": [
+        "en",
+        "fr",
+        "es"
+      ],
+      "markets": [
+        "US"
+      ],
+      "source_page_url": "https://www.sony.com/electronics/support/wireless-headphones-bluetooth-headphones/wf-1000xm5/manuals",
+      "pdf_url": "https://www.sony.com/electronics/support/res/manuals/5048/9bcf5db267bf28ccd9f1250acf4b817c/50482961M.pdf"
+    },
+    {
+      "title": "Belkin BoostCharge Pro 三合一 MagSafe 无线充电器安全说明",
+      "publisher": "Belkin",
+      "kind": "safety_guide",
+      "categories": [
+        "wireless_chargers"
+      ],
+      "models": [
+        "WIZ017"
+      ],
+      "version": "Rev. B00",
+      "languages": [
+        "en",
+        "fr"
+      ],
+      "markets": [
+        "EU",
+        "APAC"
+      ],
+      "source_page_url": "https://www.belkin.com/support-article/?articleNum=335049",
+      "pdf_url": "https://www.belkin.com/on/demandware.static/-/Sites-master-product-catalog-blk/default/dwba0ef3d0/datasheets/regulatory/INS_WIZ017xx_8850bt01611_8850-01611-IY_EU1_AP1_Rev_B00_BOOSTCHARGE_PRO_3-in-1%20Wireless%20Charging%20Stand%20with%20MagSafe_WEB.pdf"
+    },
+    {
+      "title": "Belkin Qi2 可转换充电底座英国符合性声明",
+      "publisher": "Belkin",
+      "kind": "declaration",
+      "categories": [
+        "wireless_chargers",
+        "phone_stands"
+      ],
+      "models": [
+        "WIA008"
+      ],
+      "version": null,
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "UK"
+      ],
+      "source_page_url": "https://www.belkin.com/uk/support-article/?articleNum=336819",
+      "pdf_url": "https://s3.belkin.com/support/assets/legal/psti/Belkin_UK_PSTI_Statement_of_Compliance_WIA008.pdf"
+    },
+    {
+      "title": "Apple MagSafe Charger 尺寸图",
+      "publisher": "Apple",
+      "kind": "dimension_drawing",
+      "categories": [
+        "wireless_chargers"
+      ],
+      "models": [
+        "MagSafe Charger"
+      ],
+      "version": "2026",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://developer.apple.com/accessories/",
+      "pdf_url": "https://developer.apple.com/download/files/accessories/dimensional-drawings/apple-magsafe-charger.pdf"
+    },
+    {
+      "title": "Apple MagSafe Battery Pack 回收指南",
+      "publisher": "Apple",
+      "kind": "recycling_guide",
+      "categories": [
+        "power_banks"
+      ],
+      "models": [
+        "A2384"
+      ],
+      "version": "2023",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://www.apple.com/recycling/",
+      "pdf_url": "https://www.apple.com/recycling/recycler-guides/pdf/products/accessories/MagSafe_Battery_Pack_Recycler_Guide_English.pdf"
+    },
+    {
+      "title": "OtterBox 标准移动电源快速指南",
+      "publisher": "OtterBox",
+      "kind": "user_guide",
+      "categories": [
+        "power_banks"
+      ],
+      "models": [
+        "Standard Power Bank"
+      ],
+      "version": "TR2305006-001 Rev. 1",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://www.otterbox.com/pages/accessory-user-guides",
+      "pdf_url": "https://cdn.shopify.com/s/files/1/0681/4321/8875/files/20230612-Standard-Power-Bank-Quick-Start-Guide.pdf"
+    },
+    {
+      "title": "OtterBox 无线充电板快速指南",
+      "publisher": "OtterBox",
+      "kind": "user_guide",
+      "categories": [
+        "wireless_chargers"
+      ],
+      "models": [
+        "Wireless Charging Pad"
+      ],
+      "version": null,
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://www.otterbox.com/pages/accessory-user-guides",
+      "pdf_url": "https://cdn.shopify.com/s/files/1/0681/4321/8875/files/20201013-Wireless-Charging-Pad-Quick-Start-Guide.pdf"
+    },
+    {
+      "title": "OtterBox Multi Mount 磁吸移动电源安装说明",
+      "publisher": "OtterBox",
+      "kind": "user_guide",
+      "categories": [
+        "phone_stands",
+        "power_banks"
+      ],
+      "models": [
+        "Multi Mount Power Bank MagSafe"
+      ],
+      "version": null,
+      "languages": [
+        "en",
+        "fr"
+      ],
+      "markets": [],
+      "source_page_url": "https://www.otterbox.com/pages/accessory-user-guides",
+      "pdf_url": "https://cdn.shopify.com/s/files/1/0681/4321/8875/files/Multi-mount-installation.pdf"
+    },
+    {
+      "title": "OtterBox Amplify 屏幕保护膜及手机壳兼容表",
+      "publisher": "OtterBox",
+      "kind": "compatibility_table",
+      "categories": [
+        "screen_protectors",
+        "phone_cases"
+      ],
+      "models": [
+        "Amplify Edge2Edge"
+      ],
+      "version": "2019",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://www.otterbox.com/pages/accessory-user-guides",
+      "pdf_url": "https://www.otterbox.com/on/demandware.static/-/Sites-ob_us-Library/default/dwf874cb5c/pdfs/installation-instructions/amplify-case-compatibility.pdf"
+    },
+    {
+      "title": "PINE64 PinePhone 键盘套件使用手册",
+      "publisher": "PINE64",
+      "kind": "user_guide",
+      "categories": [
+        "keyboards",
+        "phone_cases"
+      ],
+      "models": [
+        "PinePhone Keyboard"
+      ],
+      "version": "v2.0",
+      "languages": [
+        "en",
+        "de",
+        "fr",
+        "es"
+      ],
+      "markets": [],
+      "source_page_url": "https://pine64.org/documentation/Phone_Accessories/Keyboard/",
+      "pdf_url": "https://files.pine64.org/doc/PinePhone/USER%20MANUAL-KEYBOARD-V2-EN-DE-FR-ES.pdf"
+    },
+    {
+      "title": "USB-IF USB Type-C 数据线标识指南",
+      "publisher": "USB Implementers Forum",
+      "kind": "official_guidance",
+      "categories": [
+        "charging_cables"
+      ],
+      "models": [],
+      "version": null,
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://www.usb.org/logo-license",
+      "pdf_url": "https://www.usb.org/sites/default/files/usb_type-c_cable_logo_usage_guidelines_jan26_final.pdf"
+    }
+  ]
+}

@@ -169,7 +169,7 @@ def test_live_event_requires_the_scope_bound_to_its_span(monkeypatch):
 def test_retrieval_model_spans_only_measure_real_requests(monkeypatch):
     from types import SimpleNamespace
 
-    from taozhi.knowledge import embedding
+    from taozhi.infrastructure.knowledge import embedding
 
     snapshots = []
     monkeypatch.setenv("TAOZHI_TRACING", "1")

@@ -15,8 +15,8 @@ from __future__ import annotations
 import ast
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Generator, Optional, Tuple
 
 
 ROOT = Path(__file__).resolve().parents[1] / "src" / "taozhi"
@@ -40,7 +40,6 @@ LAYER_MAP = {
     ],
     "infrastructure": [
         "infrastructure/",
-        "knowledge/",
         "ai/",
         "observability/",
         "core/memory/",
@@ -79,7 +78,7 @@ FORBIDDEN_IN_DOMAIN = {
 }
 
 
-def get_layer(path: Path) -> Optional[str]:
+def get_layer(path: Path) -> str | None:
     """按最长前缀匹配把文件归入某一层；返回 None 表示未登记。"""
     rel = str(path.relative_to(ROOT))
     if rel in PACKAGE_MARKERS:
@@ -92,10 +91,17 @@ def get_layer(path: Path) -> Optional[str]:
     return best
 
 
-def _resolve_relative_import(rel_path: Path, node: ast.ImportFrom) -> Optional[str]:
-    """解析相对导入对应的模块路径。"""
-    if node.level is None or node.level == 0:
-        return node.module
+def _package_import(name: str) -> str | None:
+    """解析项目包内的绝对模块路径。"""
+    if name == "taozhi":
+        return ""
+    if name.startswith("taozhi."):
+        return name.removeprefix("taozhi.")
+    return None
+
+
+def _relative_import(rel_path: Path, node: ast.ImportFrom) -> str | None:
+    """解析相对导入定位的模块或包。"""
     parts = list(rel_path.parts[:-1])
     up = node.level - 1
     if up > len(parts):
@@ -106,20 +112,33 @@ def _resolve_relative_import(rel_path: Path, node: ast.ImportFrom) -> Optional[s
     return ".".join(base_parts)
 
 
-def _iter_all_imports(rel_path: Path, tree: ast.AST) -> Generator[Tuple[str, int], None, None]:
-    """遍历模块内全部 import，解析绝对导入与相对导入，包含函数体内的延迟 import。"""
-    for n in ast.walk(tree):
-        if isinstance(n, ast.Import):
-            for a in n.names:
-                if a.name.startswith("taozhi."):
-                    yield a.name[len("taozhi.") :], n.lineno
-        elif isinstance(n, ast.ImportFrom):
-            if n.module and n.module.startswith("taozhi."):
-                yield n.module[len("taozhi.") :], n.lineno
-            elif n.level and n.level > 0:
-                resolved = _resolve_relative_import(rel_path, n)
-                if resolved:
-                    yield resolved, n.lineno
+def _module_path(name: str) -> Path | None:
+    """返回模块或包的源码，普通导入符号没有独立路径。"""
+    folder = ROOT / name.replace(".", "/")
+    if name and folder.with_suffix(".py").is_file():
+        return folder.with_suffix(".py")
+    package = folder / "__init__.py"
+    return package if package.is_file() else None
+
+
+def _iter_all_imports(rel_path: Path, tree: ast.AST) -> Iterator[tuple[str, int]]:
+    """识别项目内直接导入及从包导入的子模块。"""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                name = _package_import(alias.name)
+                if name is not None:
+                    yield name, node.lineno
+        elif isinstance(node, ast.ImportFrom):
+            parent = _relative_import(rel_path, node) if node.level else _package_import(node.module or "")
+            if parent is None:
+                continue
+            yield parent, node.lineno
+            prefix = f"{parent}." if parent else ""
+            for alias in node.names:
+                name = prefix + alias.name
+                if _module_path(name) is not None:
+                    yield name, node.lineno
 
 
 def test_every_file_is_mapped_to_a_layer():
@@ -138,27 +157,9 @@ def test_no_low_layer_depends_on_high_layer():
             continue
         tree = ast.parse(p.read_text(encoding="utf-8"))
         for target_submod, lineno in _iter_all_imports(rel, tree):
-            target_path_str = target_submod.replace(".", "/")
-            target_file = ROOT / target_path_str
-            target_py = ROOT / f"{target_path_str}.py"
-            target_layer = None
-            if target_py.exists():
-                target_layer = get_layer(target_py)
-            elif target_file.exists():
-                target_layer = get_layer(target_file / "__init__.py")
-            else:
-                parts = target_submod.split(".")
-                for i in range(len(parts), 0, -1):
-                    prefix_path = ROOT / "/".join(parts[:i])
-                    if prefix_path.exists() or (ROOT / f"{'/'.join(parts[:i])}.py").exists():
-                        target_layer = get_layer(prefix_path if prefix_path.is_dir() else ROOT / f"{'/'.join(parts[:i])}.py")
-                        if target_layer:
-                            break
-
-            if target_layer is None:
-                continue
-
-            if LAYER_ORDER[source_layer] < LAYER_ORDER[target_layer]:
+            target = _module_path(target_submod)
+            target_layer = get_layer(target) if target else None
+            if target_layer and LAYER_ORDER[source_layer] < LAYER_ORDER[target_layer]:
                 violations.append(
                     f"{rel}:{lineno} 低层 [{source_layer}] 反向依赖高层 [{target_layer}] -> {target_submod}"
                 )
@@ -210,24 +211,14 @@ def test_domain_layer_does_not_read_config():
 
 def test_interface_routers_do_not_access_db_directly():
     """HTTP 路由与装配入口不得直接打开数据库连接或执行原始 SQL。"""
-    forbidden_targets = ("taozhi.knowledge.db", "knowledge.db")
-    forbidden_names = {"database_connection", "fetch_one", "fetch_all", "as_jsonb"}
     targets = [ROOT / "server" / "api.py"] + sorted((ROOT / "server" / "routers").glob("*.py"))
     violations = []
     for p in targets:
-        if not p.exists():
-            continue
+        rel = p.relative_to(ROOT)
         tree = ast.parse(p.read_text(encoding="utf-8"))
-        for n in ast.walk(tree):
-            lineno = getattr(n, "lineno", 0)
-            if isinstance(n, ast.Import):
-                for a in n.names:
-                    if a.name.endswith(forbidden_targets):
-                        violations.append(f"{p.relative_to(ROOT)}:{lineno} 引入 {a.name}")
-            elif isinstance(n, ast.ImportFrom):
-                mod = n.module or ""
-                if mod.endswith(forbidden_targets) or any(alias.name in forbidden_names for alias in n.names):
-                    violations.append(f"{p.relative_to(ROOT)}:{lineno} 从 {mod} 引入直连数据库符号")
+        for name, lineno in _iter_all_imports(rel, tree):
+            if name == "infrastructure.persistence.database":
+                violations.append(f"{rel}:{lineno} 直接引入数据库连接模块")
     assert not violations, "接口路由违规直连数据库：\n" + "\n".join(violations)
 
 
@@ -258,15 +249,34 @@ import sys
 import taozhi.server.api
 
 execution_modules = {
+    'taozhi.application.documents.ingestion',
     'taozhi.application.bi.workflow',
     'taozhi.application.rag.execution',
     'taozhi.application.rag.workflow',
     'taozhi.application.research.execution',
     'taozhi.application.research.graph',
-    'taozhi.knowledge.retriever',
+    'taozhi.infrastructure.mcp.server',
+    'taozhi.infrastructure.knowledge.retriever',
 }
 loaded = execution_modules.intersection(sys.modules)
 assert not loaded, f'HTTP 装配加载了执行模块 {sorted(loaded)}'
+"""
+    subprocess.run([sys.executable, "-c", script], cwd=ROOT.parent, check=True)
+
+
+def test_database_and_document_parser_import_without_execution_adapters():
+    """只加载数据库和原件解析时，不初始化 MCP、模型、混合检索或 PDF 运行时。"""
+    script = """
+import sys
+from taozhi.infrastructure.knowledge.ingest import validate_upload
+from taozhi.infrastructure.persistence.database import database_connection
+
+unexpected = {
+    'taozhi.ai.client', 'taozhi.infrastructure.knowledge.retriever',
+    'taozhi.infrastructure.mcp.server', 'taozhi.infrastructure.task_queue', 'fitz',
+}
+loaded = unexpected.intersection(sys.modules)
+assert not loaded, f'底层模块加载了无关适配 {sorted(loaded)}'
 """
     subprocess.run([sys.executable, "-c", script], cwd=ROOT.parent, check=True)
 
@@ -277,8 +287,8 @@ def test_legacy_monolith_files_stay_deleted():
         "server/pipeline.py",
         "server/services.py",
         "server/passwords.py",
-        "knowledge/guard.py",
-        "knowledge/facts.py",
+        "application/services/document_service.py",
+        "knowledge/__init__.py",
         "orchestration/agent_system.py",
     ]
     present = [rel for rel in legacy_paths if (ROOT / rel).exists()]

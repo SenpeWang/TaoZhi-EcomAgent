@@ -73,7 +73,7 @@ def build(entry: dict, out_dir: Path) -> tuple[Path, str]:
 
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-    from taozhi.knowledge.ingest import extract_docx_text_bytes, extract_pdf_pages_bytes, parse as ingest_parse
+    from taozhi.infrastructure.knowledge.ingest import extract_docx_text_bytes, extract_pdf_pages_bytes, parse as ingest_parse
 
     mime = (
         "application/pdf"

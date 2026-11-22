@@ -31,7 +31,7 @@ SPECIALIST_OPTIONS = {
 
 def test_decision_choice_semantic_fast_path():
     """测试快速语义向量近邻离散决策。"""
-    from taozhi.knowledge.embedding import available as embedding_available
+    from taozhi.infrastructure.knowledge.embedding import available as embedding_available
     if not embedding_available():
         pytest.skip("本地向量嵌入服务未运行，跳过语义快道测试")
     engine = get_decision_engine()

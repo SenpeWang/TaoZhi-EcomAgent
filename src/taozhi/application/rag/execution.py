@@ -13,8 +13,8 @@ from taozhi.domain.question_context import recalls_previous_evidence, refers_to_
 from taozhi.infrastructure.persistence import job_repo
 from taozhi.infrastructure.persistence.access_repo import get_tenant_epoch, load_principal, sources_valid
 from taozhi.infrastructure.persistence.checkpoints import postgres_checkpointer
-from taozhi.knowledge.db import database_connection
-from taozhi.knowledge.semantic_cache import get_semantic_cache
+from taozhi.infrastructure.persistence.database import database_connection
+from taozhi.infrastructure.knowledge.semantic_cache import get_semantic_cache
 from taozhi.observability.tracing import current_trace_id, node_span, record_diagnostic
 
 

@@ -13,8 +13,8 @@ import sys
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 
-from taozhi.knowledge.db import database_connection
-from taozhi.knowledge import es_index
+from taozhi.infrastructure.persistence.database import database_connection
+from taozhi.infrastructure.knowledge import es_index
 
 
 def main() -> int:

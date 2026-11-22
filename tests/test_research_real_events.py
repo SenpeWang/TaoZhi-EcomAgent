@@ -125,7 +125,7 @@ def test_pipeline_a_events_emitted_during_research():
         patch("taozhi.application.research.subagents.LLMClient", return_value=mock_llm),
         patch.object(LLMClient, "_client_for_endpoint", return_value=report_model),
     ):
-        with patch("taozhi.core.tools.search_web", return_value=[{"title": "保温杯测评", "snippet": "主流69元" + "x" * 2000}]):
+        with patch("taozhi.core.tools.search_web.search_web", return_value=[{"title": "保温杯测评", "snippet": "主流69元" + "x" * 2000}]):
             result = execute_autonomous_agents(
                 keyword="测试保温杯",
                 job_id="research_1",
@@ -192,7 +192,7 @@ def test_pipeline_a_events_emitted_during_research():
 
 def test_zero_fake_thinking_in_frontend():
     """验证前端 ResearchChatView.vue 彻底清除提交时预置的假日志占位符。"""
-    vue_file = Path(__file__).resolve().parents[1] / "web/src/views/ResearchChatView.vue"
+    vue_file = Path(__file__).resolve().parents[1] / "web/src/features/tasks/ResearchChatView.vue"
     content = vue_file.read_text(encoding="utf-8")
 
     assert "thinkingLogs: ['思考\\n总指挥" not in content

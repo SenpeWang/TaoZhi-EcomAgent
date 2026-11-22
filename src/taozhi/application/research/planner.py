@@ -12,7 +12,7 @@ from langgraph.types import Send
 
 from taozhi.ai.client import LLMClient, ModelTier
 from taozhi.ai.router import route_audit_scope
-from taozhi.core.tools.search_web import extract_search_keyword
+from taozhi.domain.question_context import extract_search_keyword
 from taozhi.domain.agent_catalog import agent_display_name
 from taozhi.domain.research import (
     WEB_TOOLS,
