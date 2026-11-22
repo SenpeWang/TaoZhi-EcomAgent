@@ -3,7 +3,7 @@ PHOENIX_PY ?= $(HOME)/.local/share/ecom-agent/phoenix-venv/bin/python
 PROJECT_ROOT := $(CURDIR)
 COMPOSE := docker compose
 
-.PHONY: help start stop status logs test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
+.PHONY: help start rebuild stop status logs test check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -13,7 +13,8 @@ help:
 	@echo "make check-commits  检查指定基准到 HEAD 的新增提交"
 	@echo "make install-hooks  启用 Git 提交和推送检查"
 	@echo "make check-repository 检查已提交公开文件和目录登记"
-	@echo "make start          构建并启动全部 Docker Compose 服务（含中间件与 GPU 向量服务）"
+	@echo "make start          启动 Docker Compose 服务"
+	@echo "make rebuild        构建镜像并启动 Docker Compose 服务"
 	@echo "make stop           停止并清理运行容器（保留持久化数据卷）"
 	@echo "make status         查看全部容器运行与健康状态"
 	@echo "make logs           实时跟踪容器日志"

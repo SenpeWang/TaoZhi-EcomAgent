@@ -10,6 +10,7 @@
 | `.github/ISSUE_TEMPLATE/` | 中文 Bug、功能、文档与使用问题表单 |
 | `.github/workflows/` | main 推送触发的最小权限 CI，不自动部署 |
 | `.githooks/` | 每份克隆主动启用的提交与推送门禁 |
+| `documentation/` | 本地演示、配件资料使用、数据库及部署手册 |
 | `migrations/` | Alembic 环境 |
 | `migrations/versions/` | 只追加已验证的数据库升级版本 |
 | `scripts/` | 部署、数据管理、构建与运维；不含评估逻辑 |
@@ -64,7 +65,7 @@
 
 ## 根文件
 
-README.md 为 GitHub 项目介绍。Makefile 是统一维护命令，Dockerfile 定义前端构建、应用运行时与语义向量容器多目标镜像，docker-compose.yml 与 docker-compose.gpu.yml 编排全官方中间件（pgvector PG 18、ES 9.2.3、Apache Kafka 4.1.2、MinIO）及应用服务，.dockerignore 隔离私有数据与构建缓存，alembic.ini 配置迁移，requirements.txt 声明依赖，requirements.lock.txt 锁定验证版本，.env.example 仅无秘密占位，.gitignore 阻止私有和生成物。.editorconfig 统一编辑器换行和缩进；web/eslint.config.js、.prettierrc.json、web/commitlint.config.cjs 分别定义代码、格式和消息检查，scripts/check_development.py 调度实际快照门禁。提交必须遵循 Conventional Commits 规范与树状多层级 Body，向 GitHub 远端推送必须严格遵守主动向 Senpe 询问确认的铁律纪律。
+README.md 提供项目入口和文档索引。Makefile 提供维护命令，Dockerfile 定义构建目标，Compose 文件描述应用及中间件拓扑。Alembic 管理表结构版本，依赖锁文件用于复现验证。代码、格式和提交消息由 ESLint、Prettier、Commitlint 及仓库检查脚本验证。[部署手册](documentation/deployment.md) · [GitHub CI](.github/workflows/ci.yml)
 
 AGENTS.md 是本机维护约束，项目说明.md 是本机个人学习文档；两者都不跟踪或提交，公开文档不链接或依赖它们。维护者在本机维护这些文件，克隆仓库无需取得它们。
 
