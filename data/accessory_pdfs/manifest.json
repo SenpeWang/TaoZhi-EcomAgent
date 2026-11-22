@@ -342,6 +342,276 @@
         "attribution": "© 2022 Yejune Seo, Inyeol Moon, Junghyun Cho, Yejin Lee, Jiyeon Jang, Morimoto Shohei, Kurosaki Toshifumi and Sungtek Kahng. Licensee MDPI. DOI 10.3390/s22124523.",
         "modified": false
       }
+    },
+    {
+      "title": "市售移动电源市场购样检测汇整表",
+      "publisher": "经济部标准检验局",
+      "kind": "regulatory_testing",
+      "categories": [
+        "power_banks"
+      ],
+      "models": [
+        "Anker A1611",
+        "Xiaomi PB1030ZM",
+        "ADATA P20000QCD",
+        "Philips DLP1815"
+      ],
+      "version": "2024 年公开",
+      "languages": [
+        "zh-TW"
+      ],
+      "markets": [
+        "TW"
+      ],
+      "source_page_url": "https://www.bsmi.gov.tw/wSite/ct?ctNode=9686&mp=1&xItem=115269",
+      "pdf_url": "https://www.bsmi.gov.tw/wSite/record/file_act.jsp?ixCuAttach=34731",
+      "file": "bsmi-market-power-bank-tests-2024-zh-tw.pdf",
+      "size_bytes": 298641,
+      "pages": 5,
+      "sha256": "a3c180a70f59d224f1ebdd9b293fc71717cd0624a120347b2d0ed8cc4bd0f371",
+      "redistribution": {
+        "basis": "标准检验局政府网站资料开放宣告",
+        "terms_url": "https://www.bsmi.gov.tw/SafetyGIP/wSite/ct?ctNode=8305&mp=65&xItem=3536",
+        "attribution": "經濟部標準檢驗局，市售移动电源市场购样检测汇整表，2024 年公开。",
+        "modified": false
+      }
+    },
+    {
+      "title": "市售移动电源检测标准与查核附表",
+      "publisher": "经济部标准检验局",
+      "kind": "regulatory_testing",
+      "categories": [
+        "power_banks"
+      ],
+      "models": [],
+      "version": "2025 年公开",
+      "languages": [
+        "zh-TW"
+      ],
+      "markets": [
+        "TW"
+      ],
+      "source_page_url": "https://www.bsmi.gov.tw/bsmiGIP/wSite/ct?ctNode=9686&mp=111&xItem=120667",
+      "pdf_url": "https://www.bsmi.gov.tw/bsmiGIP/wSite/record/file_act.jsp?ixCuAttach=35384",
+      "file": "bsmi-market-power-bank-tests-2025-zh-tw.pdf",
+      "size_bytes": 141015,
+      "pages": 3,
+      "sha256": "49b61dd51f9d55272ba2951df005ba7ba2a4430bc6578f76f0bb54c5813fe7b4",
+      "redistribution": {
+        "basis": "标准检验局政府网站资料开放宣告",
+        "terms_url": "https://www.bsmi.gov.tw/SafetyGIP/wSite/ct?ctNode=8305&mp=65&xItem=3536",
+        "attribution": "經濟部標準檢驗局，市售移动电源检测标准与查核附表，2025 年公开。",
+        "modified": false
+      }
+    },
+    {
+      "title": "市售无线充电器购样检测汇整表",
+      "publisher": "经济部标准检验局",
+      "kind": "regulatory_testing",
+      "categories": [
+        "wireless_chargers",
+        "car_chargers"
+      ],
+      "models": [
+        "Itaiwan M6",
+        "Anker A1611",
+        "JUPW11007NP"
+      ],
+      "version": "2024 年公开，2023 年购样",
+      "languages": [
+        "zh-TW"
+      ],
+      "markets": [
+        "TW"
+      ],
+      "source_page_url": "https://www.bsmi.gov.tw/wSite/ct?ctNode=9686&mp=7&xItem=115490",
+      "pdf_url": "https://www.bsmi.gov.tw/wSite/public/Attachment/f1717576699330.pdf",
+      "file": "bsmi-market-wireless-charger-tests-2024-zh-tw.pdf",
+      "size_bytes": 297270,
+      "pages": 4,
+      "sha256": "65007f902fa06673dd5aaf2f1adf2e820e3956fb84e9d8b2f9f76dde28908500",
+      "redistribution": {
+        "basis": "标准检验局政府网站资料开放宣告",
+        "terms_url": "https://www.bsmi.gov.tw/SafetyGIP/wSite/ct?ctNode=8305&mp=65&xItem=3536",
+        "attribution": "經濟部標準檢驗局，市售无线充电器购样检测汇整表，2024 年公开，2023 年购样。",
+        "modified": false
+      }
+    },
+    {
+      "title": "市售蓝牙耳机购样检测汇整表",
+      "publisher": "经济部标准检验局",
+      "kind": "regulatory_testing",
+      "categories": [
+        "headphones"
+      ],
+      "models": [
+        "Redmi Buds 6 Pro (M2430E1)",
+        "OPPO Enco Buds3 (ETEG1)",
+        "Apple AirPods 4"
+      ],
+      "version": "2026 年公开，2025 年购样",
+      "languages": [
+        "zh-TW"
+      ],
+      "markets": [
+        "TW"
+      ],
+      "source_page_url": "https://www.bsmi.gov.tw/wSite/ct?ctNode=8271&mp=4&xItem=126268",
+      "pdf_url": "https://www.bsmi.gov.tw/wSite/public/Attachment/f1283901690141000.pdf",
+      "file": "bsmi-market-bluetooth-earbud-tests-2026-zh-tw.pdf",
+      "size_bytes": 505318,
+      "pages": 7,
+      "sha256": "8633b9c922544f63f54d17dcfcf21339be3cab3a053faaec4c979ed6fd8042e9",
+      "redistribution": {
+        "basis": "标准检验局政府网站资料开放宣告",
+        "terms_url": "https://www.bsmi.gov.tw/SafetyGIP/wSite/ct?ctNode=8305&mp=65&xItem=3536",
+        "attribution": "經濟部標準檢驗局，市售蓝牙耳机购样检测汇整表，2026 年公开，2025 年购样。",
+        "modified": false
+      }
+    },
+    {
+      "title": "市售手机钢化玻璃保护膜热释光特性实测",
+      "publisher": "Frontiers in Public Health",
+      "kind": "published_study",
+      "categories": [
+        "screen_protectors"
+      ],
+      "models": [
+        "Belkin ScreenForce TemperedCurve",
+        "Belkin InvisiGlass Ultra",
+        "Mobilis Tempered Glass",
+        "OtterBox Alpha Glass",
+        "ZAGG InvisibleShield"
+      ],
+      "version": "2022 年第 10 卷，969330",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://doi.org/10.3389/fpubh.2022.969330",
+      "pdf_url": "https://www.frontiersin.org/journals/public-health/articles/10.3389/fpubh.2022.969330/pdf",
+      "file": "bassinet-retail-screen-protector-glass-study-2022-en.pdf",
+      "size_bytes": 1578193,
+      "pages": 9,
+      "sha256": "6cc5ce65dd7c73d5d38efe0c8487ce1274c08a8669e9dd69ad64a8d20acb90db",
+      "redistribution": {
+        "basis": "CC BY 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "© 2022 Céline Bassinet, Michael Discher, Yoann Ristic and Clemens Woda. Mobile phone screen protector glass: A TL investigation of the intrinsic background signal. Frontiers in Public Health 10:969330. DOI 10.3389/fpubh.2022.969330.",
+        "modified": false
+      }
+    },
+    {
+      "title": "3D 打印手机配件设计与消费体验研究",
+      "publisher": "Frontiers in Psychology",
+      "kind": "published_study",
+      "categories": [
+        "phone_cases",
+        "screen_protectors"
+      ],
+      "models": [],
+      "version": "2019 年第 10 卷，2800",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://doi.org/10.3389/fpsyg.2019.02800",
+      "pdf_url": "https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2019.02800/pdf",
+      "file": "meng-3d-printed-smartphone-accessories-study-2019-en.pdf",
+      "size_bytes": 1509233,
+      "pages": 12,
+      "sha256": "fcc27ac87d64bcb0e39d4f125a88376cdffeaa7105e28d5bf9b564cea47fd732",
+      "redistribution": {
+        "basis": "CC BY 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "© 2019 Yuke Meng and Muhammad Waseem Bari. Design Perceptions for 3D Printed Accessories of Digital Devices and Consumer-Based Brand Equity. Frontiers in Psychology 10:2800. DOI 10.3389/fpsyg.2019.02800.",
+        "modified": false
+      }
+    },
+    {
+      "title": "可降解手机保护后壳与无线信号性能的原型试验",
+      "publisher": "MDPI Materials",
+      "kind": "published_study",
+      "categories": [
+        "phone_cases"
+      ],
+      "models": [],
+      "version": "2025 年第 18 卷第 4 期，730",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://doi.org/10.3390/ma18040730",
+      "pdf_url": "https://mdpi-res.com/d_attachment/materials/materials-18-00730/article_deploy/materials-18-00730.pdf",
+      "file": "acharjee-biodegradable-phone-back-cover-study-2025-en.pdf",
+      "size_bytes": 9849475,
+      "pages": 17,
+      "sha256": "81433e83f94ff353f826a0bef46f9d6ccc44c30b9036b79f674d38551bb0640f",
+      "redistribution": {
+        "basis": "CC BY 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "© 2025 Juin Acharjee, Jawad Ali, Muhammad Uzair, Thipamas Phakaew, Prayoot Akkaraekthalin, Yaowaret Maiket, Rungsima Yeetsorn and Suramate Chalermwisutkul. Metasurface-Loaded Biodegradable Mobile Phone Back Cover for Enhanced Radiation Performance. MDPI Materials 18(4):730. DOI 10.3390/ma18040730.",
+        "modified": false
+      }
+    },
+    {
+      "title": "共享充电宝消费现状及前景调查",
+      "publisher": "汉斯出版社《统计学与应用》",
+      "kind": "published_study",
+      "categories": [
+        "power_banks"
+      ],
+      "models": [],
+      "version": "2022 年第 11 卷第 6 期",
+      "languages": [
+        "zh-CN",
+        "en"
+      ],
+      "markets": [
+        "CN"
+      ],
+      "source_page_url": "https://doi.org/10.12677/sa.2022.116137",
+      "pdf_url": "https://pdf.hanspub.org/SA20220600000_35023150.pdf",
+      "file": "huang-shared-power-bank-consumer-study-2022-zh-cn.pdf",
+      "size_bytes": 3484976,
+      "pages": 11,
+      "sha256": "7f54bbc50ac89032bb5a5d2fc536e1d06216da7568dbf5a7fa9472d8a118fb3f",
+      "redistribution": {
+        "basis": "CC BY 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "© 2022 黄菲飞、朱蕾、罗新雨、史策与汉斯出版社，《共享充电宝消费现状及前景调查——以大学生群体为例》，DOI 10.12677/sa.2022.116137。",
+        "modified": false
+      }
+    },
+    {
+      "title": "三款市售真无线耳机降噪与通透模式实测",
+      "publisher": "EDP Sciences Acta Acustica / University of York",
+      "kind": "published_study",
+      "categories": [
+        "headphones"
+      ],
+      "models": [
+        "Apple AirPods Pro (2nd generation)",
+        "Bose QuietComfort Earbuds II",
+        "Sony LinkBuds S"
+      ],
+      "version": "2025 年第 9 卷，28，作者机构保存的出版版",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://eprints.whiterose.ac.uk/id/eprint/224178/",
+      "pdf_url": "https://eprints.whiterose.ac.uk/id/eprint/224178/8/aacus240141.pdf",
+      "file": "harrison-retail-earbud-noise-cancellation-tests-2025-en.pdf",
+      "size_bytes": 2286963,
+      "pages": 15,
+      "sha256": "4014a4de361ff7a23f04d3e09e504504b1b6e7c0d39c81e6156f283b3ddd888f",
+      "redistribution": {
+        "basis": "CC BY 4.0",
+        "terms_url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "© 2025 Jay Harrison, Alan W. Archer-Boyd and Damian T. Murphy. Measurement of insertion loss and gain in variable hear-through and noise cancellation modes of true wireless earbuds. Acta Acustica 9:28. DOI 10.1051/aacus/2025013. Deposited by The University of York in White Rose Research Online.",
+        "modified": false
+      }
     }
   ],
   "official_links": [
@@ -579,6 +849,181 @@
       "markets": [],
       "source_page_url": "https://www.usb.org/logo-license",
       "pdf_url": "https://www.usb.org/sites/default/files/usb_type-c_cable_logo_usage_guidelines_jan26_final.pdf"
+    },
+    {
+      "title": "飞利浦 Qi 无线车充与桌面支架规格书",
+      "publisher": "Philips",
+      "kind": "product_specification",
+      "categories": [
+        "car_chargers",
+        "phone_stands",
+        "wireless_chargers"
+      ],
+      "models": [
+        "DLK3532Q/00"
+      ],
+      "version": null,
+      "languages": [
+        "zh-CN"
+      ],
+      "markets": [
+        "CN"
+      ],
+      "source_page_url": "https://www.philips.com.cn/c-p/DLK3532Q_00/car-and-desk-mount",
+      "pdf_url": "https://www.documents.philips.com/assets/20231124/2cdd3dfbffd642f684f8b0c400aac3bc.pdf"
+    },
+    {
+      "title": "飞利浦 USB-C 移动电源规格书",
+      "publisher": "Philips",
+      "kind": "product_specification",
+      "categories": [
+        "power_banks"
+      ],
+      "models": [
+        "DLP9502G/93"
+      ],
+      "version": null,
+      "languages": [
+        "zh-CN"
+      ],
+      "markets": [
+        "CN"
+      ],
+      "source_page_url": "https://www.philips.com.cn/c-p/DLP9502G_93/9000-series-usb-c-power-bank",
+      "pdf_url": "https://www.documents.philips.com/assets/20250202/4d251a2c130341bfa558b278012c903d.pdf"
+    },
+    {
+      "title": "飞利浦 USB-A 转 USB-C 充电与数据线规格书",
+      "publisher": "Philips",
+      "kind": "product_specification",
+      "categories": [
+        "charging_cables"
+      ],
+      "models": [
+        "DLC1530C/97"
+      ],
+      "version": null,
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://www.documents.philips.com/assets/20231125/6cedcb6cf07d4a96aa01b0c500ac2bd5.pdf",
+      "pdf_url": "https://www.documents.philips.com/assets/20231125/6cedcb6cf07d4a96aa01b0c500ac2bd5.pdf"
+    },
+    {
+      "title": "Belkin BoostCharge 磁吸车载充电支架安装与合规说明",
+      "publisher": "Belkin",
+      "kind": "user_guide",
+      "categories": [
+        "car_chargers",
+        "phone_stands",
+        "wireless_chargers"
+      ],
+      "models": [
+        "WIC011",
+        "WIC010"
+      ],
+      "version": "Rev. A00",
+      "languages": [
+        "en",
+        "fr"
+      ],
+      "markets": [
+        "EU",
+        "APAC"
+      ],
+      "source_page_url": "https://www.belkin.com/support-article/?articleNum=337719",
+      "pdf_url": "https://www.belkin.com/on/demandware.static/-/Sites-master-product-catalog-blk/default/dw0c153f3e/datasheets/regulatory/INS_WIC011_8850-02169_8850-02169-IY_EU1_AP1_A00_BoostCharge_Magnetic%20Charging%20Car%20Dash%20Mount_WEB.pdf"
+    },
+    {
+      "title": "MOBILIS 通用手机钢化玻璃保护膜规格书",
+      "publisher": "MOBILIS",
+      "kind": "product_specification",
+      "categories": [
+        "screen_protectors"
+      ],
+      "models": [
+        "Universal Tempered Glass"
+      ],
+      "version": null,
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://www.mobiliscase.com/datasheets/uk/Data_tempered_glass_smartphone_universal_en.pdf",
+      "pdf_url": "https://www.mobiliscase.com/datasheets/uk/Data_tempered_glass_smartphone_universal_en.pdf"
+    },
+    {
+      "title": "Fairphone Fairbuds 随盒快速入门说明",
+      "publisher": "Fairphone",
+      "kind": "user_guide",
+      "categories": [
+        "headphones"
+      ],
+      "models": [
+        "Fairbuds"
+      ],
+      "version": "2024-01-19",
+      "languages": [
+        "en"
+      ],
+      "markets": [],
+      "source_page_url": "https://us.support.fairphone.com/hc/en-us/articles/37564056065298-How-to-use-your-Fairbuds",
+      "pdf_url": "https://us.support.fairphone.com/hc/en-us/article_attachments/37564088352658"
+    },
+    {
+      "title": "欧盟 CASP 市售充电器联合抽检报告",
+      "publisher": "欧盟委员会",
+      "kind": "regulatory_testing",
+      "categories": [
+        "wired_chargers"
+      ],
+      "models": [],
+      "version": "CASP 2019",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "EU"
+      ],
+      "source_page_url": "https://ec.europa.eu/safety-gate/#/screen/pages/caspChargers",
+      "pdf_url": "https://mpo.gov.cz/assets/cz/ochrana-spotrebitele/bezpecnost-vyrobku/spolecne-kontrolni-akce-2019/2022/3/CASP_chargers_final_report.pdf"
+    },
+    {
+      "title": "美国 FAA 移动电源航空运输荷电状态实测报告",
+      "publisher": "美国联邦航空管理局",
+      "kind": "official_report",
+      "categories": [
+        "power_banks"
+      ],
+      "models": [],
+      "version": "DOT/FAA/TC-25/26，2025",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "US"
+      ],
+      "source_page_url": "https://rosap.ntl.bts.gov/view/dot/86558",
+      "pdf_url": "https://rosap.ntl.bts.gov/view/dot/86558/dot_86558_DS1.pdf"
+    },
+    {
+      "title": "Spigen 贴膜安装定位器技术披露",
+      "publisher": "美国专利商标局 / Spigen Korea",
+      "kind": "patent_disclosure",
+      "categories": [
+        "screen_protectors"
+      ],
+      "models": [],
+      "version": "US10744705B2，2020",
+      "languages": [
+        "en"
+      ],
+      "markets": [
+        "US"
+      ],
+      "source_page_url": "https://ppubs.uspto.gov/pubwebapp/",
+      "pdf_url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/10744705"
     }
   ]
 }
