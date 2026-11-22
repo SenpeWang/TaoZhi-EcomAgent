@@ -4,6 +4,7 @@
 
 | 脚本 | 用途 |
 | --- | --- |
+| `import_corpus.py` | 批量导入企业语料：按目录映射权限层级，解析、切片并生成向量 |
 | `manage_database.py` | 初始化老板账号、库表维护与切片段落生成 |
 | `rebuild_es_index.py` | 按已发布切片全量重建 Elasticsearch 索引 |
 | `backup_database.py` | 备份数据库并做隔离库恢复演练 |
