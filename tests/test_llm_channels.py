@@ -45,3 +45,35 @@ def test_bailian_channel_skipped_without_key():
     """未配置密钥时该通道不进入候选池，避免无效重试。"""
     eps = build_sensenova_endpoints(_settings(bailian_api_key=""))
     assert "bailian" not in [e.endpoint_id for e in eps]
+
+
+def test_bailian_is_first_candidate_channel():
+    """配置齐备时百炼为首个调用通道，其余按故障转移顺序排列。"""
+    eps = build_sensenova_endpoints(_settings(
+        sensenova_overseas_api_key="test-overseas",
+        sensenova_cn_secondary_api_key="test-secondary",
+        dots_api_key="test-dots",
+        bailian_api_key="test-bailian",
+    ))
+    assert [ep.endpoint_id for ep in eps] == [
+        "bailian",
+        "sensenova_overseas",
+        "dots",
+        "sensenova_cn_primary",
+        "sensenova_cn_secondary",
+    ]
+    assert [ep.priority for ep in eps] == [0, 1, 2, 3, 4]
+
+
+def test_bailian_key_satisfies_model_readiness():
+    """仅配置百炼密钥时也应判定模型可用，避免系统状态误报未配置。"""
+    from taozhi.config import Settings
+
+    settings = Settings(
+        api_key="",
+        sensenova_cn_secondary_api_key="",
+        sensenova_overseas_api_key="",
+        dots_api_key="",
+        bailian_api_key="test-bailian",
+    )
+    assert settings.has_llm is True

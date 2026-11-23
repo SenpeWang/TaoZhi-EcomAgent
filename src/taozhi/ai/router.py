@@ -1,8 +1,8 @@
-"""商汤 sensenova-6.8-flash 国内/海外自适应容灾路由中间件与熔断器。
+"""多模型通道自适应容灾路由中间件与熔断器。
 
 核心职责：
-1. 统一收口商汤国内版（token.sensenova.cn）多 Key 与商汤海外版（token.sensenova.ai），
-   全链路锁定 sensenova-6.8-flash 模型（已移除第三方异构云，模型行为完全一致）；
+1. 首选阿里云百炼（OpenAI 兼容，DeepSeek V4.1 Flash），故障时依次回落至商汤海外版
+   （token.sensenova.ai）、Dots、商汤国内版主 Key 与国内备用 Key；
 2. 每个通道拥有独立的传输策略（直连 / 系统代理），互不覆盖；
 3. 按错误类型（429 限流 / 401-404 鉴权或模型错误 / 网络超时）自动熔断冷却并毫秒级
    故障转移至下一个健康通道，冷却期满自动半开探活恢复；
@@ -232,7 +232,7 @@ def _infer_region(base_url: str) -> RegionType:
 
 
 def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
-    """根据运行配置构建候选通道池：商汤海外版 -> Dots -> 商汤国内 Key 2（及可选国内备用）。"""
+    """根据运行配置构建候选通道池：百炼（首选）-> 商汤海外版 -> Dots -> 商汤国内主备。"""
     target_model = settings.model or "sensenova-6.8-flash"
     endpoints: List[SensenovaEndpoint] = []
     seen_pairs = set()
@@ -268,6 +268,22 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
             )
         )
 
+    bailian_key = getattr(settings, "bailian_api_key", "")
+    bailian_url = getattr(
+        settings, "bailian_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
+    bailian_model = getattr(settings, "bailian_model", "") or "deepseek-v4.1-flash"
+    bailian_direct = bool(getattr(settings, "bailian_direct_connection", True))
+    _add(
+        "bailian",
+        "阿里云百炼（DeepSeek V4.1 Flash）",
+        "domestic",
+        bailian_url,
+        bailian_key,
+        bailian_model,
+        bailian_direct,
+    )
+
     overseas_key = getattr(settings, "sensenova_overseas_api_key", "")
     overseas_url = getattr(settings, "sensenova_overseas_base_url", "https://token.sensenova.ai/v1")
     overseas_model = getattr(settings, "sensenova_overseas_model", "") or target_model
@@ -294,22 +310,6 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
         dots_key,
         dots_model,
         dots_direct,
-    )
-
-    bailian_key = getattr(settings, "bailian_api_key", "")
-    bailian_url = getattr(
-        settings, "bailian_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    )
-    bailian_model = getattr(settings, "bailian_model", "") or "deepseek-v4.1-flash"
-    bailian_direct = bool(getattr(settings, "bailian_direct_connection", True))
-    _add(
-        "bailian",
-        "阿里云百炼（DeepSeek V4.1 Flash）",
-        "domestic",
-        bailian_url,
-        bailian_key,
-        bailian_model,
-        bailian_direct,
     )
 
     _add(

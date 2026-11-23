@@ -402,7 +402,7 @@ def get_system_status(p: Principal) -> dict[str, Any]:
         database=True,
         worker_available=workers > 0,
         counts=counts,
-        model_configured=bool(s.api_key),
+        model_configured=s.has_llm,
         business_configured=bool(s.business_api_url and s.business_api_token),
         semantic_retrieval=embed_available(),
         mode=load_config().mode,

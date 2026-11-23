@@ -88,12 +88,13 @@ class Settings(BaseSettings):
 
     @property
     def has_llm(self) -> bool:
-        """判断当前是否至少配置了一个可用的主备模型密钥。"""
+        """判断当前是否至少配置了一个可用的主备模型密钥（含百炼首选通道）。"""
         return bool(
             self.api_key
             or self.sensenova_cn_secondary_api_key
             or self.sensenova_overseas_api_key
             or self.dots_api_key
+            or self.bailian_api_key
         )
 
 

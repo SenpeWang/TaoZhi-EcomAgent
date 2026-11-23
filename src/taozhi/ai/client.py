@@ -1,6 +1,6 @@
 """淘智 AI 大模型服务客户端。
 
-统一集成商汤 sensenova-6.8-flash 国内/海外自适应容灾路由中间件、并发控制与结构化解析。
+统一集成百炼（首选）与商汤国内/海外、Dots 多通道容灾路由中间件、并发控制与结构化解析。
 严格遵循 Google Python Style 规范。
 """
 
@@ -38,7 +38,7 @@ Message = Union[str, BaseMessage, Dict[str, str]]
 
 
 class ModelTier(str, Enum):
-    """模型调用层级（当前全线统一路由至 sensenova-6.8-flash）。"""
+    """模型调用层级（模型名按通道解析，首选通道为百炼 DeepSeek V4.1 Flash）。"""
 
     FAST = "fast"
     STRONG = "strong"
@@ -46,7 +46,7 @@ class ModelTier(str, Enum):
 
 
 class LLMClient:
-    """大模型调用客户端，接入商汤国内/海外故障转移中间件与熔断恢复机制。"""
+    """大模型调用客户端，接入百炼首选与多通道故障转移中间件及熔断恢复机制。"""
 
     def __init__(
         self,
@@ -82,7 +82,7 @@ class LLMClient:
         self.last_route_events: List[Dict[str, Any]] = []
 
     def _model_for_tier(self, tier: ModelTier, override_model: str = "") -> str:
-        """统一模型名解析：仅限 sensenova-6.8-flash 体系。"""
+        """统一模型名解析：优先使用调用层级配置，缺省回落主模型名。"""
         cfg = self.settings
         if override_model:
             return override_model
@@ -94,7 +94,7 @@ class LLMClient:
         return mapped or cfg.model or "sensenova-6.8-flash"
 
     def _client_for_endpoint(self, ep: SensenovaEndpoint) -> ChatOpenAI:
-        """为指定商汤端点构建/复用绑定独立网络策略的 ChatOpenAI 客户端。"""
+        """为指定模型端点构建/复用绑定独立网络策略的 ChatOpenAI 客户端。"""
         cfg = self.settings
         direct = cfg.llm_direct_connection if ep.direct_connection is None else ep.direct_connection
         trust_env = not bool(direct)
