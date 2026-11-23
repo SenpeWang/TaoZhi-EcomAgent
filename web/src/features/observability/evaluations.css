@@ -190,3 +190,27 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.evaluation-head-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.evaluation-subsection {
+  margin-bottom: 18px;
+}
+.evaluation-subsection h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--tz-ink);
+}
+.evaluation-json {
+  max-height: 460px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--tz-surface-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}

@@ -1,3 +1,4 @@
+export type EvaluationKind = 'agent' | 'rag'
 export type EvaluationMode = 'live' | 'synthetic_trace_regrade'
 export type EvaluationStatus = 'passed' | 'failed' | 'unassessable'
 
@@ -28,6 +29,9 @@ export interface EvaluationRun {
   unassessable_cases: number
   dataset_id: string | null
   dataset_name: string | null
+  eval_kind?: EvaluationKind
+  profile_id?: string | null
+  profile_version_tag?: string | null
   pass_rate: number | null
   mean_score: number | null
   latency_p50_ms: number | null
@@ -39,13 +43,61 @@ export interface EvaluationRun {
 export interface EvaluationDataset {
   dataset_id: string
   name: string
+  eval_kind: EvaluationKind
+  version: string
+  description: string
   source: EvaluationMode
   case_count: number
   batch_count: number
-  last_run_at: string
+  last_run_at: string | null
   avg_pass_rate: number | null
   best_pass_rate: number | null
   passed_batches: number
+}
+
+export interface EvaluationDatasetDetail {
+  dataset: EvaluationDataset
+  cases: Record<string, unknown>[]
+}
+
+export interface EvaluationProfile {
+  profile_id: string
+  eval_kind: EvaluationKind
+  version_tag: string
+  tech_stack: Record<string, unknown>
+  retrieval_params: Record<string, unknown>
+  prompt_snapshots: Record<string, unknown>
+  prompt_sha256: string
+  notes: string
+  created_by: string
+  created_at: string
+  batch_count: number
+  avg_pass_rate: number | null
+  avg_mean_score: number | null
+  avg_latency_p50_ms: number | null
+  avg_tokens: number | null
+}
+
+export interface CreateEvalProfilePayload {
+  eval_kind: EvaluationKind
+  version_tag: string
+  tech_stack: Record<string, unknown>
+  retrieval_params: Record<string, unknown>
+  prompt_snapshots: Record<string, unknown>
+  notes: string
+}
+
+export interface TriggerEvaluationPayload {
+  eval_kind: EvaluationKind
+  dataset_id: string
+  profile_id: string
+  note: string
+}
+
+export interface EvaluationTriggerReceipt {
+  audit_id: string
+  run_id: string | null
+  status: string
 }
 
 export interface EvaluationCase {
