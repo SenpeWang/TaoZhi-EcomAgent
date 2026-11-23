@@ -1629,10 +1629,9 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
     assert entry["batch_count"] == 2 and entry["case_count"] == 2 and entry["passed_batches"] == 1
     assert entry["source"] == "synthetic_trace_regrade"
     assert staff.get("/api/evaluations/runs", params={"dataset_id": listing[0]["dataset_id"]}).status_code == 200
-    assert {item["dataset_id"] for item in staff.get(
-        "/api/evaluations/datasets", params={"include_archived": "true"}).json()["items"]} == {
-        listing[0]["dataset_id"]
-    }
+    catalog_ids = {item["dataset_id"] for item in staff.get(
+        "/api/evaluations/datasets", params={"include_archived": "true"}).json()["items"]}
+    assert listing[0]["dataset_id"] in catalog_ids
     assert admin.post("/api/evaluations/datasets", json={}).status_code == 405
     assert admin.get(f"{url}/baseline").json()["run"]["counterexamples_sha256"] is None
     assert not publish(current, tenant, users["staff"])

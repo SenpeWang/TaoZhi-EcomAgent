@@ -4,6 +4,8 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+
+import pytest
 import sys
 import threading
 import time
@@ -19,16 +21,37 @@ PROJECT = Path(__file__).resolve().parents[1]
 DATASET_ID = "agent_research-v1_20261123"
 
 
-def _setup() -> None:
-    spec = importlib.util.spec_from_file_location("worker_setup", PROJECT / "scripts/manage_database.py")
-    setup = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(setup)
+def _truncate_eval() -> None:
+    """只清空评测中心写入，保留租户夹具供其它测试文件复用。"""
+    with database_connection() as conn:
+        conn.execute(
+            "TRUNCATE eval_audit_logs, eval_baselines, eval_run_reports, eval_case_results, "
+            "eval_runs, eval_datasets, eval_profiles CASCADE"
+        )
+
+
+def _truncate_all() -> None:
+    """清空租户与评测中心写入，供本文件用例重新初始化夹具。"""
     with database_connection() as conn:
         conn.execute(
             "TRUNCATE eval_audit_logs, eval_baselines, eval_run_reports, eval_case_results, "
             "eval_runs, eval_datasets, eval_profiles, tenants CASCADE"
         )
         conn.execute("TRUNCATE login_attempts")
+
+
+@pytest.fixture(autouse=True)
+def _clean_eval_center():
+    """每个用例结束后只清理评测中心数据，避免全局数据集资产影响其它测试。"""
+    yield
+    _truncate_eval()
+
+
+def _setup() -> None:
+    spec = importlib.util.spec_from_file_location("worker_setup", PROJECT / "scripts/manage_database.py")
+    setup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(setup)
+    _truncate_all()
     setup.seed_test()
 
 

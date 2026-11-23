@@ -185,7 +185,7 @@ def _run_check(tenant_code: str) -> tuple[list[str], dict]:
         for record in reports:
             try:
                 payload = store.open_blob(record["tenant_id"], record["object_key"])
-            except Exception as exc:  # noqa: BLE001 - 存储实现可能抛多种异常
+            except Exception as exc:
                 failures.append(f"原始报告不可读：{record['run_id']}（{type(exc).__name__}）")
                 continue
             if sha256(payload).hexdigest() != record["sha256"]:
