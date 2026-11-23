@@ -18,6 +18,7 @@
 | `documentation/database/` | 数据模型、索引与迁移手册 |
 | `documentation/deployment/` | 配置、部署与运维手册 |
 | `documentation/access-control/` | 权限、审计与隔离边界手册 |
+| `documentation/quality/` | 场景级质量、决策门控与验收需求手册 |
 | `migrations/` | Alembic 环境 |
 | `migrations/versions/` | 只追加已验证的数据库升级版本 |
 | `scripts/` | 部署、数据管理、构建与运维；不含评估逻辑 |

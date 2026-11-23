@@ -9,5 +9,6 @@
 | 数据模型 | [database](database/README.md) | 表结构、索引与迁移约定 |
 | 部署运维 | [deployment](deployment/README.md) | 配置、首次部署、验证与常用运维 |
 | 权限治理 | [access-control](access-control/README.md) | 身份、资料决策、审计与隔离边界 |
+| 质量与门控 | [quality](quality/README.md) | 场景级评测、发版门禁、证据包与验收要求 |
 
 项目唯一的入口文档是仓库根目录的 [README](../README.md)。

@@ -44,6 +44,7 @@
 | 理解源码分层和数据模型 | [目录契约](STRUCTURE.md) · [数据库模型](documentation/database/) |
 | 配置、部署与运维 | [部署与运维手册](documentation/deployment/) |
 | 权限、审计与隔离边界 | [权限与文档治理](documentation/access-control/) |
+| 场景评测、门禁与验收要求 | [质量与门控需求](documentation/quality/) |
 | 参与开发与提交规范 | [贡献规范](CONTRIBUTING.md) |
 | 运行评测和对照基线 | [评测指南](evals/README.md) · [基准与门禁](evals/BENCHMARK.md) |
 
