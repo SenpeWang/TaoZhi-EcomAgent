@@ -1619,15 +1619,18 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
     for key in ("transcript_sha256", "counterexamples_sha256", "model_config_sha256"):
         assert listing[0][key] == current[key]
     assert listing[0]["dataset_name"] == "agent_research"
-    assert listing[0]["dataset_id"] == "agent_research-synthetic_trace_regrade-" + ("a" * 64)[:12]
+    assert listing[0]["dataset_id"] == "agent_research-v0_legacy"
+    assert listing[0]["dataset_version"] == "v0_legacy"
     assert listing[0]["pass_rate"] == 0.5 and listing[0]["mean_score"] == 0.5
     assert listing[0]["total_tokens"] is None and listing[0]["judges"] == []
-    catalog = admin.get("/api/evaluations/datasets").json()["items"]
+    assert listing[0]["comparable"] is False
+    catalog = admin.get("/api/evaluations/datasets", params={"include_archived": "true"}).json()["items"]
     entry = next(item for item in catalog if item["dataset_id"] == listing[0]["dataset_id"])
     assert entry["batch_count"] == 2 and entry["case_count"] == 2 and entry["passed_batches"] == 1
     assert entry["source"] == "synthetic_trace_regrade"
     assert staff.get("/api/evaluations/runs", params={"dataset_id": listing[0]["dataset_id"]}).status_code == 200
-    assert {item["dataset_id"] for item in staff.get("/api/evaluations/datasets").json()["items"]} == {
+    assert {item["dataset_id"] for item in staff.get(
+        "/api/evaluations/datasets", params={"include_archived": "true"}).json()["items"]} == {
         listing[0]["dataset_id"]
     }
     assert admin.post("/api/evaluations/datasets", json={}).status_code == 405
@@ -1635,7 +1638,8 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
     assert not publish(current, tenant, users["staff"])
     detail = staff.get(f"{url}/candidate").json()
     assert detail["run"]["counterexamples_sha256"] == current["counterexamples_sha256"]
-    assert "provenance" not in detail["metrics"]
+    assert detail["metrics"]["provenance"]["comparable"] is False
+    assert detail["run"]["comparable"] is False
     assert staff.get(url, params={"owner_id": "all"}).status_code == 403
     assert staff.get(url, params={"owner_id": users["boss"]}).status_code == 403
     assert [item["run_id"] for item in admin.get(url, params={"owner_id": users["boss"]}).json()["items"]] == ["baseline"]

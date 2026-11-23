@@ -10,6 +10,7 @@ from contextlib import nullcontext
 from opentelemetry import context as otel_context
 
 from taozhi.application.documents.ingestion import process_ingestion_job
+from taozhi.application.evaluation.execution import process_evaluation_job
 from taozhi.application.rag.execution import process_question_job
 from taozhi.application.research.execution import process_research_job
 from taozhi.config import load_config
@@ -68,6 +69,8 @@ def run_job(job: dict) -> None:
                     process_ingestion_job(job)
                 elif job["kind"] == "research":
                     process_research_job(job)
+                elif job["kind"] == "evaluation":
+                    process_evaluation_job(job)
                 else:
                     process_question_job(job)
             finally:

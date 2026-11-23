@@ -22,6 +22,7 @@ class LocalBlobStore:
         return folder / name
     def put_blob(self, tenant_id, name, data: bytes):
         path = self._path(tenant_id, name)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         path.write_bytes(data)
         path.chmod(0o600)
     def remove_blob(self, tenant_id, name):

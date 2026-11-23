@@ -155,6 +155,7 @@ class Config:
     rerank_chars: int = 1000
     max_chunks_per_doc: int = 3
     rerank_min_score: float = 0.05
+    eval_timeout_seconds: int = 3600
     rerank_relative: float = 0.15
     chunk_size: int = 850
     chunk_overlap: int = 200
@@ -292,6 +293,7 @@ def load_config() -> Config:
         rerank_chars=int(values.get("ECOM_RERANK_CHARS", "1000")),
         max_chunks_per_doc=int(values.get("ECOM_MAX_CHUNKS_PER_DOC", "3")),
         rerank_min_score=float(values.get("ECOM_RERANK_MIN_SCORE", "0.05")),
+        eval_timeout_seconds=int(values.get("ECOM_EVAL_TIMEOUT_SECONDS", "3600")),
         rerank_relative=float(values.get("ECOM_RERANK_RELATIVE", "0.15")),
         chunk_size=int(values.get("ECOM_CHUNK_SIZE", "850")),
         chunk_overlap=int(values.get("ECOM_CHUNK_OVERLAP", "200")),

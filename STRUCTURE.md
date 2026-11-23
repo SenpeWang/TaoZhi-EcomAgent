@@ -38,6 +38,7 @@
 | `src/taozhi/application/bi/` | 指标意图识别、受控问数工作流、工作台概览与经营看板查询 |
 | `src/taozhi/application/common/` | 应用层公共任务守卫、Token 用量聚合与 OpenTelemetry 节点埋点 |
 | `src/taozhi/application/documents/` | 文档上传、版本、授权和审批用例，包含 Worker 的解析索引与送审 |
+| `src/taozhi/application/evaluation/` | 评测任务执行：Worker 内运行器子进程、进度回传、取消与超时、报告自动入库 |
 | `src/taozhi/application/rag/` | 知识问答工作流、受控问数分发、查询扩展与引文发布 |
 | `src/taozhi/application/research/` | 调研任务执行、会话查询与中途干预，包含协调器、并行子智能体和研报合成 |
 | `src/taozhi/application/services/` | 账号审批、任务生命周期、流式输出、工具调用、轨迹与评测查询 |

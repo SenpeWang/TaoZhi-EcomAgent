@@ -53,7 +53,11 @@ def test_evaluation_center_wide_read_narrow_write_and_immutable_profiles(monkeyp
     created = admin.post("/api/evaluations/profiles", json=profile_payload)
     assert created.status_code == 201, created.text
     profile_id = created.json()["profile_id"]
-    assert admin.post("/api/evaluations/profiles", json=profile_payload).status_code == 409
+    again = admin.post("/api/evaluations/profiles", json=profile_payload)
+    assert again.status_code == 201 and again.json()["profile_id"] == profile_id
+    conflict = admin.post("/api/evaluations/profiles",
+                          json={**profile_payload, "tech_stack": {"model": "another-model"}})
+    assert conflict.status_code == 409
 
     with database_connection() as conn:
         owner = fetch_all(conn, "SELECT id, tenant_id FROM users WHERE username='admin'")[0]

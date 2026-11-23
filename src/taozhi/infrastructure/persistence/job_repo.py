@@ -144,7 +144,7 @@ def create_job(
     if cfg.kafka_enabled:
         conn.execute("INSERT INTO task_outbox(job_id) VALUES(%s)", (job["id"],))
     _record_job_event(conn, job)
-    action = {"ask": "提交问答", "research": "提交调研", "ingest": "提交资料解析"}[kind]
+    action = {"ask": "提交问答", "research": "提交调研", "ingest": "提交资料解析", "evaluation": "提交评测"}[kind]
     audit(conn, p, action, job["id"], node, level, detail={"kind": kind})
     return job
 
@@ -408,6 +408,16 @@ def renew_lease_once(conn: Any, job_id: str, run_version: int, worker_id: str, l
         "UPDATE jobs SET lease_until=now()+(%s*interval '1 second') WHERE id=%s AND run_version=%s AND worker_id=%s AND state='running'",
         (lease_seconds, job_id, run_version, worker_id),
     )
+
+
+def has_active_kind(conn: Any, tenant_id: str, kind: str) -> bool:
+    """判断租户下是否有该类任务排队或执行中，供评测任务串行控制。"""
+    row = fetch_one(
+        conn,
+        "SELECT 1 AS hit FROM jobs WHERE tenant_id=%s AND kind=%s AND state IN ('queued','running') LIMIT 1",
+        (tenant_id, kind),
+    )
+    return row is not None
 
 
 def count_active_workers(conn: Any) -> int:

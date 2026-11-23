@@ -85,6 +85,8 @@ app.include_router(tasks.router)
 app.include_router(traces.router)
 app.include_router(evaluations.router)
 app.include_router(evaluations.catalog)
+app.include_router(evaluations.jobs)
+app.include_router(evaluations.metrics)
 
 dist = ROOT / "web/dist"
 if (dist / "assets").exists():
