@@ -51,9 +51,10 @@
 | `evals/baseline/` | 基线只读归档：一次全量跑批一份快照（文件名=开跑时间），只增不改 |
 | `evals/dataset/` | 独立评测数据包：规格、契约校验、确定性生成与幂等灌库 |
 | `evals/dataset/spec/` | 数据包规格（组织/夹具/语料/模板），唯一事实来源 |
-| `evals/datasets/` | 评测数据集与口径说明，随代码进 Git 可 diff |
-| `evals/datasets/generated/` | 独立包生成产物：用例、语料与 manifest，随代码进 Git |
-| `evals/datasets/generated/latest/` | 独立包生成产物目录，generate 直接写入（唯一一份，版本由 Git 承担） |
+| `evals/datasets/` | 评测数据集按版本目录（如 `v1_20261123`）管理，随代码进 Git 可 diff |
+| `evals/datasets/v1_20261123/` | V1 基准评测数据集（含版本总览 `README.md`，只读留档） |
+| `evals/datasets/v1_20261123/agent/` | V1 Agent 调研基准用例、标准回放轨迹、定向反例与 `README.md` |
+| `evals/datasets/v1_20261123/rag/` | V1 RAG 三层评测集（180 例主集、42 篇语料、18 例对抗集）与 `README.md` |
 | `evals/reports/` | 运行产物不入库（.gitignore 全忽略） |
 | `evals/tests/` | 评估代码自身的单元测试，必须进 CI |
 | `tests/` | 单元与企业边界验收，测试事实自行构造 |

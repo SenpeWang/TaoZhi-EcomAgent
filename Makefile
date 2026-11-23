@@ -116,8 +116,8 @@ evals-agent-publish:
 	@$(MAKE) --no-print-directory evals-publish
 
 evals-agent-replay:
-	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_web_replay.json
-	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json
+	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/v1_20261123/agent/web_replay.json
+	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/v1_20261123/agent/research_replay.json
 
 evals-sync:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }

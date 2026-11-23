@@ -17,7 +17,7 @@
 
 ## 本模块纪律
 
-- 新用例只走 `dataset/spec` → `generate` → `seed`，不手改 `datasets/generated/latest/`。
+- 新用例只走 `dataset/spec` → `generate` → `seed`，且数据集按 `datasets/v1_<时间戳>/`、`datasets/v2_<时间戳>/` 分版本目录存放，每个版本目录及子目录须附带 `README.md`，严禁原地覆盖已定版历史版本。
 - `reports/` 产物与本文件不进 Git；`baseline.json` 与 `datasets/` 随代码进 Git。
 - 提交类型常用 `docs(evals)` / `test(evals)` / `fix(evals)` / `chore(evals)`。
 - 删除指标、评估层或数据层前确认无引用，并同步 BENCHMARK、README 与 Makefile 目标；

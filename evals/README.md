@@ -65,16 +65,16 @@ PYTHONPATH=src python -m evals.agent_eval.publish "$REPORT_PATH" --tenant-id "$T
 ### 复现合成正例与反例
 
 ```bash
-PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json
-PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_research_replay.json --counterexamples evals/datasets/agent_research_counterexamples.json --compare "$BASELINE_REPORT"
+PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/v1_20261123/agent/research_replay.json
+PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/v1_20261123/agent/research_replay.json --counterexamples evals/datasets/v1_20261123/agent/research_counterexamples.json --compare "$BASELINE_REPORT"
 ```
 
 第二条命令的 `BASELINE_REPORT` 取第一条打印的报告路径。反例保留输入、版本与其余观测，只修改一个执行步骤或答案，门禁将按设计返回非零退出码。两批均归档后，在评测中心选择「合成反例复核」批次，并与「合成回放」批次对照，即可查看每个用例由通过变为失败的原因。批次详情会展示报告中可用的回放记录、反例集和模型配置的 SHA-256 摘要，供复核时确认版本。
 
 | 工作 | 入口与输出 |
 |---|---|
-| 重评指定样本 | `PYTHONPATH=src python3 -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_web_replay.json`。附加 `--compare <旧报告路径>` 可得到配对的修复、回归和排除项 |
-| 人工盲审 | `PYTHONPATH=src python3 -m evals.agent_eval.review --replay evals/datasets/agent_web_replay.json` 生成独立人工标注表。显式使用 `--model-review` 可对同一合成样本运行模型裁判。`--agreement <人工表> <模型表>` 核对有效配对与分歧 |
+| 重评指定样本 | `PYTHONPATH=src python3 -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/v1_20261123/agent/web_replay.json`。附加 `--compare <旧报告路径>` 可得到配对的修复、回归和排除项 |
+| 人工盲审 | `PYTHONPATH=src python3 -m evals.agent_eval.review --replay evals/datasets/v1_20261123/agent/web_replay.json` 生成独立人工标注表。显式使用 `--model-review` 可对同一合成样本运行模型裁判。`--agreement <人工表> <模型表>` 核对有效配对与分歧 |
 | 线上问题回灌 | `PYTHONPATH=src python3 -m evals.agent_eval.feedback <活动页.json> ...` 读取通过工作台权限获取的同租户活动页，按诊断代码和处理结果输出去重计数。选择候选、重建合成证据，再用真实业务入口检验修复 |
 
 ## 运行

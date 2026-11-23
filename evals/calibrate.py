@@ -31,7 +31,7 @@ import metrics
 EVALS = ROOT / "evals"
 REPORTS = EVALS / "reports"
 CALIB = REPORTS / "calibration"
-CASES = EVALS / "datasets/generated/latest/cases.jsonl"
+CASES = EVALS / "datasets/v1_20261123/rag/cases.jsonl"
 DIMS = ("pass", "faithful", "relevant")
 
 

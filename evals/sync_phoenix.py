@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CASES_PATH = REPO_ROOT / "evals/datasets/generated/latest/cases.jsonl"
+CASES_PATH = REPO_ROOT / "evals/datasets/v1_20261123/rag/cases.jsonl"
 REPORTS_DIR = REPO_ROOT / "evals/reports"
 LIVE_PATH = REPORTS_DIR / "live.jsonl"
 

@@ -216,7 +216,7 @@ def validate_cases(cases: list) -> list:
 
 def main() -> int:
     import json
-    target = sys.argv[1] if len(sys.argv) > 1 else "evals/datasets/generated/latest/cases.jsonl"
+    target = sys.argv[1] if len(sys.argv) > 1 else "evals/datasets/v1_20261123/rag/cases.jsonl"
     path = Path(target)
     if not path.exists():
         print(f"数据集不存在: {path}", file=sys.stderr)

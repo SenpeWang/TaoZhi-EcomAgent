@@ -37,7 +37,7 @@ from taozhi.infrastructure.persistence.access_repo import can_read, can_read_met
 from taozhi.infrastructure.persistence.metric_execution import BUILTIN_BUSINESS_METRICS
 
 SPEC = Path(__file__).resolve().parent / "spec"
-GEN = ROOT / "evals/datasets/generated/latest"
+GEN = ROOT / "evals/datasets/v1_20261123/rag"
 EVAL_PASSWORD = "taozhi2026eval"
 SYN_PREFIX = "SYN_"
 

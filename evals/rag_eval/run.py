@@ -40,10 +40,10 @@ sys.path.insert(0, str(ROOT / "evals"))
 sys.path.insert(0, str(ROOT))
 EVALS = ROOT / "evals"
 OUT_DIR = EVALS / "reports"
-CASES = EVALS / "datasets/generated/latest/cases.jsonl"
-GOLDEN = EVALS / "datasets/golden_adversarial.json"
+CASES = EVALS / "datasets/v1_20261123/rag/cases.jsonl"
+GOLDEN = EVALS / "datasets/v1_20261123/rag/golden_adversarial.json"
 BASELINE = EVALS / "baseline.json"
-MANIFEST = EVALS / "datasets/generated/latest/manifest.json"
+MANIFEST = EVALS / "datasets/v1_20261123/rag/manifest.json"
 LIVE = OUT_DIR / "live.jsonl"
 
 import metrics

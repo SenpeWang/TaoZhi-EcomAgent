@@ -34,7 +34,7 @@ from evals.dataset import generate as gen_mod
 from evals.dataset import schema as schema_mod
 from evals.dataset.seed import EVAL_PASSWORD
 
-GEN_LATEST = ROOT / "evals/datasets/generated/latest"
+GEN_LATEST = ROOT / "evals/datasets/v1_20261123/rag"
 REQUIRED_CATEGORIES = {"product", "compat", "aftersale", "multi_doc", "insufficient",
                        "conflict", "role", "grant", "revocation", "injection", "leakage",
                        "operations", "supply", "coach", "finance", "calculation", "exclusion"}
@@ -221,7 +221,7 @@ def test_run_evals_has_no_hardcoded_node():
     assert not bad, f"run_evals.py 出现写死的组织节点: {bad}"
 
 
-GOLDEN = ROOT / "evals/datasets/golden_adversarial.json"
+GOLDEN = ROOT / "evals/datasets/v1_20261123/rag/golden_adversarial.json"
 
 
 def golden_cases() -> list:

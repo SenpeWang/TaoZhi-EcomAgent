@@ -122,7 +122,7 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
 
 
 def _load_synthetic_cases() -> list[dict]:
-    path = Path(__file__).resolve().parents[1] / "datasets" / "agent_research_cases.json"
+    path = Path(__file__).resolve().parents[1] / "datasets" / "v1_20261123" / "agent" / "research_cases.json"
     catalog = json.loads(path.read_text(encoding="utf-8"))
     if catalog.get("schema_version") != 1 or catalog.get("source") != "synthetic":
         raise ValueError("无法识别调研回放用例集版本或来源")
