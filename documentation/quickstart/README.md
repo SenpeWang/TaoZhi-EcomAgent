@@ -46,7 +46,7 @@ ECOM_MODE=test .venv/bin/python -m uvicorn taozhi.server.api:app --host 127.0.0.
 ECOM_MODE=test .venv/bin/python -m taozhi.server.worker
 ```
 
-打开 [本机工作台](http://127.0.0.1:18080)。使用测试租户 `mofa`、员工账号 `staff` 和测试口令 `taozhi2026eval` 登录，在知识问答中提交「店铺运营组负责什么工作？」随后打开「轨迹中台」，选择这次提问，查看「执行记录」。切换为同一测试租户的 `admin` 账号，可按发起人查到员工的这次提问。未配置模型凭据时仍可查看检索步骤。要观察一次真实模型调用，在私有配置中填入 `BASE_URL`、`API_KEY` 和 `MODEL`，重启 API、Worker 后重新提问。[测试夹具](../../scripts/manage_database.py) · [配置示例](../../.env.example)
+打开 [本机工作台](http://127.0.0.1:18080)。使用测试租户 `mofa`、员工账号 `staff` 和本地演示口令 `123456` 登录（`owner`/`admin`/`leader` 同口令，由演示夹具统一下发），在知识问答中提交「店铺运营组负责什么工作？」随后打开「轨迹中台」，选择这次提问，查看「执行记录」。切换为同一测试租户的 `admin` 账号，可按发起人查到员工的这次提问。未配置模型凭据时仍可查看检索步骤。要观察一次真实模型调用，在私有配置中填入 `BASE_URL`、`API_KEY` 和 `MODEL`，重启 API、Worker 后重新提问。[测试夹具](../../scripts/manage_database.py) · [配置示例](../../.env.example)
 
 体验结束时，在两个终端分别按 `Ctrl+C`，再运行 `docker stop taozhi-demo-db`。下次可用 `docker start taozhi-demo-db` 复用测试库。
 

@@ -24,7 +24,11 @@
 
 ## 评测口令
 
-评测运行器与 `seed.py` 统一使用 `EVAL_PASSWORD` 登录正式业务账号，默认 `taozhi2026eval`（≥12 位，生产弱口令校验通过）。内网演示环境可以把 `ECOM_EVAL_PASSWORD` 设为与 `ECOM_QUICK_LOGIN_PASSWORD` 一致的快捷口令（例如 `123456`），这样工作台登录与评测登录使用同一口令；生产环境不要开启快捷登录。
+评测运行器与 `seed.py` 使用同一个口令常量 `EVAL_PASSWORD` 登录正式业务账号，取值顺序为 `ECOM_EVAL_PASSWORD` → 默认 `taozhi2026eval`（≥12 位，生产弱口令校验通过）。
+
+本地内网演示部署开启 `ECOM_QUICK_LOGIN` 时，四个业务账号（`owner`/`admin`/`staff`/`leader`）的口令由 `ECOM_QUICK_LOGIN_PASSWORD` 统一下发（当前为 `123456`）；此时把 `ECOM_EVAL_PASSWORD` 设为同一口令，工作台登录与评测登录就完全一致：`make evals-quick/full` 经 `scripts/run_with_env.py` 载入 `.env`，评测器以 `123456` 登录。`seed.py` 在快捷登录开启时按 `allow_weak` 生成哈希，允许该演示口令。
+
+关闭快捷登录的正式部署禁止演示弱口令：使用默认 `taozhi2026eval`（或自定义 ≥12 位口令），不要设置 `ECOM_EVAL_PASSWORD=123456`。
 
 ## 目录结构
 
@@ -71,7 +75,7 @@ PYTHONPATH=src .venv/bin/python -m evals.dataset.seed --clean
 - **不编造标准答案**：资料写"未知"的题，预期行为是如实说明资料不足；`unanswerable`
   用例给的是"必须出现的说明性措辞"（如 `未标注`/`待确认`），不是编出来的数值。
 - **身份是数据不是代码**：逻辑身份→登录名在 org.yaml，seed 建档、run_evals 解析；
-  口令统一 `EVAL_PASSWORD`（≥12 位，过生产弱口令校验）。
+  口令由 `ECOM_EVAL_PASSWORD`/`EVAL_PASSWORD` 统一（本地演示与快捷登录一致，正式环境 ≥12 位）。
 - **夹具可直接写 published**：绕过发布审批流——这是测试夹具，不是业务资料。
 - **`COMPANY_ROOT` 占位**：身份/文档可写 `node: COMPANY_ROOT`，seed 插入前解析为公司根节点。
 - **权限语义实测**：`seed --verify` 用 `can_read()` 跑 10 条矩阵

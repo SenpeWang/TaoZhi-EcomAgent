@@ -36,7 +36,7 @@
 
 | 评估维度 | 评测对象与采集来源 | 核心企业级指标 | 门禁性质 |
 |---|---|---|---|
-| **1. 检索与上下文信噪比** | 全量带锚点用例，以 `syn_staff1` 调 `search_documents(limit=8)`，按**去重 `document_id`** 统计 | `Hit@1/@3/@8`、`Precision@1/@3/@8`（分母固定 `k`）、`Recall@1/@3/@8`、`nDCG@1/@3/@8`、`MRR`、`context_relevancy`、`ann_blocked_rate`、`coverage`、`95% CI` | `Recall@8 >= 0.80` 为目标线；配对 95% CI 显著下跌判**回归（阻塞）** |
+| **1. 检索与上下文信噪比** | 全量带锚点用例，以正式员工账号 `staff` 调 `search_documents(limit=8)`，按**去重 `document_id`** 统计 | `Hit@1/@3/@8`、`Precision@1/@3/@8`（分母固定 `k`）、`Recall@1/@3/@8`、`nDCG@1/@3/@8`、`MRR`、`context_relevancy`、`ann_blocked_rate`、`coverage`、`95% CI` | `Recall@8 >= 0.80` 为目标线；配对 95% CI 显著下跌判**回归（阻塞）** |
 | **2. 生成质量、误拒与 ChatBI** | 全量 180 例端到端问答 & 受控问数（27 子类 / 9 大领域角色），`LLM-as-judge` + 规则 + 本地语义相似度 | **`faithfulness micro/macro`**、`accuracy`、`fact_recall`、`answer_correctness`、`citation_in_bounds_rate`、`false_refusal_rate (FRR)`、`true_abstain_rate`、`chatbi (routing/metric_key/rbac_denial)` | **`faithfulness micro >= 0.85` 为硬底线（阻塞）**；配对回归**阻塞**；`relevant_rate >= 0.80` 为目标线 |
 | **3. 真实 SUT Token 与成本效率** | `LLMClient.usage_scope()` → PG `model_calls` + `jobs.result.token_usage`（**与 Judge 评测费用严格分账**） | `sut_token_cost (prompt/completion/total/usd)`、未缓存单题均耗、Token 放大倍率（`avg_attempts_per_uncached_case`）、按角色分布（`hyde` vs 专家）、`cache_hit_rate` & `estimated_cache_tokens_saved`、`judge_token_cost` | 监控成本异常膨胀与放大倍率 |
 | **4. 全链路耗时 SLO 与吞吐** | HTTP 端到端 + `jobs` 时间戳 + `jobs.result.timing` | 裸检索与真实用户 **E2E `p50/p95/p99/max`**、分阶段耗时（`queue_wait_ms`、`planning_ms`、`retrieval_ms`、`data_query_ms`、`specialists_ms`、`embed_ms`、`es_ms`、`pg_ann_ms`、`rerank_ms`、`hyde_ms`）、`sla_breach_rate`、`--concurrency N` 并发 `QPS` | 长链路超阈值预警与瓶颈定位 |
@@ -61,7 +61,7 @@
 ## 5. 执行与纪律红线
 
 - **只改单变量**：同一轮评估实验聚焦明确假设，不混改数据集与评估器口径后再把分数变化全算给模型或检索优化。
-- **使用测评账号**：检索与行为层统一使用 `evals.dataset.seed` 建档的 `syn_*` 测评账号，不占用 `staff`/`leader`/`boss`/`admin` 业务账号。
+- **使用正式业务账号**：检索/行为/对抗层统一使用 `staff`、`leader`、`owner`、`admin` 正式业务账号（不再使用 `syn_*`），口令由 `ECOM_EVAL_PASSWORD`/`EVAL_PASSWORD` 统一，本地演示与快捷登录口令保持一致。
 - **100% 实证**：文档中出现的一切分数、耗时、Token 数、失败条数必须直接源自评测中心批次/原始报告或运行器报告的真实输出。
 - **数据集版本目录规范**：三层评测集按 `evals/datasets/v1_<时间戳>/rag/`（后续迭代新增 `v2_<时间戳>/rag/`）分版本只读留存，每个目录须配备 `README.md` 说明样本规模与分层结构，严禁原地覆盖历史版本。
 - **入库入口唯一**：RAG 报告入库统一走 `python -m evals.rag_eval.publish`（内部委托 `evals/center`），按数据集版本 + `scope` + `mode` 落库；历史报告用 `--legacy` 归入 `v0_legacy`，不得另建写库入口。

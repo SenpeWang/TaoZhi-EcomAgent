@@ -47,7 +47,7 @@
 
 ## 7. 测试与评测使用正式账号
 - **测试/演示/评测登录统一使用正式业务账号**：`staff`（员工）、`leader`（组长）、`owner`（老板）、`admin`（系统管理员），不再单独保留 `syn_*` 测评账号。
-- **统一口令**：`taozhi2026eval`（14 位纯小写字母+数字，定义于 `evals/dataset/seed.py` 的 `EVAL_PASSWORD`），由 `python -m evals.dataset.seed` 校准口令与夹具权限。
+- **统一口令**：本地内网演示由 `ECOM_QUICK_LOGIN_PASSWORD` 统一下发（当前 `123456`），评测登录用 `ECOM_EVAL_PASSWORD` 与之对齐；未开启快捷登录的正式环境使用 `EVAL_PASSWORD`（默认 `taozhi2026eval`，≥12 位，定义于 `evals/dataset/seed.py`），生产禁止演示弱口令。`python -m evals.dataset.seed` 校准口令与夹具权限。
 
 ## 8. 代码注释规范（仅保留 Docstring，清理冗余注释）
 - **只写 Docstring**：Python 模块/类/函数与前端 TS/JS 导出的接口/函数统一只写规范 Docstring（Google Style / JSDoc），说明职责、参数与返回值。
