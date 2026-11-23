@@ -10,6 +10,7 @@ import sys
 from typing import Any
 
 from evals.center import backfill as backfill_module
+from evals.center import purge as purge_module
 from evals.center import baselines, datasets, publish
 from taozhi.infrastructure.persistence.database import database_connection, fetch_all
 
@@ -214,6 +215,15 @@ def _run_check(tenant_code: str) -> tuple[list[str], dict]:
     return failures, stats
 
 
+def _cmd_purge(args: argparse.Namespace) -> int:
+    """按口径清理历史版本与旧批次；默认只预演，确认后执行并留审计。"""
+    tenant_id, actor_id = _identity(args)
+    stats = purge_module.purge(tenant_id=tenant_id, actor_id=actor_id, mode=args.mode,
+                               include_audit=args.include_audit, dry_run=not args.yes)
+    _print_json(stats)
+    return 0
+
+
 def _cmd_check(args: argparse.Namespace) -> int:
     try:
         failures, stats = _run_check(_tenant_code(args))
@@ -277,6 +287,14 @@ def build_parser() -> argparse.ArgumentParser:
     backfill.add_argument("--owner-username")
     backfill.add_argument("--reset", action="store_true", help="先清空评测中心写入表（破坏性）")
     backfill.set_defaults(handler=_cmd_backfill)
+
+    purge_cmd = sub.add_parser("purge", help="清理历史版本与旧批次（默认预演）")
+    purge_cmd.add_argument("--mode", choices=purge_module.MODES, default="legacy",
+                           help="legacy=归档数据集；runs=全部批次与算法版本；all=同时删数据集")
+    purge_cmd.add_argument("--include-audit", action="store_true", help="同时删除审计留痕")
+    purge_cmd.add_argument("--yes", action="store_true", help="确认执行；缺省只预演")
+    _add_identity(purge_cmd, actor_name="actor")
+    purge_cmd.set_defaults(handler=_cmd_purge)
 
     check = sub.add_parser("check", help="校验数据集、基线与报告对象一致性")
     check.add_argument("--tenant-code")

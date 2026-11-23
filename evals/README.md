@@ -276,6 +276,19 @@ make evals-center-check                             # 数据集 sha / 基线唯�
 - 单份报告上限 20 MB；同一批次重复写入内容一致则跳过，不一致则拒绝覆盖；下载时重算 sha256，与登记值不符返回 `409`。
 - 数据集内容（`dataset.json` 描述符、用例、语料、回放与反例）随代码进 Git；运行产物留在 `reports/`（Git 忽略）。
 
+### 清理与重建基线
+
+旧版本或旧批次需要整体替换时用统一清理命令，默认只预演并打印将删除的数量：
+
+```bash
+make evals-center-purge PURGE_ARGS="--mode legacy"          # 预演：归档数据集 + 其批次/基线/报告
+make evals-center-purge PURGE_ARGS="--mode legacy --yes"    # 执行
+make evals-center-purge PURGE_ARGS="--mode runs --yes"      # 清空全部批次/基线/算法版本，保留数据集
+make evals-center-purge PURGE_ARGS="--mode all --yes"       # 连同数据集登记一起删除（破坏性）
+```
+
+清理会同时删除对象存储中的原始报告并写 `purge_data` 审计（`--include-audit` 才会连审计一起删）。重建基线流程：清理 → `make evals-center-register` 确认数据集登记 → 按口径重跑评测（受控任务或运行器 CLI）→ `publish` 入库 → 在评测中心把新批次设为 active 基线 → `make evals-center-check` 复核。
+
 ### 入库自检
 
 `make evals-center-check` 只读校验并以退出码表达结果：逐文件重算数据集描述符 sha256、核对登记用例数与用例集、检查 active 基线键唯一、基线批次存在、`eval_run_reports` 对象可读且摘要一致、批次是否缺少原始报告。发现问题逐条打印 `FAIL`，不自动修复。

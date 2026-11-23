@@ -11,8 +11,9 @@ CENTER_VERSION ?= v1_20261123
 TEST_ENV := ECOM_MODE=test PYTHONPATH=$(PROJECT_ROOT)/src
 COMPOSE := docker compose
 
-.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check evals-center-register evals-center-publish evals-center-backfill evals-center-check
+.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check evals-center-register evals-center-publish evals-center-backfill evals-center-check evals-center-purge
 
+GIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null)
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
 
@@ -44,6 +45,7 @@ help:
 	@echo "make evals-center-publish   发布报告入库：REPORT=路径 或 PUBLISH_ARGS=\"--kind agent --reports-dir ...\""
 	@echo "make evals-center-backfill  回填历史评测数据（BACKFILL_ARGS，默认不带 --reset）"
 	@echo "make evals-center-check     校验数据集摘要、基线唯一与报告对象一致性"
+	@echo "make evals-center-purge     清理历史版本与旧批次：PURGE_ARGS=\"--mode legacy\"（默认预演，加 --yes 执行）"
 	@echo "make check          检查 Python 语法"
 	@echo "make build-web      构建前端生产包"
 	@echo "make clean          清除项目 Python 与 pytest 缓存"
@@ -52,7 +54,7 @@ start:
 	$(COMPOSE) up -d
 
 rebuild:
-	$(COMPOSE) up -d --build
+	GIT_SHA=$(GIT_SHA) $(COMPOSE) up -d --build
 
 stop:
 	$(COMPOSE) down
@@ -151,6 +153,9 @@ evals-center-backfill:
 
 evals-center-check:
 	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli check
+
+evals-center-purge:
+	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli purge $(PURGE_ARGS)
 
 evals-pipeline:
 	@$(MAKE) --no-print-directory evals-full || { code=$$?; \

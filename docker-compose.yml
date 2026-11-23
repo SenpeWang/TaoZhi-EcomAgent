@@ -7,6 +7,7 @@ x-app-common: &app-common
       NPM_REGISTRY: ${NPM_REGISTRY:-}
       PIP_INDEX_URL: ${PIP_INDEX_URL:-}
       APT_MIRROR: ${APT_MIRROR:-}
+      GIT_SHA: ${GIT_SHA:-}
     network: host
   env_file:
     - path: .env
