@@ -12,7 +12,8 @@
 
 设计约束：
 - 幂等：重复执行结果一致（文档按 content_hash 判断是否需要重建切片）；
-- 口令统一用 EVAL_PASSWORD（≥12 位，过生产弱口令校验）；run_evals 登录同一常量；
+- 口令统一用 EVAL_PASSWORD（默认 ≥12 位，过生产弱口令校验）；本地内网演示可通过
+  `ECOM_EVAL_PASSWORD` 覆盖为快捷登录口令（与 `ECOM_QUICK_LOGIN_PASSWORD` 一致）；
 - 文档直接写 published 状态，绕过发布审批流——这是测试夹具，不是业务资料；
 - --verify 用 can_read 实测权限语义，而不是只看字段：字段对但 grade 算错的白检。
 """
@@ -21,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -38,7 +40,7 @@ from taozhi.infrastructure.persistence.metric_execution import BUILTIN_BUSINESS_
 
 SPEC = Path(__file__).resolve().parent / "spec"
 GEN = ROOT / "evals/datasets/v1_20261123/rag"
-EVAL_PASSWORD = "taozhi2026eval"
+EVAL_PASSWORD = os.environ.get("ECOM_EVAL_PASSWORD") or "taozhi2026eval"
 SYN_PREFIX = "SYN_"
 
 
@@ -119,7 +121,7 @@ def resolve_user_ids(conn, tenant_id, org):
 
 def seed_users(conn, tenant_id, org):
     """建档或复用正式账号并对齐评测口令与组织成员关系。"""
-    hashed = hash_password(EVAL_PASSWORD, load_config().mode)
+    hashed = hash_password(EVAL_PASSWORD, load_config().mode, allow_weak=load_config().quick_login)
     ids = {}
     seen_users = set()
     for i in org["identities"]:

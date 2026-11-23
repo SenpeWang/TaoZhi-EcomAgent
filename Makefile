@@ -105,13 +105,13 @@ evals-tests:
 	$(TEST_ENV) $(PYTHON) -m pytest evals/tests -q
 
 evals-quick:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" PYTHONPATH=src $(PYTHON) evals/rag_eval/run.py --quick --compare --gate
+	$(PYTHON) scripts/run_with_env.py $(PYTHON) -m evals.rag_eval.run --quick --compare --gate
 
 evals-full:
-	ECOM_ENV_FILE="$(PROJECT_ROOT)/.env" PYTHONPATH=src $(PYTHON) evals/rag_eval/run.py --full --compare --gate
+	$(PYTHON) scripts/run_with_env.py $(PYTHON) -m evals.rag_eval.run --full --compare --gate
 
 evals-baseline:
-	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.rag_eval.run --full --save-baseline
+	$(PYTHON) scripts/run_with_env.py $(PYTHON) -m evals.rag_eval.run --full --save-baseline
 
 evals-agent:
 	$(PYTHON) scripts/run_with_env.py $(PYTHON) -m evals.agent_eval.runner $(EVAL_ARGS)

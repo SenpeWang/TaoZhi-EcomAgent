@@ -22,6 +22,10 @@
 **citation**（答案必须标来源）、**long_context**（答案分散在多节）；对抗层仍走
 `datasets/<version>/rag/golden_adversarial.json`（18 条，机读判定）。
 
+## 评测口令
+
+评测运行器与 `seed.py` 统一使用 `EVAL_PASSWORD` 登录正式业务账号，默认 `taozhi2026eval`（≥12 位，生产弱口令校验通过）。内网演示环境可以把 `ECOM_EVAL_PASSWORD` 设为与 `ECOM_QUICK_LOGIN_PASSWORD` 一致的快捷口令（例如 `123456`），这样工作台登录与评测登录使用同一口令；生产环境不要开启快捷登录。
+
 ## 目录结构
 
 ```
