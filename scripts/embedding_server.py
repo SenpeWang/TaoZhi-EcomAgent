@@ -5,7 +5,8 @@
 - 默认监听 127.0.0.1，容器部署可通过 EMBED_HOST=0.0.0.0 暴露给内部编排网络。
 - 嵌入模型或权重缺失时启动失败退出，交由容器编排或守护进程重启；业务侧按服务不可用自动降级为词法检索。
 - 精排模型惰性加载：权重缺失或加载失败不影响嵌入功能，/rerank 返回 503 由业务侧回落融合序。
-- 显式指定 cuda 时不做 CPU 降级（降级会让时延失真、掩盖真实故障）；运行中 GPU 掉线由看门狗探测后退出重启。
+- 显式指定 cuda 时不做 CPU 降级（降级会让时延失真、掩盖真实故障）；宿主机重启后 GPU 直通可能晚到，
+  启动宽限期内重试，超过宽限期才按启动失败退出；运行中 GPU 掉线由看门狗探测后退出重启。
 - 与在线 API/Worker 进程隔离：重依赖（torch/transformers）只存在于本服务。
 
 配置：EMBED_HOST（默认 127.0.0.1）、EMBED_PORT（默认 18555）、
@@ -31,18 +32,14 @@ MODEL_PATH = Path(os.environ.get("EMBED_MODEL_PATH", ROOT.parent / "models/bge-s
 RERANK_MODEL_PATH = Path(os.environ.get("RERANK_MODEL_PATH", ROOT.parent / "models/bge-reranker-v2-m3"))
 HOST = os.environ.get("EMBED_HOST", "127.0.0.1")
 PORT = int(os.environ.get("EMBED_PORT", "18555"))
-DEVICE = os.environ.get("EMBED_DEVICE") or ("cuda:0" if torch.cuda.is_available() else "cpu")
-if DEVICE.startswith("cuda") and not torch.cuda.is_available():
-    raise RuntimeError(
-        f"指定推理设备 {DEVICE} 不可用：当前无可用 CUDA GPU"
-        f"（检查显卡驱动、WSL GPU 直通与显存占用）；如需 CPU 运行请显式设置 EMBED_DEVICE=cpu"
-    )
 MAX_BATCH = 256
 MAX_CHARS = 8000
 RERANK_MAX_BATCH = 64
 RERANK_MAX_CHARS = 4000
 QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
 GPU_WATCHDOG_INTERVAL = 30.0
+GPU_BOOT_GRACE_SECONDS = float(os.environ.get("EMBED_GPU_BOOT_GRACE_SECONDS", "180"))
+GPU_BOOT_RETRY_SECONDS = 10.0
 
 
 def _gpu_probe() -> None:
@@ -70,6 +67,33 @@ def _gpu_probe() -> None:
         raise RuntimeError((r.stderr or b"").decode(errors="ignore").strip()[:120] or "nvidia-smi 非零退出")
 
 
+def _wait_for_cuda() -> None:
+    """显式指定 cuda 时等待 GPU 就绪。
+
+    宿主机重启后 WSL 的 GPU 直通会晚于容器启动才可用；宽限期内按固定间隔重试，
+    超过宽限期仍不可用才按启动失败退出，避免刚重启时的连续 crash-loop 盖住真实原因。
+    """
+    deadline = time.monotonic() + GPU_BOOT_GRACE_SECONDS
+    while not torch.cuda.is_available():
+        remaining = max(0.0, deadline - time.monotonic())
+        if remaining <= 0:
+            raise RuntimeError(
+                f"指定推理设备 cuda 在 {GPU_BOOT_GRACE_SECONDS:.0f}s 宽限期内未就绪：当前无可用 CUDA GPU"
+                "（检查显卡驱动、WSL GPU 直通与显存占用）；如需 CPU 运行请显式设置 EMBED_DEVICE=cpu"
+            )
+        print(
+            f"[embed] GPU 尚未就绪，{GPU_BOOT_RETRY_SECONDS:.0f}s 后重试"
+            f"（启动宽限期剩余 {remaining:.0f}s）",
+            flush=True,
+        )
+        time.sleep(min(GPU_BOOT_RETRY_SECONDS, remaining))
+
+
+DEVICE = os.environ.get("EMBED_DEVICE") or ("cuda:0" if torch.cuda.is_available() else "cpu")
+if DEVICE.startswith("cuda"):
+    _wait_for_cuda()
+
+
 def gpu_watchdog() -> None:
     """GPU 掉线看门狗。
 
@@ -77,16 +101,26 @@ def gpu_watchdog() -> None:
     进程占满 CPU、端口还在监听、但请求永不返回——比启动失败隐蔽得多，业务侧只会看到
     "检索/精排超时"。启动校验拦不住这种运行中掉线，所以必须持续探测。
 
-    探测到掉线就退出进程，交由 Supervisor 重启；重启时若 GPU 仍未恢复，
-    启动校验会立即失败并给出明确错误，而不是继续假装服务正常。
+    探测到掉线就退出进程，交由容器重启策略重启；重启时若 GPU 仍未恢复，启动校验会立即
+    失败并给出明确错误，而不是继续假装服务正常。宿主刚重启时直通可能短暂不可见，因此
+    首个成功探测之前处于启动宽限期，只告警重试，不判定为掉线。
     """
+    started_at = time.monotonic()
+    confirmed = False
     while True:
         time.sleep(GPU_WATCHDOG_INTERVAL)
         try:
             _gpu_probe()
         except Exception as exc:
-            print(f"[embed] GPU 探测失败（{type(exc).__name__}: {exc}），退出进程交由 Supervisor 重启", flush=True)
+            if not confirmed and time.monotonic() - started_at < GPU_BOOT_GRACE_SECONDS:
+                print(f"[embed] GPU 尚未就绪（{type(exc).__name__}: {exc}），启动宽限期内继续重试", flush=True)
+                continue
+            print(f"[embed] GPU 探测失败（{type(exc).__name__}: {exc}），退出进程交由容器重启策略重启", flush=True)
             os._exit(1)
+        if not confirmed:
+            confirmed = True
+            print("[embed] GPU 看门狗首次探测成功，此后掉线立即退出重启", flush=True)
+
 
 app = FastAPI(title="ecom-embed", docs_url=None, redoc_url=None)
 _tokenizer = None
