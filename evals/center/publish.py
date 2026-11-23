@@ -546,10 +546,11 @@ def publish_report(path: Path, *, tenant_id: str, owner_id: str, kind: str = "au
             run["profile_id"] = profiles.ensure_profile(
                 conn, tenant_id, owner_id, run["eval_kind"], run["dataset_version"],
                 explicit_profile_id=profile_id, notes=notes)
-        elif run["eval_kind"] == "agent":
+        else:
+            algorithm = raw.get("algorithm") if isinstance(raw.get("algorithm"), dict) else None
             run["profile_id"] = profiles.ensure_profile(
-                conn, tenant_id, owner_id, "agent", run["dataset_version"], notes=notes,
-                algorithm=raw.get("algorithm") if isinstance(raw.get("algorithm"), dict) else None)
+                conn, tenant_id, owner_id, run["eval_kind"], run["dataset_version"], notes=notes,
+                algorithm=algorithm)
         created = evaluation_repo.insert_report(conn, tenant_id, owner_id, run, rows)
         if created:
             _store_report_object(conn, tenant_id, run["run_id"], eval_kind=run["eval_kind"],

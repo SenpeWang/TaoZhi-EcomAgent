@@ -7,14 +7,21 @@ from typing import Any
 
 
 def _collect_tech_stack() -> dict[str, str]:
-    """从当前运行配置动态读取技术栈与模型环境信息。"""
+    """从当前运行配置动态读取技术栈、实际主通道与故障转移顺序。"""
+    from taozhi.ai.router import build_sensenova_endpoints
     from taozhi.config import get_settings, load_config
 
     settings = get_settings()
     cfg = load_config()
+    endpoints = build_sensenova_endpoints(settings)
+    primary = endpoints[0] if endpoints else None
+    fallback = " -> ".join(f"{ep.endpoint_id}({ep.model})" for ep in endpoints[1:]) or "无"
     return {
         "orchestration": "LangGraph + FastAPI + PostgreSQL (pgvector)",
-        "llm_model": settings.model,
+        "llm_channel": (f"{primary.label}（{primary.endpoint_id}，{primary.model}）"
+                        if primary is not None else "未配置模型通道"),
+        "llm_fallback": fallback,
+        "llm_model": primary.model if primary is not None else settings.model,
         "llm_fast_model": settings.llm_fast_model,
         "llm_strong_model": settings.llm_strong_model,
         "retrieval_stack": (
@@ -32,7 +39,8 @@ def _stack_header_lines(stack: dict[str, str], report_path: Path, extra_line: st
         extra_line,
         f"- **报告归档**：`{_rel_path(report_path)}`",
         f"- **编排与存储栈**：`{stack['orchestration']}`",
-        f"- **模型栈**：主模型 `{stack['llm_model']}` / Fast `{stack['llm_fast_model']}` / Strong `{stack['llm_strong_model']}`",
+        f"- **模型主通道**：{stack['llm_channel']}（Fast `{stack['llm_fast_model']}` / Strong `{stack['llm_strong_model']}`）",
+        f"- **故障转移顺序**：`{stack['llm_fallback']}`",
     ]
 
 
