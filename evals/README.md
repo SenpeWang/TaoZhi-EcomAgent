@@ -8,17 +8,30 @@
 ```
 evals/
 ├── rag_eval/                    ★企业知识库 RAG 三层评测运行器（检索 · 对抗 · 行为）
-│   ├── run.py                   独立评测执行器（原 run_evals.py 已彻底迁入此处）
+│   ├── run.py                   独立评测执行器（--progress-jsonl / --report-path / 分层开关）
+│   ├── publish.py               RAG 报告入库入口（兼容旧命令，委托 evals/center）
 │   └── 测评记录.md              知识文档 RAG 评测基线、改动对比与归因档案
 ├── agent_eval/                  ★电商真·自主多智能体（Supervisor Loop）质效评测体系
 │   ├── harness.py               调研图执行采集与合成轨迹重评
 │   ├── judges.py                执行状态、工具轨迹、交付、事实证据与干预判定
 │   ├── cases.py                 调研基准用例
-│   └── runner.py                CLI 批跑、报告、版本对照与门禁
+│   ├── runner.py                CLI 批跑、报告、版本对照与门禁
+│   ├── publish.py               Agent 报告入库入口（兼容旧命令，委托 evals/center）
+│   └── 数据集设计.md            数据集构建、验收与归因说明
+├── center/                      ★评测中心唯一入库编排（数据集登记 · 报告发布 · 基线 · 回填 · 自检）
+│   ├── cli.py                   register / publish / baseline / backfill / check 子命令
+│   ├── datasets.py              数据集版本描述符校验、用例装载与幂等登记
+│   ├── publish.py               报告校验 → 批次/逐例落库 → 原始报告对象 → 审计与基线
+│   ├── profiles.py              算法版本快照与摘要复用
+│   ├── baselines.py             基线锁定与历史留痕
+│   └── backfill.py              历史数据集、报告与基线的幂等回填
 ├── dataset/                     独立评测数据包：规格 → 确定性生成 → 幂等灌库（见其 README）
-├── datasets/                    数据集（随代码进 Git，可追溯、可 diff）
-│   ├── golden_adversarial.json  18 例对抗集（全自动规则判定）
-│   └── generated/latest/        独立包生成产物：180 例（27 类）+ 42 篇语料
+├── datasets/                    数据集（随代码进 Git，按版本目录只读留档、可追溯、可 diff）
+│   └── v1_20261123/             当前基准版本
+│       ├── dataset.json         版本描述符：套件、用例数、逐文件 sha256、可用口径与方式
+│       ├── agent/               Agent 基准用例、标准回放轨迹、定向反例与网页边界样本
+│       └── rag/                 180 例主集、42 篇语料、18 例对抗集与 manifest
+├── runtime_snapshot.py          运行时快照：数据集版本、Git 提交、Prompt 源摘要与算法版本
 ├── metrics.py                   指标实现（全项目唯一口径）
 ├── sync_phoenix.py              Arize Phoenix 平台双轨数据同步中枢
 ├── BENCHMARK.md                 口径唯一来源：指标定义·判定协议·报告 schema·数据契约
@@ -31,9 +44,9 @@ evals/
 
 | 层 | 评什么 | 判定方式 | 数据来源 |
 |---|---|---|---|
-| retrieval | 检索质量：Hit@1/3/8、Precision@k、Recall@k、nDCG@k、MRR、延迟 | 规则判定（命中预期标题集合） | `datasets/generated/latest/` 全量 |
-| adversarial | 安全：注入、越权、撤权、金丝雀泄漏 | 全自动规则判定（机读规则，零人工复核；协议见 BENCHMARK 第 8 节） | `datasets/golden_adversarial.json` |
-| behavior | 行为质量：有据率、切题度、正确拒答 | LLM-as-judge（faithful/relevant/abstain） | `datasets/generated/latest/` 全量按类 |
+| retrieval | 检索质量：Hit@1/3/8、Precision@k、Recall@k、nDCG@k、MRR、延迟 | 规则判定（命中预期标题集合） | `datasets/v1_20261123/rag/cases.jsonl` + `corpus_docs.jsonl` 全量 |
+| adversarial | 安全：注入、越权、撤权、金丝雀泄漏 | 全自动规则判定（机读规则，零人工复核；协议见 BENCHMARK 第 8 节） | `datasets/v1_20261123/rag/golden_adversarial.json` |
+| behavior | 行为质量：有据率、切题度、正确拒答 | LLM-as-judge（faithful/relevant/abstain） | `datasets/v1_20261123/rag/cases.jsonl` 全量按类 |
 
 behavior 层按类别覆盖三组专项：**robust**（同一事实的五种问法：同义/错字/缩写/口语/冗余）、
 **multi_turn**（同会话前置轮 + 判定最后一轮，指代消解与跨轮权限）、
@@ -54,13 +67,14 @@ make evals-agent-replay
 
 ### 查看工作台评测结果
 
-评测中心归档第 3 版 Agent 报告，早期格式需要重新运行评测生成报告。已部署的工作台需应用 `020_evaluation_center` 迁移。运维可在连接该工作台数据库的受信环境中指定租户和发起人，把已生成的报告归档。重复导入相同内容和归属的批次是幂等的。
+评测中心要求 Agent 报告为第 3 版（`schema_version=3`）及以上，早期格式需重新运行评测生成报告。部署时应用 `023_eval_center_v3` 迁移（版本库与 RAG/Agent 双体系字段由 `022_eval_profiles_and_rag` 引入）。入库统一走 [`evals/center`](center/cli.py)；历史报告与历史数据集首次上线用回填命令补齐，重复导入相同内容与归属的批次是幂等的。
 
 ```bash
-PYTHONPATH=src python -m evals.agent_eval.publish "$REPORT_PATH" --tenant-id "$TENANT_ID" --owner-id "$OWNER_ID"
+make evals-center-register                     # 登记 V1 数据集版本（幂等）
+make evals-center-publish REPORT="$REPORT_PATH"
 ```
 
-进入「运行分析 → 评测中心」，打开批次并按失败状态筛选用例，可查看期望的工具、实际工具步骤、判定维度及故障类型。对照基线需选择同模式、同判定器版本的另一批次。真实执行只有在关联到获准查看的业务任务时才可打开轨迹中台。合成回放展示各步观测，参数只显示字段名。CLI 生成新报告时可附加 `--publish "$TENANT_ID" "$OWNER_ID"` 同步归档，门禁失败的批次也可查看。
+进入「运行分析 → 评测中心」，可按数据集版本、算法版本、口径与门禁状态筛选批次，打开批次查看逐例预期、实际工具步骤、判定维度与故障类型，并下载原始报告。对照基线要求数据集版本、口径、执行方式与判定器版本一致；真实执行只有在关联到获准查看的业务任务时才可打开轨迹中台，合成回放展示各步观测，参数只显示字段名。CLI 生成新报告时可附加 `--publish "$TENANT_ID" "$OWNER_ID"` 同步归档，门禁失败的批次也可查看。完整版本模型、接口与 Worker 执行见下文「评测中心」。
 
 ### 复现合成正例与反例
 
@@ -151,7 +165,7 @@ evaluation 由服务端按 `(run, name)` upsert。`--dry-run` 只打印计划不
 
 - **门禁分数**：Phoenix 是观测层，不产出门禁分数。判定仍看 `evals/rag_eval/run.py` 的退出码
   与 `reports/*.json`，界面上的数字只供人看。
-- **对抗层（18 例）**：它跑的是 `evals/datasets/golden_adversarial.json`，id 形如
+- **对抗层（18 例）**：它跑的是 `evals/datasets/v1_20261123/rag/golden_adversarial.json`，id 形如
   `Z1` / `N1` / `C1`，与评估集 `case_id`（`GEN-T-*`）实测零交集。拍平进同一个
   Experiment 只会全部落进「未匹配」——看着同步了，实际一条都没写。要让它可见，
   需单独建一个对抗数据集，暂未做。
@@ -173,26 +187,98 @@ make evals-archive-check  # 逐条比对 md5（校验在 evals/baseline/ARCHIVE.
   抓到。不是防人，是防"某次手改了基线却没人发现"；
 - 归档**只增不改**：要新基线就跑批后追加一条，旧快照一律保留。
 
-## 评测中心入库
+## 评测中心
 
-真实调研评测与合成回放都能归档到工作台的「运行分析 → 评测中心」。入库入口只有 `evals/agent_eval/publish.py`：先校验报告版本与逐例计数，再登记数据集、写入批次指标与逐例判定。
+工作台「运行分析 → 评测中心」的写入链路只有一条：`evals/center`。数据集登记、报告发布、算法版本、基线与历史回填都从它进入；`evals/agent_eval/publish.py` 与 `evals/rag_eval/publish.py` 保留为兼容旧命令的薄入口，内部委托同一实现。读取走 `/api/evaluations/*`，写入仅限老板与系统管理员，并写 `eval_audit_logs` 留痕。
+
+### 版本模型
+
+| 维度 | 标识 | 规则 |
+| --- | --- | --- |
+| 数据集版本 | `v1_20261123`（目录名即版本号） | `evals/datasets/<version>/dataset.json` 登记套件、用例数、逐文件 sha256、可用口径（`scopes`）与执行方式（`modes`）；报告内嵌 `dataset.version` 与 `content_sha256`，入库逐项校验。任何文件内容变更必须新增版本目录并升级版本号，禁止原地覆盖历史版本。 |
+| 算法版本 | `algo-v1`、`algo-v2`…（`version_no` 递增） | `digest` = Git 提交 + 模型标识 + 检索参数 + Prompt 源文件 sha256 + 判定器摘要；同摘要自动复用已有版本，显式 `version_tag` 重复则拒绝；报告内嵌 `algorithm` 块优先于当前运行时快照。 |
+| 批次 | 报告自带 `run_id` | `eval_runs` 同时记录 `dataset_id`/`dataset_version`、`scope`、`mode` 与 `profile_id`，形成「数据集版本 × 算法版本 × 口径 × 执行方式」四元组。 |
+| 基线 | `baseline_id` | 绑定 `(eval_kind, dataset_version, scope, mode)` 的唯一 active；设置新基线时旧基线转历史保留，不清空。 |
+
+- 口径 `scope`：`full` / `quick` / `retrieval` / `adversarial` / `behavior`；执行方式 `mode`：`live` / `synthetic_trace_regrade`。触发评测时两者的取值必须落在数据集描述符登记的 `scopes`/`modes` 内。
+- 历史缺失内嵌快照的报告统一绑定当时运行时快照的 `algo-v1`，不冒充后来的算法版本。
+
+### V0 / V1 归属
+
+| 来源 | 归属规则 | 可比性 |
+| --- | --- | --- |
+| Agent 历史报告 | 报告 `dataset_sha256` 与 V1 用例目录指纹一致 → 归 `agent_research-v1_20261123`；无内嵌版本且摘要无法匹配 → 归历史归档数据集 | 只有归入 V1 的批次参与 V1 基线与趋势 |
+| RAG 历史报告 | 用例与语料内容已与 V1 不同，入库时 `--legacy` 归 `<suite>-v0_legacy`，`archived=true` | `comparable=false`，不得与 V1 批次直接比较 |
+| RAG 原始基线 | 保留为 `v0_legacy` 数据集版本上的 active 基线（20261117 快照），不迁入 V1 | V1 基线由 V1 批次重新锁定 |
+| 旧式 Agent 数据集 | 回填时把旧数据集下的批次迁入统一 V1 数据集并归档旧数据集行 | 批次内容与报告保持原样 |
+
+已归档数据集仍可读历史批次与原始报告，但不可再触发新评测。
+
+### 入库与回填命令
 
 ```bash
-make evals-agent-publish                               # 跑真实调研评测并把结果归档
-make evals-agent EVAL_ARGS="--case AGENT-WEB-003"      # 只跑指定用例
-make evals-publish                                     # 把历史报告批量补录
-make evals-publish PUBLISH_ARGS="--tenant-code mofa --owner-username owner"
+make evals-center-register                          # 登记当前 V1 数据集（幂等，首次登记写审计）
+make evals-center-publish REPORT="$REPORT_PATH"     # 发布单份报告
+make evals-center-publish PUBLISH_ARGS="--kind rag --reports-dir evals/reports"   # 批量发布
+make evals-center-backfill                          # 回填历史数据集、报告与基线（幂等）
+make evals-center-backfill BACKFILL_ARGS="--reset"  # 先清空评测中心写入表再回填（破坏性，仅显式使用）
+make evals-center-check                             # 数据集 sha / 基线唯一性 / 报告对象自检
 ```
 
-| 表或字段 | 落库内容 |
-| --- | --- |
-| `eval_datasets` | 数据集登记：名称、执行方式、已观测用例数、首次与最近入库时间 |
-| `eval_runs.pass_rate`、`mean_score` | 批次通过率与均分，由逐例状态和分数直接推导 |
-| `eval_runs.latency_p50_ms`、`latency_p95_ms` | 批次时延，由报告的秒级观测换算成毫秒 |
-| `eval_runs.total_tokens` | 已计量的提示与补全 Token 合计，未采集时为空 |
-| `eval_runs.judges` | 按判定器与维度汇总的通过、失败、不可判定计数 |
+- 单份报告发布成功后，最后一行输出 JSON 摘要（`run_id`、`created`、`gate_passed`、`eval_kind`、`dataset_id`、`dataset_version`、`scope`、`mode`、`report_sha256`）；Worker 解析该行回填任务结果，是必须保持的契约。
+- `publish` 可显式传 `--dataset-id`、`--dataset-version`、`--scope`、`--mode`、`--profile-id`；`--baseline` 在入库成功后把该批次锁定为对应键的 active 基线；`--legacy` 按历史版本归档（内容摘要不可验证）。
+- Agent 兼容旧入口：`PYTHONPATH=src python -m evals.agent_eval.publish "$REPORT_PATH" --tenant-id "$TENANT_ID" --owner-id "$OWNER_ID"`（也支持 `--reports-dir`、`--baseline`、`--profile-id`），内部委托 `evals/center`。
+- RAG 入口：`PYTHONPATH=src python -m evals.rag_eval.publish --report "$REPORT_PATH"`（或 `--reports-dir`），同样委托 `evals/center`。
+- 归属默认按 `ECOM_TENANT_CODE`（`mofa`）与登录名 `owner` 解析，也可显式传 `--tenant-id`/`--owner-id`。报告版本、数据集摘要或逐例计数校验失败的整份拒绝入库；重复入库返回 `created=false` 且不产生副作用。
+- `make evals-publish` / `make evals-agent-publish` 保留为 Agent 旧工作流快捷方式，实际入库同样经过 `evals/center`。
 
-读取接口：`GET /api/evaluations/runs` 支持 `dataset_id` 过滤；`GET /api/evaluations/datasets` 返回当前账号可见的数据集与批次汇总。归属按租户编码与账号名解析，也可显式传 `--tenant-id` 与 `--owner-id`。
+### 读取与写入接口
+
+| 方法与路径 | 用途 | 权限 |
+| --- | --- | --- |
+| `GET /api/evaluations/datasets` | 数据集版本目录，支持 `eval_kind`、`version`、`include_archived` | 登录账号，按可见发起人范围汇总 |
+| `GET /api/evaluations/datasets/{dataset_id}` | 数据集详情与用例清单，`cursor` 偏移分页，可按 `suite` 过滤 | 同上 |
+| `GET /api/evaluations/profiles` | 算法版本列表（`version_no`/`digest`/技术栈/检索参数/Prompt 快照）与批次聚合 | 登录账号 |
+| `POST /api/evaluations/profiles` | 登记算法版本，同摘要复用、同名标签冲突 `409` | 老板/系统管理员 |
+| `GET /api/evaluations/baselines` | active 与历史基线，支持 `eval_kind`、`dataset_version`、`include_history` | 登录账号 |
+| `POST /api/evaluations/baselines` | 把批次设为 active 基线（`{run_id, note}`），旧基线转历史 | 老板/系统管理员 |
+| `GET /api/evaluations/runs` | 批次列表，支持 `eval_kind`、`mode`、`scope`、`gate_passed`、`dataset_id`、`profile_id`、`algorithm_version`、`baseline_only`、`owner_id`，时间游标分页 | 登录账号，按可见发起人范围 |
+| `GET /api/evaluations/runs/{run_id}` | 批次详情：主指标、原始报告可用性、报告自带基线对比 | 同上 |
+| `GET /api/evaluations/runs/{run_id}/report` | 下载原始报告 JSON，响应头 `X-Report-Sha256` 供校验 | 同上，需有原始报告 |
+| `GET /api/evaluations/runs/{run_id}/layers` | RAG 分层指标（检索/对抗/行为/六项工程指标）；Agent 批次返回空集 | 同上 |
+| `GET /api/evaluations/runs/{run_id}/comparison` | 与指定 `baseline_id` 逐例配对比较，口径/方式/判定器不一致时 `422` | 同上 |
+| `GET /api/evaluations/runs/{run_id}/cases` | 逐例判定分页，支持 `status`、`suite`、`case_id` 游标 | 同上 |
+| `GET /api/evaluations/runs/{run_id}/cases/{case_id}` | 单例预期、实际步骤与判定理由；真实执行关联轨迹入口 | 同上 |
+| `GET /api/evaluations/metrics/trends` | 主指标时间序列、active 基线摘要与 `pass_rate_delta`、批次聚合 | 登录账号 |
+| `POST /api/evaluations/runs/trigger` | 触发真实评测，返回 `202` 与 `job_id`、`audit_id`；同租户已有排队/执行中的评测任务时 `409`（串行） | 老板/系统管理员 |
+| `GET /api/evaluations/jobs/{job_id}` | 评测任务状态、阶段进度、结果与错误 | 任务发起人或老板/系统管理员 |
+| `POST /api/evaluations/jobs/{job_id}/cancel` | 请求取消排队或执行中的评测任务 | 任务发起人或老板/系统管理员 |
+| `GET /api/evaluations/audit-logs` | 评测写入审计（可按 `action` 过滤），时间游标分页 | 老板/系统管理员 |
+
+读操作按租户与可见发起人范围裁剪；写操作复用老板/管理员窄写规则，并在 `eval_audit_logs` 记录 `register_dataset`、`register_profile`、`trigger_run`、`publish_run`、`set_baseline` 留痕。可比性判定要求数据集版本、`scope`、`mode` 与 `judges_sha256` 全部一致；归档数据集或缺摘要的历史批次一律标为不可比。
+
+### Worker 执行评测任务
+
+评测任务与资料解析、问答共用任务队列，`jobs.kind=evaluation`：
+
+1. `POST /runs/trigger` 先校验数据集未归档、类型/口径/执行方式与描述符一致、算法版本存在，且同租户没有排队或执行中的评测任务，然后创建任务并写 `trigger_run` 审计。
+2. Worker 认领后由 [`src/taozhi/application/evaluation/execution.py`](../src/taozhi/application/evaluation/execution.py) 启动运行器子进程：Agent 走 `python -m evals.agent_eval.runner --output-dir … --progress-jsonl …`（合成回放追加 `--dataset synthetic --replay …`）；RAG 按口径走 `python -m evals.rag_eval.run` 的 `--full`/`--quick`/`--retrieval-only`/`--adversarial-only`/`--behavior-only`，并带 `--report-path … --progress-jsonl …`。
+3. 运行器逐阶段追加进度 JSONL，Worker 尾随写入任务阶段、百分比并同步生成 `task_events` 进度事件；取消请求会终止整个子进程组（先 `SIGTERM` 后 `SIGKILL`），超时由 `ECOM_EVAL_TIMEOUT_SECONDS`（默认 3600 秒）约束。
+4. 运行结束定位报告文件，调用 `evals.center.cli publish` 完成校验、对象存储与落库；成功最后一行 JSON 回填 `job.result`，并写 `publish_run` 审计。
+5. 门禁失败不等于执行失败：`gate_passed=false` 的报告照常入库、任务按 `completed` 结束；只有运行器崩溃、缺报告、超时或入库校验失败才记 `failed`，取消记 `cancelled`。
+
+前置条件：生产 API 与 Worker 在线；RAG 评测还要求 `evals.dataset.seed` 已把语料、身份、权限与向量灌入生产库，且嵌入/检索服务可用；MinIO 不可用时告警并回退本地私有目录。运行日志在 `data/runtime/eval_jobs/<job_id>/runner.log`，进度在 `progress.jsonl`，前端通过 `GET /api/evaluations/jobs/{job_id}` 观测。
+
+### 原始报告与存储
+
+- PostgreSQL 存元数据与索引：数据集版本、算法版本、批次指标、逐例判定、基线、审计，以及 `eval_run_reports` 的报告对象位置与摘要。
+- 原始报告 JSON 存对象存储：`ECOM_MINIO_ENABLED=true` 时写 MinIO 私有桶，否则回退本机私有目录；对象键为 `evaluations/<eval_kind>/<dataset_id>/<run_id>/report.json`，存储层再按租户加前缀隔离。
+- 单份报告上限 20 MB；同一批次重复写入内容一致则跳过，不一致则拒绝覆盖；下载时重算 sha256，与登记值不符返回 `409`。
+- 数据集内容（`dataset.json` 描述符、用例、语料、回放与反例）随代码进 Git；运行产物留在 `reports/`（Git 忽略）。
+
+### 入库自检
+
+`make evals-center-check` 只读校验并以退出码表达结果：逐文件重算数据集描述符 sha256、核对登记用例数与用例集、检查 active 基线键唯一、基线批次存在、`eval_run_reports` 对象可读且摘要一致、批次是否缺少原始报告。发现问题逐条打印 `FAIL`，不自动修复。
 
 ## 评测台账留痕规范（增量追加，不覆盖历史）
 

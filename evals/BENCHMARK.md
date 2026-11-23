@@ -368,9 +368,16 @@ judge 未校准时，无法区分"系统答错了"和"judge 判错了"，第一�
 
 判定依据在合成条件下可用正反例验证。人工盲审与模型评审分别存放，双方在同一用例、观察记录和量表版本下给出标签后才能统计一致率。该一致率供标注与裁判校准使用。[执行与报告操作](README.md#agent-调研评测)
 
-### 13.1 批次指标与入库口径（2026-11-23 定）
+### 13.1 评测中心入库口径（Agent / RAG 双体系，2026-11-23 定）
 
-评测中心只接收通过 `evals/agent_eval/publish.py` 校验的报告。入库时由逐例结果推导批次指标，报告中的原始内容保持只读：
+评测中心只接收通过 `evals/center/publish.py` 校验的报告；Agent 与 RAG 的旧发布入口只是委托同一实现的外壳。入库按「数据集版本 + 算法版本」记账，报告原文保持只读：
+
+- **数据集版本**：`evals/datasets/<version>/dataset.json` 登记套件、用例数、逐文件 sha256 与可用口径/方式；报告内嵌 `dataset.version`/`content_sha256`，不一致即拒绝入库，内容变更必须升版本。
+- **算法版本**：`eval_profiles` 以 `version_no` 递增、`digest` = Git 提交 + 模型 + 检索参数 + Prompt 源 sha + 判定器摘要唯一标识；同摘要复用，显式标签不可覆盖。
+- **批次**：`eval_runs` 同时记录 `dataset_id`/`dataset_version`、`scope`、`mode` 与 `profile_id`。
+- **基线**：`eval_baselines` 按 `(eval_kind, dataset_version, scope, mode)` 保留唯一 active，旧基线转历史；历史缺失内嵌快照的报告绑定当时运行时快照的 `algo-v1`。
+
+#### Agent 批次指标
 
 | 字段 | 口径 |
 | --- | --- |
@@ -379,4 +386,29 @@ judge 未校准时，无法区分"系统答错了"和"judge 判错了"，第一�
 | `latency_p50_ms`、`latency_p95_ms` | 报告中的秒级时延换算为毫秒，未观测时为空 |
 | `total_tokens` | 已计量的提示与补全 Token 合计，两项都缺失时为空 |
 | `judges` | 按判定器与维度汇总的通过、失败、不可判定计数 |
-| 数据集登记 | `dataset_id` 由用例集摘要与执行方式生成；同摘要批次归入同一数据集，用例数取已观测最大值 |
+| 数据集登记 | 归入 `<suite>-<version>`（如 `agent_research-v1_20261123`）；同摘要批次归入同一版本，用例数取已观测最大值 |
+
+#### RAG 批次指标投影
+
+| 字段 | 口径（报告来源） |
+| --- | --- |
+| `pass_rate` | `behavior.pass_rate`；行为层缺失时回退 `adversarial.pass_rate` |
+| `latency_p50_ms`、`latency_p95_ms` | `six_metrics.latency_e2e_s.p50` / `.p95`，秒换算为毫秒 |
+| `total_tokens` | `six_metrics.token_cost.total_tokens`，未采集时为空 |
+| `judges_sha256` | 报告内嵌 `algorithm.judges_sha256`；缺失时为空 |
+| `gate_passed` | 复用运行器门禁：只有硬底线未达才算未通过，目标线差额不阻塞 |
+| 数据集登记 | 归入 `<suite>-<version>`；仅跑对抗层时套件为 `rag_adversarial`，其余为 `rag_core` |
+
+逐例结果按三层落库，`case_id` 带层前缀避免跨层重名，`case_sha256` 优先取用例定义摘要（缺失时按可核验字段兜底）：
+
+| 层 | `case_id` 前缀 | 状态与分数口径 |
+| --- | --- | --- |
+| 检索 | `retrieval:` | `hit@8` 与 `recall@8` 至少一项大于 0 记 `passed`，否则 `failed`；分数取 `recall@8`（缺失时取 `hit@8`） |
+| 行为 | `behavior:` | 报告逐例 `pass` 直接映射 `passed`/`failed`，分数 1/0 |
+| 对抗 | `adversarial:` | 报告逐例 `pass` 映射状态；未通过记 `hard_failure=true` |
+
+#### scope 推断与可比较条件
+
+- RAG `scope` 按报告实际出现的层推断：检索 + 行为 → `full`；只有行为 → `behavior`；检索 + 对抗 → `quick`；只有检索 → `retrieval`；只有对抗 → `adversarial`。显式 `--scope` 优先，触发任务时还须落在数据集描述符登记的 `scopes` 内。
+- 两个批次可比的条件：**数据集版本 + `scope` + `mode` + `judges_sha256` 全部一致**。V0 历史批次（`*-v0_legacy`）与归档数据集一律 `comparable=false`，不参与 V1 趋势与基线差值。
+- 门禁失败不是执行失败：`gate_passed=false` 的报告仍会入库，失败结论由批次指标与逐例判定表达；只有报告非法、缺报告或运行器异常才拒绝执行。

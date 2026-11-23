@@ -20,7 +20,7 @@
 
 三个特殊小集以类别承载，不另立维度：**timeliness**（文档改版后答案变化，V1/V2 同库共存）、
 **citation**（答案必须标来源）、**long_context**（答案分散在多节）；对抗层仍走
-`golden_adversarial.json`（18 条，机读判定）。
+`datasets/<version>/rag/golden_adversarial.json`（18 条，机读判定）。
 
 ## 目录结构
 
@@ -33,12 +33,12 @@ evals/dataset/
 │   ├── parsing.yaml       10 个 PDF/DOCX 解析夹具的版面特征（表格 / 页眉页脚 / 多页）
 │   └── templates.yaml     160 个模板（带五维标注）；槽位语法 {a.b.c}
 ├── schema.py              契约校验：必填字段、类别合法、五维合法、锚点可解析、覆盖下限
-├── generate.py            确定性生成器 → datasets/generated/latest/（唯一一份，版本由 Git 承担）
+├── generate.py            确定性生成器 → datasets/<version>/rag/（当前 v1_20261123；版本由 Git 承担）
 ├── parsing.py             PDF/DOCX 渲染 → 入库解析器读回
 └── seed.py                幂等灌库：组织/身份/文档/切片/向量/ES/授权 + 权限实测校验
 ```
 
-生成产物在 `evals/datasets/generated/`（进 Git）：`cases.jsonl`（180 例、27 类）、
+生成产物在 `evals/datasets/<version>/rag/`（当前 `v1_20261123/rag/`，进 Git）：`cases.jsonl`（180 例、27 类）、
 `corpus_docs.jsonl`（42 篇含文本、指引手册与 PDF/DOCX 解析夹具）、
 `manifest.json`（spec sha256 + 种子 + 类别与五维分布）。
 

@@ -64,3 +64,4 @@
 - **使用测评账号**：检索与行为层统一使用 `evals.dataset.seed` 建档的 `syn_*` 测评账号，不占用 `staff`/`leader`/`boss`/`admin` 业务账号。
 - **100% 实证**：文档中出现的一切分数、耗时、Token 数、失败条数必须直接源自 `evals/baseline.json` 或 `evals/reports/*.json` 的真实落盘输出。
 - **数据集版本目录规范**：三层评测集按 `evals/datasets/v1_<时间戳>/rag/`（后续迭代新增 `v2_<时间戳>/rag/`）分版本只读留存，每个目录须配备 `README.md` 说明样本规模与分层结构，严禁原地覆盖历史版本。
+- **入库入口唯一**：RAG 报告入库统一走 `python -m evals.rag_eval.publish`（内部委托 `evals/center`），按数据集版本 + `scope` + `mode` 落库；历史报告用 `--legacy` 归入 `v0_legacy`，不得另建写库入口。

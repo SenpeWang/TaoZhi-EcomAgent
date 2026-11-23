@@ -71,6 +71,43 @@ curl -fsS http://127.0.0.1:18555/health
 2. 准备目标租户及公司组织根，执行 `docker compose exec api python scripts/manage_database.py bootstrap-owner` 创建首位老板账号。
 3. 用测试身份核对资料的阅读与下载权限，提交知识问答并在轨迹中台检查执行节点。首次使用第三方 PDF 时核对页码和引用。 [问答验收](../knowledge-base/)
 
+## 评测中心与评测任务
+
+评测中心把数据集版本、算法版本、批次与基线落库，并可由工作台触发真实评测。数据与报告口径见 [评测体系](../../evals/README.md) 与 [评估基准](../../evals/BENCHMARK.md)，本节只讲部署与运维。
+
+### 运行前置
+
+| 条件 | 核对方式 |
+| --- | --- |
+| 数据库已迁移到 `023_eval_center_v3` | `migrate` 容器退出码为 `0`，`eval_run_reports`、`eval_baselines` 表存在 |
+| API 与 Worker 在线 | `curl -fsS http://127.0.0.1:18080/api/health`；Worker 日志有任务认领与租约心跳 |
+| RAG 夹具已灌库 | `PYTHONPATH=src .venv/bin/python -m evals.dataset.seed`（`--verify` 只校验），语料、身份、权限与向量需与生产库一致 |
+| 检索与向量服务可用 | `curl -fsS http://127.0.0.1:18555/health`；启用 Elasticsearch 时对应实例健康 |
+| 对象存储可用 | MinIO 正常时原始报告写私有桶；不可用会告警并回退本地私有目录，仅适合临时排障 |
+| Worker 镜像含评测代码 | 镜像包含 `evals/`、`src/taozhi/application/evaluation/` 与 023 迁移；升级后 `make rebuild` 重建 API 与 Worker |
+
+### 回填与自检
+
+```bash
+make evals-center-register                 # 登记 V1 数据集（幂等）
+make evals-center-backfill                 # 回填历史数据集、报告与基线（幂等）
+make evals-center-check                    # 数据集 sha、基线唯一性与报告对象自检
+```
+
+以上目标默认使用 `ECOM_MODE=production`，需在能连生产库与对象存储的主机执行。`BACKFILL_ARGS="--reset"` 会先清空评测中心写入表，属破坏性操作，只在明确重建时使用。
+
+### 触发与观测
+
+- 触发：`POST /api/evaluations/runs/trigger`，请求体含 `eval_kind`、`dataset_id`、`scope`、`mode`，可选 `profile_id`、`note`、`mark_baseline`。仅老板/系统管理员可调用，成功返回 `202` 与 `job_id`、`audit_id`；同租户已有排队或执行中的评测任务时返回 `409`。
+- 任务：创建后 `jobs.kind=evaluation`，Worker 启动运行器子进程并回报阶段进度；`GET /api/evaluations/jobs/{job_id}` 返回 `state`、`stage`、`progress`、`result` 与 `error`。
+- 日志：运行器输出在 `data/runtime/eval_jobs/<job_id>/runner.log`，进度 JSONL 在同目录 `progress.jsonl`；完成后报告经对象存储入库，批次号回填任务结果。
+- 取消与超时：`POST /api/evaluations/jobs/{job_id}/cancel` 终止评测子进程组；单次执行超过 `ECOM_EVAL_TIMEOUT_SECONDS`（默认 3600 秒）记为失败。评测任务按租户串行，不并发执行。
+- 审计：`GET /api/evaluations/audit-logs` 查询登记数据集/算法版本、触发、发布与设基线留痕，仅老板/系统管理员可读。
+
+`ECOM_GIT_SHA` 用于镜像内没有 `git` 命令时记录算法版本的代码提交，建议构建时注入当前提交；容器内能读取 Git 元数据时以实际 `HEAD` 为准。
+
+门禁未通过不等于任务失败：报告仍会入库并标记 `gate_passed=false`，任务按 `completed` 结束；只有运行器崩溃、超时、缺报告或报告校验失败才记 `failed`。
+
 ## 常见运维入口
 
 | 情况 | 查看位置 |
@@ -78,6 +115,7 @@ curl -fsS http://127.0.0.1:18555/health
 | 任务长期排队 | 查看 `docker compose ps -a` 的迁移状态，再查看 `docker compose logs --tail=100 worker` 的认领和续租记录。 |
 | 宿主机重启后服务未就绪 | 先看 `docker compose logs --tail=100 api` 的 `[启动闸门]` 等待项；数据库恢复期显示 `health: starting` 属正常。 |
 | 工具、模型 API 或资料核验失败 | 在任务的「执行轨迹」查节点、问题日志和 Trace ID，再关联进程日志。 |
+| 评测任务排队或失败 | 先查 `GET /api/evaluations/jobs/{job_id}` 的阶段与结果，再看 `data/runtime/eval_jobs/<job_id>/runner.log`；门禁未过是正常结果，不是任务失败。 |
 | 备份与恢复演练 | 数据库和本地私有附件可使用仓库备份脚本，MinIO 对象另行备份。 |
 
 [备份与恢复脚本](../../scripts/backup_database.py) · [数据库模型](../database/)
