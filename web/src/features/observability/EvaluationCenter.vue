@@ -1220,11 +1220,24 @@ function auditActionLabel(action: string): string {
  * @returns 摘要字符串
  */
 function formatTechStack(stack: Record<string, unknown>): string {
-  return (
-    Object.entries(stack)
-      .map(([key, value]) => `${key}=${String(value)}`)
-      .join(' · ') || '-'
-  )
+  const entries = Object.entries(stack)
+  if (!entries.length) return '-'
+  return entries.map(([key, value]) => `${key}=${summarizeStackValue(value)}`).join(' · ')
+}
+
+/**
+ * 把算法快照中的嵌套对象与数组压缩成可读摘要。
+ *
+ * @param value 快照字段值
+ * @returns 单行摘要文本
+ */
+function summarizeStackValue(value: unknown): string {
+  if (Array.isArray(value)) return `${value.length} 项`
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>)
+    return keys.length ? `{${keys.join('、')}}` : '{}'
+  }
+  return String(value)
 }
 
 /**
