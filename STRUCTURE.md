@@ -49,6 +49,7 @@
 | `evals/` | 评估模块（独立单元）：口径说明、数据集、指标、运行器、基线与报告 |
 | `evals/rag_eval/` | 企业知识库 RAG 三层评测运行器、质量门禁与实战测评记录（`测评记录.md`） |
 | `evals/agent_eval/` | 自治多智能体能力、工具调用、可观测评测体系与实战测评记录（`测评记录.md`） |
+| `evals/center/` | 评测中心入库编排：数据集登记、报告校验发布、算法版本、基线与历史回填（`cli.py` 提供 register/publish/baseline/backfill/check） |
 | `evals/baseline/` | 基线只读归档：一次全量跑批一份快照（文件名=开跑时间），只增不改 |
 | `evals/dataset/` | 独立评测数据包：规格、契约校验、确定性生成与幂等灌库 |
 | `evals/dataset/spec/` | 数据包规格（组织/夹具/语料/模板），唯一事实来源 |

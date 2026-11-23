@@ -7,6 +7,7 @@ from evals.agent_eval.cases import AGENT_BENCHMARK_CASES
 from evals.agent_eval.contracts import REPORT_SCHEMA_VERSION, expectation_notes
 from evals.agent_eval.publish import project_report
 from evals.agent_eval.reporting import fingerprint, group_metrics
+from evals.center import datasets
 
 
 def record():
@@ -46,13 +47,38 @@ def test_batch_metrics_and_judge_summary_are_projected():
     """批次指标与判定器汇总必须由逐例结果直接推导。"""
     run, rows = project_report(record())
     assert run["dataset_name"] == "agent_research"
-    assert run["dataset_id"] == "agent_research-live-" + ("a" * 64)[:12]
+    assert run["dataset_id"] == "agent_research-v0_legacy"
+    assert run["dataset_version"] == "v0_legacy" and run["dataset_archived"] is True
+    assert run["dataset_content_sha256"] == ""
     assert run["pass_rate"] == 0 and run["mean_score"] == 0
     assert run["total_tokens"] is None and run["latency_p50_ms"] is None
     assert run["judges"] == [
         {"judge": "ToolBoundaryJudge", "dimension": "governance", "passed": 0, "failed": 1, "unassessable": 0}
     ]
     assert rows[0]["status"] == "failed"
+
+
+def test_verified_dataset_version_binds_registered_projection():
+    """内嵌数据集描述符与内容摘要一致时归入 V1，并标记可比。"""
+    version = datasets.current_version()
+    definition = datasets.suite_definition(version, "agent_research")
+    raw = record()
+    raw.update(dataset_sha256=definition["content_sha256"],
+               dataset={"version": version, "suite": "agent_research",
+                        "content_sha256": definition["content_sha256"]})
+    run, _ = project_report(raw)
+    assert run["dataset_id"] == f"agent_research-{version}"
+    assert run["dataset_version"] == version and run["dataset_archived"] is False
+    assert run["dataset_content_sha256"] == definition["content_sha256"]
+    assert run["dataset_case_count"] == definition["case_count"]
+    assert len(run["cases_payload"]) == definition["case_count"]
+    assert run["metrics"]["provenance"]["comparable"] is True
+
+
+def test_unverified_dataset_is_archived_and_incomparable():
+    run, _ = project_report(record())
+    assert run["metrics"]["provenance"]["comparable"] is False
+    assert run["dataset_metadata"]["legacy"] is True
 
 
 def test_unobserved_steps_do_not_bind_a_synthetic_trace():
@@ -96,7 +122,7 @@ def test_incorrect_counts_old_versions_and_mixed_sources_are_rejected():
     with pytest.raises(ValueError, match="状态数量"):
         project_report({**raw, "metrics": {**raw["metrics"], "failed": 0, "unassessable": 1}})
     with pytest.raises(ValueError, match="版本"):
-        project_report({**raw, "schema_version": REPORT_SCHEMA_VERSION - 1})
+        project_report({**raw, "schema_version": 2})
     with pytest.raises(ValueError, match="合成回放来源"):
         project_report({**raw, "counterexamples_sha256": "3" * 64})
     with pytest.raises(ValueError, match="回放记录摘要"):
@@ -115,8 +141,8 @@ def test_provenance_retains_only_validated_source_digests():
     digests = {"transcript_sha256": "1" * 64, "counterexamples_sha256": "2" * 64, "model_config_sha256": "3" * 64}
     raw.update(digests, mode="synthetic_trace_regrade", raw_model_configuration="private-source")
     run, _ = project_report(raw)
-    assert run["metrics"]["provenance"] == digests
-    assert "provenance" not in project_report(record())[0]["metrics"]
+    assert run["metrics"]["provenance"] == {**digests, "comparable": False}
+    assert project_report(record())[0]["metrics"]["provenance"] == {"comparable": False}
 
 
 @pytest.mark.parametrize("key", ["transcript_sha256", "counterexamples_sha256", "model_config_sha256"])

@@ -6,7 +6,7 @@ from graphlib import CycleError, TopologicalSorter
 
 from taozhi.domain.research import ALL_RESEARCH_TOOLS
 
-REPORT_SCHEMA_VERSION = 3
+REPORT_SCHEMA_VERSION = 4
 
 CASE_FIELDS = {
     "id", "category", "name", "prompt", "keyword", "suite", "critical",

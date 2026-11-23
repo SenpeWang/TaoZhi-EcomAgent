@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 from statistics import mean
 import subprocess
@@ -12,6 +13,8 @@ import sys
 from uuid import uuid4
 
 from taozhi.domain.evaluation_comparison import pair_case_results
+
+from evals import runtime_snapshot
 
 from .cases import AGENT_BENCHMARK_CASES
 from .contracts import REPORT_SCHEMA_VERSION, validate_cases
@@ -112,8 +115,14 @@ def run_agent_evaluations(cases: list[dict], *,
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     run_id = f"{timestamp}_{uuid4().hex[:8]}"
     records = []
-    for case in cases:
+    for index, case in enumerate(cases, start=1):
         case_id = case["id"]
+        runtime_snapshot.write_progress(
+            os.environ.get("ECOM_EVAL_PROGRESS_FILE"),
+            stage=f"执行用例 {index}/{len(cases)}",
+            progress=5 + int(85 * index / len(cases)),
+            detail=case_id,
+        )
         if replay_file is None:
             result = harness.run(case)
         elif case_id in captured:
@@ -130,10 +139,14 @@ def run_agent_evaluations(cases: list[dict], *,
 
     metrics = group_metrics(records)
     scores = [r["score"] for r in records if r["score"] is not None]
+    dataset_meta = runtime_snapshot.dataset_meta("agent_research")
     report = {
         "schema_version": REPORT_SCHEMA_VERSION, "git_sha": git_sha(), "timestamp": timestamp, "run_id": run_id,
         "mode": mode, "dataset_sha256": fingerprint(sorted(dataset, key=lambda c: c["id"])),
-        "judges_sha256": judges_sha256,
+        "judges_sha256": judges_sha256, "scope": "full",
+        "dataset": dataset_meta,
+        "algorithm": runtime_snapshot.algorithm_snapshot(
+            judges_sha=judges_sha256, model_config_sha=source.get("model_config_sha256")),
         **source, "mean_score": round(mean(scores), 4) if scores else None,
         "metrics": metrics,
         "suites": {suite: group_metrics([r for r in records if r["suite"] == suite])
@@ -177,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--counterexamples", type=Path, metavar="PATH", help="在合成回放上重现指定反例，每次只改一项观测")
     parser.add_argument("--publish", nargs=2, metavar=("TENANT_ID", "OWNER_ID"), help="在已配置的工作台数据库归档本次结果")
     parser.add_argument("--output-dir", type=Path, help="报告目录，合成重评另存于其子目录")
+    parser.add_argument("--progress-jsonl", type=Path, help="运行进度 JSONL，供评测任务面板轮询")
     args = parser.parse_args(argv)
     if args.dataset and args.replay is None:
         parser.error("合成数据集需要 --replay 执行记录")
@@ -190,6 +204,10 @@ def main(argv: list[str] | None = None) -> int:
     if not selected:
         parser.error("未找到指定用例")
     try:
+        if args.progress_jsonl:
+            args.progress_jsonl.parent.mkdir(parents=True, exist_ok=True)
+            args.progress_jsonl.write_text("", encoding="utf-8")
+            os.environ["ECOM_EVAL_PROGRESS_FILE"] = str(args.progress_jsonl)
         report = run_agent_evaluations(selected, replay_file=args.replay,
                                        reports_dir=args.output_dir, catalog=AGENT_BENCHMARK_CASES,
                                        compare_file=args.compare, counterexamples_file=args.counterexamples,

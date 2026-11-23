@@ -1,4 +1,4 @@
-"""将受信运行器的 JSON 报告归档到工作台，账号归属由执行导入的运维人员指定。"""
+"""将受信运行器的 Agent JSON 报告归档到评测中心，账号归属由执行导入的运维人员指定。"""
 from __future__ import annotations
 
 import argparse
@@ -15,11 +15,11 @@ from .cases import AGENT_BENCHMARK_CASES
 from .contracts import REPORT_SCHEMA_VERSION, expectation_notes
 from .reporting import FAILURE_LABELS, TOOL_OUTCOMES, TOOL_PARAMETERS, fingerprint
 
-
 Identifier = Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{1,128}$")]
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Count = Annotated[int, Field(ge=0, strict=True)]
 DATASET_NAME = "agent_research"
+SUPPORTED_SCHEMA_VERSIONS = (3, REPORT_SCHEMA_VERSION)
 Status = Literal["passed", "failed", "unassessable"]
 
 
@@ -152,19 +152,6 @@ def _verdict(check: Verdict) -> dict:
     }
 
 
-def dataset_identifier(mode: str, digest: str) -> str:
-    """由执行方式与用例集摘要生成稳定的数据集编号。
-
-    Args:
-        mode: 报告执行方式。
-        digest: 用例集 SHA-256 摘要。
-
-    Returns:
-        用于评测中心数据集登记的唯一编号。
-    """
-    return f"{DATASET_NAME}-{mode}-{digest[:12]}"
-
-
 def judge_summary(case_results: list) -> list[dict]:
     """按判定器与维度汇总逐例结论，作为批次级指标入库。
 
@@ -189,11 +176,55 @@ def _milliseconds(seconds: float | None) -> int | None:
     return None if seconds is None else int(round(float(seconds) * 1000))
 
 
+def _apply_dataset(run: dict, fields: dict) -> None:
+    """把数据集登记字段写入待入库批次。"""
+    run.update({
+        "dataset_id": fields["dataset_id"],
+        "dataset_name": fields["name"],
+        "dataset_version": fields["version"],
+        "dataset_description": fields.get("description") or "",
+        "dataset_suite": fields.get("suite") or "",
+        "dataset_archived": bool(fields.get("archived")),
+        "dataset_content_sha256": fields.get("content_sha256") or "",
+        "dataset_case_count": int(fields.get("case_count") or 0),
+        "cases_payload": fields.get("cases_payload") or [],
+        "dataset_metadata": fields.get("metadata") or {},
+    })
+
+
+def _dataset_projection(raw: dict) -> tuple[dict, bool]:
+    """解析报告对应的数据集版本：内嵌描述符优先，其次按内容摘要反查，最后归历史版本。"""
+    from evals.center import datasets
+
+    block = raw.get("dataset")
+    if isinstance(block, dict) and block.get("version") and block.get("suite") == DATASET_NAME:
+        version = str(block["version"])
+        fields = datasets.dataset_fields(version, DATASET_NAME)
+        expected = fields["content_sha256"]
+        embedded = block.get("content_sha256")
+        if embedded and expected and embedded != expected:
+            raise ValueError(
+                f"报告内嵌数据集摘要与 {version} 描述符不一致：期望 {expected} 实际 {embedded}")
+        return fields, True
+    version = datasets.version_for_content_sha(DATASET_NAME, raw.get("dataset_sha256") or "")
+    if version:
+        return datasets.dataset_fields(version, DATASET_NAME), True
+    return datasets.legacy_dataset_fields("agent", DATASET_NAME, raw.get("git_sha"),
+                                          source=raw.get("mode") or "live"), False
+
+
 def project_report(raw: dict) -> tuple[dict, list[dict]]:
-    """校验汇总与明细，对所有可展示字段作投影，避免原始运行数据入库。"""
+    """校验汇总与明细，对所有可展示字段作投影，避免原始运行数据入库。
+
+    Args:
+        raw: 运行器产出的报告对象。
+
+    Returns:
+        (批次字段, 逐例判定列表)；批次字段包含数据集版本归属与可比性标记。
+    """
     report = AgentReport.model_validate(raw)
-    if report.schema_version != REPORT_SCHEMA_VERSION:
-        raise ValueError("评测报告版本无效")
+    if report.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+        raise ValueError(f"评测报告版本无效：{report.schema_version}")
     if report.mode == "synthetic_trace_regrade" and not report.transcript_sha256:
         raise ValueError("合成评测缺少回放记录摘要")
     if report.mode == "live" and (report.transcript_sha256 or report.counterexamples_sha256):
@@ -205,11 +236,12 @@ def project_report(raw: dict) -> tuple[dict, list[dict]]:
     if any(counts[status] != getattr(report.metrics, status) for status in ("passed", "failed", "unassessable")):
         raise ValueError("报告的各状态数量与逐例结果不一致")
     created_at = datetime.strptime(report.timestamp, "%Y%m%d_%H%M%S_%f").replace(tzinfo=timezone.utc)
+    dataset, comparable = _dataset_projection(raw)
     metrics = report.metrics.token_usage.model_dump(exclude={"call_coverage_among_known"})
     provenance = report.model_dump(include={"transcript_sha256", "counterexamples_sha256", "model_config_sha256"},
                                    exclude_none=True)
-    if provenance:
-        metrics["provenance"] = provenance
+    provenance["comparable"] = bool(comparable)
+    metrics["provenance"] = provenance
     ratios = {key: getattr(report.metrics, key) for key in ("required_tool_coverage", "parameter_accuracy", "reference_fact_coverage")}
     ratios["call_coverage_among_known"] = report.metrics.token_usage.call_coverage_among_known
     for key, ratio in ratios.items():
@@ -224,19 +256,22 @@ def project_report(raw: dict) -> tuple[dict, list[dict]]:
         None if prompt_tokens is None and completion_tokens is None else (prompt_tokens or 0) + (completion_tokens or 0)
     )
     selected = len(report.case_results)
+    scope = raw.get("scope") if raw.get("scope") in ("full", "quick", "retrieval", "adversarial", "behavior") else "full"
     run = {
         "run_id": report.run_id, "created_at": created_at, "mode": report.mode, "git_sha": report.git_sha,
+        "eval_kind": "agent",
         "report_sha256": fingerprint(raw), "dataset_sha256": report.dataset_sha256, "judges_sha256": report.judges_sha256,
         "baseline_sha256": report.comparison.baseline_sha256 if report.comparison else None, "metrics": metrics,
         "gate_passed": report.gate.passed, **{s + "_cases": counts[s] for s in ("passed", "failed", "unassessable")},
         "schema_version": report.schema_version, "dataset_name": DATASET_NAME,
-        "dataset_id": dataset_identifier(report.mode, report.dataset_sha256),
         "pass_rate": round(counts["passed"] / selected, 4) if selected else None,
         "mean_score": round(sum(scores) / len(scores), 4) if scores else None,
         "latency_p50_ms": _milliseconds(report.metrics.latency_p50_seconds),
         "latency_p95_ms": _milliseconds(report.metrics.latency_p95_seconds),
         "total_tokens": total_tokens, "judges": judge_summary(report.case_results),
+        "scope": scope,
     }
+    _apply_dataset(run, dataset)
     catalog = {(case["id"], fingerprint(case)): case for case in AGENT_BENCHMARK_CASES}
     rows = []
     for row in report.case_results:
@@ -257,14 +292,27 @@ def project_report(raw: dict) -> tuple[dict, list[dict]]:
     return run, rows
 
 
-def publish_report(path: Path, tenant_id: str, owner_id: str) -> bool:
-    from taozhi.infrastructure.persistence.evaluation_repo import insert_report
-    from taozhi.infrastructure.persistence.database import database_connection
+def publish_report(path: Path, tenant_id: str, owner_id: str, *, mark_baseline: bool = False,
+                   profile_id: str | None = None) -> bool:
+    """把 Agent 报告归档进评测中心，返回是否新建批次。
 
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    run, rows = project_report(raw)
-    with database_connection() as conn:
-        return insert_report(conn, tenant_id, owner_id, run, rows)
+    Args:
+        path: 报告文件路径。
+        tenant_id: 租户编号。
+        owner_id: 批次发起人编号。
+        mark_baseline: 是否在入库成功后锁定为基线。
+        profile_id: 显式指定的算法版本编号。
+
+    Returns:
+        新建批次返回 True，已存在返回 False。
+    """
+    from evals.center import publish as center_publish
+
+    result = center_publish.publish_report(
+        Path(path), tenant_id=tenant_id, owner_id=owner_id, kind="agent",
+        profile_id=profile_id, mark_baseline=mark_baseline,
+    )
+    return bool(result["created"])
 
 
 def resolve_owner(tenant_code: str, owner_username: str) -> tuple[str, str]:
@@ -276,26 +324,15 @@ def resolve_owner(tenant_code: str, owner_username: str) -> tuple[str, str]:
 
     Returns:
         (租户编号, 发起人编号)。
-
-    Raises:
-        ValueError: 租户或账号不存在时抛出。
     """
-    from taozhi.infrastructure.persistence.database import database_connection, fetch_one
+    from evals.center.publish import resolve_owner as resolve
 
-    with database_connection() as conn:
-        tenant = fetch_one(conn, "SELECT id FROM tenants WHERE code=%s", (tenant_code,))
-        if tenant is None:
-            raise ValueError(f"租户编码不存在：{tenant_code}")
-        user = fetch_one(conn, "SELECT id FROM users WHERE tenant_id=%s AND username=%s",
-                         (tenant["id"], owner_username))
-        if user is None:
-            raise ValueError(f"发起人账号不存在：{owner_username}")
-    return tenant["id"], user["id"]
+    return resolve(tenant_code, owner_username)
 
 
 def pending_reports(reports_dir: Path) -> list[Path]:
     """列出目录下尚未归档的批次报告，按时间升序。"""
-    return sorted(path for path in reports_dir.glob("agent_eval_report_*.json") if path.is_file())
+    return sorted(path for path in Path(reports_dir).glob("agent_eval_report_*.json") if path.is_file())
 
 
 def main() -> None:
@@ -306,6 +343,8 @@ def main() -> None:
     parser.add_argument("--owner-id")
     parser.add_argument("--tenant-code", help="按租户编码解析归属，与 --owner-username 一起使用")
     parser.add_argument("--owner-username", default="owner")
+    parser.add_argument("--profile-id", help="显式指定算法版本编号")
+    parser.add_argument("--baseline", action="store_true", help="入库后锁定为基线")
     args = parser.parse_args()
     if args.report is None and args.reports_dir is None:
         parser.error("请指定报告文件或 --reports-dir")
@@ -313,15 +352,17 @@ def main() -> None:
         if args.tenant_id and args.owner_id:
             tenant_id, owner_id = args.tenant_id, args.owner_id
         else:
-            tenant_id, owner_id = resolve_owner(args.tenant_code or __import__("os").environ.get("ECOM_TENANT_CODE", "mofa"),
-                                                args.owner_username)
+            tenant_id, owner_id = resolve_owner(
+                args.tenant_code or __import__("os").environ.get("ECOM_TENANT_CODE", "mofa"),
+                args.owner_username)
         paths = [args.report] if args.report is not None else pending_reports(args.reports_dir)
     except ValueError as exc:
         parser.exit(2, f"归属解析失败（{exc}）\n")
     created = duplicated = skipped = failed = 0
     for path in paths:
         try:
-            if publish_report(path, tenant_id, owner_id):
+            if publish_report(path, tenant_id, owner_id, mark_baseline=args.baseline,
+                              profile_id=args.profile_id):
                 created += 1
                 print(f"已入库 {path.name}")
             else:

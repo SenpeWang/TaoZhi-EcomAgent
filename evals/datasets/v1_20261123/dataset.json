@@ -1,0 +1,49 @@
+{
+  "version": "v1_20261123",
+  "created_at": "2026-11-23",
+  "notes": "V1 基准评测数据集：Agent 调研基准与 RAG 三层评测集。内容以本描述符登记的文件 sha256 为准，任何文件内容变更必须新增版本目录并升级版本号；批次报告内嵌 version 与 content_sha256，入库时逐项校验。",
+  "suites": {
+    "agent_research": {
+      "eval_kind": "agent",
+      "name": "agent_research",
+      "description": "Agent 调研基准：10 例内联 live 用例 + 12 例合成回放用例，附带反例集与回放观测。",
+      "case_count": 22,
+      "content_sha256": "c91b8a82ffce9b9604c3d9a9adc4dd06de9d823dd4984216cf0297a3fc993812",
+      "catalog": "evals.agent_eval.cases:AGENT_BENCHMARK_CASES",
+      "files": {
+        "agent/research_cases.json": "358592554bf361cec1f419a26d2e59e3426d2f490b67c30f991cceaf907419d6",
+        "agent/research_counterexamples.json": "08691e6d70141e425bd3de07adb7d6677ed73f5e98ad826e19119c17d19a70a6",
+        "agent/research_replay.json": "0e0baf60b06482809a0949d2f922546b4e5cc8ef0bcada3a7b2fabfc0b95f483",
+        "agent/web_replay.json": "eea5a4d31bd2c0e8051e3679df9f71bf114f4443d0d651caa64c64b6aed9dab9"
+      },
+      "modes": ["live", "synthetic_trace_regrade"],
+      "scopes": ["full"]
+    },
+    "rag_core": {
+      "eval_kind": "rag",
+      "name": "rag_core",
+      "description": "RAG 三层评测主集：180 例问答题 + 42 篇语料夹具（检索、生成行为两层）。",
+      "case_count": 180,
+      "content_sha256": "226b70b81976ed7e0eef777300322ed7604c4c869dc8610b7019202719da18a7",
+      "files": {
+        "rag/cases.jsonl": "226b70b81976ed7e0eef777300322ed7604c4c869dc8610b7019202719da18a7",
+        "rag/corpus_docs.jsonl": "c900de49d196cb85c9dd414f56f3812fbd2346e9d1b3d78798f849895f7a38fb",
+        "rag/manifest.json": "fe68830ecd79ee9c78338dd7d3ebc77e45e71a1b2d923269d097e5ee24a8f99d"
+      },
+      "modes": ["live"],
+      "scopes": ["full", "quick", "retrieval", "behavior"]
+    },
+    "rag_adversarial": {
+      "eval_kind": "rag",
+      "name": "rag_adversarial",
+      "description": "RAG 对抗层：18 例注入、越权、撤权与金丝雀泄漏规则题。",
+      "case_count": 18,
+      "content_sha256": "46524e60b17d088d0e03de8d1e539c35f6d47d2549ddd74f35e1a1974f9ee6b7",
+      "files": {
+        "rag/golden_adversarial.json": "46524e60b17d088d0e03de8d1e539c35f6d47d2549ddd74f35e1a1974f9ee6b7"
+      },
+      "modes": ["live"],
+      "scopes": ["adversarial", "full", "quick"]
+    }
+  }
+}

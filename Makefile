@@ -5,10 +5,13 @@ IMPORT_ARGS ?=
 EVAL_ARGS ?=
 REPORTS_DIR ?= $(PROJECT_ROOT)/evals/reports/agent_eval
 PUBLISH_ARGS ?=
+REPORT ?=
+BACKFILL_ARGS ?=
+CENTER_VERSION ?= v1_20261123
 TEST_ENV := ECOM_MODE=test PYTHONPATH=$(PROJECT_ROOT)/src
 COMPOSE := docker compose
 
-.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check
+.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check evals-center-register evals-center-publish evals-center-backfill evals-center-check
 
 COMMIT_BASE ?= origin/main
 COMMIT_HEAD ?= HEAD
@@ -37,6 +40,10 @@ help:
 	@echo "make evals-follow   跟随评估进度逐例推 Phoenix（另开一个终端，跑批时用）"
 	@echo "make evals-archive  把当前 baseline.json 归档成只读快照（进 Git 留档）"
 	@echo "make evals-archive-check  校验归档快照与登记一致（不符退出码 1）"
+	@echo "make evals-center-register  登记 V1 数据集版本（生产库）"
+	@echo "make evals-center-publish   发布报告入库：REPORT=路径 或 PUBLISH_ARGS=\"--kind agent --reports-dir ...\""
+	@echo "make evals-center-backfill  回填历史评测数据（BACKFILL_ARGS，默认不带 --reset）"
+	@echo "make evals-center-check     校验数据集摘要、基线唯一与报告对象一致性"
 	@echo "make check          检查 Python 语法"
 	@echo "make build-web      构建前端生产包"
 	@echo "make clean          清除项目 Python 与 pytest 缓存"
@@ -132,6 +139,18 @@ evals-archive:
 
 evals-archive-check:
 	$(PYTHON) scripts/archive_baseline.py check
+
+evals-center-register:
+	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli register --version $(CENTER_VERSION)
+
+evals-center-publish:
+	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli publish $(if $(REPORT),--report $(REPORT),) $(PUBLISH_ARGS)
+
+evals-center-backfill:
+	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli backfill $(BACKFILL_ARGS)
+
+evals-center-check:
+	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli check
 
 evals-pipeline:
 	@$(MAKE) --no-print-directory evals-full || { code=$$?; \

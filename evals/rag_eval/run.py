@@ -26,6 +26,7 @@
 """
 import argparse
 from contextlib import closing
+import hashlib
 import json
 import os
 import re
@@ -39,14 +40,16 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "evals"))
 sys.path.insert(0, str(ROOT))
 EVALS = ROOT / "evals"
-OUT_DIR = EVALS / "reports"
+OUT_DIR = Path(os.environ.get("ECOM_EVAL_REPORT_DIR") or (EVALS / "reports"))
 CASES = EVALS / "datasets/v1_20261123/rag/cases.jsonl"
 GOLDEN = EVALS / "datasets/v1_20261123/rag/golden_adversarial.json"
 BASELINE = EVALS / "baseline.json"
 MANIFEST = EVALS / "datasets/v1_20261123/rag/manifest.json"
 LIVE = OUT_DIR / "live.jsonl"
+PROGRESS_FILE = os.environ.get("ECOM_EVAL_PROGRESS_FILE") or ""
 
 import metrics
+from evals import runtime_snapshot
 
 import httpx
 
@@ -268,6 +271,10 @@ def live_emit(rec: dict) -> None:
         print(f"⚠ 实时进度写入失败（不影响评测）：{type(exc).__name__}: {exc}", flush=True)
 
 
+
+def report_progress(stage: str, progress: int, detail: str = "") -> None:
+    """把阶段进度写入任务进度文件，供评测任务面板轮询；未启用时不产生任何副作用。"""
+    runtime_snapshot.write_progress(PROGRESS_FILE, stage=stage, progress=progress, detail=detail)
 
 EVIDENCE_QUOTE_CHARS = 400
 
@@ -1473,6 +1480,9 @@ def main():
     ap.add_argument("--full", action="store_true", help="三层全跑（无特殊说明时的默认行为）")
     ap.add_argument("--behavior-only", action="store_true", help="只重跑行为层")
     ap.add_argument("--adversarial-only", action="store_true", help="只重跑对抗层（规则判定）")
+    ap.add_argument("--retrieval-only", action="store_true", help="只重跑检索层")
+    ap.add_argument("--report-path", type=Path, help="报告输出路径，默认写入报告目录的时间戳文件")
+    ap.add_argument("--progress-jsonl", type=Path, help="阶段进度 JSONL，供评测任务面板轮询")
     ap.add_argument("--only", default="", help="只跑指定类别，逗号分隔（冒烟/定位用）")
     ap.add_argument("--repeat", type=int, default=1, help="多轮重复次数，>1 时计算稳定性 pass^k")
     ap.add_argument("--concurrency", type=int, default=1, help="HTTP 用例并发数，>1 时测试并发吞吐 QPS 与 p95 退化")
@@ -1488,6 +1498,12 @@ def main():
     ap.add_argument("--gate", action="store_true",
                     help="按生产阈值校验，未达标退出码 1（供 CI 阻塞合并）")
     args = ap.parse_args()
+    if args.progress_jsonl:
+        args.progress_jsonl.parent.mkdir(parents=True, exist_ok=True)
+        args.progress_jsonl.write_text("", encoding="utf-8")
+        os.environ["ECOM_EVAL_PROGRESS_FILE"] = str(args.progress_jsonl)
+    global PROGRESS_FILE
+    PROGRESS_FILE = os.environ.get("ECOM_EVAL_PROGRESS_FILE") or ""
     global ONLY_CATS, REPEAT_COUNT, CONCURRENCY, CORPUS_SCOPE, API_BASE_URL, SLA_SIMPLE_S, SLA_COMPLEX_S, SLA_ADVERSARIAL_S
     ONLY_CATS = {x.strip() for x in (args.only or "").split(",") if x.strip()}
     REPEAT_COUNT = max(1, int(args.repeat or 1))
@@ -1500,34 +1516,65 @@ def main():
         SLA_COMPLEX_S = float(args.sla_complex_s)
     if args.sla_adversarial_s is not None:
         SLA_ADVERSARIAL_S = float(args.sla_adversarial_s)
+    report_progress("准备评测环境", 5)
     need_emb = not args.adversarial_only
     if not args.skip_preflight:
         preflight_check(need_http=True, need_embedding=need_emb)
+    scope = ("adversarial" if args.adversarial_only else "behavior" if args.behavior_only
+             else "retrieval" if args.retrieval_only else "quick" if args.quick else "full")
+    suite = "rag_adversarial" if scope == "adversarial" else "rag_core"
+    judges_sha = hashlib.sha256(
+        (ROOT / "evals/rag_eval/run.py").read_bytes() + (ROOT / "evals/metrics.py").read_bytes()
+    ).hexdigest()
     result = {
+        "schema_version": 1,
         "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "git": git_sha(),
+        "scope": scope,
+        "dataset": runtime_snapshot.dataset_meta(suite),
+        "algorithm": runtime_snapshot.algorithm_snapshot(judges_sha=judges_sha),
         "config": {"repeat": REPEAT_COUNT, "concurrency": CONCURRENCY, "corpus_scope": CORPUS_SCOPE},
     }
     live_start(result["at"], result["git"])
     try:
-        if args.adversarial_only:
-            result["adversarial"] = phase_adversarial()
-        elif args.behavior_only:
-            result["behavior"] = phase_behavior()
-        else:
+        if args.retrieval_only:
+            report_progress("检索层", 10)
             result["retrieval"] = phase_retrieval()
+            report_progress("检索层完成", 35)
+        elif args.adversarial_only:
+            report_progress("对抗层", 40)
             result["adversarial"] = phase_adversarial()
+            report_progress("对抗层完成", 60)
+        elif args.behavior_only:
+            report_progress("行为层", 65)
+            result["behavior"] = phase_behavior()
+            report_progress("行为层完成", 85)
+        else:
+            report_progress("检索层", 10)
+            result["retrieval"] = phase_retrieval()
+            report_progress("检索层完成", 30)
+            report_progress("对抗层", 35)
+            result["adversarial"] = phase_adversarial()
+            report_progress("对抗层完成", 55)
             if args.full or not args.quick:
+                report_progress("行为层", 60)
                 result["behavior"] = phase_behavior()
+                report_progress("行为层完成", 85)
     finally:
         live_emit({"type": "end", "at": result["at"]})
     six = six_metrics(result)
     result["six_metrics"] = six
     print_six(six)
+    report_progress("汇总六项指标", 90)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    path = OUT_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{result['git']}.json"
+    if args.report_path:
+        path = Path(args.report_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        path = OUT_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{result['git']}.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"结果已存档: {path}")
+    report_progress("报告已存档", 95)
     from evals.history_log import append_rag_eval_record
 
     log_file = append_rag_eval_record(result, path)
