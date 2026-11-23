@@ -1,10 +1,11 @@
 """工作台评测报告的只读投影，排除提示词、工具参数值和模型原文。"""
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
+EvaluationKind = Literal["agent", "rag"]
 EvaluationMode = Literal["live", "synthetic_trace_regrade"]
 EvaluationStatus = Literal["passed", "failed", "unassessable"]
 
@@ -36,6 +37,9 @@ class EvaluationRun(BaseModel):
     unassessable_cases: int
     dataset_id: str | None = None
     dataset_name: str | None = None
+    eval_kind: EvaluationKind = "agent"
+    profile_id: str | None = None
+    profile_version_tag: str | None = None
     pass_rate: float | None = None
     mean_score: float | None = None
     latency_p50_ms: int | None = None
@@ -47,17 +51,69 @@ class EvaluationRun(BaseModel):
 class EvaluationDataset(BaseModel):
     dataset_id: str
     name: str
+    eval_kind: EvaluationKind = "agent"
+    version: str = "v1"
+    description: str = ""
     source: EvaluationMode
     case_count: int
-    batch_count: int
-    last_run_at: datetime
-    avg_pass_rate: float | None
-    best_pass_rate: float | None
-    passed_batches: int
+    batch_count: int = 0
+    last_run_at: datetime | None = None
+    avg_pass_rate: float | None = None
+    best_pass_rate: float | None = None
+    passed_batches: int = 0
+
+
+class EvaluationDatasetDetail(BaseModel):
+    dataset: EvaluationDataset
+    cases: list[dict[str, Any]]
 
 
 class EvaluationDatasetPage(BaseModel):
     items: list[EvaluationDataset]
+
+
+class EvaluationProfile(BaseModel):
+    profile_id: str
+    eval_kind: EvaluationKind
+    version_tag: str
+    tech_stack: dict[str, Any]
+    retrieval_params: dict[str, Any]
+    prompt_snapshots: dict[str, Any]
+    prompt_sha256: str
+    notes: str
+    created_by: str
+    created_at: datetime
+    batch_count: int = 0
+    avg_pass_rate: float | None = None
+    avg_mean_score: float | None = None
+    avg_latency_p50_ms: float | None = None
+    avg_tokens: float | None = None
+
+
+class EvaluationProfilePage(BaseModel):
+    items: list[EvaluationProfile]
+
+
+class CreateEvalProfileInput(BaseModel):
+    eval_kind: EvaluationKind
+    version_tag: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    tech_stack: dict[str, Any] = Field(default_factory=dict)
+    retrieval_params: dict[str, Any] = Field(default_factory=dict)
+    prompt_snapshots: dict[str, Any] = Field(default_factory=dict)
+    notes: str = Field(default="", max_length=1000)
+
+
+class TriggerEvaluationInput(BaseModel):
+    eval_kind: EvaluationKind
+    dataset_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.-]+$")
+    profile_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.-]+$")
+    note: str = Field(default="", max_length=500)
+
+
+class EvaluationTriggerReceipt(BaseModel):
+    audit_id: str
+    run_id: str | None = None
+    status: str
 
 
 class EvaluationRunPage(BaseModel):
