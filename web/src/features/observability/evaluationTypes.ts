@@ -1,6 +1,12 @@
 export type EvaluationKind = 'agent' | 'rag'
 export type EvaluationMode = 'live' | 'synthetic_trace_regrade'
 export type EvaluationStatus = 'passed' | 'failed' | 'unassessable'
+export type EvaluationScope = 'full' | 'quick' | 'retrieval' | 'adversarial' | 'behavior'
+export type EvaluationJobState =
+  'queued' | 'running' | 'review' | 'completed' | 'cancelled' | 'failed' | 'rejected' | 'legacy'
+export type EvaluationAuditAction =
+  'register_dataset' | 'register_profile' | 'trigger_run' | 'publish_run' | 'set_baseline'
+export type EvaluationLayerName = 'retrieval' | 'adversarial' | 'behavior' | 'six_metrics'
 
 export interface EvaluationJudgeSummary {
   judge: string
@@ -16,6 +22,7 @@ export interface EvaluationRun {
   owner_name: string
   created_at: string
   mode: EvaluationMode
+  scope: EvaluationScope
   git_sha: string | null
   dataset_sha256: string
   judges_sha256: string
@@ -29,9 +36,14 @@ export interface EvaluationRun {
   unassessable_cases: number
   dataset_id: string | null
   dataset_name: string | null
-  eval_kind?: EvaluationKind
-  profile_id?: string | null
-  profile_version_tag?: string | null
+  dataset_version: string | null
+  eval_kind: EvaluationKind
+  profile_id: string | null
+  profile_version_tag: string | null
+  profile_version_no: number | null
+  is_baseline: boolean
+  report_available: boolean
+  comparable: boolean
   pass_rate: number | null
   mean_score: number | null
   latency_p50_ms: number | null
@@ -47,6 +59,10 @@ export interface EvaluationDataset {
   version: string
   description: string
   source: EvaluationMode
+  suite: string
+  archived: boolean
+  content_sha256: string
+  metadata: Record<string, unknown>
   case_count: number
   batch_count: number
   last_run_at: string | null
@@ -58,12 +74,18 @@ export interface EvaluationDataset {
 export interface EvaluationDatasetDetail {
   dataset: EvaluationDataset
   cases: Record<string, unknown>[]
+  next_cursor: string | null
+  total_cases: number
 }
 
 export interface EvaluationProfile {
   profile_id: string
   eval_kind: EvaluationKind
+  version_no: number
   version_tag: string
+  digest: string
+  git_sha: string | null
+  dataset_version: string
   tech_stack: Record<string, unknown>
   retrieval_params: Record<string, unknown>
   prompt_snapshots: Record<string, unknown>
@@ -71,6 +93,7 @@ export interface EvaluationProfile {
   notes: string
   created_by: string
   created_at: string
+  created: boolean
   batch_count: number
   avg_pass_rate: number | null
   avg_mean_score: number | null
@@ -84,6 +107,8 @@ export interface CreateEvalProfilePayload {
   tech_stack: Record<string, unknown>
   retrieval_params: Record<string, unknown>
   prompt_snapshots: Record<string, unknown>
+  git_sha?: string | null
+  dataset_version?: string
   notes: string
 }
 
@@ -91,13 +116,120 @@ export interface TriggerEvaluationPayload {
   eval_kind: EvaluationKind
   dataset_id: string
   profile_id: string
+  scope: EvaluationScope
+  mode: EvaluationMode
   note: string
+  mark_baseline: boolean
 }
 
 export interface EvaluationTriggerReceipt {
+  job_id: string
   audit_id: string
-  run_id: string | null
-  status: string
+  status: EvaluationJobState
+}
+
+export interface EvaluationBaseline {
+  baseline_id: string
+  eval_kind: EvaluationKind
+  dataset_id: string
+  dataset_version: string
+  scope: EvaluationScope
+  mode: EvaluationMode
+  run_id: string
+  note: string
+  created_by: string
+  created_at: string
+  active: boolean
+  superseded_at: string | null
+  run_created_at: string | null
+  run_gate_passed: boolean | null
+  run_pass_rate: number | null
+  run_git_sha: string | null
+  run_report_sha256: string | null
+  algorithm_version: string | null
+}
+
+export interface SetBaselinePayload {
+  run_id: string
+  note: string
+}
+
+export interface EvaluationTrendItem {
+  run_id: string
+  created_at: string
+  mode: EvaluationMode
+  scope: EvaluationScope
+  dataset_version: string | null
+  algorithm_version: string | null
+  gate_passed: boolean
+  pass_rate: number | null
+  mean_score: number | null
+  latency_p50_ms: number | null
+  latency_p95_ms: number | null
+  total_tokens: number | null
+  is_baseline: boolean
+  comparable: boolean
+  pass_rate_delta: number | null
+}
+
+export interface EvaluationTrendAggregate {
+  batches: number
+  avg_pass_rate: number | null
+  best_pass_rate: number | null
+  latest_pass_rate: number | null
+}
+
+export interface EvaluationBaselineSummary {
+  baseline_id: string
+  run_id: string
+  note: string
+  created_at: string | null
+  pass_rate: number | null
+  gate_passed: boolean | null
+  report_sha256: string | null
+}
+
+export interface EvaluationTrends {
+  dataset_version: string | null
+  scope: EvaluationScope | null
+  mode: EvaluationMode | null
+  items: EvaluationTrendItem[]
+  aggregate: EvaluationTrendAggregate
+  baseline: EvaluationBaselineSummary | null
+}
+
+export interface EvaluationLayers {
+  run_id: string
+  eval_kind: EvaluationKind
+  layers: Partial<Record<EvaluationLayerName, Record<string, unknown>>>
+}
+
+export interface EvaluationJob {
+  job_id: string
+  state: EvaluationJobState
+  stage: string
+  progress: number
+  result: Record<string, unknown> | null
+  error: string
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface EvaluationAuditLog {
+  audit_id: string
+  tenant_id: string
+  actor_id: string
+  action: EvaluationAuditAction
+  target_id: string
+  git_sha: string | null
+  summary: Record<string, unknown>
+  created_at: string
+}
+
+export interface EvaluationAuditPage {
+  items: EvaluationAuditLog[]
+  next_cursor: string | null
 }
 
 export interface EvaluationCase {
@@ -209,12 +341,41 @@ export function formatEvaluationLatency(value: number | null): string {
 }
 
 /**
+ * 展示相对基线的通过率差值，正负号与百分点后缀便于横向比较。
+ * @param value - 通过率差值（0 到 1 之间的小数）。
+ * @returns 带符号的百分点文本或缺失提示。
+ */
+export function formatEvaluationDelta(value: number | null): string {
+  if (value === null) return '—'
+  return (value > 0 ? '+' : '') + (value * 100).toFixed(1) + 'pp'
+}
+
+/**
+ * 按通过率差值的正负选择展示色调。
+ * @param value - 通过率差值（0 到 1 之间的小数）。
+ * @returns 上调、下调或持平的样式类名。
+ */
+export function evaluationDeltaTone(value: number | null): string {
+  if (value === null || value === 0) return 'evaluation-delta-flat'
+  return value > 0 ? 'evaluation-delta-up' : 'evaluation-delta-down'
+}
+
+/**
  * 展示数据集执行方式的中文名称。
  * @param mode - 报告执行方式。
  * @returns 面向工作台用户的执行方式名称。
  */
 export function evaluationModeLabel(mode: EvaluationMode): string {
   return evaluationModes[mode]
+}
+
+/**
+ * 展示评测口径的中文名称。
+ * @param scope - 评测口径编码。
+ * @returns 面向工作台用户的口径名称。
+ */
+export function evaluationScopeLabel(scope: EvaluationScope): string {
+  return evaluationScopes[scope]
 }
 
 /**
@@ -230,6 +391,13 @@ export function formatEvaluationRatio(ratio: EvaluationRatio): string {
 export const evaluationModes = {
   live: '真实调研',
   synthetic_trace_regrade: '合成记录（回放与反例）',
+}
+export const evaluationScopes = {
+  full: '全量',
+  quick: '快速',
+  retrieval: '检索层',
+  adversarial: '对抗层',
+  behavior: '行为层',
 }
 export const evaluationStatuses = { passed: '通过', failed: '失败', unassessable: '不可判定' }
 export const evaluationTags = { passed: 'success', failed: 'danger', unassessable: 'info' } as const
@@ -260,6 +428,13 @@ export const evaluationToolStatuses: Record<string, string> = {
   error: '错误',
   timeout: '超时',
   cancelled: '取消',
+}
+export const evaluationAuditActions: Record<EvaluationAuditAction, string> = {
+  register_dataset: '登记数据集',
+  register_profile: '登记算法版本',
+  trigger_run: '触发评测',
+  publish_run: '入库批次',
+  set_baseline: '设置基线',
 }
 
 /**

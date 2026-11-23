@@ -184,6 +184,7 @@
           :key="`${user.id}:${user.role_level}`"
           :api="api"
           :is-admin="isAdmin(user)"
+          :can-write-eval="isAdmin(user) || Boolean(user.is_boss)"
           @inspect="openTrace"
         />
 

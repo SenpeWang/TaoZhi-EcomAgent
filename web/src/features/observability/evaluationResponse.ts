@@ -134,12 +134,27 @@ export function validateEvaluationResponse(resource: string, data: JsonRecord): 
       throw invalid
     return
   }
+  if (child === 'layers') {
+    if (
+      !isRecord(data) ||
+      typeof data.run_id !== 'string' ||
+      encodeURIComponent(data.run_id) !== runId ||
+      !['agent', 'rag'].includes(String(data.eval_kind)) ||
+      !isRecord(data.layers)
+    )
+      throw invalid
+    return
+  }
+  if (!child && !validEvaluationRun(data.run)) throw invalid
+  if (!child && encodeURIComponent((data.run as JsonRecord).run_id as string) !== runId)
+    throw invalid
   if (
     !child &&
-    (!validEvaluationRun(data.run) ||
-      encodeURIComponent(data.run.run_id) !== runId ||
-      !validEvaluationMetrics(data.metrics))
+    (data.run as JsonRecord).eval_kind !== 'rag' &&
+    !validEvaluationMetrics(data.metrics)
   )
+    throw invalid
+  if (!child && (data.run as JsonRecord).eval_kind === 'rag' && !isRecord(data.metrics))
     throw invalid
   const comparison = child === 'comparison' ? data : data.comparison
   if (!child && comparison === null) return
