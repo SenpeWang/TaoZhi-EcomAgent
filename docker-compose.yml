@@ -48,6 +48,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+      start_period: 300s
     restart: unless-stopped
     networks:
       - ecom-net
@@ -67,6 +68,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+      start_period: 60s
     restart: unless-stopped
     networks:
       - ecom-net
@@ -96,6 +98,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 12
+      start_period: 120s
     restart: unless-stopped
     networks:
       - ecom-net
@@ -115,6 +118,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 18
+      start_period: 180s
     restart: unless-stopped
     networks:
       - ecom-net
@@ -139,7 +143,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 18
-      start_period: 30s
+      start_period: 300s
     restart: unless-stopped
     networks:
       - ecom-net
@@ -159,12 +163,23 @@ services:
 
   api:
     <<: *app-common
-    command: ["uvicorn", "taozhi.server.api:app", "--host", "127.0.0.1", "--port", "18080", "--no-access-log"]
+    command:
+      - python
+      - scripts/wait_for_startup.py
+      - "--"
+      - uvicorn
+      - taozhi.server.api:app
+      - "--host"
+      - "127.0.0.1"
+      - "--port"
+      - "18080"
+      - "--no-access-log"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:18080/api/health | grep -q '\"ok\"'"]
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 600s
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -179,7 +194,13 @@ services:
 
   worker:
     <<: *app-common
-    command: ["python", "-m", "taozhi.server.worker"]
+    command:
+      - python
+      - scripts/wait_for_startup.py
+      - "--"
+      - python
+      - "-m"
+      - taozhi.server.worker
     depends_on:
       migrate:
         condition: service_completed_successfully

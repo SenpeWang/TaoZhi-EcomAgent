@@ -42,6 +42,21 @@ location / {
 }
 ```
 
+## 启动顺序与自愈
+
+Compose 的 `depends_on` 只在 `docker compose up` 时生效；宿主机重启后容器由 `restart: unless-stopped` 拉起，彼此没有顺序保证。因此 API 与 Worker 的启动命令先经过依赖闸门 [wait_for_startup.py](../../scripts/wait_for_startup.py)：数据库、MinIO、Kafka、Elasticsearch 与向量服务都探测通过后才替换成真正的服务进程；`docker compose up`、`docker start` 与重启策略三种拉起方式都适用。
+
+| 场景 | 行为 |
+| --- | --- |
+| 数据库崩溃恢复 | 闸门按探测间隔重试连接，日志行以 `[启动闸门]` 开头；恢复后自动继续启动 |
+| 向量服务 GPU 未就绪 | 嵌入服务在 `EMBED_GPU_BOOT_GRACE_SECONDS`（默认 180 秒）内重试 CUDA 与探测，超过宽限期才按启动失败退出 |
+| 健康检查宽限期 | 各服务 `start_period` 覆盖自身恢复窗口，恢复期显示 `health: starting` 而不是 `unhealthy` |
+| 闸门超时 | 默认 600 秒内依赖仍不可用则以非零码退出，交由重启策略重试，日志列出未就绪依赖 |
+
+可调参数写进 `.env` 即对容器生效：`ECOM_STARTUP_WAIT_SECONDS`（闸门整体超时）、`ECOM_STARTUP_PROBE_INTERVAL`（探测间隔）、`EMBED_GPU_BOOT_GRACE_SECONDS`（GPU 启动宽限期）。
+
+宿主机重启后无需手工干预：`docker compose ps` 里的 `health: starting` 属正常，依赖恢复后自动转 `healthy`。代码升级包含数据库迁移时仍需执行 `make start`（或 `docker compose up -d`）触发 `migrate`，重启策略只拉起常驻容器，不补跑一次性迁移。
+
 ## 首次部署与验收
 
 ```bash
@@ -61,6 +76,7 @@ curl -fsS http://127.0.0.1:18555/health
 | 情况 | 查看位置 |
 | --- | --- |
 | 任务长期排队 | 查看 `docker compose ps -a` 的迁移状态，再查看 `docker compose logs --tail=100 worker` 的认领和续租记录。 |
+| 宿主机重启后服务未就绪 | 先看 `docker compose logs --tail=100 api` 的 `[启动闸门]` 等待项；数据库恢复期显示 `health: starting` 属正常。 |
 | 工具、模型 API 或资料核验失败 | 在任务的「执行轨迹」查节点、问题日志和 Trace ID，再关联进程日志。 |
 | 备份与恢复演练 | 数据库和本地私有附件可使用仓库备份脚本，MinIO 对象另行备份。 |
 

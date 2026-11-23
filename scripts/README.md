@@ -12,6 +12,7 @@
 | `seed_business_data.py`、`seed_metrics.py`、`seed_business_metrics.py` | 灌入业务夹具与指标口径 |
 | `backfill_embeddings.py` | 回填缺失向量 |
 | `embedding_server.py` | 本地向量推理服务，供 embedding 容器调用 |
+| `wait_for_startup.py` | API/Worker 容器入口的依赖就绪闸门：等数据库、中间件与向量服务可用后再启动目标进程 |
 | `check_repository.py` | 敏感文件、秘密与目录契约检查 |
 | `check_development.py` | 前端规范、暂存快照与提交信息校验 |
 | `archive_baseline.py`、`clean_cache.py` | 基线归档与缓存清理 |
