@@ -48,6 +48,5 @@ Thumbs.db
 # 私有文档目录整体忽略
 /docs/private/
 
-# 评测：本机基线缓存与运行产物（权威基线在评测中心）
-evals/baseline.json
+# 评测：运行产物不入库（基线快照 evals/baseline/ 与 evals/baseline.json 随代码进 Git，可修订）
 evals/reports/

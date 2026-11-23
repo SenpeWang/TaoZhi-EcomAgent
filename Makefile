@@ -11,7 +11,7 @@ CENTER_VERSION ?= v1_20261123
 TEST_ENV := ECOM_MODE=test PYTHONPATH=$(PROJECT_ROOT)/src
 COMPOSE := docker compose
 
-.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-center-register evals-center-publish evals-center-backfill evals-center-check evals-center-purge
+.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check evals-center-register evals-center-publish evals-center-backfill evals-center-check evals-center-purge
 
 GIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null)
 COMMIT_BASE ?= origin/main
@@ -36,10 +36,12 @@ help:
 	@echo "make evals-publish   把 REPORTS_DIR 下的评测报告批量归档进评测中心"
 	@echo "make evals-quick    评估：检索+对抗层（需企业服务在线；对比基线并过门禁）"
 	@echo "make evals-full     评估：三层全跑（需企业服务在线；对比基线并过门禁）"
-	@echo "make evals-baseline  生成本机对比缓存 baseline.json（不入库；权威基线在评测中心）"
+	@echo "make evals-baseline  三层全跑并更新 evals/baseline.json（基线演进记录，可修订）"
 	@echo "make evals-sync     评估集与最新报告同步到 Phoenix（旁路；Phoenix 离线只跳过）"
 	@echo "make evals-pipeline 三层评估 + 同步 Phoenix，一条命令走完整流程"
 	@echo "make evals-follow   跟随评估进度逐例推 Phoenix（另开一个终端，跑批时用）"
+	@echo "make evals-archive  归档/更新当前基线快照（可修订，随代码进 Git）"
+	@echo "make evals-archive-check  校验快照并把登记 md5 同步为当前内容"
 	@echo "make evals-center-register  登记 V1 数据集版本（生产库）"
 	@echo "make evals-center-publish   发布报告入库：REPORT=路径 或 PUBLISH_ARGS=\"--kind agent --reports-dir ...\""
 	@echo "make evals-center-backfill  回填历史评测数据（BACKFILL_ARGS，默认不带 --reset）"
@@ -134,6 +136,12 @@ evals-sync:
 evals-follow:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
 	PYTHONPATH=src $(PHOENIX_PY) -m evals.sync_phoenix --follow
+
+evals-archive:
+	$(PYTHON) scripts/archive_baseline.py archive
+
+evals-archive-check:
+	$(PYTHON) scripts/archive_baseline.py check
 
 evals-center-register:
 	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli register --version $(CENTER_VERSION)

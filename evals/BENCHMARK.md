@@ -32,7 +32,7 @@ spec/*.yaml ──generate(固定种子)──> cases.jsonl + corpus_docs.jsonl 
     │                                              │
     │                                        seed(幂等, --verify 自检)
     │                                              ↓
-    └──────────> 检索层 run ───── 生成层 run ──> report.json ──入库/compare──> 评测中心基线批次
+    └──────────> 检索层 run ───── 生成层 run ──> report.json ──compare──> 评测中心 active 基线 / 仓库基线快照（可修订）
 ```
 
 数据集进 Git（可 diff、可追溯）；运行产物进 `reports/`（gitignored）；基线进 Git（唯一一份）。
@@ -258,7 +258,7 @@ behavior.detail     id / pass / why / verdict{pass,faithful,relevant,abstain} /
 ops         延迟 p50/p95 / token / 成本
 ```
 
-基线批次（评测中心 `eval_baselines` 指向的批次，或本机 `baseline.json` 缓存）与 run 报告共用此 schema，逐项 diff；时间戳与耗时只进文件名。
+基线批次（评测中心 `eval_baselines` 指向的批次，或 `evals/baseline/*.json` 演进快照，可修订）与 run 报告共用此 schema，逐项 diff；时间戳与耗时只进文件名。
 
 ---
 

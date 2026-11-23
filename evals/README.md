@@ -35,6 +35,8 @@ evals/
 ├── metrics.py                   指标实现（全项目唯一口径）
 ├── sync_phoenix.py              Arize Phoenix 平台双轨数据同步中枢
 ├── BENCHMARK.md                 口径唯一来源：指标定义·判定协议·报告 schema·数据契约
+├── baseline.json                当前基线记录（可修订，随代码进 Git）
+├── baseline/                    基线演进快照（逐次记录，可修订）
 ├── reports/                     运行产物（Git 忽略）
 └── tests/                       评估代码自身的单元测试
 ```
@@ -170,11 +172,20 @@ evaluation 由服务端按 `(run, name)` upsert。`--dry-run` 只打印计划不
   需单独建一个对抗数据集，暂未做。
 - **在线任务轨迹**由工作台通过 OpenTelemetry 采集并写入 PostgreSQL。本节的 Phoenix 同步脚本处理评估集、实验与评估报告。[在线采集器](../src/taozhi/observability/tracing.py) · [评估同步脚本](sync_phoenix.py)
 
-## 基线管理
+## 基线记录（可修订）
 
-基线以评测中心为准：每个「数据集版本 × 口径 × 执行方式」只保留一条 active 基线批次，历史基线自动转历史留痕（`eval_baselines`）。刷新基线的做法是：跑批 → `publish` 入库时带 `--baseline`，或入库后在评测中心「设为基线」；每次替换都写 `set_baseline` 审计。
+基线分两层，二者都保留：
 
-`evals/baseline.json` 仅作为本机快速对比缓存：`make evals-baseline` 生成、默认不进 Git，不替代评测中心记录。旧的只读快照目录 `evals/baseline/`、历史报告文件与归档脚本已按维护要求清理；历史结果通过评测中心批次与台账追溯。
+- **评测中心 active 基线**（`eval_baselines`）：门禁对比的权威口径。每个「数据集版本 × 口径 × 执行方式」只保留一条 active，替换时旧基线自动转历史并写 `set_baseline` 审计。
+- **仓库内基线记录**（`evals/baseline.json` 与 `evals/baseline/*.json`）：记录代码一步步演进时的实测水位，随代码进 Git，**允许修订**。
+
+```bash
+make evals-baseline        # 三层全跑并更新 evals/baseline.json
+make evals-archive         # 写入或更新 evals/baseline/<开跑时间>.json 快照
+make evals-archive-check   # 校验快照可读并把登记 md5 同步为当前内容（修订不报错）
+```
+
+修订基线快照时在提交说明写明原因、旧值与新值；需要门禁对比时在评测中心把对应批次设为 active 基线。
 
 ## 评测中心
 
@@ -298,15 +309,15 @@ make evals-center-purge PURGE_ARGS="--mode all --yes"       # 连同数据集登
 
 1. `make evals-tests`：评估代码自身单测（判定器契约、数据集契约、身份同源、
    AST 回归断言），不需要在线服务，秒级。CI 也跑这一层。
-2. `make evals-full`：三层全跑——与评测中心 active 基线（或本机生成的 `baseline.json`）
+2. `make evals-full`：三层全跑——与评测中心 active 基线或 `evals/baseline/` 中选定的演进快照
    做**配对 bootstrap**（只有显著下降才算回归）、按硬底线门禁校验（未达标退出码 1，
    供 CI 阻塞合并；没跑的层跳过）。判定语义见 BENCHMARK 第 12 节。需要生产服务在线，
    本机跑，不进 CI。
 3. 读结果：无回归且门禁过 → 改动可提交；否则修到通过；只有确属有意变更
    （提交信息写明原因）才走第 4 步。
-4. 在评测中心把新批次设为 active 基线（入库时 `--baseline` 或 `POST /api/evaluations/baselines`）。
-   刷新基线 = 宣布新水位，提交信息必须写明修了什么、哪个指标为什么变、旧水位多少；
-   基线记录在评测中心，不随代码进 Git。
+4. 记录新水位：`make evals-baseline` 更新 `evals/baseline.json` → `make evals-archive` 写入/更新快照；
+   需要门禁对比时在评测中心把批次设为 active 基线。刷新基线 = 宣布新水位，提交信息必须写明
+   修了什么、哪个指标为什么变、旧水位多少；基线数据允许修订，修订需注明原因与旧值。
 
 ## 指标口径
 
