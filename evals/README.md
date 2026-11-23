@@ -36,7 +36,6 @@ evals/
 ├── sync_phoenix.py              Arize Phoenix 平台双轨数据同步中枢
 ├── BENCHMARK.md                 口径唯一来源：指标定义·判定协议·报告 schema·数据契约
 ├── reports/                     运行产物（Git 忽略）
-├── baseline.json                唯一基线快照，随代码进 Git
 └── tests/                       评估代码自身的单元测试
 ```
 
@@ -98,7 +97,7 @@ PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay ev
 # 独立数据包夹具已灌库（PYTHONPATH=src .venv/bin/python -m evals.dataset.seed）
 make evals-quick      # 检索 + 对抗，约 5 分钟
 make evals-full       # 三层全跑（180 例逐题 judge；对比基线 + 门禁，不过则退出码 1）
-make evals-baseline   # 三层全跑后锁定为基线
+make evals-baseline   # 生成本机对比缓存（不入库；权威基线在评测中心）
 make evals-agent      # 执行 10 个真实调研用例并保存评分报告
 make evals-tests      # 评估代码自身的单元测试（不需要在线服务）
 make evals-sync       # 评估集 + 最新报告 -> Phoenix（旁路；Phoenix 离线只跳过）
@@ -145,7 +144,7 @@ PYTHONPATH=src ~/.local/share/ecom-agent/phoenix-venv/bin/python -m evals.sync_p
 
 ```bash
 # 终端 1：跑批（约 2 小时）
-make evals-baseline
+make evals-full
 # 终端 2：跟随（评估没开始时它会等，超时 20 分钟无新数据则退出）
 make evals-follow
 ```
@@ -171,21 +170,11 @@ evaluation 由服务端按 `(run, name)` upsert。`--dry-run` 只打印计划不
   需单独建一个对抗数据集，暂未做。
 - **在线任务轨迹**由工作台通过 OpenTelemetry 采集并写入 PostgreSQL。本节的 Phoenix 同步脚本处理评估集、实验与评估报告。[在线采集器](../src/taozhi/observability/tracing.py) · [评估同步脚本](sync_phoenix.py)
 
-## 基线归档（只读）
+## 基线管理
 
-`evals/baseline.json` 是"当前基线"，每次 `make evals-baseline` 都会整份覆盖；
-历史值只活在 git log 里，要对比某次跑批得先翻提交。归档目录把这件事摊平：
+基线以评测中心为准：每个「数据集版本 × 口径 × 执行方式」只保留一条 active 基线批次，历史基线自动转历史留痕（`eval_baselines`）。刷新基线的做法是：跑批 → `publish` 入库时带 `--baseline`，或入库后在评测中心「设为基线」；每次替换都写 `set_baseline` 审计。
 
-```bash
-make evals-archive         # 把当前 baseline.json 复制成 evals/baseline/<开跑时间>.json
-make evals-archive-check  # 逐条比对 md5（校验在 evals/baseline/ARCHIVE.md）
-```
-
-- 一次跑批一份快照，文件名=开跑时间，与 Phoenix experiment 名
-  `eval-<开跑时间>-<git>` 对齐，横向对比不用做映射；
-- 快照写完即 `chmod 444` 并登记 md5：改一个字节都会被 `evals-archive-check`
-  抓到。不是防人，是防"某次手改了基线却没人发现"；
-- 归档**只增不改**：要新基线就跑批后追加一条，旧快照一律保留。
+`evals/baseline.json` 仅作为本机快速对比缓存：`make evals-baseline` 生成、默认不进 Git，不替代评测中心记录。旧的只读快照目录 `evals/baseline/`、历史报告文件与归档脚本已按维护要求清理；历史结果通过评测中心批次与台账追溯。
 
 ## 评测中心
 
@@ -309,13 +298,15 @@ make evals-center-purge PURGE_ARGS="--mode all --yes"       # 连同数据集登
 
 1. `make evals-tests`：评估代码自身单测（判定器契约、数据集契约、身份同源、
    AST 回归断言），不需要在线服务，秒级。CI 也跑这一层。
-2. `make evals-full`：三层全跑——与 `baseline.json` 做**配对 bootstrap**（只有显著下降
-   才算回归）、按硬底线门禁校验（未达标退出码 1，供 CI 阻塞合并；没跑的层跳过）。
-   判定语义见 BENCHMARK 第 12 节。需要生产服务在线，本机跑，不进 CI。
+2. `make evals-full`：三层全跑——与评测中心 active 基线（或本机生成的 `baseline.json`）
+   做**配对 bootstrap**（只有显著下降才算回归）、按硬底线门禁校验（未达标退出码 1，
+   供 CI 阻塞合并；没跑的层跳过）。判定语义见 BENCHMARK 第 12 节。需要生产服务在线，
+   本机跑，不进 CI。
 3. 读结果：无回归且门禁过 → 改动可提交；否则修到通过；只有确属有意变更
    （提交信息写明原因）才走第 4 步。
-4. `make evals-baseline`：新结果锁定为基线，随提交进 Git。刷新基线 = 宣布新水位，
-   提交信息必须写明修了什么、哪个指标为什么变、旧水位多少。
+4. 在评测中心把新批次设为 active 基线（入库时 `--baseline` 或 `POST /api/evaluations/baselines`）。
+   刷新基线 = 宣布新水位，提交信息必须写明修了什么、哪个指标为什么变、旧水位多少；
+   基线记录在评测中心，不随代码进 Git。
 
 ## 指标口径
 

@@ -47,3 +47,7 @@ Thumbs.db
 
 # 私有文档目录整体忽略
 /docs/private/
+
+# 评测：本机基线缓存与运行产物（权威基线在评测中心）
+evals/baseline.json
+evals/reports/

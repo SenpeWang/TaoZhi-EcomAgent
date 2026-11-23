@@ -13,8 +13,8 @@
 用法（需企业正式环境服务在线）：
   python -m evals.rag_eval.run --quick            # 对抗+检索，约 5 分钟
   python -m evals.rag_eval.run --full             # 三层全跑，约 2 小时（108 例逐题 judge，串行）
-  python -m evals.rag_eval.run --quick --compare  # 运行后与 evals/baseline.json 对比
-  python -m evals.rag_eval.run --quick --save-baseline  # 将本次结果锁定为基线
+  python -m evals.rag_eval.run --quick --compare  # 运行后与本机 baseline.json 缓存对比
+  python -m evals.rag_eval.run --quick --save-baseline  # 生成本机 baseline.json 缓存（不入库）
   python -m evals.rag_eval.run --behavior-only    # 只重跑行为层（LLM judge）
   python -m evals.rag_eval.run --adversarial-only  # 只重跑对抗层（规则判定，约 5 分钟）
 
