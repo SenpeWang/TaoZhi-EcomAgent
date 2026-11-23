@@ -31,7 +31,7 @@ RUN if [ -n "$APT_MIRROR" ]; then \
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --timeout 60 --retries 10 ${PIP_INDEX_URL:+--index-url "$PIP_INDEX_URL"} -r requirements.txt
 
-COPY alembic.ini .env.example ./
+COPY alembic.ini ./
 COPY config ./config
 COPY migrations ./migrations
 COPY src ./src
@@ -49,19 +49,23 @@ FROM python:3.10-slim AS embedding
 ARG APP_UID=1000
 ARG APP_GID=1000
 ARG PIP_INDEX_URL=""
+ARG APT_MIRROR=""
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-RUN apt-get update \
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s#deb.debian.org#$APT_MIRROR#g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    fi \
+    && apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g "${APP_GID}" appuser \
     && useradd -m -u "${APP_UID}" -g "${APP_GID}" appuser
 
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir --timeout 60 --retries 10 \
         ${PIP_INDEX_URL:+--index-url "$PIP_INDEX_URL"} \
         --extra-index-url https://download.pytorch.org/whl/cu118 \
         torch==2.3.1+cu118 \

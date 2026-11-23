@@ -1,4 +1,3 @@
-
 x-app-common: &app-common
   image: taozhi-ecomagent/app:latest
   build:
@@ -12,7 +11,7 @@ x-app-common: &app-common
   env_file:
     - path: .env
       required: false
-  environment: &app-env
+  environment:
     ECOM_MODE: production
     ECOM_DATABASE_URL: postgresql://${ECOM_PG_USER:-ecom_production}:${ECOM_PG_PASSWORD:?请配置 ECOM_PG_PASSWORD}@127.0.0.1:15432/${ECOM_PG_DB:-ecom_production}
     ECOM_MINIO_ENABLED: ${ECOM_MINIO_ENABLED:-true}
@@ -128,6 +127,10 @@ services:
     build:
       context: .
       target: embedding
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+        APT_MIRROR: ${APT_MIRROR:-}
+      network: host
     environment:
       EMBED_HOST: 0.0.0.0
       EMBED_PORT: 18555
