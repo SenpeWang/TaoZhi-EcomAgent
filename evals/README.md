@@ -68,7 +68,7 @@ make evals-agent-replay
 
 ### 查看工作台评测结果
 
-评测中心要求 Agent 报告为第 3 版（`schema_version=3`）及以上，早期格式需重新运行评测生成报告。部署时应用 `023_eval_center_v3` 迁移（版本库与 RAG/Agent 双体系字段由 `022_eval_profiles_and_rag` 引入）。入库统一走 [`evals/center`](center/cli.py)；历史报告与历史数据集首次上线用回填命令补齐，重复导入相同内容与归属的批次是幂等的。
+评测中心要求 Agent 报告 `schema_version` ≥ 3；低于 3 的报告需重新运行评测生成。部署时应用 `023_eval_center_v3` 迁移（版本库与 RAG/Agent 双体系字段由 `022_eval_profiles_and_rag` 引入）。入库统一走 [`evals/center`](center/cli.py)；回填命令用于导入仓库中已有的历史报告与数据集，重复导入相同内容与归属的批次是幂等的。
 
 ```bash
 make evals-center-register                     # 登记 V1 数据集版本（幂等）
@@ -287,7 +287,7 @@ make evals-center-check                             # 数据集 sha / 基线唯�
 
 ### 清理与重建基线
 
-旧版本或旧批次需要整体替换时用统一清理命令，默认只预演并打印将删除的数量：
+归档版本与历史批次需要整体替换时用统一清理命令，默认只预演并打印将删除的数量：
 
 ```bash
 make evals-center-purge PURGE_ARGS="--mode legacy"          # 预演：归档数据集 + 其批次/基线/报告

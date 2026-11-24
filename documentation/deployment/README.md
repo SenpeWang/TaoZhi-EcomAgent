@@ -96,7 +96,7 @@ make evals-center-check                    # 数据集 sha、基线唯一性与�
 
 以上目标默认使用 `ECOM_MODE=production`，需在能连生产库与对象存储的主机执行。`BACKFILL_ARGS="--reset"` 会先清空评测中心写入表，属破坏性操作，只在明确重建时使用。
 
-旧版本或旧批次整体替换时用 `make evals-center-purge`（默认预演，`--yes` 才执行）：`--mode legacy` 只清理归档数据集及其批次/基线/报告，`--mode runs` 清空全部批次与算法版本但保留数据集登记，`--mode all` 连同数据集一起删除。清理会删除对象存储中的原始报告并写 `purge_data` 审计；重建基线的顺序是清理 → 登记数据集 → 按口径重跑评测 → 入库 → 设为 active 基线 → `make evals-center-check`。
+归档版本与历史批次整体替换时用 `make evals-center-purge`（默认预演，`--yes` 才执行）：`--mode legacy` 只清理归档数据集及其批次/基线/报告，`--mode runs` 清空全部批次与算法版本但保留数据集登记，`--mode all` 连同数据集一起删除。清理会删除对象存储中的原始报告并写 `purge_data` 审计；重建基线的顺序是清理 → 登记数据集 → 按口径重跑评测 → 入库 → 设为 active 基线 → `make evals-center-check`。
 
 ### 触发与观测
 
