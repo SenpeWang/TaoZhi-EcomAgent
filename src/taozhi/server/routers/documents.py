@@ -4,7 +4,7 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import ValidationError
 
 from taozhi.application.documents import service
@@ -145,6 +145,13 @@ def page_image(doc_id: str, page_no: int, p=Depends(identity)):
         media_type="image/png",
         headers={"Cache-Control": "private, max-age=300"},
     )
+
+
+@router.get("/{doc_id}/docx")
+def docx_page(doc_id: str, p=Depends(identity)):
+    """老板查看 DOCX 原件的 HTML 渲染结果；其他身份按统一错误返回。"""
+    spec = service.render_document_docx(p, doc_id)
+    return HTMLResponse(spec["html"], headers={"Cache-Control": "private, max-age=300"})
 
 
 @router.get("/{doc_id}/download")

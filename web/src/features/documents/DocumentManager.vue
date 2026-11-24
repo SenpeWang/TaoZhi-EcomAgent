@@ -121,6 +121,7 @@
             <iframe v-else class="document-pdf" :src="originalUrl" title="PDF 原件" />
             <p class="chunk-note">当前按 PDF 原件版面展示，使用上一页 / 下一页浏览全部页面。</p>
           </template>
+          <article v-else-if="docxReady" ref="docxHost" class="document-markdown" />
           <pre v-else-if="detail.body" class="document-body">{{ detail.body }}</pre>
           <el-empty v-else description="当前仅可查看文档基本信息，暂未获准阅读正文" />
           <p
@@ -128,6 +129,12 @@
             class="chunk-note"
           >
             PDF 原件仅企业负责人可在页面内查看，此处为脱敏正文；如需原件请联系资料负责人。
+          </p>
+          <p
+            v-if="detail.mime_type === DOCX_MIME && detail.has_original && !user.is_boss"
+            class="chunk-note"
+          >
+            DOCX 原件仅企业负责人可在页面内查看，此处为脱敏正文；如需原件请联系资料负责人。
           </p>
         </el-tab-pane>
         <el-tab-pane label="切片与词嵌入" name="chunks">
@@ -459,10 +466,20 @@ const detailTab = ref<'original' | 'chunks'>('original')
 const chunkIndex = ref<DocumentChunkIndex | null>(null)
 const chunkError = ref('')
 const markdownHost = ref<HTMLElement | null>(null)
+const docxHost = ref<HTMLElement | null>(null)
+const docxHtml = ref('')
+const docxReady = ref(false)
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 watchEffect(() => {
   if (markdownHost.value) {
     markdownHost.value.innerHTML = renderMarkdown(detail.value?.body || '')
+  }
+})
+
+watchEffect(() => {
+  if (docxHost.value) {
+    docxHost.value.innerHTML = docxHtml.value
   }
 })
 const originalUrl = computed(() =>
@@ -513,6 +530,8 @@ function closeDocument(): void {
   chunkError.value = ''
   pdfPage.value = 1
   pdfTotal.value = 0
+  docxHtml.value = ''
+  docxReady.value = false
   selectedFile.value = null
   docForm.id = docForm.title = docForm.body = ''
   history.value = []
@@ -598,10 +617,35 @@ async function loadPdfMeta(): Promise<void> {
   })
 }
 
+/** 读取并渲染 DOCX 原件；仅在老板查看带原件的 DOCX 时请求一次。 */
+async function loadDocx(): Promise<void> {
+  const document = detail.value
+  if (!document || document.mime_type !== DOCX_MIME) return
+  if (!document.has_original || !props.user.is_boss || docxReady.value) return
+  const request = selection
+  await action(async () => {
+    try {
+      const response = await fetch('/api/documents/' + encodeURIComponent(document.id) + '/docx', {
+        credentials: 'same-origin',
+      })
+      if (!response.ok) return
+      const html = await response.text()
+      if (request !== selection || detail.value?.id !== document.id) return
+      docxHtml.value = html
+      docxReady.value = true
+    } catch {
+      docxReady.value = false
+    }
+  })
+}
+
 watch(
   () => [detail.value?.id, detailTab.value] as const,
   ([id, tab]) => {
-    if (id && tab === 'original') void loadPdfMeta()
+    if (id && tab === 'original') {
+      void loadPdfMeta()
+      void loadDocx()
+    }
   },
 )
 
@@ -993,6 +1037,14 @@ defineExpose({ openDocument })
   margin-bottom: 8px;
   font-size: 13px;
   color: var(--el-text-color-secondary);
+}
+
+.document-markdown :deep(.docx-meta) {
+  padding: 4px 0;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  border-bottom: 1px dashed var(--el-border-color);
 }
 
 .document-pdf {

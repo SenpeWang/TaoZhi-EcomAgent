@@ -23,6 +23,7 @@ from taozhi.infrastructure.persistence.access_repo import (
 )
 from taozhi.infrastructure.knowledge import es_index
 from taozhi.infrastructure.knowledge.embedding import model_signature, to_vector
+from taozhi.infrastructure.knowledge.docx_html import render_docx_html
 from taozhi.infrastructure.persistence.database import database_connection
 from taozhi.infrastructure.knowledge.ingest import validate_upload
 from taozhi.infrastructure.knowledge.semantic_cache import get_semantic_cache
@@ -470,6 +471,31 @@ def render_document_pdf_page(p: Principal, doc_id: str, page_no: int) -> dict[st
             raise Denied("页码超出范围", "INVALID", 400)
         pixmap = doc[page_no - 1].get_pixmap(dpi=144)
         return {"data": pixmap.tobytes("png"), "total": doc.page_count}
+
+
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def _load_docx_original(p: Principal, doc_id: str) -> bytes:
+    """校验老板身份与下载权限后返回当前版本的 DOCX 原件字节。"""
+    with database_connection() as c:
+        d = get_document(c, p, doc_id)
+        if not p.boss:
+            raise Denied("原件预览仅限企业负责人", "FORBIDDEN", 403)
+        if not can_download(c, p, d):
+            raise Denied("没有资料下载权限", "NOT_FOUND", 404)
+        v = document_repo.get_document_version(c, d["id"], d["current_version"])
+        if not v["blob_name"] or v["mime_type"] != _DOCX_MIME:
+            raise Denied("该资料没有 DOCX 原件", "NOT_FOUND", 404)
+        try:
+            return get_blob_store().open_blob(p.tenant_id, v["blob_name"])
+        except Exception as exc:
+            raise Denied("原件不可用", "NOT_FOUND", 404) from exc
+
+
+def render_document_docx(p: Principal, doc_id: str) -> dict[str, str]:
+    """把 DOCX 原件渲染为 HTML 片段，保留标题、段落与表格版式。"""
+    return {"html": render_docx_html(_load_docx_original(p, doc_id))}
 
 
 def list_knowledge_map(p: Principal) -> list[dict[str, Any]]:
