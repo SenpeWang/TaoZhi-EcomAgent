@@ -22,6 +22,7 @@ from taozhi.infrastructure.persistence.access_repo import (
     require_system,
 )
 from taozhi.infrastructure.knowledge import es_index
+from taozhi.infrastructure.knowledge.embedding import model_signature, to_vector
 from taozhi.infrastructure.persistence.database import database_connection
 from taozhi.infrastructure.knowledge.ingest import validate_upload
 from taozhi.infrastructure.knowledge.semantic_cache import get_semantic_cache
@@ -163,7 +164,56 @@ def get_document_detail(p: Principal, doc_id: str) -> dict[str, Any]:
             body=v["body"] if p.boss else redacted_body,
             can_write=evaluate_write_permission(p, d, grant) and (p.boss or v["body"] == redacted_body),
             can_download=evaluate_download_permission(p, d, grant),
+            mime_type=v["mime_type"],
+            has_original=bool(v["blob_name"]),
         )
+
+
+_VECTOR_PREVIEW_DIMS = 24
+
+
+def get_document_chunks(p: Principal, doc_id: str) -> dict[str, Any]:
+    """读取文档当前版本的切片、页码与词嵌入摘要，供原文/向量对照查看。
+
+    切片文本与正文遵循同一脱敏规则；向量对具备阅读权限的成员可见，
+    只返回维度、L2 范数和前若干维预览，避免整表 512 维数值撑大响应。
+    """
+    with database_connection() as c:
+        d = get_document(c, p, doc_id)
+        require_document_read(c, p, d)
+        rows = document_repo.list_version_chunks_with_vectors(c, d["id"], d["current_version"])
+    items: list[dict[str, Any]] = []
+    dim = 0
+    for row in rows:
+        vector = to_vector(row.get("embedding"))
+        has_vector = vector is not None and len(vector) > 0
+        if has_vector:
+            dim = len(vector)
+        items.append(
+            dict(
+                id=row["id"],
+                ordinal=row["ordinal"],
+                page=row["page"],
+                chars=len(row["text"]),
+                text=row["text"] if p.boss else redact(row["text"]),
+                embedded=has_vector,
+                dim=len(vector) if has_vector else 0,
+                norm=round(sum(float(v) * float(v) for v in vector) ** 0.5, 4) if has_vector else 0.0,
+                preview=(
+                    [round(float(v), 4) for v in vector[:_VECTOR_PREVIEW_DIMS]] if has_vector else []
+                ),
+            )
+        )
+    embedded = sum(1 for item in items if item["embedded"])
+    return dict(
+        version=d["current_version"],
+        state=d["state"],
+        total=len(items),
+        embedded=embedded,
+        model=model_signature() if embedded else "",
+        dim=dim,
+        items=items,
+    )
 
 
 def list_document_versions(p: Principal, doc_id: str) -> list[dict[str, Any]]:
@@ -355,6 +405,32 @@ def prepare_download(p: Principal, doc_id: str) -> dict[str, Any]:
             "kind": "text",
             "filename": f"{d['title']}.txt",
             "content": v["body"] if p.boss else redact(v["body"]),
+        }
+
+
+def prepare_original_preview(p: Principal, doc_id: str) -> dict[str, Any]:
+    """校验老板身份与下载权限后返回归档原件，供浏览器内联查看。
+
+    非老板视角的正文会做脱敏，原件本身不做脱敏，因此内联预览严格限定企业负责人。
+    """
+    with database_connection() as c:
+        d = get_document(c, p, doc_id)
+        if not p.boss:
+            raise Denied("原件预览仅限企业负责人", "FORBIDDEN", 403)
+        if not can_download(c, p, d):
+            raise Denied("没有资料下载权限", "NOT_FOUND", 404)
+        v = document_repo.get_document_version(c, d["id"], d["current_version"])
+        if not v["blob_name"]:
+            raise Denied("该资料没有归档原件", "NOT_FOUND", 404)
+        try:
+            data = get_blob_store().open_blob(p.tenant_id, v["blob_name"])
+        except Exception as exc:
+            raise Denied("原件不可用", "NOT_FOUND", 404) from exc
+        audit(c, p, "预览资料原件", d["id"], d["node_id"], d["level"])
+        return {
+            "data": data,
+            "media_type": v["mime_type"],
+            "filename": d["title"] + (Path(v["blob_name"]).suffix or ".bin"),
         }
 
 

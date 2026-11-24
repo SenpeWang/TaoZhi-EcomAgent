@@ -1,4 +1,4 @@
-"""在 Vue 渲染器中验证跨页面资料详情和撤权后的可见状态。"""
+"""在 Vue 渲染器中验证跨页面资料详情、切片视图和撤权后的可见状态。"""
 import subprocess
 from pathlib import Path
 
@@ -66,6 +66,13 @@ let readable = true
 async function api(path) {
   if (path === '/documents/earlier') return new Promise(resolve => { releaseFirst = resolve })
   if (path === '/documents/current/versions') return { items: [{ version: 1, body: '历史正文' }] }
+  if (path === '/documents/current/chunks') return { version: 1, state: 'published', total: 2,
+    embedded: 1, model: 'stub:4', dim: 4, items: [
+      { id: 'chunk_a', ordinal: 0, page: 1, chars: 4, text: '切片正文', embedded: true,
+        dim: 4, norm: 1, preview: [0.5, -0.25] },
+      { id: 'chunk_b', ordinal: 1, page: 2, chars: 2, text: '第二片', embedded: false,
+        dim: 0, norm: 0, preview: [] },
+    ] }
   assert.equal(path, '/documents/current')
   if (!readable) throw new Error('权限已撤回')
   return record('current')
@@ -98,6 +105,14 @@ try {
   await nextTick()
   assert.deepEqual(titles(), ['current'])
   assert.ok(content(root).includes('current 正文'))
+  const tabs = tree().find(item => item.tag === 'el-tabs')
+  assert.ok(tabs, 'el-tabs')
+  await tabs.props['onUpdate:modelValue']('chunks')
+  await new Promise(resolve => setTimeout(resolve, 0))
+  await nextTick()
+  assert.ok(content(root).includes('切片正文'))
+  assert.ok(content(root).includes('第二片'))
+  assert.ok(content(root).includes('stub:4'))
   assert.ok(!tree().some(item => item.tag === 'el-table'))
   await click('编辑文档')
   await click('历史版本')

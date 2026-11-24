@@ -65,6 +65,12 @@ def versions(doc_id: str, p=Depends(identity)):
     return {"items": service.list_document_versions(p, doc_id)}
 
 
+@router.get("/{doc_id}/chunks")
+def chunks(doc_id: str, p=Depends(identity)):
+    """读取文档当前版本的切片与词嵌入摘要，供原文/向量对照查看。"""
+    return service.get_document_chunks(p, doc_id)
+
+
 @router.put("/{doc_id}")
 def edit(doc_id: str, payload: EditDoc, p=Depends(identity)):
     """提交新修订版本并重新触发切片解析与发布审批。"""
@@ -111,6 +117,17 @@ def grant_change(doc_id: str, payload: Grant, p=Depends(identity)):
 def request_access(doc_id: str, p=Depends(identity)):
     """员工自助发起已发布文档阅读权限申请。"""
     return service.request_document_access(p, doc_id)
+
+
+@router.get("/{doc_id}/original")
+def original(doc_id: str, p=Depends(identity)):
+    """老板在浏览器内联查看归档原件；其他身份与无原件资料按统一错误返回。"""
+    spec = service.prepare_original_preview(p, doc_id)
+    return Response(
+        spec["data"],
+        media_type=spec["media_type"],
+        headers={"Content-Disposition": "inline; filename*=UTF-8''" + quote(spec["filename"])},
+    )
 
 
 @router.get("/{doc_id}/download")

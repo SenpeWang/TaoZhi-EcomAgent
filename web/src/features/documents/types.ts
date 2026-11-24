@@ -13,6 +13,8 @@ export interface DocumentRecord {
   download_allowed: boolean
   can_write?: boolean
   can_download?: boolean
+  mime_type?: string
+  has_original?: boolean
   error?: string | null
 }
 
@@ -34,4 +36,26 @@ export interface Grant {
   can_download: boolean
   can_write: boolean
   expires_at: string | null
+}
+
+export interface DocumentChunk {
+  id: string
+  ordinal: number
+  page: number
+  chars: number
+  text: string
+  embedded: boolean
+  dim: number
+  norm: number
+  preview: number[]
+}
+
+export interface DocumentChunkIndex {
+  version: number
+  state: string
+  total: number
+  embedded: number
+  model: string
+  dim: number
+  items: DocumentChunk[]
 }

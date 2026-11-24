@@ -90,8 +90,69 @@
         <span>权限版本 #{{ detail.acl_version }}</span>
       </div>
       <el-alert v-if="detail.error" type="error" :title="detail.error" :closable="false" />
-      <pre v-if="detail.body" class="document-body">{{ detail.body }}</pre>
-      <el-empty v-else description="当前仅可查看文档基本信息，暂未获准阅读正文" />
+      <el-tabs v-model="detailTab" class="document-tabs">
+        <el-tab-pane label="原始文档" name="original">
+          <pre v-if="detail.body" class="document-body">{{ detail.body }}</pre>
+          <el-empty v-else description="当前仅可查看文档基本信息，暂未获准阅读正文" />
+          <p v-if="detail.has_original && user.is_boss" class="chunk-note">
+            <el-link
+              v-if="detail.mime_type === 'application/pdf'"
+              :href="'/api/documents/' + encodeURIComponent(detail.id) + '/original'"
+              target="_blank"
+              type="primary"
+            >
+              查看归档原件（PDF）
+            </el-link>
+          </p>
+        </el-tab-pane>
+        <el-tab-pane label="切片与词嵌入" name="chunks">
+          <div v-if="chunkError" class="chunk-summary">
+            <el-alert type="error" :title="chunkError" :closable="false" />
+            <el-button size="small" @click="loadChunks">重新读取</el-button>
+          </div>
+          <div v-else-if="!chunkIndex" class="chunk-summary">正在读取切片与词嵌入…</div>
+          <template v-else>
+            <div class="chunk-summary">
+              <el-tag size="small">V{{ chunkIndex.version }}</el-tag>
+              <span>共 {{ chunkIndex.total }} 个切片</span>
+              <span>已向量化 {{ chunkIndex.embedded }}/{{ chunkIndex.total }}</span>
+              <span v-if="chunkIndex.dim">{{ chunkIndex.dim }} 维</span>
+              <span v-if="chunkIndex.model">模型 {{ chunkIndex.model }}</span>
+              <span v-else-if="chunkIndex.embedded">嵌入服务暂不可用，展示已入库向量</span>
+            </div>
+            <p class="chunk-note">
+              向量输入为「文档标题 + 切片正文」，切片文本与原文遵循同一脱敏规则。
+            </p>
+            <el-empty
+              v-if="!chunkIndex.items.length"
+              description="当前版本尚未生成切片：解析与向量编码在发布审核前完成"
+            />
+            <div v-else class="chunk-list">
+              <article v-for="chunk in chunkIndex.items" :key="chunk.id" class="chunk-card">
+                <header>
+                  <strong>#{{ chunk.ordinal + 1 }}</strong>
+                  <span>第 {{ chunk.page }} 页</span>
+                  <span>{{ chunk.chars }} 字</span>
+                  <el-tag size="small" :type="chunk.embedded ? 'success' : 'info'">
+                    {{ chunk.embedded ? '已向量化' : '未向量化' }}
+                  </el-tag>
+                  <span v-if="chunk.embedded">L2 范数 {{ chunk.norm.toFixed(3) }}</span>
+                </header>
+                <pre class="chunk-text">{{ chunk.text }}</pre>
+                <div v-if="chunk.embedded" class="vector-strip">
+                  <span
+                    v-for="(value, index) in chunk.preview"
+                    :key="index"
+                    class="vector-cell"
+                    :style="{ background: vectorColor(value) }"
+                    :title="`维度 ${index + 1}：${value}`"
+                  />
+                </div>
+              </article>
+            </div>
+          </template>
+        </el-tab-pane>
+      </el-tabs>
       <div class="dialog-actions">
         <el-link
           v-if="detail.can_download"
@@ -310,7 +371,13 @@ import { levelText, stateTag, stateText } from '../../shared/labels'
 import { useWorkspaceAction } from '../../shared/useWorkspaceAction'
 import { isAdmin } from '../administration/types'
 import type { ManagedUser, Organization, User } from '../administration/types'
-import type { DocumentListItem, DocumentRecord, DocumentVersion, Grant } from './types'
+import type {
+  DocumentChunkIndex,
+  DocumentListItem,
+  DocumentRecord,
+  DocumentVersion,
+  Grant,
+} from './types'
 import type { ApiClient, Items } from '../../shared/apiTypes'
 
 const props = defineProps<{
@@ -362,6 +429,9 @@ const grantForm = reactive({
 })
 
 const historyOpen = ref(false)
+const detailTab = ref<'original' | 'chunks'>('original')
+const chunkIndex = ref<DocumentChunkIndex | null>(null)
+const chunkError = ref('')
 const history = ref<DocumentVersion[]>([])
 const accessOpen = ref(false)
 const accessId = ref('')
@@ -395,6 +465,9 @@ function closeDocument(): void {
   grantOpen.value = false
   historyOpen.value = false
   detail.value = null
+  detailTab.value = 'original'
+  chunkIndex.value = null
+  chunkError.value = ''
   selectedFile.value = null
   docForm.id = docForm.title = docForm.body = ''
   history.value = []
@@ -410,6 +483,7 @@ async function refreshDetail(): Promise<void> {
       '/documents/' + encodeURIComponent(document.id),
     )
     if (detail.value !== document) return
+    const versionChanged = snapshot.current_version !== document.current_version
     if (
       snapshot.acl_version !== document.acl_version ||
       (document.can_write && !snapshot.can_write)
@@ -418,10 +492,51 @@ async function refreshDetail(): Promise<void> {
       docOpen.value = true
     }
     detail.value = snapshot
+    if (versionChanged) {
+      chunkIndex.value = null
+      chunkError.value = ''
+      if (detailTab.value === 'chunks') void loadChunks()
+    }
   } catch {
     if (detail.value === document) closeDocument()
   }
 }
+
+/** 读取当前文档版本的切片与词嵌入摘要，同一版本只请求一次。 */
+async function loadChunks(): Promise<void> {
+  const document = detail.value
+  if (!document) return
+  if (chunkIndex.value?.version === document.current_version && !chunkError.value) return
+  const request = selection
+  chunkError.value = ''
+  await action(async () => {
+    try {
+      const index = await props.api<DocumentChunkIndex>(
+        '/documents/' + encodeURIComponent(document.id) + '/chunks',
+      )
+      if (request !== selection || detail.value?.id !== document.id) return
+      if (index.version !== detail.value.current_version) return
+      chunkIndex.value = index
+    } catch (error) {
+      chunkError.value = error instanceof Error ? error.message : '切片读取失败，请稍后重试'
+    }
+  })
+}
+
+/**
+ * 把归一化向量的分量映射为红蓝热力色：正负区分方向，绝对值决定深浅。
+ * @param value - 向量的单个分量，取值约在 -1 到 1 之间。
+ * @returns 可直接用于 CSS 背景色的 rgba 字符串。
+ */
+function vectorColor(value: number): string {
+  const magnitude = Math.min(1, Math.abs(value))
+  const alpha = (0.12 + magnitude * 0.88).toFixed(2)
+  return value >= 0 ? `rgba(64, 158, 255, ${alpha})` : `rgba(245, 108, 108, ${alpha})`
+}
+
+watch(detailTab, (tab) => {
+  if (tab === 'chunks') void loadChunks()
+})
 
 watch(docOpen, (open, _previous, onCleanup) => {
   if (!open) return
@@ -683,3 +798,71 @@ async function manageById(): Promise<void> {
 
 defineExpose({ openDocument })
 </script>
+
+<style scoped>
+.document-tabs {
+  margin-top: 4px;
+}
+
+.chunk-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.chunk-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.chunk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.chunk-card {
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+}
+
+.chunk-card header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.chunk-text {
+  margin: 0;
+  max-height: 9em;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.vector-strip {
+  display: flex;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.vector-cell {
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--el-fill-color-light);
+}
+</style>

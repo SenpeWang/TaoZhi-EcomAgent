@@ -32,7 +32,7 @@ function validateWorkspaceResponse(path: string, data: JsonRecord, method: strin
     (['/organizations', '/documents', '/tasks', '/users', '/approvals', '/audit'].includes(
       resource,
     ) ||
-      /^\/documents\/[^/]+\/(versions|grants)$/.test(path))
+      /^\/documents\/[^/]+\/(versions|grants|chunks)$/.test(resource))
   validateItems(data, collection)
   validateSessionResponse(path, data)
 }

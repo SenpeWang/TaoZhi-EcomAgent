@@ -235,6 +235,16 @@ def list_version_chunks_for_index(conn: Any, doc_id: str, version: int) -> list[
     )
 
 
+def list_version_chunks_with_vectors(conn: Any, doc_id: str, version: int) -> list[dict]:
+    """读取指定版本的切片正文与已落库词嵌入，供详情页按原文/向量对照展示。"""
+    return fetch_all(
+        conn,
+        "SELECT id,ordinal,page,text,embedding FROM chunks "
+        "WHERE document_id=%s AND version=%s ORDER BY ordinal",
+        (doc_id, version),
+    )
+
+
 def replace_version_chunks_and_mentions(
     conn: Any,
     *,
