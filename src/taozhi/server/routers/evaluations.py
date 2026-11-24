@@ -7,6 +7,7 @@ from taozhi.application.services import evaluation_service
 from taozhi.schemas.evaluation import (
     CreateEvalProfileInput, EvaluationAuditPage, EvaluationBaselinePage, EvaluationCaseDetail,
     EvaluationCasePage, EvaluationComparison, EvaluationDatasetDetail, EvaluationDatasetPage,
+    EvaluationDatasetRaw, EvaluationMetricCatalog,
     EvaluationJob, EvaluationKind, EvaluationLayers, EvaluationMode, EvaluationProfile,
     EvaluationProfilePage, EvaluationRunDetail, EvaluationRunPage, EvaluationScope, EvaluationStatus,
     EvaluationTrends, SetBaselineInput, TriggerEvaluationInput, TriggerReceipt,
@@ -19,6 +20,7 @@ catalog = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
 jobs = APIRouter(prefix="/api/evaluations/jobs", tags=["evaluations"])
 metrics = APIRouter(prefix="/api/evaluations/metrics", tags=["evaluations"])
 Identifier = Annotated[str, Path(pattern=r"^[A-Za-z0-9_.-]{1,128}$")]
+CaseIdentifier = Annotated[str, Path(pattern=r"^[A-Za-z0-9_.:-]{1,128}$")]
 PageSize = Annotated[int, Query(ge=1, le=100)]
 Pattern = r"^[A-Za-z0-9_.-]{1,128}$"
 
@@ -43,6 +45,28 @@ def datasets(eval_kind: EvaluationKind | None = None, version: str | None = Quer
              include_archived: bool = False, p=Depends(identity)):
     return evaluation_service.list_datasets(p, eval_kind=eval_kind, version=version,
                                             include_archived=include_archived)
+
+
+@catalog.get("/datasets/{dataset_id}/raw", response_model=EvaluationDatasetRaw)
+def dataset_raw(dataset_id: Identifier, p=Depends(identity)):
+    return evaluation_service.get_dataset_raw(p, dataset_id)
+
+
+@catalog.get("/datasets/{dataset_id}/files")
+def dataset_file(dataset_id: Identifier, path: str = Query(..., max_length=256), p=Depends(identity)):
+    record = evaluation_service.get_dataset_file(p, dataset_id, path)
+    media_type = {
+        ".json": "application/json", ".jsonl": "application/x-ndjson",
+        ".md": "text/markdown", ".yaml": "text/yaml", ".yml": "text/yaml",
+    }.get("." + record["filename"].rsplit(".", 1)[-1], "application/octet-stream")
+    return Response(
+        content=record["payload"],
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{record["filename"]}"',
+            "X-Content-Sha256": record["sha256"],
+        },
+    )
 
 
 @catalog.get("/datasets/{dataset_id}", response_model=EvaluationDatasetDetail)
@@ -88,6 +112,11 @@ def trigger_run(body: TriggerEvaluationInput, p=Depends(identity)):
     return evaluation_service.trigger(p, body.model_dump())
 
 
+@metrics.get("/catalog", response_model=EvaluationMetricCatalog)
+def metric_catalog(p=Depends(identity)):
+    return evaluation_service.catalog(p)
+
+
 @metrics.get("/trends", response_model=EvaluationTrends)
 def trend_metrics(eval_kind: EvaluationKind | None = None,
                   dataset_version: str | None = Query(None, pattern=r"^[A-Za-z0-9_.-]{1,32}$"),
@@ -128,13 +157,13 @@ def comparison(run_id: Identifier, baseline_id: Annotated[str, Query(pattern=Pat
 @router.get("/{run_id}/cases", response_model=EvaluationCasePage)
 def cases(run_id: Identifier, status: EvaluationStatus | None = None,
           suite: str | None = Query(None, max_length=32),
-          cursor: str | None = Query(None, pattern=Pattern),
+          cursor: str | None = Query(None, pattern=r"^[A-Za-z0-9_.:-]{1,128}$"),
           limit: PageSize = 30, p=Depends(identity)):
     return evaluation_service.list_cases(p, run_id, status=status, suite=suite, cursor=cursor, limit=limit)
 
 
 @router.get("/{run_id}/cases/{case_id}", response_model=EvaluationCaseDetail)
-def case(run_id: Identifier, case_id: Identifier, p=Depends(identity)):
+def case(run_id: Identifier, case_id: CaseIdentifier, p=Depends(identity)):
     return evaluation_service.get_case(p, run_id, case_id)
 
 

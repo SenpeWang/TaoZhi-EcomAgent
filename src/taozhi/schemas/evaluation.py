@@ -21,6 +21,41 @@ class EvaluationJudgeSummary(BaseModel):
     unassessable: int
 
 
+class EvaluationMetricSpec(BaseModel):
+    key: str
+    label: str
+    group: str
+    unit: str
+    direction: str
+    description: str = ""
+
+
+class EvaluationMetricSchema(BaseModel):
+    version: int
+    eval_kind: EvaluationKind
+    scope: EvaluationScope
+    label: str
+    metrics: list[EvaluationMetricSpec]
+
+
+class EvaluationMetricScope(BaseModel):
+    version: int
+    eval_kind: EvaluationKind
+    scope: EvaluationScope
+    label: str
+    metrics: list[EvaluationMetricSpec]
+
+
+class EvaluationMetricKind(BaseModel):
+    label: str
+    scopes: dict[str, EvaluationMetricScope]
+
+
+class EvaluationMetricCatalog(BaseModel):
+    version: int
+    kinds: dict[str, EvaluationMetricKind]
+
+
 class EvaluationRun(BaseModel):
     run_id: str
     owner_id: str
@@ -55,6 +90,8 @@ class EvaluationRun(BaseModel):
     latency_p95_ms: int | None = None
     total_tokens: int | None = None
     judges: list[EvaluationJudgeSummary] | None = None
+    summary: dict[str, float | None] | None = None
+    metric_schema_version: int | None = None
 
 
 class EvaluationDataset(BaseModel):
@@ -85,6 +122,12 @@ class EvaluationDatasetDetail(BaseModel):
 
 class EvaluationDatasetPage(BaseModel):
     items: list[EvaluationDataset]
+
+
+class EvaluationDatasetRaw(BaseModel):
+    dataset: EvaluationDataset
+    files: dict[str, str] = Field(default_factory=dict)
+    cases: list[dict[str, Any]]
 
 
 class EvaluationProfile(BaseModel):
@@ -215,6 +258,7 @@ class EvaluationTrendItem(BaseModel):
     is_baseline: bool = False
     comparable: bool = True
     pass_rate_delta: float | None = None
+    summary: dict[str, float | None] | None = None
 
 
 class EvaluationTrendAggregate(BaseModel):
@@ -235,6 +279,7 @@ class EvaluationBaselineSummary(BaseModel):
 
 
 class EvaluationTrends(BaseModel):
+    metric_schema: EvaluationMetricSchema | None = None
     dataset_version: str | None = None
     scope: EvaluationScope | None = None
     mode: EvaluationMode | None = None
@@ -302,7 +347,7 @@ class EvaluationTraceLink(BaseModel):
 class EvaluationCaseDetail(BaseModel):
     case: EvaluationCase
     expected: list[str]
-    observed: list[EvaluationStep] | None
+    observed: list[EvaluationStep] | dict[str, Any] | None
     steps_complete: bool | None
     verdicts: list[EvaluationVerdict]
     trace_link: EvaluationTraceLink | None
@@ -328,3 +373,4 @@ class EvaluationRunDetail(BaseModel):
     run: EvaluationRun
     comparison: EvaluationComparison | None
     metrics: dict[str, Any]
+    metric_schema: EvaluationMetricSchema | None = None

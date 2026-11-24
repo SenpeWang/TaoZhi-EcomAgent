@@ -61,7 +61,7 @@ def _cmd_register(args: argparse.Namespace) -> int:
     version = args.version or datasets.current_version()
     tenant_id, actor_id = _identity(args)
     with database_connection() as conn:
-        rows = datasets.register(conn, version, tenant_id, actor_id)
+        rows = datasets.register(conn, version, tenant_id, actor_id, refresh=args.refresh)
     _print_json({"version": version, "datasets": [row["dataset_id"] for row in rows]})
     return 0
 
@@ -254,6 +254,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     register = sub.add_parser("register", help="登记数据集版本")
     register.add_argument("--version", help="数据集版本目录名，默认当前最新版本")
+    register.add_argument("--refresh", action="store_true",
+                          help="用仓库原始用例覆盖已登记 payload（存量数据透明化刷新）")
     _add_identity(register, actor_name="actor")
     register.add_argument("--owner-username", dest="owner_username", help=argparse.SUPPRESS)
     register.set_defaults(handler=_cmd_register)

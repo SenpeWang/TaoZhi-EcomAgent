@@ -6,12 +6,13 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
+from psycopg.types.json import Jsonb
+
 from evals import runtime_snapshot
 
 SUITES: tuple[str, ...] = ("agent_research", "rag_core", "rag_adversarial")
 LEGACY_VERSION = "v0_legacy"
 MAX_CASES_PAYLOAD_BYTES = 400 * 1024
-QUESTION_MAX_CHARS = 300
 _AGENT_SUITE = "agent_research"
 
 
@@ -74,10 +75,6 @@ def version_for_content_sha(suite: str, digest: str) -> str | None:
     return None
 
 
-def _truncate(text: object, limit: int = QUESTION_MAX_CHARS) -> str:
-    return str(text or "").strip()[:limit]
-
-
 def _payload_size(cases: Iterable[dict]) -> int:
     return len(json.dumps(list(cases), ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
@@ -137,47 +134,24 @@ def _raw_cases(version: str, suite: str) -> list[dict]:
     raise ValueError(f"未知的数据集套件：{suite}")
 
 
-def _display_case(suite: str, case: dict) -> dict:
-    if suite == "agent_research":
-        return {
-            "id": case.get("id"),
-            "name": case.get("name") or "",
-            "question": _truncate(case.get("prompt")),
-            "category": case.get("category") or "",
-            "suite": case.get("suite") or "benchmark",
-        }
-    if suite == "rag_core":
-        return {
-            "id": case.get("case_id"),
-            "name": "",
-            "question": _truncate(case.get("question")),
-            "category": case.get("category") or "",
-            "suite": "behavior",
-        }
-    return {
-        "id": case.get("id"),
-        "name": "",
-        "question": _truncate(case.get("question")),
-        "category": case.get("category") or "",
-        "suite": "adversarial",
-    }
-
-
 def suite_cases(version: str, suite: str) -> list[dict]:
-    """按版本与套件装载可展示用例；装载前逐文件校验内容摘要。
+    """按版本与套件装载完整原始用例定义；装载前逐文件校验内容摘要。
+
+    原始用例不做裁剪：链路透明要求界面能查看与仓库文件一致的原始字段
+    （prompt、工具期望、参考事实、expected_documents、payload 等）。
 
     Args:
         version: 数据集版本。
         suite: 套件名。
 
     Returns:
-        每例保留 id/name（或 question）/category/suite 的可展示投影，question 截断 300 字。
+        与仓库数据集文件逐字段一致的原始用例列表。
 
     Raises:
         ValueError: 描述符缺失、文件摘要不一致或用例数与描述符不符时抛出。
     """
     validate_suite(version, suite)
-    return [_display_case(suite, case) for case in _raw_cases(version, suite)]
+    return _raw_cases(version, suite)
 
 
 def case_index(version: str | None, suite: str) -> dict[str, dict]:
@@ -218,7 +192,7 @@ def dataset_metadata(version: str, suite: str) -> dict:
 def dataset_fields(version: str, suite: str) -> dict:
     """按描述符组装数据集登记字段（含摘要、用例数与可展示用例）。"""
     definition = validate_suite(version, suite)
-    cases = [_display_case(suite, case) for case in _raw_cases(version, suite)]
+    cases = _raw_cases(version, suite)
     metadata = dataset_metadata(version, suite)
     payload = cases if _payload_size(cases) < MAX_CASES_PAYLOAD_BYTES else []
     modes = definition.get("modes") or ["live"]
@@ -274,14 +248,17 @@ def ensure_legacy_dataset(conn: Any, eval_kind: str, suite: str, report_git: str
     return evaluation_repo.upsert_dataset(conn, legacy_dataset_fields(eval_kind, suite, report_git, source=source))
 
 
-def register(conn: Any, version: str, tenant_id: str, actor_id: str) -> list[dict]:
-    """幂等登记当前版本的全部套件数据集，并为首次登记写审计。
+def register(conn: Any, version: str, tenant_id: str, actor_id: str,
+             *, refresh: bool = False) -> list[dict]:
+    """幂等登记当前版本的全部套件数据集，并为首次登记或刷新写审计。
 
     Args:
         conn: 数据库连接（调用方事务内）。
         version: 数据集版本。
         tenant_id: 租户编号，写入审计。
         actor_id: 操作账号编号，写入审计。
+        refresh: 为 True 时用仓库原始用例覆盖已登记的 cases_payload/用例数/元数据，
+            用于数据集透明化改造后的存量刷新。
 
     Returns:
         三个套件数据集的登记行。
@@ -292,8 +269,17 @@ def register(conn: Any, version: str, tenant_id: str, actor_id: str) -> list[dic
     for suite in SUITES:
         fields = dataset_fields(version, suite)
         existing = evaluation_repo.dataset_row(conn, fields["dataset_id"])
-        row = evaluation_repo.upsert_dataset(conn, fields)
-        if existing is None:
+        if existing is not None and refresh:
+            conn.execute(
+                "UPDATE eval_datasets SET cases_payload=%s, case_count=%s, metadata=%s, "
+                "content_sha256=%s, suite=%s, updated_at=now() WHERE dataset_id=%s",
+                (Jsonb(fields["cases_payload"]), fields["case_count"], Jsonb(fields["metadata"]),
+                 fields["content_sha256"], fields["suite"], fields["dataset_id"]),
+            )
+            row = evaluation_repo.dataset_row(conn, fields["dataset_id"])
+        else:
+            row = evaluation_repo.upsert_dataset(conn, fields)
+        if existing is None or refresh:
             evaluation_repo.insert_audit_log(
                 conn, tenant_id, actor_id, "register_dataset", fields["dataset_id"],
                 {
@@ -302,6 +288,7 @@ def register(conn: Any, version: str, tenant_id: str, actor_id: str) -> list[dic
                     "content_sha256": fields["content_sha256"],
                     "case_count": fields["case_count"],
                     "files": sorted((fields["metadata"].get("files") or {}).keys()),
+                    "refresh": bool(refresh),
                 },
             )
         registered.append(row)

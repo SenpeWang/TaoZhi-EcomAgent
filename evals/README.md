@@ -75,7 +75,7 @@ make evals-center-register                     # 登记 V1 数据集版本（幂
 make evals-center-publish REPORT="$REPORT_PATH"
 ```
 
-进入「运行分析 → 评测中心」，可按数据集版本、算法版本、口径与门禁状态筛选批次，打开批次查看逐例预期、实际工具步骤、判定维度与故障类型，并下载原始报告。对照基线要求数据集版本、口径、执行方式与判定器版本一致；真实执行只有在关联到获准查看的业务任务时才可打开轨迹中台，合成回放展示各步观测，参数只显示字段名。CLI 生成新报告时可附加 `--publish "$TENANT_ID" "$OWNER_ID"` 同步归档，门禁失败的批次也可查看。完整版本模型、接口与 Worker 执行见下文「评测中心」。
+进入「运行分析 → 评测中心」，页面分为「概览 / 数据集 / 批次 / 基线 / 任务 / 审计」页签：顶部先选评测类型、数据集版本、口径与执行方式，概览与批次均按同一口径渲染同一组指标；「数据集」页签可查看登记文件清单、完整原始用例与原始 JSON/文件下载，链路可追溯。可按数据集版本、算法版本、口径与门禁状态筛选批次，打开批次查看逐例预期、实际工具步骤、判定维度与故障类型，并下载原始报告。对照基线要求数据集版本、口径、执行方式与判定器版本一致；真实执行只有在关联到获准查看的业务任务时才可打开轨迹中台，合成回放展示各步观测，参数只显示字段名。CLI 生成新报告时可附加 `--publish "$TENANT_ID" "$OWNER_ID"` 同步归档，门禁失败的批次也可查看。完整版本模型、接口与 Worker 执行见下文「评测中心」。
 
 ### 复现合成正例与反例
 
@@ -232,12 +232,20 @@ make evals-center-check                             # 数据集 sha / 基线唯�
 - 归属默认按 `ECOM_TENANT_CODE`（`mofa`）与登录名 `owner` 解析，也可显式传 `--tenant-id`/`--owner-id`。报告版本、数据集摘要或逐例计数校验失败的整份拒绝入库；重复入库返回 `created=false` 且不产生副作用。
 - `make evals-publish` / `make evals-agent-publish` 保留为 Agent 旧工作流快捷方式，实际入库同样经过 `evals/center`。
 
+### 指标口径目录与数据集透明
+
+指标定义集中在 [`src/taozhi/domain/evaluation_metrics.py`](../src/taozhi/domain/evaluation_metrics.py)：同一「评测类型 + 口径」对应唯一一组指标键与单位，不同任务类型（Agent 调研 / RAG 问答）与不同口径（full/quick/检索/对抗/行为）的指标各自独立属于预期；接口与界面只能从 `GET /api/evaluations/metrics/catalog` 渲染，批次摘要由同一目录从原始报告提取，禁止前端自拼指标或改名。
+
+数据集透明：登记时保存与仓库文件逐字段一致的原始用例（不做裁剪），`/datasets/{id}/raw` 返回全部原始用例与文件 sha256，`/datasets/{id}/files?path=` 按登记清单回读原始文件并校验摘要；界面「数据集」页签提供文件查看/下载、逐例原始 JSON 与整份原始用例下载，保证界面看到的就是 `evals/datasets/<version>/` 里的原始内容。
+
 ### 读取与写入接口
 
 | 方法与路径 | 用途 | 权限 |
 | --- | --- | --- |
 | `GET /api/evaluations/datasets` | 数据集版本目录，支持 `eval_kind`、`version`、`include_archived` | 登录账号，按可见发起人范围汇总 |
-| `GET /api/evaluations/datasets/{dataset_id}` | 数据集详情与用例清单，`cursor` 偏移分页，可按 `suite` 过滤 | 同上 |
+| `GET /api/evaluations/datasets/{dataset_id}` | 数据集详情与原始用例清单（完整字段），`cursor` 偏移分页，可按 `suite` 过滤 | 同上 |
+| `GET /api/evaluations/datasets/{dataset_id}/raw` | 数据集全部原始用例与登记文件 sha256，供链路透明查看/下载 | 同上 |
+| `GET /api/evaluations/datasets/{dataset_id}/files` | 按登记清单下载数据集原始文件（`path` 参数），响应头 `X-Content-Sha256` 校验 | 同上，未登记路径拒绝 |
 | `GET /api/evaluations/profiles` | 算法版本列表（`version_no`/`digest`/技术栈/检索参数/Prompt 快照）与批次聚合 | 登录账号 |
 | `POST /api/evaluations/profiles` | 登记算法版本，同摘要复用、同名标签冲突 `409` | 老板/系统管理员 |
 | `GET /api/evaluations/baselines` | active 与历史基线，支持 `eval_kind`、`dataset_version`、`include_history` | 登录账号 |
@@ -249,7 +257,8 @@ make evals-center-check                             # 数据集 sha / 基线唯�
 | `GET /api/evaluations/runs/{run_id}/comparison` | 与指定 `baseline_id` 逐例配对比较，口径/方式/判定器不一致时 `422` | 同上 |
 | `GET /api/evaluations/runs/{run_id}/cases` | 逐例判定分页，支持 `status`、`suite`、`case_id` 游标 | 同上 |
 | `GET /api/evaluations/runs/{run_id}/cases/{case_id}` | 单例预期、实际步骤与判定理由；真实执行关联轨迹入口 | 同上 |
-| `GET /api/evaluations/metrics/trends` | 主指标时间序列、active 基线摘要与 `pass_rate_delta`、批次聚合 | 登录账号 |
+| `GET /api/evaluations/metrics/catalog` | 指标目录：按评测类型与口径列出唯一指标集合（键/名称/单位/方向/说明） | 登录账号 |
+| `GET /api/evaluations/metrics/trends` | 选定类型的指标时间序列、`metric_schema`、每批次 `summary`、active 基线摘要与批次聚合 | 登录账号 |
 | `POST /api/evaluations/runs/trigger` | 触发真实评测，返回 `202` 与 `job_id`、`audit_id`；同租户已有排队/执行中的评测任务时 `409`（串行） | 老板/系统管理员 |
 | `GET /api/evaluations/jobs/{job_id}` | 评测任务状态、阶段进度、结果与错误 | 任务发起人或老板/系统管理员 |
 | `POST /api/evaluations/jobs/{job_id}/cancel` | 请求取消排队或执行中的评测任务 | 任务发起人或老板/系统管理员 |

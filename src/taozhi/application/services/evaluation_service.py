@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
 from taozhi.application.common.pagination import decode_time_cursor
 from taozhi.domain.access import visible_owner_id
 from taozhi.domain.entities import Principal
+from taozhi.config import ROOT
+from taozhi.domain import evaluation_metrics
 from taozhi.domain.errors import Denied
 from taozhi.domain.evaluation_comparison import pair_case_results
 from taozhi.domain.roles import ROLE_LEVEL_BOSS
@@ -32,9 +35,13 @@ def _require_run(conn, p: Principal, run_id: str) -> dict:
 
 
 def _decorate(run: dict) -> dict:
-    """把可比性标记换算成布尔值：历史版本缺失数据集摘要时显式标不可比。"""
+    """补齐可比性标记与按口径定义的标准指标摘要。"""
     comparable_raw = run.pop("comparable_raw", None)
     run["comparable"] = comparable_raw != "false" and not run.get("dataset_archived")
+    summary = evaluation_metrics.extract(run.get("eval_kind"), run.get("scope"),
+                                         run.get("metrics"), run)
+    run["summary"] = summary
+    run["metric_schema_version"] = evaluation_metrics.SCHEMA_VERSION if summary else None
     return run
 
 
@@ -139,7 +146,12 @@ def get_run(p: Principal, run_id: str) -> dict:
         digest = current["baseline_sha256"]
         baseline = evaluation_repo.run(conn, p.tenant_id, visible_owner_id(p), report_digest=digest) if digest else None
         comparison = _compare(conn, p.tenant_id, current, _decorate(baseline) if baseline else None)
-    return {"run": current, "comparison": comparison, "metrics": current["metrics"]}
+    return {
+        "run": current,
+        "comparison": comparison,
+        "metrics": current["metrics"],
+        "metric_schema": evaluation_metrics.schema(current["eval_kind"], current["scope"]),
+    }
 
 
 def _report_key(run: dict) -> str:
@@ -196,7 +208,10 @@ def trends(p: Principal, *, eval_kind: str | None, dataset_version: str | None, 
         delta = None
         if baseline_rate is not None and row["pass_rate"] is not None:
             delta = round(row["pass_rate"] - baseline_rate, 4)
+        summary = evaluation_metrics.extract(
+            eval_kind, row.get("scope") or resolved_scope, row.get("metrics"), row)
         items.append({
+            "summary": summary,
             "run_id": row["run_id"], "created_at": row["created_at"], "mode": row["mode"],
             "scope": row["scope"], "dataset_version": row["dataset_version"],
             "algorithm_version": row["profile_version_tag"], "gate_passed": row["gate_passed"],
@@ -207,6 +222,7 @@ def trends(p: Principal, *, eval_kind: str | None, dataset_version: str | None, 
         })
     rates = [row["pass_rate"] for row in rows if row["pass_rate"] is not None]
     return {
+        "metric_schema": evaluation_metrics.schema(eval_kind, resolved_scope) if eval_kind else None,
         "dataset_version": resolved_version, "scope": resolved_scope, "mode": resolved_mode,
         "items": items,
         "aggregate": {
@@ -346,3 +362,44 @@ def cancel_job(p: Principal, job_id: str) -> dict:
             raise Denied("评测任务已经结束", "CONFLICT", 409)
         job_repo.mark_job_cancelled(conn, job_id)
     return {"message": "已请求取消"}
+
+
+def catalog(p: Principal) -> dict:
+    """返回指标目录：按评测类型与口径定义唯一指标集合，供界面统一渲染。"""
+    return evaluation_metrics.catalog()
+
+
+def get_dataset_raw(p: Principal, dataset_id: str) -> dict:
+    """返回数据集登记的全部原始用例与文件摘要，用于链路透明展示与下载。"""
+    with database_connection() as conn:
+        row = evaluation_repo.dataset_row(conn, dataset_id)
+    if row is None:
+        raise Denied("评测数据集不存在", "NOT_FOUND", 404)
+    cases = row.pop("cases_payload") or []
+    metadata = row.get("metadata") or {}
+    return {"dataset": row, "files": metadata.get("files") or {}, "cases": cases}
+
+
+def get_dataset_file(p: Principal, dataset_id: str, relative: str) -> dict:
+    """按登记清单读取数据集原始文件并校验 sha256，拒绝越目录或未登记路径。"""
+    relative = (relative or "").strip()
+    parts = Path(relative).parts
+    if not relative or any(part in ("..", "") for part in parts) or Path(relative).is_absolute():
+        raise Denied("数据集文件路径非法", "INVALID_PATH", 400)
+    with database_connection() as conn:
+        row = evaluation_repo.dataset_row(conn, dataset_id)
+    if row is None:
+        raise Denied("评测数据集不存在", "NOT_FOUND", 404)
+    files = (row.get("metadata") or {}).get("files") or {}
+    expected = files.get(relative)
+    if not expected:
+        raise Denied("文件不在数据集登记清单内", "NOT_FOUND", 404)
+    base = (ROOT / "evals/datasets" / row["version"]).resolve()
+    path = (base / relative).resolve()
+    if base not in path.parents or not path.is_file():
+        raise Denied("数据集文件不存在", "NOT_FOUND", 404)
+    payload = path.read_bytes()
+    digest = sha256(payload).hexdigest()
+    if digest != expected:
+        raise Denied("数据集文件摘要不一致，文件可能已被改动", "CORRUPT_DATASET", 409)
+    return {"filename": path.name, "payload": payload, "sha256": digest}

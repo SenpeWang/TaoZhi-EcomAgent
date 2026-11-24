@@ -87,8 +87,18 @@ def _register_dataset() -> None:
             "content_sha256": "c" * 64,
             "case_count": 22,
             "cases_payload": cases,
-            "metadata": {"modes": ["live", "synthetic_trace_regrade"], "scopes": ["full"]},
+            "metadata": {
+                "modes": ["live", "synthetic_trace_regrade"],
+                "scopes": ["full"],
+                "files": {"agent/research_cases.json": _research_cases_sha()},
+            },
         })
+
+
+def _research_cases_sha() -> str:
+    """返回仓库内 Agent 基准用例文件的 sha256，用于数据集文件透明化用例。"""
+    payload = (PROJECT / "evals/datasets/v1_20261123/agent/research_cases.json").read_bytes()
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _insert_run(owner: dict, run_id: str, *, day: int, pass_rate: float, gate: bool) -> None:
@@ -251,3 +261,134 @@ def test_dataset_detail_not_found_and_invalid_scope_rejected() -> None:
     rejected = admin.post("/api/evaluations/runs/trigger", json=body)
     assert rejected.status_code == 422
     assert rejected.json()["code"] == "INVALID_SCOPE"
+
+
+def test_metric_catalog_summary_and_dataset_raw_transparency() -> None:
+    """指标目录按类型+口径唯一，批次摘要同口径一致；数据集原始用例与文件可查。"""
+    _setup()
+    _register_dataset()
+    admin = _login("admin")
+    owner = _owner("admin")
+
+    catalog = admin.get("/api/evaluations/metrics/catalog").json()
+    assert catalog["version"] >= 1 and set(catalog["kinds"]) == {"agent", "rag"}
+    agent_schema = catalog["kinds"]["agent"]["scopes"]["full"]
+    metric_keys = [metric["key"] for metric in agent_schema["metrics"]]
+    assert metric_keys == [
+        "task_completion", "mean_score", "required_tool_coverage", "parameter_accuracy",
+        "reference_fact_coverage", "call_coverage_among_known", "latency_p50_ms",
+        "latency_p95_ms", "total_tokens",
+    ]
+    assert set(catalog["kinds"]["rag"]["scopes"]) == {
+        "full", "quick", "adversarial", "retrieval", "behavior",
+    }
+    again = admin.get("/api/evaluations/metrics/catalog").json()
+    assert again["kinds"]["agent"]["scopes"]["full"] == agent_schema
+
+    _insert_run(owner, "run_metric_001", day=1, pass_rate=0.6, gate=False)
+    runs = admin.get("/api/evaluations/runs").json()["items"]
+    assert list(runs[0]["summary"]) == metric_keys
+    assert runs[0]["summary"]["task_completion"] == 0.6
+    assert runs[0]["metric_schema_version"] == catalog["version"]
+
+    trends = admin.get("/api/evaluations/metrics/trends", params={
+        "eval_kind": "agent", "dataset_version": "v1_20261123", "scope": "full",
+    }).json()
+    assert [metric["key"] for metric in trends["metric_schema"]["metrics"]] == metric_keys
+    assert list(trends["items"][0]["summary"]) == metric_keys
+
+    raw = admin.get(f"/api/evaluations/datasets/{DATASET_ID}/raw")
+    assert raw.status_code == 200
+    body = raw.json()
+    assert len(body["cases"]) == 5
+    assert body["cases"][0]["id"] == "AGENT-T-001" and "prompt" in body["cases"][0]
+    sha = _research_cases_sha()
+    assert body["files"]["agent/research_cases.json"] == sha
+
+    file_resp = admin.get(f"/api/evaluations/datasets/{DATASET_ID}/files",
+                          params={"path": "agent/research_cases.json"})
+    assert file_resp.status_code == 200
+    assert file_resp.headers["X-Content-Sha256"] == sha
+
+    assert admin.get(f"/api/evaluations/datasets/{DATASET_ID}/files",
+                     params={"path": "../AGENTS.md"}).status_code == 400
+    assert admin.get(f"/api/evaluations/datasets/{DATASET_ID}/files",
+                     params={"path": "agent/unknown.json"}).status_code == 404
+    assert admin.get("/api/evaluations/datasets/unknown-v9/raw").status_code == 404
+
+
+def test_rag_case_detail_accepts_colon_case_ids() -> None:
+    """RAG 逐例编号含冒号（层前缀）时，用例详情与游标分页不得被路径校验拒绝。"""
+    _setup()
+    admin = _login("admin")
+    owner = _owner("admin")
+    run_id = "rag_metric_colon_001"
+    report = {
+        "run_id": run_id,
+        "created_at": datetime(2026, 11, 3, 4, 0, tzinfo=timezone.utc),
+        "mode": "live",
+        "eval_kind": "rag",
+        "scope": "full",
+        "git_sha": "a1b2c3d4",
+        "dataset_sha256": "e" * 64,
+        "judges_sha256": "j" * 64,
+        "report_sha256": hashlib.sha256(run_id.encode()).hexdigest(),
+        "baseline_sha256": None,
+        "dataset_id": "rag_metric-v1_20261123",
+        "dataset_name": "rag_metric",
+        "dataset_version": "v1_20261123",
+        "dataset_description": "RAG 指标用例",
+        "dataset_suite": "rag_core",
+        "dataset_content_sha256": "e" * 64,
+        "dataset_case_count": 18,
+        "cases_payload": [],
+        "dataset_metadata": {"modes": ["live"], "scopes": ["full"]},
+        "schema_version": 1,
+        "metrics": {"retrieval": {"hit@8": 0.9}, "provenance": {"comparable": True}},
+        "gate_passed": True,
+        "passed_cases": 1,
+        "failed_cases": 0,
+        "unassessable_cases": 0,
+        "pass_rate": 1.0,
+        "mean_score": None,
+        "latency_p50_ms": 100,
+        "latency_p95_ms": 200,
+        "total_tokens": 300,
+        "judges": [],
+    }
+    def case_row(case_id: str, corpus: str) -> dict:
+        return {
+            "case_id": case_id,
+            "case_sha256": "f" * 64,
+            "name": "行为层用例",
+            "category": "product",
+            "suite": "behavior",
+            "status": "passed",
+            "score": 1.0,
+            "hard_failure": False,
+            "trace_id": None,
+            "expected": [corpus],
+            "observed": {"why": "命中文档"},
+            "steps_complete": True,
+            "verdicts": [{"judge": "BehaviorJudge", "dimension": "answer_quality",
+                          "status": "passed", "reason": "通过", "issues": []}],
+        }
+
+    rows = [case_row("behavior:GEN-T-001", "SYN_CORPUS_LX20"),
+            case_row("behavior:GEN-T-002", "SYN_CORPUS_LX21")]
+    with database_connection() as conn:
+        assert evaluation_repo.insert_report(conn, owner["tenant_id"], owner["id"], report, rows)
+
+    detail = admin.get(f"/api/evaluations/runs/{run_id}/cases/behavior:GEN-T-001")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["case"]["case_id"] == "behavior:GEN-T-001"
+    assert body["expected"] == ["SYN_CORPUS_LX20"]
+    assert body["observed"] == {"why": "命中文档"}
+
+    page = admin.get(f"/api/evaluations/runs/{run_id}/cases", params={"limit": 1}).json()
+    assert page["next_cursor"] == "behavior:GEN-T-001"
+    second = admin.get(f"/api/evaluations/runs/{run_id}/cases",
+                       params={"limit": 1, "cursor": page["next_cursor"]}).json()
+    assert second["items"][0]["case_id"] == "behavior:GEN-T-002"
+    assert admin.get(f"/api/evaluations/runs/{run_id}/runs").status_code in (404, 405)

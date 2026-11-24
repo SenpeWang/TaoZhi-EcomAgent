@@ -7,6 +7,7 @@
 - 公开文档三份：`README.md` 讲怎么跑，`BENCHMARK.md` 是口径唯一来源，
   `dataset/README.md` 讲数据包。
 - 指标实现只有 `metrics.py`，运行器只有 `run_evals.py`；第二套实现与一次性探针
+- 指标展示目录只有 `src/taozhi/domain/evaluation_metrics.py`：同一评测类型+口径的指标键固定，界面与接口按 `/api/evaluations/metrics/catalog` 渲染，禁止前端自拼或改名；数据集展示必须使用登记原始用例，不得裁剪字段。
   结论回写代码注释后删除，不留副本。
 
 ## 流程引用（不在本文件复述）

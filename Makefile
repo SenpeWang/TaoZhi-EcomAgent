@@ -8,6 +8,7 @@ PUBLISH_ARGS ?=
 REPORT ?=
 BACKFILL_ARGS ?=
 CENTER_VERSION ?= v1_20261123
+REGISTER_ARGS ?=
 TEST_ENV := ECOM_MODE=test PYTHONPATH=$(PROJECT_ROOT)/src
 COMPOSE := docker compose
 
@@ -144,7 +145,7 @@ evals-archive-check:
 	$(PYTHON) scripts/archive_baseline.py check
 
 evals-center-register:
-	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli register --version $(CENTER_VERSION)
+	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli register --version $(CENTER_VERSION) $(REGISTER_ARGS)
 
 evals-center-publish:
 	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli publish $(if $(REPORT),--report $(REPORT),) $(PUBLISH_ARGS)
