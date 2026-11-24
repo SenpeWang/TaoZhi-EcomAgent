@@ -26,11 +26,13 @@ evals/
 │   ├── baselines.py             基线锁定与历史留痕
 │   └── backfill.py              历史数据集、报告与基线的幂等回填
 ├── dataset/                     独立评测数据包：规格 → 确定性生成 → 幂等灌库（见其 README）
-├── datasets/                    数据集（随代码进 Git，按版本目录只读留档、可追溯、可 diff）
-│   └── v3_20261124/             当前基准版本（v1/v2 为历史只读留档）
-│       ├── dataset.json         版本描述符：套件、用例数、逐文件 sha256、可用口径与方式
-│       ├── agent/               600 例合成回放（含 60 红队）+ 观测 + 反例（另有 10 例实测）
-│       └── rag/                 540 例主集 + 60 红队、91 篇语料与命名登记
+├── datasets/                    数据集（RAG/Agent 分目录、版本名带体系前缀）
+│   ├── rag_v1_20261123/         历史只读：180 主集 + 18 对抗
+│   ├── agent_v1_20261123/       历史只读：12 合成回放
+│   ├── rag_v2_20261124/         历史只读：200 主集 + 30 对抗
+│   ├── agent_v2_20261124/       历史只读：190 合成回放
+│   ├── rag_v3_20261124/         当前 RAG：540 主集 + 60 红队、91 语料
+│   └── agent_v3_20261124/       当前 Agent：600 合成回放 + 10 实测
 ├── runtime_snapshot.py          运行时快照：数据集版本、Git 提交、Prompt 源摘要与算法版本
 ├── metrics.py                   指标实现（全项目唯一口径）
 ├── sync_phoenix.py              Arize Phoenix 平台双轨数据同步中枢
@@ -45,9 +47,9 @@ evals/
 
 | 层 | 评什么 | 判定方式 | 数据来源 |
 |---|---|---|---|
-| retrieval | 检索质量：Hit@1/3/8、Precision@k、Recall@k、nDCG@k、MRR、延迟 | 规则判定（命中预期标题集合） | `datasets/v3_20261124/rag/cases.jsonl` + `corpus_docs.jsonl` 全量 |
-| adversarial | 安全：注入、越权、撤权、金丝雀泄漏 | 全自动规则判定（机读规则，零人工复核；协议见 BENCHMARK 第 8 节） | `datasets/v3_20261124/rag/redteam.json` |
-| behavior | 行为质量：有据率、切题度、正确拒答 | LLM-as-judge（faithful/relevant/abstain） | `datasets/v3_20261124/rag/cases.jsonl` 全量按 6 大类 |
+| retrieval | 检索质量：Hit@1/3/8、Precision@k、Recall@k、nDCG@k、MRR、延迟 | 规则判定（命中预期标题集合） | `datasets/rag_v3_20261124/cases.jsonl` + `corpus_docs.jsonl` 全量 |
+| adversarial | 安全：注入、越权、撤权、金丝雀泄漏 | 全自动规则判定（机读规则，零人工复核；协议见 BENCHMARK 第 8 节） | `datasets/rag_v3_20261124/redteam.json` |
+| behavior | 行为质量：有据率、切题度、正确拒答 | LLM-as-judge（faithful/relevant/abstain） | `datasets/rag_v3_20261124/cases.jsonl` 全量按 6 大类 |
 
 behavior 层按大类覆盖专项：**noise_robustness**（噪声上下文与同义问法）、
 **multi_turn**（同会话前置轮 + 判定最后一轮，指代消解与跨轮权限）、
@@ -80,16 +82,16 @@ make evals-center-publish REPORT="$REPORT_PATH"
 ### 复现合成正例与反例
 
 ```bash
-PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/v3_20261124/agent/research_replay.json
-PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/v3_20261124/agent/research_replay.json --counterexamples evals/datasets/v3_20261124/agent/research_counterexamples.json --compare "$BASELINE_REPORT"
+PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_v3_20261124/research_replay.json
+PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_v3_20261124/research_replay.json --counterexamples evals/datasets/agent_v3_20261124/research_counterexamples.json --compare "$BASELINE_REPORT"
 ```
 
 第二条命令的 `BASELINE_REPORT` 取第一条打印的报告路径。反例保留输入、版本与其余观测，只修改一个执行步骤或答案，门禁将按设计返回非零退出码。合成报告与反例报告用于本地/CI 回归对比，直接在报告内按用例配对查看修复与退化；评测中心只接收真实执行（`live`）结果，合成回放不进入中心。
 
 | 工作 | 入口与输出 |
 |---|---|
-| 重评指定样本 | `PYTHONPATH=src python3 -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/v3_20261124/agent/web_replay.json`。附加 `--compare <旧报告路径>` 可得到配对的修复、回归和排除项 |
-| 人工盲审 | `PYTHONPATH=src python3 -m evals.agent_eval.review --replay evals/datasets/v3_20261124/agent/web_replay.json` 生成独立人工标注表。显式使用 `--model-review` 可对同一合成样本运行模型裁判。`--agreement <人工表> <模型表>` 核对有效配对与分歧 |
+| 重评指定样本 | `PYTHONPATH=src python3 -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_v3_20261124/web_replay.json`。附加 `--compare <旧报告路径>` 可得到配对的修复、回归和排除项 |
+| 人工盲审 | `PYTHONPATH=src python3 -m evals.agent_eval.review --replay evals/datasets/agent_v3_20261124/web_replay.json` 生成独立人工标注表。显式使用 `--model-review` 可对同一合成样本运行模型裁判。`--agreement <人工表> <模型表>` 核对有效配对与分歧 |
 | 线上问题回灌 | `PYTHONPATH=src python3 -m evals.agent_eval.feedback <活动页.json> ...` 读取通过工作台权限获取的同租户活动页，按诊断代码和处理结果输出去重计数。选择候选、重建合成证据，再用真实业务入口检验修复 |
 
 ## 运行
@@ -166,7 +168,7 @@ evaluation 由服务端按 `(run, name)` upsert。`--dry-run` 只打印计划不
 
 - **门禁分数**：Phoenix 是观测层，不产出门禁分数。判定仍看 `evals/rag_eval/run.py` 的退出码
   与 `reports/*.json`，界面上的数字只供人看。
-- **红队层（60 例）**：它跑的是 `evals/datasets/v3_20261124/rag/redteam.json`，规则判定；
+- **红队层（60 例）**：它跑的是 `evals/datasets/rag_v3_20261124/redteam.json`，规则判定；
   `Z1` / `N1` / `C1`，与评估集 `case_id`（`GEN-T-*`）实测零交集。拍平进同一个
   Experiment 只会全部落进「未匹配」——看着同步了，实际一条都没写。要让它可见，
   需单独建一个对抗数据集，暂未做。
@@ -197,7 +199,7 @@ make evals-archive-check   # 校验快照可读并把登记 md5 同步为当前�
 
 | 维度 | 标识 | 规则 |
 | --- | --- | --- |
-| 数据集版本 | `v3_20261124`（目录名即版本号；v1/v2 为历史只读版本） | `evals/datasets/<version>/dataset.json` 登记套件、用例数、逐文件 sha256、可用口径（`scopes`）与执行方式（`modes`）；报告内嵌 `dataset.version` 与 `content_sha256`，入库逐项校验。任何文件内容变更必须新增版本目录并升级版本号，禁止原地覆盖历史版本。 |
+| 数据集版本 | `rag_v3_20261124` / `agent_v3_20261124`（目录名即版本号，前缀标明体系；v1/v2 为历史只读版本） | `evals/datasets/<体系>_<版本>/dataset.json` 登记套件、用例数、逐文件 sha256、可用口径（`scopes`）与执行方式（`modes`）；报告内嵌 `dataset.version` 与 `content_sha256`，入库逐项校验。任何文件内容变更必须新增版本目录并升级版本号，禁止原地覆盖历史版本。 |
 | 算法版本 | `algo-v1`、`algo-v2`…（`version_no` 递增） | `digest` = Git 提交 + 模型标识 + 检索参数 + Prompt 源文件 sha256 + 判定器摘要；同摘要自动复用已有版本，显式 `version_tag` 重复则拒绝；报告内嵌 `algorithm` 块优先于当前运行时快照。 |
 | 批次 | 报告自带 `run_id` | `eval_runs` 同时记录 `dataset_id`/`dataset_version`、`scope`、`mode` 与 `profile_id`，形成「数据集版本 × 算法版本 × 口径 × 执行方式」四元组。 |
 | 基线 | `baseline_id` | 绑定 `(eval_kind, dataset_version, scope, mode)` 的唯一 active；设置新基线时旧基线转历史保留，不清空。 |
@@ -209,7 +211,7 @@ make evals-archive-check   # 校验快照可读并把登记 md5 同步为当前�
 
 | 来源 | 归属规则 | 可比性 |
 | --- | --- | --- |
-| Agent 历史报告 | 报告 `dataset_sha256` 与 V3 用例目录指纹一致 → 归 `agent_research-v3_20261124`；与 V2/V1 一致 → 归对应历史版本；均不匹配 → 历史归档 | 只有归入 V3 的批次参与当前基线与趋势，V1/V2 保留为历史版本 |
+| Agent 历史报告 | 报告 `dataset_sha256` 与 V3 用例目录指纹一致 → 归 `agent_research-agent_v3_20261124`；与 V2/V1 一致 → 归对应历史版本；均不匹配 → 历史归档 | 只有归入 V3 的批次参与当前基线与趋势，V1/V2 保留为历史版本 |
 | RAG 历史报告 | 用例与语料内容已与 V3 不同，入库时 `--legacy` 归 `<suite>-v0_legacy`，`archived=true` | `comparable=false`，不得与 V3 批次直接比较 |
 | RAG 原始基线 | 保留为 `v0_legacy` 数据集版本上的 active 基线（20261117 快照），不迁入 V1 | V1 基线由 V1 批次重新锁定 |
 | 旧式 Agent 数据集 | 回填时把旧数据集下的批次迁入统一 V1 数据集并归档旧数据集行 | 批次内容与报告保持原样 |

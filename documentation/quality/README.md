@@ -31,7 +31,7 @@
 
 | 能力 | 现有实现 | 状态 | 主要差距 |
 | --- | --- | --- | --- |
-| 评测集与版本 | [评测数据集描述符](../../evals/datasets/v3_20261124/dataset.json)、`eval_datasets.content_sha256`、[数据库手册](../database/README.md) | 已实现 | 场景级用例继续扩充 |
+| 评测集与版本 | [评测数据集描述符](../../evals/datasets/rag_v3_20261124/dataset.json)、`eval_datasets.content_sha256`、[数据库手册](../database/README.md) | 已实现 | 场景级用例继续扩充 |
 | 自动化回归与门禁 | [基准与门禁](../../evals/BENCHMARK.md) 三类门禁语义、`make test`、`make evals-agent-replay`、[CI](../../.github/workflows/ci.yml) | 已实现（离线/合成） | 在线层门禁需人工触发与举证模板 |
 | 批次与基线管理 | 评测中心 V3：`eval_runs`/`eval_profiles`/`eval_baselines`/`eval_run_reports`，`make evals-center-backfill`、`make evals-center-check` | 已实现 | 验收报告导出 |
 | 停止条件 | [调研领域停止判定](../../src/taozhi/domain/research.py)（`StopReason`/`evaluate_hard_stop`）、[检索决策](../../src/taozhi/domain/rag_verification.py)（`RetrievalDecision`） | 已实现 | 统一写入证据包并导出 |

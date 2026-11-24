@@ -49,7 +49,7 @@ evals/dataset/
 └── seed.py                幂等灌库：组织/身份/文档/切片/向量/ES/授权 + 权限实测校验
 ```
 
-V3 产物在 `evals/datasets/v3_20261124/rag/`：`cases.jsonl`（540 例，6 大类 × 6 用途）、
+V3 RAG 产物在 `evals/datasets/rag_v3_20261124/`：`cases.jsonl`（540 例，6 大类 × 6 用途）、
 `redteam.json`（60 例红队，机读判定）、`corpus_docs.jsonl`（91 篇语料、指引手册与 PDF/DOCX 解析夹具）、
 `manifest.json`（spec sha256 + 种子 + 大类/子类/用途分布 + 文件 sha256）。
 
