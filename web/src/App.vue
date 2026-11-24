@@ -348,7 +348,7 @@ const workspaceInfo = ref<WorkspaceInfo>({
   quick_accounts: [],
 })
 const user = ref<User | null>(null)
-const currentPage = ref<WorkspacePage>('测评启动')
+const currentPage = ref<WorkspacePage>('工作概览')
 const currentEvaluationKind = ref<EvaluationKind>('agent')
 const { busy, action } = useWorkspaceAction()
 const documentManager = ref<InstanceType<typeof DocumentManager> | null>(null)
