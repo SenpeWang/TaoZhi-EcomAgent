@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <LoginPortal
     v-if="!user"
     v-model:username="loginForm.username"
@@ -29,23 +29,17 @@
 
       <nav class="sidebar-nav" aria-label="主导航">
         <template v-for="group in navigationGroups" :key="group.title">
-          <div
-            class="nav-group-label"
-            :class="{ 'nav-group-directory': group.items.some((item) => Boolean(item.kind)) }"
-          >
+          <div class="nav-group-label" :class="{ 'nav-group-directory': group.nested }">
             {{ group.title }}
           </div>
           <button
             v-for="item in group.items"
-            :key="`${item.page}:${item.kind || ''}`"
+            :key="item.page"
             type="button"
             class="nav-item-btn"
-            :class="{
-              active: isNavItemActive(item),
-              'nav-item-child': Boolean(item.kind),
-            }"
-            :aria-current="isNavItemActive(item) ? 'page' : undefined"
-            @click="navigate(item.page, item.kind)"
+            :class="{ active: currentPage === item.page, 'nav-item-child': group.nested }"
+            :aria-current="currentPage === item.page ? 'page' : undefined"
+            @click="navigate(item.page)"
           >
             <svg
               class="nav-svg-icon"
@@ -58,7 +52,7 @@
             >
               <path v-for="path in item.iconPaths" :key="path" :d="path" />
             </svg>
-            <span class="nav-label">{{ item.label }}</span>
+            <span class="nav-label">{{ item.page }}</span>
             <span v-if="item.badge" class="nav-badge-count">{{ item.badge }}</span>
           </button>
         </template>
@@ -91,16 +85,12 @@
         <select
           class="mobile-navigation"
           aria-label="工作台导航"
-          :value="currentNavigationValue"
+          :value="currentPage"
           @change="navigateFromSelect"
         >
           <optgroup v-for="group in navigationGroups" :key="group.title" :label="group.title">
-            <option
-              v-for="item in group.items"
-              :key="`${item.page}:${item.kind || ''}`"
-              :value="navigationValue(item)"
-            >
-              {{ item.label }}
+            <option v-for="item in group.items" :key="item.page" :value="item.page">
+              {{ item.page }}
             </option>
           </optgroup>
         </select>
@@ -152,10 +142,7 @@
       <main class="content">
         <div class="page-heading">
           <div>
-            <h1>
-              {{ currentPage }}
-              <span v-if="currentKindLabel" class="page-heading-kind">{{ currentKindLabel }}</span>
-            </h1>
+            <h1>{{ currentPage }}</h1>
             <p>{{ currentPageDefinition.description }}</p>
           </div>
         </div>
@@ -192,16 +179,38 @@
           @inspect="openTrace"
         />
 
-        <EvaluationCenter
-          v-else-if="isEvaluationWorkspacePage && !user.must_change"
-          :key="`${user.id}:${user.role_level}:${currentPage}:${currentEvaluationKind}`"
-          :api="api"
-          :is-admin="isAdmin(user)"
-          :can-write-eval="isAdmin(user) || Boolean(user.is_boss)"
-          :view="evaluationView"
-          :kind="currentEvaluationKind"
-          @inspect="openTrace"
-        />
+        <template v-else-if="isEvaluationWorkspacePage && !user.must_change">
+          <section class="evaluation-kind-switch" aria-label="选择评测体系">
+            <span class="evaluation-kind-switch-label">评测体系</span>
+            <el-checkbox-group v-model="evaluationKinds">
+              <el-checkbox
+                value="agent"
+                :disabled="evaluationKinds.length === 1 && evaluationKinds.includes('agent')"
+              >
+                Agent
+              </el-checkbox>
+              <el-checkbox
+                value="rag"
+                :disabled="evaluationKinds.length === 1 && evaluationKinds.includes('rag')"
+              >
+                RAG
+              </el-checkbox>
+            </el-checkbox-group>
+            <span class="evaluation-kind-switch-hint">至少保留一个评测体系</span>
+          </section>
+          <div class="evaluation-panel-stack">
+            <EvaluationCenter
+              v-for="kind in evaluationKinds"
+              :key="`${user.id}:${user.role_level}:${currentPage}:${kind}`"
+              :api="api"
+              :is-admin="isAdmin(user)"
+              :can-write-eval="isAdmin(user) || Boolean(user.is_boss)"
+              :view="evaluationView"
+              :kind="kind"
+              @inspect="openTrace"
+            />
+          </div>
+        </template>
 
         <KnowledgeWorkspace
           v-else-if="currentPage === '知识问答' && !user.must_change"
@@ -316,7 +325,6 @@ import {
   isEvaluationPage,
   workspaceNavigation,
   workspacePages,
-  type WorkspaceNavItem,
   type WorkspacePage,
 } from './app/workspaceNavigation'
 import { isAdmin, isAdministrationPage, type ManagedUser } from './features/administration/types'
@@ -349,7 +357,7 @@ const workspaceInfo = ref<WorkspaceInfo>({
 })
 const user = ref<User | null>(null)
 const currentPage = ref<WorkspacePage>('工作概览')
-const currentEvaluationKind = ref<EvaluationKind>('agent')
+const evaluationKinds = ref<EvaluationKind[]>(['agent', 'rag'])
 const { busy, action } = useWorkspaceAction()
 const documentManager = ref<InstanceType<typeof DocumentManager> | null>(null)
 const organizations = ref<Organization[]>([])
@@ -420,17 +428,7 @@ const navigationGroups = computed(() =>
   ),
 )
 const currentPageDefinition = computed(() => workspacePages[currentPage.value])
-const navigationItems = computed<WorkspaceNavItem[]>(() =>
-  navigationGroups.value.flatMap((group) => group.items),
-)
-const currentNavigationItem = computed<WorkspaceNavItem | null>(() => {
-  const exact = navigationItems.value.find((item) => isNavItemActive(item))
-  return exact ?? null
-})
-const currentKindLabel = computed(() => {
-  const kind = currentNavigationItem.value?.kind
-  return kind === 'agent' ? 'Agent' : kind === 'rag' ? 'RAG' : ''
-})
+const navigationItems = computed(() => navigationGroups.value.flatMap((group) => group.items))
 const isEvaluationWorkspacePage = computed(() => isEvaluationPage(currentPage.value))
 const evaluationView = computed<'launch' | 'results'>(() =>
   currentPage.value === '测评启动' ? 'launch' : 'results',
@@ -438,37 +436,11 @@ const evaluationView = computed<'launch' | 'results'>(() =>
 const breadcrumbText = computed(() => {
   if (user.value?.must_change) return '账号安全'
   const group = currentPageDefinition.value.group
-  const leaf = currentNavigationItem.value
-  return leaf?.kind ? `${group} / ${leaf.label}` : group
+  return isEvaluationWorkspacePage.value ? `${group} / ${currentPage.value}` : group
 })
 
 /**
- * 判断导航项是否对应当前页面与评测体系。
- * @param item - 导航叶子项。
- * @returns 是否为当前选中项。
- */
-function isNavItemActive(item: WorkspaceNavItem): boolean {
-  if (item.page !== currentPage.value) return false
-  if (!item.kind) return true
-  return item.kind === currentEvaluationKind.value
-}
-
-/**
- * 把导航项编码为移动端下拉框的可解析取值。
- * @param item - 导航叶子项。
- * @returns 页面名，或「页面|评测体系」编码。
- */
-function navigationValue(item: WorkspaceNavItem): string {
-  return item.kind ? `${item.page}|${item.kind}` : item.page
-}
-
-const currentNavigationValue = computed(() => {
-  const item = currentNavigationItem.value
-  return item ? navigationValue(item) : currentPage.value
-})
-
-/**
- * 处理移动端导航下拉框选择，解析可选的评测体系编码后跳转。
+ * 处理移动端导航下拉框选择。
  * @param event - 下拉框变更事件。
  */
 function navigateFromSelect(event: Event): void {
@@ -576,8 +548,8 @@ function clearSession(): void {
   approvals.value = []
   users.value = []
   dashboard.value = emptyDashboard
-  currentPage.value = '测评启动'
-  currentEvaluationKind.value = 'agent'
+  currentPage.value = '工作概览'
+  evaluationKinds.value = ['agent', 'rag']
   loginForm.password = ''
   clearTaskWorkspace()
 }
@@ -647,8 +619,8 @@ async function signIn(): Promise<void> {
     const signedUser = result.user
     user.value = signedUser
     loginForm.password = ''
-    currentPage.value = signedUser.must_change ? '个人中心' : '测评启动'
-    currentEvaluationKind.value = 'agent'
+    currentPage.value = signedUser.must_change ? '个人中心' : '工作概览'
+    evaluationKinds.value = ['agent', 'rag']
     await load()
   })
 }
@@ -685,25 +657,14 @@ function handleUserCommand(cmd: string): void {
 }
 
 /**
- * 切换菜单并加载对应页面数据；评测体系页面由二级项携带 kind 编码。
- * @param target - 页面名称，或「页面|评测体系」编码。
- * @param kind - 侧边栏直接传入的评测体系。
+ * 切换菜单并加载对应页面数据。
+ * @param name - 菜单名称。
  */
-async function navigate(target: string, kind?: EvaluationKind): Promise<void> {
-  const [pageName, encodedKind] = target.split('|')
-  const page = pageName as WorkspacePage
-  const requestedKind: EvaluationKind | undefined =
-    encodedKind === 'agent' || encodedKind === 'rag' ? encodedKind : kind
-  const destination =
-    navigationItems.value.find((item) =>
-      requestedKind
-        ? item.page === page && item.kind === requestedKind
-        : item.page === page && !item.kind,
-    ) ?? navigationItems.value.find((item) => item.page === page)
+async function navigate(name: string): Promise<void> {
+  const destination = navigationItems.value.find((item) => item.page === name)
   if (!destination) return
   if (currentPage.value === '知识问答' && destination.page !== currentPage.value) newQuestion()
   currentPage.value = destination.page
-  if (destination.kind) currentEvaluationKind.value = destination.kind
   if (!isLazyPage(destination.page)) await action(load)
 }
 
@@ -798,14 +759,32 @@ onMounted(async () => {
   opacity: 1;
 }
 
-.page-heading-kind {
-  margin-left: 10px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  background: var(--tz-primary-soft);
-  color: var(--tz-primary);
+.evaluation-kind-switch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 10px 16px;
+  background: var(--tz-surface);
+  border: 1px solid var(--tz-border);
+  border-radius: 10px;
+}
+
+.evaluation-kind-switch-label {
+  color: var(--tz-ink-secondary);
   font-size: 13px;
   font-weight: 600;
-  vertical-align: middle;
+}
+
+.evaluation-kind-switch-hint {
+  color: var(--tz-ink-muted);
+  font-size: 12px;
+}
+
+.evaluation-panel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 </style>

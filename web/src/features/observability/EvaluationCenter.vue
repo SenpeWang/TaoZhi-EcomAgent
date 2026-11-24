@@ -1131,16 +1131,12 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'inspect', taskId: string, traceId: string): void }>()
 
 const evalKind = computed<EvaluationKind>(() => props.kind)
-const centerTitle = computed(() => {
-  const kindLabel = props.kind === 'agent' ? 'Agent' : 'RAG'
-  return `${kindLabel} ${props.view === 'launch' ? '评测启动' : '测评结果'}`
-})
+const centerTitle = computed(() => (props.kind === 'agent' ? 'Agent 评测' : 'RAG 评测'))
 const centerSubtitle = computed(() => {
-  const owner = props.isAdmin ? '企业' : '我的'
   if (props.view === 'launch') {
-    return `${owner}评测启动：登记算法版本，选择数据集、口径与真实执行方式发起评测，并跟踪当前任务进度。`
+    return '登记算法版本，选择数据集与评测口径发起真实评测，并跟踪当前任务进度。'
   }
-  return `${owner}评测结果：概览指标与趋势、数据集原始内容、批次与基线${props.canWriteEval ? '，以及管理员写权限可见的审计留痕' : ''}。`
+  return `概览指标与趋势、数据集原始内容、批次与基线${props.canWriteEval ? '，以及管理员写权限可见的审计留痕' : ''}。`
 })
 const activeTab = ref(props.view === 'launch' ? 'launch' : 'overview')
 const owner = ref('all')
