@@ -349,6 +349,8 @@ judge 未校准时，无法区分"系统答错了"和"judge 判错了"，第一�
 
 ## 13. Agent 调研评测
 
+V3 数据集包含 Agent 600 例合成回放（含 60 红队）+ 10 例实测、RAG 主集 540 例 + 60 红队；分类口径按能力维度命名，历史版本只读留档、与 V2 批次不可比。
+
 运行器区分实际调用调研图的 `live` 和向同一套判定器输入合成执行记录的 `synthetic_trace_regrade`。后一种验证评分逻辑和报告，不产生 Agent 实测成绩。两种报告分别记录来源、代码提交、用例集及判定器摘要，每例另记用例定义摘要，合成报告还记录输入文件摘要。
 
 | 指标 | 判定范围 |
@@ -365,7 +367,7 @@ judge 未校准时，无法区分"系统答错了"和"judge 判错了"，第一�
 
 ### 13.1 评测中心入库口径（Agent / RAG 双体系）
 
-评测中心只接收通过 `evals/center/publish.py` 校验的报告；Agent 与 RAG 的旧发布入口只是委托同一实现的外壳。入库按「数据集版本 + 算法版本」记账，报告原文保持只读：
+评测中心只接收通过 `evals/center/publish.py` 校验的真实执行（`live`）报告；合成回放/轨迹重评报告仅用于本地与 CI 回归，`publish` 拒绝入库。Agent 与 RAG 的旧发布入口只是委托同一实现的外壳。入库按「数据集版本 + 算法版本」记账，报告原文保持只读：
 
 - **数据集版本**：`evals/datasets/<version>/dataset.json` 登记套件、用例数、逐文件 sha256 与可用口径/方式；报告内嵌 `dataset.version`/`content_sha256`，不一致即拒绝入库，内容变更必须升版本。
 - **算法版本**：`eval_profiles` 以 `version_no` 递增、`digest` = Git 提交 + 模型 + 检索参数 + Prompt 源 sha + 判定器摘要唯一标识；同摘要复用，显式标签不可覆盖。
@@ -381,7 +383,7 @@ judge 未校准时，无法区分"系统答错了"和"judge 判错了"，第一�
 | `latency_p50_ms`、`latency_p95_ms` | 报告中的秒级时延换算为毫秒，未观测时为空 |
 | `total_tokens` | 已计量的提示与补全 Token 合计，两项都缺失时为空 |
 | `judges` | 按判定器与维度汇总的通过、失败、不可判定计数 |
-| 数据集登记 | 归入 `<suite>-<version>`（如 `agent_research-v1_20261123`）；同摘要批次归入同一版本，用例数取已观测最大值 |
+| 数据集登记 | 归入 `<suite>-<version>`（如 `agent_research-v3_20261124`）；同摘要批次归入同一版本，用例数取已观测最大值 |
 
 #### RAG 批次指标投影
 
@@ -407,3 +409,13 @@ judge 未校准时，无法区分"系统答错了"和"judge 判错了"，第一�
 - RAG `scope` 按报告实际出现的层推断：检索 + 行为 → `full`；只有行为 → `behavior`；检索 + 对抗 → `quick`；只有检索 → `retrieval`；只有对抗 → `adversarial`。显式 `--scope` 优先，触发任务时还须落在数据集描述符登记的 `scopes` 内。
 - 两个批次可比的条件：**数据集版本 + `scope` + `mode` + `judges_sha256` 全部一致**。V0 历史批次（`*-v0_legacy`）与归档数据集一律 `comparable=false`，不参与 V1 趋势与基线差值。
 - 门禁失败不是执行失败：`gate_passed=false` 的报告仍会入库，失败结论由批次指标与逐例判定表达；只有报告非法、缺报告或运行器异常才拒绝执行。
+
+## 14. V3 数据集口径（能力大类 × 用途 × 命名）
+
+- **大类**：RAG 与 Agent 各 6 个能力大类（见 `evals/naming.py` 与两份数据集 README），按能力归因，不按业务主题；业务主题放 `topic`。
+- **用途 track**：`golden` / `capability` / `regression` / `challenge` / `heldout` / `redteam`。每体系主集 540 例（每大类 golden 30 / capability 20 / regression 15 / challenge 10 / heldout 15）+ 独立红队 60 例；Agent 另保留 10 例实测。
+- **子类命名**：唯一来源 `evals/naming.py`。子类英文名必须对齐官方来源术语（Anthropic / RAGAS / ARES / RAGBench / CRAG / RGB / LongMemEval / BFCL / τ-bench / DeepEval / AgentHarm / OWASP LLM Top 10），无官方术语的标 `project_defined`；未登记子类禁止入库。
+- **README 参考来源**：每份数据集 README 必须含"参考来源与依据"与"子类命名登记表"，由 `evals/tests` 校验。
+- **门禁**：golden / regression / redteam 由确定性 grader 阻塞；capability 只观察；challenge 单列；heldout 仅在发布前单独运行。大类通过率 >85% 触发饱和告警。
+- **非确定性**：Agent live 支持 `--trials k`，报告 `pass@k` 与 `pass^k`；RAG 复用 `--repeat k` 的 `pass^k`。子类 n<30 不下结论，报告先按大类聚合并给 Wilson 95% CI。
+- **LLM judge**：本版本为全合成数据、无人工标注，LLM judge 只作旁路观察，不参与阻塞门禁；报告须标注"未经人工校准"。

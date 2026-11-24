@@ -34,7 +34,7 @@
 
 | 维度 / 组件 | 覆盖范围与数据源 | 核心指标与规则 | 门禁性质 |
 |---|---|---|---|
-| **基准用例集（`cases.py`）** | 当前 10 例（覆盖 `full_research`、`sourcing_comparison`、`web_intelligence`、`dynamic_steering`、`error_recovery` 5 类全场景） | `total_cases`、`passed_cases`、`pass_rate`、`mean_score` | 全量跑批 `pass_rate < 0.75` 时 `runner.py` 退出码 `1` 阻塞 |
+| **基准用例集（`cases.py`）** | 当前 600 例合成回放（6 大类 × 6 用途，含 60 红队）+ 10 例实测；日常回放默认排除 90 例 heldout，发布前用 `--include-heldout` 跑全量；子类命名见 `evals/naming.py` | `total_cases`、`passed_cases`、`pass_rate`、`mean_score` | 全量跑批 `pass_rate < 0.75` 时 `runner.py` 退出码 `1` 阻塞 |
 | **工具契约判定（`ToolExecutionJudge`）** | `AgentRunResult.tool_calls` | `required_tools` 命中率、`forbidden_tools` 零触发、有效数据条数 `>= min_data_count` | 触发禁止工具即判 `FAIL` |
 | **交付与真实性（`DeliverableJudge` & `AntiHallucinationJudge`）** | `AgentRunResult.report` | 核心大纲小节正则匹配、`len(report) >= min_chars`、虚假思考标记扫描 | 出现虚假思考文案直接判 `FAIL` |
 | **动态干预判定（`SteeringJudge`）** | `steering_applied` & `steering_keyword` | 注入干预后终稿关键词与重规划兑现验证 | 干预用例未采纳即判 `FAIL` |
@@ -60,5 +60,5 @@
 - **真实执行与可回放**：文档中出现的一切分数、耗时、工具调用序列与 TraceID 必须直接源自 `evals/reports/agent_eval/` 真实生成文件，严禁脑补、截断捏造或伪造成功。
 - **局部与全量严格区分**：`--case` 单例复测仅作问题定位与修复确认；全量评估结论必须运行完整 `AGENT_BENCHMARK_CASES` 并通过 `pass_rate >= 0.75` 门禁。
 - **不混用两套体系**：多智能体与 RAG 评测完全独立，不共用基线批次或本机基线缓存，且仅修改本目录 `./测评记录.md`。
-- **数据集版本目录规范**：基准测试集按 `evals/datasets/v1_<时间戳>/agent/`（后续迭代新增 `v2_<时间戳>/agent/`）分版本只读留存，每个目录须配备 `README.md` 说明用例分布与口径，严禁原地覆盖历史版本。
+- **数据集版本目录规范**：基准测试集按 `evals/datasets/v3_20261124/agent/`（历史 v1/v2 只读）分版本只读留存，每个目录须配备 `README.md` 说明用例分布与口径，严禁原地覆盖历史版本。
 - **入库入口唯一**：报告入库统一走 `python -m evals.agent_eval.publish`（内部委托 `evals/center`），保留数据集版本与算法版本归属；不得另建写库入口。

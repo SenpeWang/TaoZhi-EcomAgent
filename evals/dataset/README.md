@@ -10,17 +10,17 @@
 
 | 维度 | 取值 | 判定方式 | 覆盖下限（不足即生成失败） |
 |---|---|---|---|
-| **可回答性** answerability | answerable / partial / unanswerable | 前两档看事实命中，`unanswerable` 看是否如实说明资料不足、未硬答 | 78 / 11 / 19（下限 60 / 8 / 18） |
-| **问题类型** qtype | fact / process / multihop / compare / troubleshoot / edge / ambiguous / security | 判「考察能力」是否达标：组合证据、排查顺序、边界条件、澄清动作 | fact 59、compare 10、security 14、process/edge/troubleshoot/ambiguous/multihop 各 4-5 |
-| **难度** difficulty | easy / medium / hard | easy=单文档单点；medium=单文档归纳或多文档；hard=多跳、例外条款、资料不足 | 36 / 42 / 30（下限 20 / 25 / 20） |
-| **来源** source | synthetic / badcase / adversarial / real | real=线上日志采样（暂无日志通道，仅保留取值）；badcase=上一轮基线真实失败回放 | 99 / 5 / 4 / 0（下限 60 / 4 / 4） |
-| **风险** risk | high / medium / low | high=合规/权限/财务口径；medium=流程指引；low=一般参数查询 | 19 / 14 / 75（下限 15 / 10 / 30） |
+| **可回答性** answerability | answerable / partial / unanswerable | 前两档看事实命中，`unanswerable` 看是否如实说明资料不足、未硬答 | 148 / 16 / 36（下限 130 / 12 / 30） |
+| **问题类型** qtype | fact / process / multi_hop / comparison / aggregation / false_premise / troubleshooting / edge_case / ambiguity / security | 判「考察能力」是否达标：组合证据、排查顺序、边界条件、澄清动作 | fact 96、security 32、edge_case 16、multi_hop 16、comparison 14、troubleshooting 9、process 8、ambiguity 5、aggregation 2、false_premise 2 |
+| **难度** difficulty | easy / medium / hard | easy=单文档单点；medium=单文档归纳或多文档；hard=多跳、例外条款、资料不足 | 47 / 91 / 62（下限 35 / 45 / 40） |
+| **来源** source | synthetic / badcase / adversarial / real | real=线上日志采样（暂无日志通道，仅保留取值）；badcase=上一轮基线真实失败回放 | 172 / 7 / 15 / 6（下限 120 / 5 / 5 / 5） |
+| **风险** risk | high / medium / low | high=合规/权限/财务口径；medium=流程指引；low=一般参数查询 | 46 / 45 / 109（下限 30 / 22 / 60） |
 
 `qtype=security` 强制 `risk=high`；`source=badcase` 必须带 `evidence_location`（失败可追溯）。
 
 三个特殊小集以类别承载，不另立维度：**timeliness**（文档改版后答案变化，V1/V2 同库共存）、
-**citation**（答案必须标来源）、**long_context**（答案分散在多节）；对抗层仍走
-`datasets/<version>/rag/golden_adversarial.json`（18 条，机读判定）。
+**citation**（答案必须标来源）、**long_context**（答案分散在多节）；对抗/红队层单独走
+`datasets/<version>/rag/redteam.json`（V3 为 60 条，机读判定）。
 
 ## 评测口令
 
@@ -36,21 +36,22 @@
 
 ```
 evals/dataset/
-├── spec/                  规格（唯一事实来源，进 Git）
+├── spec/                  V2 规格（唯一事实来源，进 Git）
+├── spec_v3/               V3 规格（6 大类 × 6 用途场景，唯一事实来源）
 │   ├── org.yaml           7 个逻辑身份 → 登录名映射；2 个评测组织节点
-│   ├── fixtures.yaml      5 篇权限夹具文档、2 个金丝雀、3 条授权（含过期=撤权、deny）
-│   ├── corpus.yaml        6 个产品、5 条兼容关系、3 条政策、2 对冲突文档、6 篇指引/手册类
-│   ├── parsing.yaml       10 个 PDF/DOCX 解析夹具的版面特征（表格 / 页眉页脚 / 多页）
-│   └── templates.yaml     160 个模板（带五维标注）；槽位语法 {a.b.c}
+│   ├── fixtures.yaml      9 篇权限夹具文档、3 个金丝雀、3 条授权（含过期=撤权、deny）
+│   ├── corpus.yaml        7 个产品、5 条兼容关系、5 条政策、2 对冲突文档、17 篇指引/手册类
+│   ├── parsing.yaml       14 个 PDF/DOCX 解析夹具的版面特征（表格 / 页眉页脚 / 多页）
+│   └── templates.yaml     180 个模板（带五维标注）；槽位语法 {a.b.c}
 ├── schema.py              契约校验：必填字段、类别合法、五维合法、锚点可解析、覆盖下限
-├── generate.py            确定性生成器 → datasets/<version>/rag/（当前 v1_20261123；版本由 Git 承担）
+├── generate.py            V2 确定性生成器；generate_v3.py 生成 V3（6 大类 × 6 用途）
 ├── parsing.py             PDF/DOCX 渲染 → 入库解析器读回
 └── seed.py                幂等灌库：组织/身份/文档/切片/向量/ES/授权 + 权限实测校验
 ```
 
-生成产物在 `evals/datasets/<version>/rag/`（当前 `v1_20261123/rag/`，进 Git）：`cases.jsonl`（180 例、27 类）、
-`corpus_docs.jsonl`（42 篇含文本、指引手册与 PDF/DOCX 解析夹具）、
-`manifest.json`（spec sha256 + 种子 + 类别与五维分布）。
+V3 产物在 `evals/datasets/v3_20261124/rag/`：`cases.jsonl`（540 例，6 大类 × 6 用途）、
+`redteam.json`（60 例红队，机读判定）、`corpus_docs.jsonl`（91 篇语料、指引手册与 PDF/DOCX 解析夹具）、
+`manifest.json`（spec sha256 + 种子 + 大类/子类/用途分布 + 文件 sha256）。
 
 ## 使用
 
