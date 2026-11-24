@@ -32,7 +32,7 @@
       "files": {
         "rag/cases.jsonl": "67dc01268ce78cd4233e9ccf42e7c5fc190c47d94f166add9d9c83cd19171a20",
         "rag/corpus_docs.jsonl": "53c8da2619ca0e06524630208c5bbe2daa8d1811f0141851346ecc466d9efbbd",
-        "rag/manifest.json": "b22d7031fafe2d0ed6987844d670da8a2cf261b9cd9b60eddbd0e2bf8c8dec94"
+        "rag/manifest.json": "f891a4ec5e566355a41685cf5a00d1f2703e56aaaf47f2e9d254abaef6cda926"
       },
       "modes": [
         "live"

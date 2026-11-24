@@ -130,7 +130,9 @@ def test_rag_v3_generator_snapshot_matches_committed_files():
     import subprocess
     import sys
 
-    env = {**os.environ, "PYTHONPATH": str(ROOT)}
+    pythonpath = os.pathsep.join(
+        [str(ROOT), str(ROOT / "src"), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+    env = {**os.environ, "PYTHONPATH": pythonpath}
     result = subprocess.run([sys.executable, "-m", "evals.dataset.generate_v3", "--check"],
                             cwd=ROOT, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
@@ -168,7 +170,9 @@ def test_agent_v3_generator_snapshot_matches_committed_files():
     import subprocess
     import sys
 
-    env = {**os.environ, "PYTHONPATH": str(ROOT)}
+    pythonpath = os.pathsep.join(
+        [str(ROOT), str(ROOT / "src"), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+    env = {**os.environ, "PYTHONPATH": pythonpath}
     result = subprocess.run(
         [sys.executable, "-m", "evals.agent_eval.generate", "--version", "v3",
          "--out", str(V3 / "agent"), "--check"],

@@ -2,11 +2,6 @@ version: 3
 seed: 20261124
 dataset: v3_20261124/rag
 
-# V3 RAG 场景参数表：确定性展开为 540 例主集 + 60 例红队。
-# 所有 capability/subcategory/track 取自 evals/naming.py；子类英文名即官方术语。
-# 生成器按 plans 顺序消费锚点池，track 由每大类固定 30/20/15/10/15 的序列分配，
-# 因此改 anchor 内容不会漂移数量口径。
-
 tracks:
   golden: 30
   capability: 20

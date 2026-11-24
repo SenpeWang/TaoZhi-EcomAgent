@@ -96,7 +96,6 @@ TYPE_ORDER = (
     "budget_exceeded",
 )
 
-# 新增 178 例的反例配额；v1 十二例保留各自原有反例。
 NEW_FAILURE_QUOTAS = {
     "run_status": 14,
     "missing_observation": 13,
@@ -297,10 +296,6 @@ def _load_v1_records() -> list[dict]:
         })
     return records
 
-
-# ---------------------------------------------------------------------------
-# 各能力族：固定顺序的模板表逐一展开，每个用例同时给出正例观测。
-# ---------------------------------------------------------------------------
 
 _TOOL_SELECTION_ROWS = (
     ("折叠露营灯", "灯体偏重", "灯体偏重，长时间手持会有坠手感", "充满电后可用 6 小时", "充满电后可用 6 小时，续航表现稳定"),
@@ -1640,10 +1635,6 @@ def build_dataset() -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# 落盘与逐项校验
-# ---------------------------------------------------------------------------
-
 
 def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
@@ -1972,13 +1963,6 @@ def validate_on_disk(out: Path, built: dict) -> tuple[list[str], list[str]]:
         errors.append("生成内容不得包含转义字符序列")
     return errors, _summary_lines(built)
 
-
-# <<< V3-BLOCK START
-# ---------------------------------------------------------------------------
-# V3 全合成基准集：6 大类 × 90 例（golden 30 / capability 20 / regression 15 /
-# challenge 10 / heldout 15）+ 独立红队 60 例，观测与反例逐例 1:1。
-# 全部实体、编号与数值由固定顺序的模板表展开，不使用随机数。
-# ---------------------------------------------------------------------------
 
 V2_DIR = ROOT / "evals" / "datasets" / "v2_20261124" / "agent"
 V3_DEFAULT_OUT = ROOT / "evals" / "datasets" / "v3_20261124" / "agent"
@@ -3725,7 +3709,6 @@ def _check_hashes_v3(out: Path, built: dict, lines: list[str]) -> None:
             f"content_sha256={fingerprint(sorted(built['cases'], key=lambda case: case['id']))}")
     except ImportError:
         lines.append("content_sha256 未计算（reporting.py 暂不可用）")
-# <<< V3-BLOCK END
 
 
 def main(argv: list[str] | None = None) -> int:

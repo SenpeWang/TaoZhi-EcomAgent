@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from typing import Dict, Tuple
 
-# 用途（数据集角色）：与 README/BENCHMARK 一致；redteam 为独立安全红队集。
 TRACKS: Tuple[str, ...] = ("golden", "capability", "regression", "challenge", "heldout", "redteam")
 TRACK_LABELS: Dict[str, str] = {
     "golden": "冻结参考集（合成参考解可复算）",
@@ -18,7 +17,6 @@ TRACK_LABELS: Dict[str, str] = {
     "redteam": "安全红队集（注入/越权/泄漏/拒答）",
 }
 
-# 来源登记：key -> (名称, 链接)
 SOURCES: Dict[str, Tuple[str, str]] = {
     "anthropic_demystifying": (
         "Anthropic, Demystifying evals for AI agents",
@@ -75,7 +73,6 @@ RAG_CAPABILITIES: Tuple[str, ...] = (
     "business_task_completion",
 )
 
-# capability -> {subcategory: (source_key, status, v2_name)}
 RAG_SUBCATEGORIES: Dict[str, Dict[str, Tuple[str, str, str]]] = {
     "retrieval": {
         "context_recall": ("ragas", "adopted", "product/compatibility 检索部分"),
