@@ -93,18 +93,11 @@
       <el-tabs v-model="detailTab" class="document-tabs">
         <el-tab-pane label="原始文档" name="original">
           <article
-            v-if="detail.body && detail.mime_type === 'text/markdown'"
+            v-if="detail.mime_type === 'text/markdown' && (originalText || detail.body)"
             ref="markdownHost"
             class="document-markdown"
           />
-          <template
-            v-else-if="
-              detail.body &&
-              detail.mime_type === 'application/pdf' &&
-              detail.has_original &&
-              user.is_boss
-            "
-          >
+          <template v-else-if="detail.mime_type === 'application/pdf' && detail.has_original">
             <div v-if="pdfTotal" class="pdf-viewer">
               <div class="pdf-toolbar">
                 <el-button size="small" :disabled="pdfPage <= 1" @click="pdfPage -= 1">
@@ -122,20 +115,10 @@
             <p class="chunk-note">当前按 PDF 原件版面展示，使用上一页 / 下一页浏览全部页面。</p>
           </template>
           <article v-else-if="docxReady" ref="docxHost" class="document-markdown" />
-          <pre v-else-if="detail.body" class="document-body">{{ detail.body }}</pre>
+          <pre v-else-if="originalText || detail.body" class="document-body">{{
+            originalText || detail.body
+          }}</pre>
           <el-empty v-else description="当前仅可查看文档基本信息，暂未获准阅读正文" />
-          <p
-            v-if="detail.mime_type === 'application/pdf' && detail.has_original && !user.is_boss"
-            class="chunk-note"
-          >
-            PDF 原件仅企业负责人可在页面内查看，此处为脱敏正文；如需原件请联系资料负责人。
-          </p>
-          <p
-            v-if="detail.mime_type === DOCX_MIME && detail.has_original && !user.is_boss"
-            class="chunk-note"
-          >
-            DOCX 原件仅企业负责人可在页面内查看，此处为脱敏正文；如需原件请联系资料负责人。
-          </p>
         </el-tab-pane>
         <el-tab-pane label="切片与词嵌入" name="chunks">
           <div v-if="chunkError" class="chunk-summary">
@@ -469,11 +452,12 @@ const markdownHost = ref<HTMLElement | null>(null)
 const docxHost = ref<HTMLElement | null>(null)
 const docxHtml = ref('')
 const docxReady = ref(false)
+const originalText = ref('')
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 watchEffect(() => {
   if (markdownHost.value) {
-    markdownHost.value.innerHTML = renderMarkdown(detail.value?.body || '')
+    markdownHost.value.innerHTML = renderMarkdown(originalText.value || detail.value?.body || '')
   }
 })
 
@@ -532,6 +516,7 @@ function closeDocument(): void {
   pdfTotal.value = 0
   docxHtml.value = ''
   docxReady.value = false
+  originalText.value = ''
   selectedFile.value = null
   docForm.id = docForm.title = docForm.body = ''
   history.value = []
@@ -602,7 +587,7 @@ function vectorColor(value: number): string {
 async function loadPdfMeta(): Promise<void> {
   const document = detail.value
   if (!document || document.mime_type !== 'application/pdf') return
-  if (!document.has_original || !props.user.is_boss || pdfTotal.value) return
+  if (!document.has_original || pdfTotal.value) return
   const request = selection
   await action(async () => {
     try {
@@ -621,7 +606,7 @@ async function loadPdfMeta(): Promise<void> {
 async function loadDocx(): Promise<void> {
   const document = detail.value
   if (!document || document.mime_type !== DOCX_MIME) return
-  if (!document.has_original || !props.user.is_boss || docxReady.value) return
+  if (!document.has_original || docxReady.value) return
   const request = selection
   await action(async () => {
     try {
@@ -639,12 +624,36 @@ async function loadDocx(): Promise<void> {
   })
 }
 
+/** 读取 Markdown/TXT 归档原件，按原始权限展示未脱敏内容。 */
+async function loadOriginalText(): Promise<void> {
+  const document = detail.value
+  if (!document || !document.has_original) return
+  if (!['text/markdown', 'text/plain'].includes(document.mime_type || '')) return
+  if (originalText.value) return
+  const request = selection
+  await action(async () => {
+    try {
+      const response = await fetch(
+        '/api/documents/' + encodeURIComponent(document.id) + '/original',
+        { credentials: 'same-origin' },
+      )
+      if (!response.ok) return
+      const text = await response.text()
+      if (request !== selection || detail.value?.id !== document.id) return
+      originalText.value = text
+    } catch {
+      originalText.value = ''
+    }
+  })
+}
+
 watch(
   () => [detail.value?.id, detailTab.value] as const,
   ([id, tab]) => {
     if (id && tab === 'original') {
       void loadPdfMeta()
       void loadDocx()
+      void loadOriginalText()
     }
   },
 )

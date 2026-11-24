@@ -63,13 +63,41 @@ def test_pdf_page_number_must_be_within_range(monkeypatch):
     assert error.value.code == "INVALID"
 
 
-def test_pdf_page_requires_boss(monkeypatch):
-    """非老板不得通过翻页图片绕过原件脱敏限制。"""
+def test_pdf_page_requires_read_permission(monkeypatch):
+    """无文档阅读权限时不得通过翻页图片查看原件。"""
     monkeypatch.setattr(service, "database_connection", lambda: _Connection())
     monkeypatch.setattr(service, "get_document", lambda _c, _p, _doc_id: {"id": "doc_1"})
-    monkeypatch.setattr(service, "can_download", lambda _c, _p, _d: True)
+
+    def _denied(*_args):
+        raise Denied("没有阅读权限", "NOT_FOUND", 404)
+
+    monkeypatch.setattr(service, "require_document_read", _denied)
 
     with pytest.raises(Denied) as error:
         service.document_pdf_page_count(_principal(boss=False), "doc_1")
 
-    assert error.value.status == 403
+    assert error.value.status == 404
+
+
+def test_pdf_page_available_to_reader(monkeypatch):
+    """具备阅读权限的非老板成员可查看原件页数与页面图。"""
+    data = _pdf_bytes()
+    monkeypatch.setattr(service, "database_connection", lambda: _Connection())
+    monkeypatch.setattr(
+        service, "get_document", lambda _c, _p, _doc_id: {"id": "doc_1", "current_version": 1}
+    )
+    monkeypatch.setattr(service, "require_document_read", lambda _c, _p, _d: None)
+    monkeypatch.setattr(
+        service.document_repo,
+        "get_document_version",
+        lambda _c, _doc_id, _version: {"blob_name": "blob.pdf", "mime_type": "application/pdf"},
+    )
+
+    class _Store:
+        def open_blob(self, _tenant_id, _name):
+            return data
+
+    monkeypatch.setattr(service, "get_blob_store", lambda: _Store())
+
+    assert service.document_pdf_page_count(_principal(boss=False), "doc_1") == {"total": 1}
+    assert service.render_document_pdf_page(_principal(boss=False), "doc_1", 1)["total"] == 1

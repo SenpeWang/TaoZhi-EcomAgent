@@ -120,27 +120,31 @@ def test_chunks_require_read_permission(monkeypatch):
         service.get_document_chunks(_principal(boss=False), "doc_1")
 
 
-def test_original_preview_rejects_non_boss(monkeypatch):
-    """原件不做脱敏，非老板即使有下载权限也不得内联预览。"""
+def test_original_preview_requires_read_permission(monkeypatch):
+    """无文档阅读权限时不得内联查看原件。"""
     monkeypatch.setattr(service, "database_connection", lambda: _Connection())
     monkeypatch.setattr(service, "get_document", lambda _c, _p, _doc_id: _document())
-    monkeypatch.setattr(service, "can_download", lambda _c, _p, _d: True)
+
+    def _denied(*_args):
+        raise Denied("没有阅读权限", "NOT_FOUND", 404)
+
+    monkeypatch.setattr(service, "require_document_read", _denied)
 
     with pytest.raises(Denied) as error:
         service.prepare_original_preview(_principal(boss=False), "doc_1")
 
-    assert error.value.status == 403
+    assert error.value.status == 404
 
 
-def test_original_preview_streams_blob_for_boss(monkeypatch):
-    """老板可读取归档原件，并保留原始 MIME 类型与扩展名。"""
+def test_original_preview_streams_blob_for_reader(monkeypatch):
+    """具备阅读权限的非老板成员可读取归档原件，并保留原始 MIME 与扩展名。"""
     class _Store:
         def open_blob(self, _tenant_id, _blob_name):
             return b"%PDF-1.4 demo"
 
     monkeypatch.setattr(service, "database_connection", lambda: _Connection())
     monkeypatch.setattr(service, "get_document", lambda _c, _p, _doc_id: _document())
-    monkeypatch.setattr(service, "can_download", lambda _c, _p, _d: True)
+    monkeypatch.setattr(service, "require_document_read", lambda _c, _p, _d: None)
     monkeypatch.setattr(
         service.document_repo,
         "get_document_version",
@@ -149,7 +153,7 @@ def test_original_preview_streams_blob_for_boss(monkeypatch):
     monkeypatch.setattr(service, "get_blob_store", lambda: _Store())
     monkeypatch.setattr(service, "audit", lambda *_args, **_kwargs: None)
 
-    spec = service.prepare_original_preview(_principal(boss=True), "doc_1")
+    spec = service.prepare_original_preview(_principal(boss=False), "doc_1")
 
     assert spec["media_type"] == "application/pdf"
     assert spec["data"] == b"%PDF-1.4 demo"
