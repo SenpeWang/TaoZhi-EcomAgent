@@ -1,22 +1,13 @@
 <template>
-  <EvaluationRunInspector
-    v-if="selected"
-    :key="selected.run_id"
-    :initial-run="selected"
-    :api="api"
-    :owner-filter="isAdmin ? owner : null"
-    @back="selected = null"
-    @inspect="(taskId, traceId) => emit('inspect', taskId, traceId)"
-  />
-  <section v-else class="panel">
+  <section class="panel evaluation-center">
     <div class="section-heading">
       <div>
         <h3>{{ isAdmin ? '企业评测中心' : '我的评测中心' }}</h3>
         <small class="evaluation-meta">
           {{
             evalKind === 'agent'
-              ? '多智能体协同调研与工具轨迹评测'
-              : '企业知识文档 RAG 检索、对抗与行为评测'
+              ? '多智能体协同调研与工具轨迹评测 · 指标口径与数据集内容透明可查'
+              : '企业知识文档 RAG 检索、对抗与行为评测 · 指标口径与数据集内容透明可查'
           }}
         </small>
       </div>
@@ -25,593 +16,689 @@
           <el-radio-button value="agent">AGENT 评测</el-radio-button>
           <el-radio-button value="rag">RAG 评测</el-radio-button>
         </el-radio-group>
-        <el-button v-if="canWriteEval" plain @click="openAuditDrawer">审计留痕</el-button>
-        <el-button v-if="canWriteEval" type="primary" plain @click="openProfileDialog">
-          登记技术栈 / Prompt 版本
-        </el-button>
-        <el-button v-if="canWriteEval" type="primary" @click="openTriggerDialog">
-          选择数据集发起评测
-        </el-button>
-        <el-button :loading="busy" @click="reload">刷新</el-button>
+        <el-button :loading="refreshing" @click="refreshAll">刷新</el-button>
       </div>
     </div>
 
-    <div class="evaluation-subsection evaluation-overview">
-      <div class="evaluation-subsection-head">
-        <h4>指标概览</h4>
-        <div class="evaluation-filters">
-          <el-select
-            v-model="datasetVersion"
-            placeholder="全部数据集版本"
-            aria-label="按数据集版本筛选"
-          >
-            <el-option value="" label="全部数据集版本" />
-            <el-option
-              v-for="version in datasetVersions"
-              :key="version"
-              :value="version"
-              :label="version"
-            />
-          </el-select>
-          <el-select
-            v-model="trendScope"
-            placeholder="全部评测口径"
-            aria-label="按评测口径筛选趋势"
-          >
-            <el-option value="" label="全部评测口径" />
-            <el-option
-              v-for="(label, code) in evaluationScopes"
-              :key="code"
-              :value="code"
-              :label="label"
-            />
-          </el-select>
-          <el-select v-model="trendMode" placeholder="全部执行方式" aria-label="按执行方式筛选趋势">
-            <el-option value="" label="全部执行方式" />
-            <el-option
-              v-for="(label, code) in evaluationModes"
-              :key="code"
-              :value="code"
-              :label="label"
-            />
-          </el-select>
-        </div>
-      </div>
-      <el-alert v-if="trendError" type="warning" show-icon :title="trendError" :closable="false" />
-      <el-skeleton v-else-if="!trends" :rows="3" animated />
-      <template v-else>
-        <div class="evaluation-overview-grid">
-          <div class="evaluation-overview-card">
-            <span class="evaluation-card-label">活跃基线</span>
-            <template v-if="trends.baseline">
-              <button
-                class="evaluation-link"
-                type="button"
-                @click="openRunById(trends.baseline.run_id)"
-              >
-                {{ trends.baseline.run_id }}
-              </button>
-              <span class="evaluation-overview-value">{{
-                formatEvaluationPercent(trends.baseline.pass_rate)
-              }}</span>
-              <el-tag :type="trends.baseline.gate_passed ? 'success' : 'danger'" size="small">
-                {{ trends.baseline.gate_passed ? '门禁通过' : '门禁阻断' }}
+    <div class="evaluation-controls">
+      <label class="evaluation-control-item">
+        <span>数据集版本</span>
+        <el-select
+          v-model="datasetVersion"
+          placeholder="暂无可选版本"
+          :disabled="!datasetVersions.length"
+          aria-label="选择数据集版本"
+        >
+          <el-option
+            v-for="version in datasetVersions"
+            :key="version"
+            :value="version"
+            :label="version"
+          />
+        </el-select>
+      </label>
+      <label class="evaluation-control-item">
+        <span>评测口径</span>
+        <el-select v-model="scope" aria-label="选择评测口径">
+          <el-option
+            v-for="item in scopeOptions"
+            :key="item.value"
+            :value="item.value"
+            :label="item.label"
+          />
+        </el-select>
+      </label>
+      <label class="evaluation-control-item">
+        <span>执行方式</span>
+        <el-select v-model="mode" aria-label="选择执行方式">
+          <el-option
+            v-for="item in allowedModes"
+            :key="item"
+            :value="item"
+            :label="evaluationModeLabel(item)"
+          />
+        </el-select>
+      </label>
+      <span class="evaluation-control-summary">{{ schemaSummaryText }}</span>
+    </div>
+    <el-alert
+      v-if="catalogError"
+      type="error"
+      show-icon
+      :title="catalogError"
+      :closable="false"
+      class="evaluation-catalog-alert"
+    />
+
+    <el-tabs v-model="activeTab" class="evaluation-tabs">
+      <el-tab-pane label="概览" name="overview">
+        <div class="evaluation-tab">
+          <el-alert
+            v-if="trendsError"
+            type="warning"
+            show-icon
+            :title="trendsError"
+            :closable="false"
+          />
+          <el-skeleton v-else-if="!trends" :rows="4" animated />
+          <template v-else>
+            <div class="evaluation-schema-bar">
+              <div>
+                <strong>{{ schema ? schema.label : '当前口径没有指标定义' }}</strong>
+                <small class="evaluation-meta">
+                  dataset 版本 {{ trends.dataset_version || datasetVersion || '—' }} · 执行方式
+                  {{ trends.mode ? evaluationModeLabel(trends.mode) : '—' }} · 批次数
+                  {{ trends.aggregate.batches }}
+                </small>
+              </div>
+              <el-tag effect="plain" size="small">
+                schema v{{ schema ? schema.version : '—' }} · {{ metrics.length }} 项指标
               </el-tag>
-              <small class="evaluation-meta"
-                >{{ trends.baseline.note || '未填写基线备注' }} ·
-                {{ traceTime(trends.baseline.created_at) }}</small
+            </div>
+            <p class="evaluation-meta">{{ baselineHint }}</p>
+            <div class="evaluation-metric-grid">
+              <div v-for="card in metricCards" :key="card.spec.key" class="evaluation-metric-card">
+                <div class="evaluation-metric-card-head">
+                  <span class="evaluation-card-label">{{ card.spec.label }}</span>
+                  <el-tag effect="plain" size="small">{{ card.spec.group }}</el-tag>
+                </div>
+                <strong class="evaluation-metric-value">{{
+                  formatMetricValue(card.spec, card.latest)
+                }}</strong>
+                <span class="evaluation-meta">
+                  <template v-if="card.delta !== null">
+                    环比基线
+                    <span :class="metricDeltaTone(card.spec, card.delta)">{{
+                      formatMetricDelta(card.spec, card.delta)
+                    }}</span>
+                  </template>
+                  <template v-else>环比基线 —（不可比或缺少同口径基线）</template>
+                </span>
+                <small class="evaluation-meta"
+                  >active 基线值 {{ formatMetricValue(card.spec, card.baseline) }} ·
+                  {{
+                    card.spec.direction === 'lower'
+                      ? '越低越好'
+                      : card.spec.direction === 'neutral'
+                        ? '中性指标'
+                        : '越高越好'
+                  }}</small
+                >
+                <small v-if="card.spec.description" class="evaluation-meta">{{
+                  card.spec.description
+                }}</small>
+              </div>
+            </div>
+            <dl class="evaluation-aggregate-grid">
+              <div>
+                <dt>批次数</dt>
+                <dd>{{ aggregateStats.batches }}</dd>
+              </div>
+              <div>
+                <dt>最近 · {{ aggregateStats.label }}</dt>
+                <dd>{{ formatAggregateValue(aggregateStats.latest) }}</dd>
+              </div>
+              <div>
+                <dt>平均 · {{ aggregateStats.label }}</dt>
+                <dd>{{ formatAggregateValue(aggregateStats.average) }}</dd>
+              </div>
+              <div>
+                <dt>最佳 · {{ aggregateStats.label }}</dt>
+                <dd>{{ formatAggregateValue(aggregateStats.best) }}</dd>
+              </div>
+            </dl>
+            <p class="evaluation-meta">
+              聚合口径：按当前口径第一个比例指标「{{ aggregateStats.label }}」在最近
+              {{ trends.items.length }}
+              个批次内的摘要统计；指标列与单位全部来自指标目录，同口径固定同一组列。
+            </p>
+            <h4>批次趋势（最近 {{ trends.items.length }} 个批次）</h4>
+            <el-table
+              v-if="trends.items.length"
+              :data="trends.items"
+              row-key="run_id"
+              class="evaluation-datasets"
+              empty-text="当前口径还没有批次"
+            >
+              <el-table-column label="批次时间" min-width="170">
+                <template #default="{ row }">
+                  <button class="evaluation-link" type="button" @click="openRunDetail(row.run_id)">
+                    {{ traceTime(row.created_at) }}
+                  </button>
+                  <small class="evaluation-meta">{{ row.run_id }}</small>
+                </template>
+              </el-table-column>
+              <el-table-column label="算法版本" min-width="120">
+                <template #default="{ row }">{{ row.algorithm_version || '未绑定' }}</template>
+              </el-table-column>
+              <el-table-column label="执行方式" min-width="130">
+                <template #default="{ row }">{{ evaluationModeLabel(row.mode) }}</template>
+              </el-table-column>
+              <el-table-column
+                v-for="spec in metrics"
+                :key="spec.key"
+                :label="spec.label"
+                min-width="108"
               >
-            </template>
-            <p v-else class="evaluation-muted">当前筛选范围还没有活跃基线。</p>
+                <template #default="{ row }">
+                  <el-tooltip v-if="spec.description" :content="spec.description" placement="top">
+                    <span>{{ formatMetricValue(spec, row.summary?.[spec.key] ?? null) }}</span>
+                  </el-tooltip>
+                  <span v-else>{{ formatMetricValue(spec, row.summary?.[spec.key] ?? null) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="门禁" width="90">
+                <template #default="{ row }">
+                  <el-tag :type="row.gate_passed ? 'success' : 'danger'" size="small">
+                    {{ row.gate_passed ? '通过' : '阻断' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="基线" width="90">
+                <template #default="{ row }">
+                  <el-tag v-if="row.is_baseline" type="warning" size="small">基线</el-tag>
+                  <el-tag v-else-if="!row.comparable" type="info" size="small">不可比</el-tag>
+                  <span v-else class="evaluation-meta">—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="150" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" @click="openRunDetail(row.run_id)">查看</el-button>
+                  <el-button link type="primary" @click="downloadRunReport(row.run_id)"
+                    >原始报告</el-button
+                  >
+                </template>
+              </el-table-column>
+            </el-table>
+            <p v-else class="evaluation-muted">当前口径还没有可比较的批次。</p>
+          </template>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="数据集" name="datasets">
+        <div class="evaluation-tab">
+          <div class="evaluation-subsection-head">
+            <h4>评测数据集（按版本目录管理）</h4>
+            <div class="evaluation-filters evaluation-filters-inline">
+              <el-switch v-model="showArchived" active-text="显示归档版本" />
+              <el-button :loading="datasetsBusy" @click="loadDatasets">刷新</el-button>
+            </div>
           </div>
-          <dl class="evaluation-overview-card">
-            <dt>批次数</dt>
-            <dd>{{ trends.aggregate.batches }}</dd>
-          </dl>
-          <dl class="evaluation-overview-card">
-            <dt>平均通过率</dt>
-            <dd>{{ formatEvaluationPercent(trends.aggregate.avg_pass_rate) }}</dd>
-          </dl>
-          <dl class="evaluation-overview-card">
-            <dt>最佳通过率</dt>
-            <dd>{{ formatEvaluationPercent(trends.aggregate.best_pass_rate) }}</dd>
-          </dl>
-          <dl class="evaluation-overview-card">
-            <dt>最近通过率</dt>
-            <dd>{{ formatEvaluationPercent(trends.aggregate.latest_pass_rate) }}</dd>
-          </dl>
-        </div>
-        <el-table
-          v-if="trends.items.length"
-          :data="trends.items"
-          row-key="run_id"
-          class="evaluation-datasets"
-          empty-text="当前筛选范围还没有批次"
-        >
-          <el-table-column label="批次时间" min-width="150">
-            <template #default="{ row }">
-              <button class="evaluation-link" type="button" @click="openRunById(row.run_id)">
-                {{ traceTime(row.created_at) }}
-              </button>
-              <small class="evaluation-meta">
-                {{ row.run_id }}<template v-if="row.is_baseline"> · 当前基线</template>
-              </small>
-            </template>
-          </el-table-column>
-          <el-table-column label="口径" width="90">
-            <template #default="{ row }">{{ evaluationScopeLabel(row.scope) }}</template>
-          </el-table-column>
-          <el-table-column label="执行方式" min-width="130">
-            <template #default="{ row }">{{ evaluationModeLabel(row.mode) }}</template>
-          </el-table-column>
-          <el-table-column label="数据集版本" width="120">
-            <template #default="{ row }">{{ row.dataset_version || '—' }}</template>
-          </el-table-column>
-          <el-table-column label="算法版本" min-width="130">
-            <template #default="{ row }">{{ row.algorithm_version || '未绑定算法版本' }}</template>
-          </el-table-column>
-          <el-table-column label="通过率" width="100">
-            <template #default="{ row }">{{ formatEvaluationPercent(row.pass_rate) }}</template>
-          </el-table-column>
-          <el-table-column label="相对基线" width="110">
-            <template #default="{ row }">
-              <span v-if="row.comparable" :class="evaluationDeltaTone(row.pass_rate_delta)">
-                {{ formatEvaluationDelta(row.pass_rate_delta) }}
-              </span>
-              <template v-else>
-                <el-tag type="info" size="small">不可比</el-tag>
-                <span class="evaluation-delta-flat">—</span>
+          <p class="evaluation-meta">
+            数据集内容随 Git 版本化：页面对的仓库路径是
+            <code>evals/datasets/&lt;版本&gt;/</code> 下的原始文件，文件 sha256
+            与登记一致；用例字段不做裁剪或改名。
+          </p>
+          <el-alert
+            v-if="datasetsError"
+            type="warning"
+            show-icon
+            :title="datasetsError"
+            :closable="false"
+          />
+          <el-table
+            v-else
+            v-loading="datasetsBusy"
+            :data="visibleDatasets"
+            row-key="dataset_id"
+            class="evaluation-datasets"
+            empty-text="当前评测体系还没有登记数据集"
+          >
+            <el-table-column label="数据集 / 版本" min-width="210">
+              <template #default="{ row }">
+                <strong>{{ row.name }}</strong>
+                <small class="evaluation-meta">{{ row.dataset_id }}</small>
               </template>
-            </template>
-          </el-table-column>
-          <el-table-column label="门禁" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.gate_passed ? 'success' : 'danger'" size="small">
-                {{ row.gate_passed ? '通过' : '阻断' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="P50 / P95 延迟" min-width="130">
-            <template #default="{ row }">
-              {{ formatEvaluationLatency(row.latency_p50_ms) }} /
-              {{ formatEvaluationLatency(row.latency_p95_ms) }}
-            </template>
-          </el-table-column>
-        </el-table>
-        <p v-else class="evaluation-meta">当前筛选范围还没有可比较的批次。</p>
-      </template>
-    </div>
-
-    <div v-if="activeJob || jobError" class="evaluation-subsection evaluation-job">
-      <div class="evaluation-subsection-head">
-        <h4>评测任务</h4>
-        <el-button
-          v-if="canWriteEval && activeJob && !jobTerminal"
-          :loading="jobBusy"
-          @click="cancelJob"
-        >
-          取消任务
-        </el-button>
-      </div>
-      <el-alert v-if="jobError" type="error" show-icon :title="jobError" :closable="false" />
-      <template v-if="activeJob">
-        <div class="evaluation-job-head">
-          <strong>{{ activeJob.job_id }}</strong>
-          <el-tag :type="stateTag(activeJob.state)" size="small">{{
-            stateText(activeJob.state)
-          }}</el-tag>
-          <span class="evaluation-meta">{{ activeJob.stage || '等待 Worker 调度' }}</span>
+            </el-table-column>
+            <el-table-column label="版本" width="115">
+              <template #default="{ row }">
+                <el-tag effect="plain" size="small">{{ row.version }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="类型" width="120">
+              <template #default="{ row }">{{
+                evaluationSuites[row.suite] || row.suite || '—'
+              }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag v-if="row.archived" type="info" size="small">归档</el-tag>
+                <el-tag v-else type="success" size="small">生效</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="用例数" width="85" prop="case_count" />
+            <el-table-column label="内容 sha256" width="140">
+              <template #default="{ row }">
+                <span :title="row.content_sha256 || '未登记内容摘要'">{{
+                  shortSha(row.content_sha256)
+                }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="文件数" width="80">
+              <template #default="{ row }">{{ datasetFileEntries(row).length }}</template>
+            </el-table-column>
+            <el-table-column label="批次数" width="85" prop="batch_count" />
+            <el-table-column label="最近批次" min-width="145">
+              <template #default="{ row }">{{ traceTime(row.last_run_at) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="230" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="inspectDataset(row)">查看数据集</el-button>
+                <el-button link type="primary" @click="filterRunsByDataset(row)"
+                  >筛选批次</el-button
+                >
+                <el-button
+                  v-if="canWriteEval && !row.archived"
+                  link
+                  type="primary"
+                  @click="openTriggerDialog(row)"
+                  >发起评测</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
         </div>
-        <el-progress :percentage="activeJob.progress" :status="jobProgressStatus" />
-        <p class="evaluation-meta">
-          创建 {{ traceTime(activeJob.created_at)
-          }}<template v-if="activeJob.started_at">
-            · 开始 {{ traceTime(activeJob.started_at) }}</template
-          >
-          <template v-if="activeJob.finished_at">
-            · 结束 {{ traceTime(activeJob.finished_at) }}</template
-          >
-        </p>
-        <el-alert v-if="activeJob.error" type="error" :title="activeJob.error" :closable="false" />
-        <p v-if="jobRunId" class="evaluation-meta">
-          评测批次已入库：
-          <button class="evaluation-link" type="button" @click="openRunById(jobRunId)">
-            {{ jobRunId }}
-          </button>
-        </p>
-      </template>
-    </div>
+      </el-tab-pane>
 
-    <div class="evaluation-subsection">
-      <div class="evaluation-subsection-head">
-        <h4>测试数据集（按版本目录管理）</h4>
-        <el-switch v-model="showArchived" active-text="显示历史版本" />
-      </div>
-      <el-table
-        v-if="datasets.length"
-        :data="datasets"
-        row-key="dataset_id"
-        class="evaluation-datasets"
-        empty-text="当前评测体系还没有登记数据集"
-      >
-        <el-table-column label="数据集" min-width="230">
-          <template #default="{ row }">
-            <strong>{{ row.name }}</strong>
-            <small class="evaluation-meta">{{ row.dataset_id }}</small>
-            <small v-if="row.archived" class="evaluation-meta">
-              <el-tag type="info" size="small" class="evaluation-archived-tag"
-                >历史版本·仅归档</el-tag
+      <el-tab-pane label="批次" name="runs">
+        <div class="evaluation-tab">
+          <div class="evaluation-subsection-head">
+            <h4>评测批次</h4>
+            <div class="evaluation-filters evaluation-filters-inline">
+              <TenantOwnerSelect v-if="isAdmin" v-model="owner" :api="api" />
+              <el-select
+                v-model="runDatasetId"
+                clearable
+                placeholder="全部数据集"
+                aria-label="按数据集筛选批次"
               >
-            </small>
-          </template>
-        </el-table-column>
-        <el-table-column label="数据集版本" width="130">
-          <template #default="{ row }">
-            <el-tag effect="plain" size="small">{{ row.version }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="内容摘要" width="130">
-          <template #default="{ row }">
-            <span :title="row.content_sha256 || '未登记内容摘要'">
-              {{ row.content_sha256 ? row.content_sha256.slice(0, 12) : '—' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="分组" width="110">
-          <template #default="{ row }">{{
-            evaluationSuites[row.suite] || row.suite || '—'
-          }}</template>
-        </el-table-column>
-        <el-table-column label="来源" min-width="120">
-          <template #default="{ row }">{{ evaluationModeLabel(row.source) }}</template>
-        </el-table-column>
-        <el-table-column label="用例数" width="90" prop="case_count" />
-        <el-table-column label="批次数" width="85" prop="batch_count" />
-        <el-table-column label="平均通过率" width="110">
-          <template #default="{ row }">{{ formatEvaluationPercent(row.avg_pass_rate) }}</template>
-        </el-table-column>
-        <el-table-column label="最近批次" min-width="135">
-          <template #default="{ row }">{{ traceTime(row.last_run_at) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="175" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="inspectDataset(row)">查看用例</el-button>
-            <el-button
-              link
-              :type="selectedDatasetId === row.dataset_id ? 'warning' : 'primary'"
-              @click="toggleDatasetFilter(row.dataset_id)"
+                <el-option value="" label="全部数据集" />
+                <el-option
+                  v-for="dataset in kindDatasets"
+                  :key="dataset.dataset_id"
+                  :value="dataset.dataset_id"
+                  :label="`${dataset.name}（${dataset.version}）`"
+                />
+              </el-select>
+              <el-button :loading="runsBusy" @click="refreshRuns">刷新</el-button>
+            </div>
+          </div>
+          <p class="evaluation-meta">
+            指标列由指标目录动态生成：{{ schema ? schema.label : '—' }}（schema v{{
+              schema ? schema.version : '—'
+            }}，共 {{ metrics.length }} 项）；同一口径下所有批次共用同一组列。
+          </p>
+          <el-alert
+            v-if="runsError"
+            type="warning"
+            show-icon
+            :title="runsError"
+            :closable="false"
+          />
+          <el-table
+            v-else
+            v-loading="runsBusy"
+            :data="runs"
+            row-key="run_id"
+            class="evaluation-datasets"
+            empty-text="当前范围内没有评测批次"
+          >
+            <el-table-column label="批次时间" min-width="175">
+              <template #default="{ row }">
+                <button class="evaluation-link" type="button" @click="openRunDetail(row.run_id)">
+                  {{ traceTime(row.created_at) }}
+                </button>
+                <small class="evaluation-meta">{{ row.run_id }}</small>
+              </template>
+            </el-table-column>
+            <el-table-column label="数据集 / 算法版本" min-width="185">
+              <template #default="{ row }">
+                <span>{{ row.dataset_version || '未登记数据集版本' }}</span>
+                <small class="evaluation-meta">{{
+                  row.profile_version_tag || '未绑定算法版本'
+                }}</small>
+              </template>
+            </el-table-column>
+            <el-table-column label="执行方式" min-width="125">
+              <template #default="{ row }">{{ evaluationModeLabel(row.mode) }}</template>
+            </el-table-column>
+            <el-table-column
+              v-for="spec in metrics"
+              :key="spec.key"
+              :label="spec.label"
+              min-width="108"
             >
-              {{ selectedDatasetId === row.dataset_id ? '取消筛选' : '筛选批次' }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <p v-else class="evaluation-meta">当前类型暂无已入库数据集。</p>
-      <el-alert
-        v-if="datasetError"
-        type="warning"
-        show-icon
-        :title="datasetError"
-        :closable="false"
-      />
-    </div>
-
-    <div class="evaluation-subsection">
-      <h4>算法版本（技术栈 / 检索参数 / Prompt 快照，只增不改留痕）</h4>
-      <el-table
-        v-if="profiles.length"
-        :data="profiles"
-        row-key="profile_id"
-        class="evaluation-datasets"
-      >
-        <el-table-column label="版本" min-width="190">
-          <template #default="{ row }">
-            <strong>V{{ row.version_no }} · {{ row.version_tag }}</strong>
-            <small class="evaluation-meta">{{ row.notes || '无备注' }}</small>
-          </template>
-        </el-table-column>
-        <el-table-column label="版本摘要" width="140">
-          <template #default="{ row }">
-            <span :title="row.digest || '未登记摘要'">
-              {{ row.digest ? row.digest.slice(0, 12) : '—' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="代码提交" width="110">
-          <template #default="{ row }">
-            <span :title="row.git_sha || '未记录代码提交'">
-              {{ row.git_sha ? row.git_sha.slice(0, 8) : '未记录' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="数据集版本" width="120">
-          <template #default="{ row }">{{ row.dataset_version || '—' }}</template>
-        </el-table-column>
-        <el-table-column label="技术栈" min-width="200">
-          <template #default="{ row }">
-            <span>{{ formatTechStack(row.tech_stack) }}</span>
-            <small class="evaluation-meta">{{
-              row.prompt_sha256 ? row.prompt_sha256.slice(0, 12) : '未登记 Prompt 摘要'
-            }}</small>
-          </template>
-        </el-table-column>
-        <el-table-column label="关联批次" width="90" prop="batch_count" />
-        <el-table-column label="平均通过率" width="110">
-          <template #default="{ row }">{{ formatEvaluationPercent(row.avg_pass_rate) }}</template>
-        </el-table-column>
-        <el-table-column label="平均延迟" width="100">
-          <template #default="{ row }">{{
-            formatEvaluationLatency(row.avg_latency_p50_ms)
-          }}</template>
-        </el-table-column>
-        <el-table-column label="平均 Token" width="110">
-          <template #default="{ row }">{{
-            row.avg_tokens === null ? '—' : Math.round(row.avg_tokens)
-          }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="175" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="inspectedProfile = row">查看配置</el-button>
-            <el-button
-              link
-              :type="selectedProfileId === row.profile_id ? 'warning' : 'primary'"
-              @click="toggleProfileFilter(row.profile_id)"
+              <template #default="{ row }">
+                <el-tooltip v-if="spec.description" :content="spec.description" placement="top">
+                  <span>{{ formatMetricValue(spec, row.summary?.[spec.key] ?? null) }}</span>
+                </el-tooltip>
+                <span v-else>{{ formatMetricValue(spec, row.summary?.[spec.key] ?? null) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="门禁" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.gate_passed ? 'success' : 'danger'" size="small">
+                  {{ row.gate_passed ? '通过' : '阻断' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="基线" width="90">
+              <template #default="{ row }">
+                <el-tag v-if="row.is_baseline" type="warning" size="small">基线</el-tag>
+                <el-tag v-else-if="!row.comparable" type="info" size="small">不可比</el-tag>
+                <span v-else class="evaluation-meta">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="230" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openRunDetail(row.run_id)"
+                  >查看详情</el-button
+                >
+                <el-button link type="primary" @click="downloadRunReport(row.run_id)"
+                  >原始报告</el-button
+                >
+                <el-button
+                  v-if="canWriteEval && row.dataset_id"
+                  link
+                  type="primary"
+                  @click="openBaselineDialog(row)"
+                  >设为基线</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+          <nav class="evaluation-pager" aria-label="评测批次分页">
+            <span>第 {{ runsPageNo }} 页</span>
+            <el-button :disabled="runsBusy || runsPageNo === 1" @click="turnRuns(false)"
+              >上一页</el-button
             >
-              {{ selectedProfileId === row.profile_id ? '取消筛选' : '筛选批次' }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <p v-else class="evaluation-meta">当前类型暂未登记技术栈/Prompt 配置版本。</p>
-      <el-alert
-        v-if="profileError"
-        type="warning"
-        show-icon
-        :title="profileError"
-        :closable="false"
-      />
-    </div>
+            <el-button :disabled="runsBusy || !runsNext" @click="turnRuns(true)">下一页</el-button>
+          </nav>
+        </div>
+      </el-tab-pane>
 
-    <div class="evaluation-subsection">
-      <div class="evaluation-subsection-head">
-        <h4>评测基线（按数据集版本 + 口径 + 执行方式唯一）</h4>
-        <el-switch v-model="baselineActiveOnly" active-text="只看 active" />
-      </div>
-      <el-alert
-        v-if="baselineError"
-        type="warning"
-        show-icon
-        :title="baselineError"
-        :closable="false"
-      />
-      <el-table
-        v-if="activeBaselines.length"
-        :data="activeBaselines"
-        row-key="baseline_id"
-        class="evaluation-datasets"
-        :row-class-name="baselineRowClass"
-        empty-text="当前筛选范围没有活跃基线"
-      >
-        <el-table-column label="口径" width="95">
-          <template #default="{ row }">
-            <el-tag effect="plain" size="small">{{ evaluationScopeLabel(row.scope) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="执行方式" min-width="130">
-          <template #default="{ row }">{{ evaluationModeLabel(row.mode) }}</template>
-        </el-table-column>
-        <el-table-column label="数据集版本" width="120">
-          <template #default="{ row }">{{ row.dataset_version }}</template>
-        </el-table-column>
-        <el-table-column label="批次" min-width="215">
-          <template #default="{ row }">
-            <button class="evaluation-link" type="button" @click="openRunById(row.run_id)">
-              {{ traceTime(row.run_created_at) }}
-            </button>
-            <small class="evaluation-meta">{{ row.run_id }}</small>
-          </template>
-        </el-table-column>
-        <el-table-column label="通过率" width="100">
-          <template #default="{ row }">{{ formatEvaluationPercent(row.run_pass_rate) }}</template>
-        </el-table-column>
-        <el-table-column label="门禁" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.run_gate_passed ? 'success' : 'danger'" size="small">
-              {{ row.run_gate_passed ? '通过' : '阻断' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="算法版本" min-width="130">
-          <template #default="{ row }">{{ row.algorithm_version || '—' }}</template>
-        </el-table-column>
-        <el-table-column label="设置人" min-width="110">
-          <template #default="{ row }">{{ row.created_by }}</template>
-        </el-table-column>
-        <el-table-column label="设置时间" min-width="135">
-          <template #default="{ row }">{{ traceTime(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column label="备注" min-width="150">
-          <template #default="{ row }">{{ row.note || '—' }}</template>
-        </el-table-column>
-      </el-table>
-      <p v-else class="evaluation-meta">当前范围还没有活跃基线，可在下方批次表把批次设为基线。</p>
-      <details v-if="historyBaselines.length" class="evaluation-baseline-history">
-        <summary>历史基线（{{ historyBaselines.length }}）</summary>
-        <el-table :data="historyBaselines" row-key="baseline_id" class="evaluation-datasets">
-          <el-table-column label="口径" width="95">
-            <template #default="{ row }">{{ evaluationScopeLabel(row.scope) }}</template>
-          </el-table-column>
-          <el-table-column label="执行方式" min-width="130">
-            <template #default="{ row }">{{ evaluationModeLabel(row.mode) }}</template>
-          </el-table-column>
-          <el-table-column label="数据集版本" width="120">
-            <template #default="{ row }">{{ row.dataset_version }}</template>
-          </el-table-column>
-          <el-table-column label="批次" min-width="215">
-            <template #default="{ row }">
-              <button class="evaluation-link" type="button" @click="openRunById(row.run_id)">
-                {{ traceTime(row.run_created_at) }}
+      <el-tab-pane label="基线" name="baselines">
+        <div class="evaluation-tab">
+          <div class="evaluation-subsection-head">
+            <h4>评测基线</h4>
+            <div class="evaluation-filters evaluation-filters-inline">
+              <el-switch v-model="baselineActiveOnly" active-text="只看 active" />
+              <el-button :loading="baselinesBusy" @click="loadBaselines">刷新</el-button>
+            </div>
+          </div>
+          <p class="evaluation-meta">
+            基线按「数据集版本 + 口径 + 执行方式」唯一：同一组合只保留一个 active
+            基线，被替换的基线保留历史记录；概览页的环比使用 active 基线。
+          </p>
+          <el-alert
+            v-if="baselinesError"
+            type="warning"
+            show-icon
+            :title="baselinesError"
+            :closable="false"
+          />
+          <el-table
+            v-else
+            v-loading="baselinesBusy"
+            :data="baselines"
+            row-key="baseline_id"
+            class="evaluation-datasets"
+            empty-text="当前范围还没有基线，可在批次页把批次设为基线"
+          >
+            <el-table-column label="状态" width="85">
+              <template #default="{ row }">
+                <el-tag :type="row.active ? 'success' : 'info'" size="small">{{
+                  row.active ? 'active' : '历史'
+                }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="数据集版本" width="120">
+              <template #default="{ row }">{{ row.dataset_version }}</template>
+            </el-table-column>
+            <el-table-column label="口径" width="95">
+              <template #default="{ row }">{{ evaluationScopeLabel(row.scope) }}</template>
+            </el-table-column>
+            <el-table-column label="执行方式" min-width="125">
+              <template #default="{ row }">{{ evaluationModeLabel(row.mode) }}</template>
+            </el-table-column>
+            <el-table-column label="批次" min-width="190">
+              <template #default="{ row }">
+                <button class="evaluation-link" type="button" @click="openRunDetail(row.run_id)">
+                  {{ traceTime(row.run_created_at) }}
+                </button>
+                <small class="evaluation-meta">{{ row.run_id }}</small>
+              </template>
+            </el-table-column>
+            <el-table-column :label="baselineMetricLabel" width="125">
+              <template #default="{ row }">{{
+                formatEvaluationPercent(row.run_pass_rate)
+              }}</template>
+            </el-table-column>
+            <el-table-column label="门禁" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.run_gate_passed ? 'success' : 'danger'" size="small">
+                  {{ row.run_gate_passed ? '通过' : '阻断' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="算法版本" min-width="120">
+              <template #default="{ row }">{{ row.algorithm_version || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="设置人" min-width="110">
+              <template #default="{ row }">{{ row.created_by }}</template>
+            </el-table-column>
+            <el-table-column label="设置时间" min-width="150">
+              <template #default="{ row }">{{ traceTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column label="备注" min-width="160">
+              <template #default="{ row }">{{ row.note || '—' }}</template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="任务" name="tasks">
+        <div class="evaluation-tab">
+          <div class="evaluation-subsection-head">
+            <h4>评测任务</h4>
+            <div v-if="canWriteEval" class="evaluation-filters evaluation-filters-inline">
+              <el-button @click="openProfileDialog">登记算法版本</el-button>
+              <el-button type="primary" @click="openTriggerDialog()">发起评测</el-button>
+            </div>
+          </div>
+          <p class="evaluation-meta">
+            评测由 Worker
+            真实执行；触发时评测口径选项来自指标目录，执行方式按所选数据集登记的能力过滤，成功后返回任务号与审计号。
+          </p>
+          <el-alert
+            v-if="!canWriteEval"
+            type="info"
+            show-icon
+            :closable="false"
+            title="当前账号可查看评测批次，触发/取消/设基线等写入操作需要企业负责人或系统管理员权限。"
+          />
+          <el-alert v-if="jobError" type="error" show-icon :title="jobError" :closable="false" />
+          <p v-if="profilesError" class="evaluation-meta">{{ profilesError }}</p>
+          <el-empty
+            v-if="!activeJob"
+            description="当前没有进行中的评测任务，可点击「发起评测」创建。"
+            :image-size="60"
+          />
+          <template v-else>
+            <div class="evaluation-job-head">
+              <strong>{{ activeJob.job_id }}</strong>
+              <el-tag :type="stateTag(activeJob.state)" size="small">{{
+                stateText(activeJob.state)
+              }}</el-tag>
+              <span class="evaluation-meta">{{ activeJob.stage || '等待 Worker 调度' }}</span>
+              <el-button v-if="canWriteEval && !jobTerminal" :loading="jobBusy" @click="cancelJob"
+                >取消任务</el-button
+              >
+            </div>
+            <el-progress :percentage="activeJob.progress" :status="jobProgressStatus" />
+            <p class="evaluation-meta">
+              创建 {{ traceTime(activeJob.created_at)
+              }}<template v-if="activeJob.started_at">
+                · 开始 {{ traceTime(activeJob.started_at) }}</template
+              >
+              <template v-if="activeJob.finished_at">
+                · 结束 {{ traceTime(activeJob.finished_at) }}</template
+              >
+            </p>
+            <el-alert
+              v-if="activeJob.error"
+              type="error"
+              :title="activeJob.error"
+              :closable="false"
+            />
+            <p v-if="jobRunId" class="evaluation-meta">
+              评测批次已入库：
+              <button class="evaluation-link" type="button" @click="openRunDetail(jobRunId)">
+                {{ jobRunId }}
               </button>
-              <small class="evaluation-meta">{{ row.run_id }}</small>
-            </template>
-          </el-table-column>
-          <el-table-column label="通过率" width="100">
-            <template #default="{ row }">{{ formatEvaluationPercent(row.run_pass_rate) }}</template>
-          </el-table-column>
-          <el-table-column label="门禁" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.run_gate_passed ? 'success' : 'danger'" size="small">
-                {{ row.run_gate_passed ? '通过' : '阻断' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="算法版本" min-width="130">
-            <template #default="{ row }">{{ row.algorithm_version || '—' }}</template>
-          </el-table-column>
-          <el-table-column label="设置人" min-width="110">
-            <template #default="{ row }">{{ row.created_by }}</template>
-          </el-table-column>
-          <el-table-column label="设置时间" min-width="135">
-            <template #default="{ row }">{{ traceTime(row.created_at) }}</template>
-          </el-table-column>
-          <el-table-column label="备注" min-width="150">
-            <template #default="{ row }">{{ row.note || '—' }}</template>
-          </el-table-column>
-        </el-table>
-      </details>
-    </div>
+            </p>
+          </template>
+        </div>
+      </el-tab-pane>
 
-    <div class="evaluation-filters">
-      <TenantOwnerSelect v-if="isAdmin" v-model="owner" :api="api" />
-      <el-select v-model="mode" placeholder="全部执行方式" aria-label="按执行方式筛选">
-        <el-option value="" label="全部执行方式" />
-        <el-option
-          v-for="(label, code) in evaluationModes"
-          :key="code"
-          :value="code"
-          :label="label"
-        />
-      </el-select>
-      <el-select v-model="gate" placeholder="全部门禁结果" aria-label="按门禁结果筛选">
-        <el-option value="" label="全部门禁结果" />
-        <el-option value="true" label="门禁通过" />
-        <el-option value="false" label="门禁阻断" />
-      </el-select>
-    </div>
-
-    <el-alert v-if="error" type="error" show-icon :title="error" :closable="false" />
-    <el-table
-      v-else
-      v-loading="busy"
-      :data="rows"
-      row-key="run_id"
-      empty-text="当前范围没有评测批次"
-    >
-      <el-table-column label="评测批次" min-width="200">
-        <template #default="{ row }">
-          <button class="evaluation-link" type="button" @click="selected = row">
-            {{ traceTime(row.created_at) }}
-          </button>
-          <small class="evaluation-meta">
-            {{ row.run_id }}<template v-if="row.is_baseline"> · 基线</template>
-          </small>
-        </template>
-      </el-table-column>
-      <el-table-column label="数据集 / 算法版本" min-width="185">
-        <template #default="{ row }">
-          <span>{{ row.dataset_name || '未登记数据集' }}</span>
-          <small class="evaluation-meta">
-            数据集 {{ row.dataset_version || '—' }} · 算法
-            {{ row.profile_version_tag || '未绑定' }}
-          </small>
-        </template>
-      </el-table-column>
-      <el-table-column label="口径 / 执行方式" min-width="140">
-        <template #default="{ row }">
-          {{ evaluationScopeLabel(row.scope) }} · {{ evaluationSource(row) }}
-        </template>
-      </el-table-column>
-      <el-table-column label="用例结果" min-width="185">
-        <template #default="{ row }">
-          <strong>{{ row.passed_cases }} / {{ row.total_cases }} 通过</strong>
-          <small class="evaluation-meta"
-            >{{ row.failed_cases }} 失败 · {{ row.unassessable_cases }} 不可判定</small
+      <el-tab-pane v-if="canWriteEval" label="审计" name="audit">
+        <div class="evaluation-tab">
+          <div class="evaluation-subsection-head">
+            <h4>评测审计留痕</h4>
+            <div class="evaluation-filters evaluation-filters-inline">
+              <el-select v-model="auditAction" placeholder="全部动作" aria-label="按审计动作筛选">
+                <el-option value="" label="全部动作" />
+                <el-option
+                  v-for="(label, code) in evaluationAuditActions"
+                  :key="code"
+                  :value="code"
+                  :label="label"
+                />
+              </el-select>
+              <el-button :loading="auditBusy" @click="loadAuditLogs">刷新</el-button>
+            </div>
+          </div>
+          <el-alert
+            v-if="auditError"
+            type="error"
+            show-icon
+            :title="auditError"
+            :closable="false"
+          />
+          <el-table
+            v-else
+            v-loading="auditBusy"
+            :data="auditLogs"
+            row-key="audit_id"
+            empty-text="当前筛选范围没有审计记录"
           >
-        </template>
-      </el-table-column>
-      <el-table-column label="指标" min-width="170">
-        <template #default="{ row }">
-          <strong>{{ formatEvaluationPercent(row.pass_rate) }} 通过率</strong>
-          <small class="evaluation-meta"
-            >均分 {{ formatEvaluationPercent(row.mean_score) }} · P50
-            {{ formatEvaluationLatency(row.latency_p50_ms) }}</small
-          >
-        </template>
-      </el-table-column>
-      <el-table-column label="发布门禁" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.gate_passed ? 'success' : 'danger'" size="small">{{
-            row.gate_passed ? '通过' : '阻断'
-          }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="240" fixed="right">
-        <template #default="{ row }">
-          <el-button
-            link
-            type="primary"
-            :disabled="!row.report_available"
-            :title="row.report_available ? '下载原始报告 JSON' : '该批次未保存原始报告'"
-            @click="downloadReport(row)"
-          >
-            原始报告
-          </el-button>
-          <el-button v-if="row.eval_kind === 'rag'" link type="primary" @click="openRunLayers(row)">
-            分层指标
-          </el-button>
-          <el-button
-            v-if="canWriteEval && row.dataset_id"
-            link
-            type="primary"
-            @click="openBaselineDialog(row)"
-          >
-            设为基线
-          </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-    <nav class="evaluation-pager" aria-label="评测批次分页">
-      <span>第 {{ page }} 页</span>
-      <el-button :disabled="busy || page === 1" @click="turn(false)">上一页</el-button>
-      <el-button :disabled="busy || !nextCursor" @click="turn(true)">下一页</el-button>
-    </nav>
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <pre class="evaluation-json">{{ JSON.stringify(row.summary, null, 2) }}</pre>
+              </template>
+            </el-table-column>
+            <el-table-column label="动作" width="120">
+              <template #default="{ row }">
+                <el-tag size="small">{{ auditActionLabel(row.action) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="对象" min-width="190">
+              <template #default="{ row }">{{ row.target_id }}</template>
+            </el-table-column>
+            <el-table-column label="操作人" min-width="130">
+              <template #default="{ row }">{{ row.actor_id }}</template>
+            </el-table-column>
+            <el-table-column label="时间" min-width="150">
+              <template #default="{ row }">{{ traceTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column label="摘要" min-width="240">
+              <template #default="{ row }">{{ summarizeJson(row.summary) }}</template>
+            </el-table-column>
+          </el-table>
+          <nav class="evaluation-pager" aria-label="审计留痕分页">
+            <span>第 {{ auditCursors.length }} 页</span>
+            <el-button :disabled="auditBusy || auditCursors.length === 1" @click="turnAudit(false)"
+              >上一页</el-button
+            >
+            <el-button :disabled="auditBusy || !auditNext" @click="turnAudit(true)"
+              >下一页</el-button
+            >
+          </nav>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
 
     <el-drawer
       v-model="datasetDrawer"
-      :title="inspectedDataset ? `数据集用例：${inspectedDataset.name}` : '数据集用例'"
-      size="60%"
+      :title="
+        inspectedDataset
+          ? `数据集：${inspectedDataset.name}（${inspectedDataset.version}）`
+          : '数据集'
+      "
+      size="72%"
     >
       <template v-if="inspectedDataset">
+        <el-alert type="info" :closable="false" show-icon>
+          <template #title>
+            数据集内容随 Git 版本化：页面对应仓库 evals/datasets/{{ inspectedDataset.version }}/
+            下的原始文件，sha256 与登记一致；用例字段完整保留，不做裁剪或改名。
+          </template>
+        </el-alert>
         <div class="evaluation-filters">
           <el-tag effect="plain" size="small">版本 {{ inspectedDataset.version }}</el-tag>
           <el-tag type="info" effect="plain" size="small">{{
-            evaluationSuites[inspectedDataset.suite] || inspectedDataset.suite || '未登记分组'
+            evaluationSuites[inspectedDataset.suite] || inspectedDataset.suite || '未登记类型'
           }}</el-tag>
-          <el-tag v-if="inspectedDataset.archived" type="info" size="small">历史版本·仅归档</el-tag>
-          <span
-            class="evaluation-meta"
-            :title="inspectedDataset.content_sha256 || '未登记内容摘要'"
-          >
-            内容摘要
-            {{
-              inspectedDataset.content_sha256 ? inspectedDataset.content_sha256.slice(0, 12) : '—'
-            }}
+          <el-tag v-if="inspectedDataset.archived" type="info" size="small">归档版本</el-tag>
+          <span class="evaluation-meta" :title="inspectedDataset.content_sha256">
+            内容 sha256
+            {{ inspectedDataset.content_sha256 || '—' }}
           </span>
           <span class="evaluation-meta"
-            >登记用例数 {{ inspectedDataset.case_count }} · 本页合计 {{ datasetCaseTotal }}</span
+            >登记用例数 {{ inspectedDataset.case_count }} · 文件数
+            {{ datasetFileList.length }}</span
           >
+          <el-button type="primary" :loading="dsRawBusy" @click="downloadDatasetRaw"
+            >下载全部原始用例</el-button
+          >
+          <el-button :loading="datasetCaseBusy" @click="loadDatasetCases">刷新用例</el-button>
         </div>
-        <p v-if="inspectedDataset.description">{{ inspectedDataset.description }}</p>
+        <el-alert v-if="dsRawError" type="error" show-icon :title="dsRawError" :closable="false" />
+        <el-alert
+          v-if="rawExport"
+          type="success"
+          show-icon
+          :closable="false"
+          :title="`已导出 ${rawExport.cases} 条原始用例 / ${rawExport.files} 个文件摘要，SHA-256 ${rawExport.sha256}（${rawExport.bytes} 字节）`"
+        />
+        <h4>文件清单（{{ datasetFileList.length }}）</h4>
+        <el-table
+          v-if="datasetFileList.length"
+          :data="datasetFileList"
+          size="small"
+          row-key="path"
+          max-height="240"
+        >
+          <el-table-column label="仓库相对路径" min-width="260">
+            <template #default="{ row }">
+              <code>{{ row.path }}</code>
+            </template>
+          </el-table-column>
+          <el-table-column label="sha256" width="200">
+            <template #default="{ row }">
+              <span :title="row.sha256">{{ shortSha(row.sha256) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="140">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="viewDatasetFile(row.path)">查看</el-button>
+              <el-button link type="primary" @click="downloadDatasetFile(row.path)">下载</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <p v-else class="evaluation-muted">该数据集版本没有登记文件清单（历史版本或旧登记）。</p>
+
+        <h4>原始用例（{{ datasetCaseTotal }}）</h4>
         <el-alert
           v-if="datasetCaseError"
           type="error"
@@ -620,194 +707,200 @@
           :closable="false"
         />
         <el-table
-          v-else-if="datasetKind === 'agent'"
-          v-loading="datasetCaseBusy"
-          :data="datasetCases"
-          max-height="520"
-          empty-text="该数据集版本没有登记用例"
-        >
-          <el-table-column label="用例 ID" width="155">
-            <template #default="{ row }">{{ datasetCaseText(row, ['id', 'case_id']) }}</template>
-          </el-table-column>
-          <el-table-column label="名称" min-width="140">
-            <template #default="{ row }">{{ datasetCaseText(row, ['name', 'title']) }}</template>
-          </el-table-column>
-          <el-table-column label="分类" width="120">
-            <template #default="{ row }">{{ datasetCaseText(row, ['category']) }}</template>
-          </el-table-column>
-          <el-table-column label="Prompt / 输入" min-width="320">
-            <template #default="{ row }">{{
-              datasetCasePreview(row, ['prompt', 'input', 'question', 'query'])
-            }}</template>
-          </el-table-column>
-        </el-table>
-        <el-table
           v-else
           v-loading="datasetCaseBusy"
           :data="datasetCases"
-          max-height="520"
-          empty-text="该数据集版本没有登记用例"
+          max-height="460"
+          empty-text="该数据集版本没有登记用例内容"
         >
-          <el-table-column label="用例 ID" width="155">
-            <template #default="{ row }">{{ datasetCaseText(row, ['id', 'case_id']) }}</template>
+          <el-table-column
+            v-for="column in datasetCaseColumns"
+            :key="column.key"
+            :label="column.label"
+            :min-width="column.width"
+          >
+            <template #default="{ row }">
+              <span v-if="column.preview">{{ datasetCasePreview(row, column.keys) }}</span>
+              <span v-else>{{ datasetCaseText(row, column.keys) }}</span>
+            </template>
           </el-table-column>
-          <el-table-column label="分类" width="120">
-            <template #default="{ row }">{{ datasetCaseText(row, ['category']) }}</template>
-          </el-table-column>
-          <el-table-column label="问题" min-width="260">
-            <template #default="{ row }">{{
-              datasetCasePreview(row, ['question', 'query', 'prompt'])
-            }}</template>
-          </el-table-column>
-          <el-table-column label="预期摘要" min-width="300">
-            <template #default="{ row }">{{
-              datasetCasePreview(row, [
-                'expected',
-                'expected_answer',
-                'expected_facts',
-                'expected_documents',
-                'reference_answer',
-              ])
-            }}</template>
+          <el-table-column label="原始 JSON" width="105" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openRawCase(row)">原始 JSON</el-button>
+            </template>
           </el-table-column>
         </el-table>
         <nav class="evaluation-pager" aria-label="数据集用例分页">
-          <span>第 {{ datasetCasePage }} 页</span>
+          <span>第 {{ datasetCaseCursors.length }} 页 / 共 {{ datasetCaseTotal }} 条</span>
           <el-button
-            :disabled="datasetCaseBusy || datasetCasePage === 1"
+            :disabled="datasetCaseBusy || datasetCaseCursors.length === 1"
             @click="turnDatasetCase(false)"
+            >上一页</el-button
           >
-            上一页
-          </el-button>
-          <el-button :disabled="datasetCaseBusy || !datasetCaseNext" @click="turnDatasetCase(true)">
-            下一页
-          </el-button>
+          <el-button :disabled="datasetCaseBusy || !datasetCaseNext" @click="turnDatasetCase(true)"
+            >下一页</el-button
+          >
         </nav>
       </template>
     </el-drawer>
 
-    <el-drawer
-      v-model="layersDrawer"
-      :title="layersTarget ? `RAG 分层指标：${layersTarget.run_id}` : 'RAG 分层指标'"
-      size="60%"
+    <el-dialog
+      v-model="rawCaseDialog"
+      :title="rawCaseTitle ? `原始用例 JSON：${rawCaseTitle}` : '原始用例 JSON'"
+      width="min(880px, 94vw)"
     >
-      <el-alert v-if="layersError" type="error" show-icon :title="layersError" :closable="false" />
-      <el-skeleton v-else-if="layersBusy" :rows="4" animated />
-      <template v-else-if="layersData">
-        <p v-if="!layersPresent" class="evaluation-muted">
-          该批次没有产出分层指标：可能只执行了部分口径，或入库时未保存分层结果。
-        </p>
-        <div v-else class="evaluation-layers">
-          <section v-if="retrievalLayer" class="evaluation-layer-card">
-            <h4>检索层</h4>
-            <dl class="evaluation-layer-metrics">
-              <div v-for="metric in retrievalMetrics" :key="metric.label">
-                <dt>{{ metric.label }}</dt>
-                <dd>
-                  {{ formatLayerValue(readLayerValue(retrievalLayer, metric.path), metric.kind) }}
-                </dd>
-              </div>
-            </dl>
-          </section>
-          <section v-if="adversarialLayer" class="evaluation-layer-card">
-            <h4>对抗层</h4>
-            <dl class="evaluation-layer-metrics">
-              <div v-for="metric in adversarialMetrics" :key="metric.label">
-                <dt>{{ metric.label }}</dt>
-                <dd>
-                  {{ formatLayerValue(readLayerValue(adversarialLayer, metric.path), metric.kind) }}
-                </dd>
-              </div>
-            </dl>
-          </section>
-          <section v-if="behaviorLayer" class="evaluation-layer-card">
-            <h4>行为层</h4>
-            <dl class="evaluation-layer-metrics">
-              <div v-for="metric in behaviorMetrics" :key="metric.label">
-                <dt>{{ metric.label }}</dt>
-                <dd>
-                  {{ formatLayerValue(readLayerValue(behaviorLayer, metric.path), metric.kind) }}
-                </dd>
-              </div>
-            </dl>
-            <dl v-if="behaviorDimensionRows.length" class="evaluation-layer-dimensions">
-              <div v-for="item in behaviorDimensionRows" :key="item.dimension">
-                <dt>{{ item.dimension }}</dt>
-                <dd>{{ item.buckets }}</dd>
-              </div>
-            </dl>
-          </section>
-          <section v-if="engineeringLayer" class="evaluation-layer-card">
-            <h4>工程指标</h4>
-            <dl class="evaluation-layer-metrics">
-              <div v-for="metric in engineeringMetrics" :key="metric.label">
-                <dt>{{ metric.label }}</dt>
-                <dd>
-                  {{ formatLayerValue(readLayerValue(engineeringLayer, metric.path), metric.kind) }}
-                </dd>
-              </div>
-            </dl>
-          </section>
+      <p class="evaluation-meta">以下为该用例登记在数据集中的完整原始字段，未裁剪、未改名。</p>
+      <pre class="evaluation-json">{{ rawCaseJson }}</pre>
+    </el-dialog>
+
+    <el-drawer
+      v-model="runDetailOpen"
+      :title="runDetail ? `批次详情：${runDetail.run.run_id}` : `批次详情：${runDetailId}`"
+      size="76%"
+    >
+      <el-alert
+        v-if="runDetailError"
+        type="error"
+        show-icon
+        :title="runDetailError"
+        :closable="false"
+      />
+      <el-skeleton v-else-if="runDetailBusy && !runDetail" :rows="5" animated />
+      <template v-else-if="runDetail">
+        <div class="evaluation-run-title">
+          <strong>{{ traceTime(runDetail.run.created_at) }}</strong>
+          <el-tag :type="runDetail.run.gate_passed ? 'success' : 'danger'" size="small">
+            {{ runDetail.run.gate_passed ? '门禁通过' : '门禁阻断' }}
+          </el-tag>
+          <el-tag v-if="runDetail.run.is_baseline" type="warning" size="small">当前基线</el-tag>
+          <span
+            >{{ evaluationModeLabel(runDetail.run.mode) }} ·
+            {{ evaluationScopeLabel(runDetail.run.scope) }}</span
+          >
         </div>
+        <small class="evaluation-meta"
+          >{{ runDetail.run.run_id }} · 数据集版本 {{ runDetail.run.dataset_version || '—' }} ·
+          算法版本 {{ runDetail.run.profile_version_tag || '未绑定' }} · 发起人
+          {{ runDetail.run.owner_name || runDetail.run.owner_id }}</small
+        >
+        <div class="evaluation-filters">
+          <el-tag effect="plain" size="small"
+            >用例 {{ runDetail.run.passed_cases }} / {{ runDetail.run.total_cases }} 通过</el-tag
+          >
+          <el-tag type="danger" effect="plain" size="small"
+            >失败 {{ runDetail.run.failed_cases }}</el-tag
+          >
+          <el-tag type="info" effect="plain" size="small"
+            >不可判定 {{ runDetail.run.unassessable_cases }}</el-tag
+          >
+          <el-button
+            :disabled="!runDetail.run.report_available"
+            :title="runDetail.run.report_available ? '下载原始报告 JSON' : '该批次未保存原始报告'"
+            @click="downloadRunReport(runDetail.run.run_id)"
+            >下载原始报告</el-button
+          >
+          <el-button
+            v-if="canWriteEval && runDetail.run.dataset_id"
+            @click="openBaselineDialog(runDetail.run)"
+            >设为基线</el-button
+          >
+        </div>
+        <p v-if="runDetail.run.metric_schema_version" class="evaluation-meta">
+          指标口径 schema v{{ runDetail.run.metric_schema_version }} ·
+          {{ runDetailSchema ? runDetailSchema.label : '未定义' }}
+        </p>
+        <div class="evaluation-metric-grid">
+          <div v-for="card in runMetricCards" :key="card.spec.key" class="evaluation-metric-card">
+            <div class="evaluation-metric-card-head">
+              <span class="evaluation-card-label">{{ card.spec.label }}</span>
+              <el-tag effect="plain" size="small">{{ card.spec.group }}</el-tag>
+            </div>
+            <strong class="evaluation-metric-value">{{
+              formatMetricValue(card.spec, card.value)
+            }}</strong>
+            <small v-if="card.spec.description" class="evaluation-meta">{{
+              card.spec.description
+            }}</small>
+          </div>
+        </div>
+        <h4>逐例结果</h4>
+        <el-alert
+          v-if="runCaseError"
+          type="error"
+          show-icon
+          :title="runCaseError"
+          :closable="false"
+        />
+        <el-table
+          v-else
+          v-loading="runCaseBusy"
+          :data="runCaseRows"
+          row-key="case_id"
+          empty-text="该批次没有用例结果"
+        >
+          <el-table-column label="用例" min-width="210">
+            <template #default="{ row }">
+              <button class="evaluation-link" type="button" @click="openCaseJson(row.case_id)">
+                {{ row.name }}
+              </button>
+              <small class="evaluation-meta">{{ row.case_id }}</small>
+            </template>
+          </el-table-column>
+          <el-table-column label="分组" width="110">
+            <template #default="{ row }">{{
+              evaluationSuites[row.suite] || row.suite || '—'
+            }}</template>
+          </el-table-column>
+          <el-table-column label="得分" width="80">
+            <template #default="{ row }">{{
+              typeof row.score === 'number' ? row.score.toFixed(2) : '—'
+            }}</template>
+          </el-table-column>
+          <el-table-column label="判定" width="120">
+            <template #default="{ row }">
+              <el-tag :type="evaluationTags[row.status as EvaluationStatus]" size="small">{{
+                evaluationStatuses[row.status as EvaluationStatus]
+              }}</el-tag>
+              <small v-if="row.hard_failure" class="evaluation-meta">硬性违规</small>
+            </template>
+          </el-table-column>
+          <el-table-column label="原始 JSON" width="110" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openCaseJson(row.case_id)"
+                >原始 JSON</el-button
+              >
+            </template>
+          </el-table-column>
+        </el-table>
+        <nav class="evaluation-pager" aria-label="批次用例分页">
+          <span>第 {{ runCaseCursors.length }} 页</span>
+          <el-button
+            :disabled="runCaseBusy || runCaseCursors.length === 1"
+            @click="turnRunCase(false)"
+            >上一页</el-button
+          >
+          <el-button :disabled="runCaseBusy || !runCaseNext" @click="turnRunCase(true)"
+            >下一页</el-button
+          >
+        </nav>
       </template>
     </el-drawer>
 
-    <el-drawer v-model="auditDrawer" title="评测审计留痕" size="60%">
-      <div class="evaluation-filters">
-        <el-select
-          v-model="auditAction"
-          placeholder="全部动作"
-          aria-label="按审计动作筛选"
-          @change="resetAudit"
-        >
-          <el-option value="" label="全部动作" />
-          <el-option
-            v-for="(label, code) in evaluationAuditActions"
-            :key="code"
-            :value="code"
-            :label="label"
-          />
-        </el-select>
-      </div>
-      <el-alert v-if="auditError" type="error" show-icon :title="auditError" :closable="false" />
-      <el-table
-        v-else
-        v-loading="auditBusy"
-        :data="auditLogs"
-        row-key="audit_id"
-        empty-text="当前筛选范围没有审计记录"
+    <el-dialog v-model="caseJsonDialog" title="用例原始判定 JSON" width="min(900px, 94vw)">
+      <p class="evaluation-meta">
+        用例 {{ caseJsonCaseId }} · 以下为服务端返回的 expected / observed / verdicts
+        原始字段，未裁剪。
+      </p>
+      <el-button
+        v-if="caseJsonTrace"
+        type="primary"
+        plain
+        class="evaluation-case-trace"
+        @click="inspectCaseTrace"
+        >查看关联执行轨迹</el-button
       >
-        <el-table-column type="expand">
-          <template #default="{ row }">
-            <pre class="evaluation-json">{{ JSON.stringify(row.summary, null, 2) }}</pre>
-          </template>
-        </el-table-column>
-        <el-table-column label="动作" width="120">
-          <template #default="{ row }">
-            <el-tag size="small">{{ auditActionLabel(row.action) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="对象" min-width="180">
-          <template #default="{ row }">{{ row.target_id }}</template>
-        </el-table-column>
-        <el-table-column label="操作人" min-width="130">
-          <template #default="{ row }">{{ row.actor_id }}</template>
-        </el-table-column>
-        <el-table-column label="时间" min-width="150">
-          <template #default="{ row }">{{ traceTime(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column label="摘要" min-width="220">
-          <template #default="{ row }">{{ summarizeJson(row.summary) }}</template>
-        </el-table-column>
-      </el-table>
-      <nav class="evaluation-pager" aria-label="审计留痕分页">
-        <span>第 {{ auditPage }} 页</span>
-        <el-button :disabled="auditBusy || auditPage === 1" @click="turnAudit(false)"
-          >上一页</el-button
-        >
-        <el-button :disabled="auditBusy || !auditNext" @click="turnAudit(true)">下一页</el-button>
-      </nav>
-    </el-drawer>
+      <pre class="evaluation-json">{{ caseJsonText }}</pre>
+    </el-dialog>
 
     <el-dialog v-model="profileDialog" title="登记不可变技术栈 / Prompt 版本" width="560px">
       <el-form label-position="top">
@@ -834,15 +927,15 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="triggerDialog" title="选择数据集与算法版本发起评测" width="540px">
+    <el-dialog v-model="triggerDialog" title="选择数据集与算法版本发起评测" width="560px">
       <el-form label-position="top">
         <el-form-item label="评测数据集版本">
           <el-select v-model="triggerForm.dataset_id" style="width: 100%">
             <el-option
-              v-for="ds in triggerDatasets"
-              :key="ds.dataset_id"
-              :label="`${ds.name}（${ds.version}）`"
-              :value="ds.dataset_id"
+              v-for="dataset in triggerDatasets"
+              :key="dataset.dataset_id"
+              :label="`${dataset.name}（${dataset.version}）`"
+              :value="dataset.dataset_id"
             />
           </el-select>
           <small class="evaluation-meta"
@@ -859,14 +952,14 @@
           >
             <el-option label="自动生成算法版本快照" value="" />
             <el-option
-              v-for="pf in profiles"
-              :key="pf.profile_id"
-              :label="`V${pf.version_no} · ${pf.version_tag}`"
-              :value="pf.profile_id"
+              v-for="profile in profiles"
+              :key="profile.profile_id"
+              :label="`V${profile.version_no} · ${profile.version_tag}`"
+              :value="profile.profile_id"
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="评测口径">
+        <el-form-item label="评测口径（选项来自指标目录）">
           <el-select v-model="triggerForm.scope" style="width: 100%">
             <el-option
               v-for="item in triggerScopeOptions"
@@ -876,7 +969,7 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="执行方式">
+        <el-form-item label="执行方式（按数据集登记能力过滤）">
           <el-select v-model="triggerForm.mode" style="width: 100%">
             <el-option
               v-for="item in triggerModeOptions"
@@ -905,14 +998,14 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="baselineDialog" title="设为评测基线" width="480px">
+    <el-dialog v-model="baselineDialog" title="设为评测基线" width="500px">
       <el-form label-position="top">
         <el-form-item label="基线批次">
-          <span>{{ baselineRun?.run_id }}</span>
+          <span>{{ baselineRun ? baselineRun.run_id : '—' }}</span>
           <small class="evaluation-meta">
-            口径 {{ baselineRun ? evaluationScopeLabel(baselineRun.scope) : '—' }} · 执行方式
-            {{ baselineRun ? evaluationModeLabel(baselineRun.mode) : '—' }} · 数据集版本
-            {{ baselineRun?.dataset_version || '—' }}
+            数据集版本 {{ baselineRun ? baselineRun.dataset_version || '—' : '—' }} · 口径
+            {{ baselineRun ? evaluationScopeLabel(baselineRun.scope) : '—' }} · 执行方式
+            {{ baselineRun ? evaluationModeLabel(baselineRun.mode) : '—' }}
           </small>
         </el-form-item>
         <el-form-item label="基线备注（必填）">
@@ -920,7 +1013,7 @@
             v-model="baselineNote"
             maxlength="500"
             show-word-limit
-            placeholder="说明为什么将该批次作为当前基线"
+            placeholder="说明为什么将该批次作为该数据集版本 + 口径 + 执行方式的当前基线"
           />
         </el-form-item>
         <el-alert
@@ -937,15 +1030,6 @@
         >
       </template>
     </el-dialog>
-
-    <el-dialog
-      :model-value="Boolean(inspectedProfile)"
-      title="技术栈与 Prompt 快照详情"
-      width="640px"
-      @close="inspectedProfile = null"
-    >
-      <pre v-if="inspectedProfile" class="evaluation-json">{{ profileSnapshotJson }}</pre>
-    </el-dialog>
   </section>
 </template>
 
@@ -957,41 +1041,48 @@ import { useCursorPage } from '../../shared/useCursorPage'
 import { stateTag, stateText, traceTime } from '../../shared/labels'
 import {
   evaluationAuditActions,
-  evaluationDeltaTone,
   evaluationModes,
-  evaluationModeLabel,
   evaluationScopes,
   evaluationScopeLabel,
-  evaluationSource,
+  evaluationModeLabel,
+  evaluationStatuses,
   evaluationSuites,
-  formatEvaluationDelta,
-  formatEvaluationLatency,
+  evaluationTags,
   formatEvaluationPercent,
+  formatMetricDelta,
+  formatMetricValue,
+  metricDeltaTone,
   type EvaluationAuditAction,
   type EvaluationAuditLog,
   type EvaluationBaseline,
+  type EvaluationCase,
+  type EvaluationCaseDetail,
   type EvaluationDataset,
   type EvaluationDatasetDetail,
+  type EvaluationDatasetRaw,
   type EvaluationJob,
   type EvaluationJobState,
   type EvaluationKind,
-  type EvaluationLayerName,
-  type EvaluationLayers,
+  type EvaluationMetricCatalog,
+  type EvaluationMetricSchema,
+  type EvaluationMetricSpec,
   type EvaluationMode,
   type EvaluationProfile,
   type EvaluationRun,
   type EvaluationRunDetail,
   type EvaluationScope,
+  type EvaluationStatus,
   type EvaluationTriggerReceipt,
   type EvaluationTrends,
   type TriggerEvaluationPayload,
 } from './evaluationTypes'
-import EvaluationRunInspector from './EvaluationRunInspector.vue'
 import TenantOwnerSelect from './TenantOwnerSelect.vue'
 import './evaluations.css'
 
-const DATASET_CASE_PAGE_SIZE = 50
 const TREND_LIMIT = 30
+const RUN_PAGE_SIZE = 25
+const DATASET_CASE_PAGE_SIZE = 20
+const RUN_CASE_PAGE_SIZE = 30
 const AUDIT_PAGE_SIZE = 30
 const JOB_POLL_MS = 3000
 const JOB_TERMINAL_STATES = new Set<EvaluationJobState>([
@@ -1002,28 +1093,78 @@ const JOB_TERMINAL_STATES = new Set<EvaluationJobState>([
   'legacy',
 ])
 
+interface MetricCard {
+  spec: EvaluationMetricSpec
+  latest: number | null
+  baseline: number | null
+  delta: number | null
+}
+
+interface RunMetricCard {
+  spec: EvaluationMetricSpec
+  value: number | null
+}
+
+interface DatasetFileEntry {
+  path: string
+  sha256: string
+}
+
+interface DatasetCaseColumn {
+  key: string
+  label: string
+  keys: string[]
+  preview: boolean
+  width: number
+}
+
+interface RawExportSummary {
+  sha256: string
+  bytes: number
+  cases: number
+  files: number
+}
+
 const props = defineProps<{ isAdmin: boolean; canWriteEval: boolean; api: ApiClient }>()
 const emit = defineEmits<{ (e: 'inspect', taskId: string, traceId: string): void }>()
+
 const evalKind = ref<EvaluationKind>('agent')
-const selected = ref<EvaluationRun | null>(null)
+const activeTab = ref('overview')
 const owner = ref('all')
-const mode = ref<EvaluationMode | ''>('')
-const gate = ref('')
-const selectedDatasetId = ref('')
-const selectedProfileId = ref('')
-const showArchived = ref(false)
+const scope = ref<EvaluationScope>('full')
+const mode = ref<EvaluationMode>('live')
 const datasetVersion = ref('')
-const trendScope = ref<EvaluationScope | ''>('')
-const trendMode = ref<EvaluationMode | ''>('')
+const refreshing = ref(false)
+
+const catalog = ref<EvaluationMetricCatalog | null>(null)
+const catalogError = ref('')
+
 const datasets = ref<EvaluationDataset[]>([])
-const profiles = ref<EvaluationProfile[]>([])
-const baselines = ref<EvaluationBaseline[]>([])
+const datasetsBusy = ref(false)
+const datasetsError = ref('')
+const showArchived = ref(false)
+
 const trends = ref<EvaluationTrends | null>(null)
-const datasetError = ref('')
-const profileError = ref('')
-const baselineError = ref('')
-const trendError = ref('')
+const trendsBusy = ref(false)
+const trendsError = ref('')
+
+const runDatasetId = ref('')
+
+const baselines = ref<EvaluationBaseline[]>([])
+const baselinesBusy = ref(false)
+const baselinesError = ref('')
 const baselineActiveOnly = ref(false)
+
+const profiles = ref<EvaluationProfile[]>([])
+const profilesError = ref('')
+
+const auditAction = ref<EvaluationAuditAction | ''>('')
+const auditLogs = ref<EvaluationAuditLog[]>([])
+const auditCursors = ref<string[]>([''])
+const auditNext = ref<string | null>(null)
+const auditBusy = ref(false)
+const auditError = ref('')
+
 const datasetDrawer = ref(false)
 const inspectedDataset = ref<EvaluationDataset | null>(null)
 const datasetCases = ref<Record<string, unknown>[]>([])
@@ -1032,22 +1173,32 @@ const datasetCaseNext = ref<string | null>(null)
 const datasetCaseTotal = ref(0)
 const datasetCaseBusy = ref(false)
 const datasetCaseError = ref('')
-const inspectedProfile = ref<EvaluationProfile | null>(null)
-const layersDrawer = ref(false)
-const layersTarget = ref<EvaluationRun | null>(null)
-const layersData = ref<EvaluationLayers | null>(null)
-const layersBusy = ref(false)
-const layersError = ref('')
+const rawCaseDialog = ref(false)
+const rawCaseJson = ref('')
+const rawCaseTitle = ref('')
+const dsRawBusy = ref(false)
+const dsRawError = ref('')
+const rawExport = ref<RawExportSummary | null>(null)
+
+const runDetailOpen = ref(false)
+const runDetailId = ref('')
+const runDetail = ref<EvaluationRunDetail | null>(null)
+const runDetailBusy = ref(false)
+const runDetailError = ref('')
+const runCaseRows = ref<EvaluationCase[]>([])
+const runCaseCursors = ref<string[]>([''])
+const runCaseNext = ref<string | null>(null)
+const runCaseBusy = ref(false)
+const runCaseError = ref('')
+const caseJsonDialog = ref(false)
+const caseJsonText = ref('')
+const caseJsonCaseId = ref('')
+const caseJsonTrace = ref<{ task_id: string; trace_id: string } | null>(null)
+
 const activeJob = ref<EvaluationJob | null>(null)
 const jobError = ref('')
 const jobBusy = ref(false)
-const auditDrawer = ref(false)
-const auditAction = ref<EvaluationAuditAction | ''>('')
-const auditLogs = ref<EvaluationAuditLog[]>([])
-const auditCursors = ref<string[]>([''])
-const auditNext = ref<string | null>(null)
-const auditBusy = ref(false)
-const auditError = ref('')
+
 const profileDialog = ref(false)
 const triggerDialog = ref(false)
 const baselineDialog = ref(false)
@@ -1071,39 +1222,159 @@ const triggerForm = reactive({
   note: '',
   mark_baseline: false,
 })
+
+let trendRequest = 0
+let datasetRequest = 0
+let baselineRequest = 0
+let profileRequest = 0
+let runDetailRequest = 0
+let runCaseRequest = 0
 let jobTimer: number | null = null
 let polledJobId = ''
 
-const endpoint = computed(() => {
-  const query = new URLSearchParams({ limit: '25', eval_kind: evalKind.value })
-  if (props.isAdmin) query.set('owner_id', owner.value)
-  if (mode.value) query.set('mode', mode.value)
-  if (gate.value) query.set('gate_passed', gate.value)
-  if (selectedDatasetId.value) query.set('dataset_id', selectedDatasetId.value)
-  if (selectedProfileId.value) query.set('profile_id', selectedProfileId.value)
+const kindDatasets = computed(() =>
+  datasets.value.filter((item) => item.eval_kind === evalKind.value),
+)
+const activeDatasets = computed(() => kindDatasets.value.filter((item) => !item.archived))
+const visibleDatasets = computed(() =>
+  showArchived.value ? kindDatasets.value : activeDatasets.value,
+)
+const datasetVersions = computed(() => {
+  const versions = new Set(activeDatasets.value.map((item) => item.version))
+  return [...versions].sort((a, b) => b.localeCompare(a))
+})
+const selectedVersionDatasets = computed(() =>
+  activeDatasets.value.filter((item) => item.version === datasetVersion.value),
+)
+const primaryDataset = computed(
+  () => selectedVersionDatasets.value[0] ?? activeDatasets.value[0] ?? null,
+)
+const allowedModes = computed<EvaluationMode[]>(() => {
+  const modes = datasetModeList(primaryDataset.value)
+  return modes.length ? modes : ['live']
+})
+const scopeOptions = computed<{ value: EvaluationScope; label: string }[]>(() => {
+  const kind = catalog.value?.kinds[evalKind.value]
+  if (kind) {
+    return Object.entries(kind.scopes).map(([value, item]) => ({
+      value: value as EvaluationScope,
+      label: item.label,
+    }))
+  }
+  const fallback: EvaluationScope[] =
+    evalKind.value === 'rag' ? ['full', 'quick', 'adversarial', 'retrieval', 'behavior'] : ['full']
+  return fallback.map((value) => ({ value, label: evaluationScopes[value] }))
+})
+const schema = computed<EvaluationMetricSchema | null>(() => {
+  const fromCatalog = catalog.value?.kinds[evalKind.value]?.scopes[scope.value]
+  if (fromCatalog) return fromCatalog
+  const fromTrends = trends.value?.metric_schema
+  if (fromTrends && fromTrends.eval_kind === evalKind.value && fromTrends.scope === scope.value) {
+    return fromTrends
+  }
+  return null
+})
+const metrics = computed<EvaluationMetricSpec[]>(() => schema.value?.metrics ?? [])
+const schemaSummaryText = computed(() => {
+  if (!schema.value) return '指标目录尚未加载，暂无可渲染的指标口径'
+  return `指标口径 ${schema.value.label} · schema v${schema.value.version} · 共 ${schema.value.metrics.length} 项指标`
+})
+
+const trendItems = computed(() => trends.value?.items ?? [])
+const latestTrend = computed(() => trendItems.value.at(-1) ?? null)
+const baselineTrend = computed(() => {
+  const summary = trends.value?.baseline
+  if (!summary) return null
+  return (
+    trendItems.value.find((item) => item.run_id === summary.run_id) ??
+    trendItems.value.find((item) => item.is_baseline) ??
+    null
+  )
+})
+const baselineComparable = computed(
+  () =>
+    Boolean(latestTrend.value) &&
+    Boolean(baselineTrend.value) &&
+    latestTrend.value!.comparable &&
+    latestTrend.value!.run_id !== baselineTrend.value!.run_id,
+)
+const baselineHint = computed(() => {
+  if (!trends.value) return ''
+  if (!trends.value.baseline)
+    return '当前数据集版本与口径没有 active 基线，概览仅展示最新批次数值。'
+  if (!baselineTrend.value) return 'active 基线批次不在最近批次列表内，无法按指标逐项对比。'
+  if (!latestTrend.value) return '当前口径还没有批次数据。'
+  if (!latestTrend.value.comparable) return '最新批次被标记为不可比，不给出环比结论。'
+  if (latestTrend.value.run_id === baselineTrend.value.run_id) {
+    return '最新批次就是当前 active 基线，环比值为 0。'
+  }
+  return `与 active 基线 ${baselineTrend.value.run_id} 对比（${baselineTrend.value.algorithm_version || '未绑定算法版本'}）。`
+})
+const metricCards = computed<MetricCard[]>(() =>
+  metrics.value.map((spec) => {
+    const latest = latestTrend.value?.summary?.[spec.key] ?? null
+    const baseline = baselineTrend.value?.summary?.[spec.key] ?? null
+    const delta =
+      baselineComparable.value && latest !== null && baseline !== null ? latest - baseline : null
+    return { spec, latest, baseline, delta }
+  }),
+)
+const aggregateMetric = computed<EvaluationMetricSpec | null>(
+  () => metrics.value.find((item) => item.unit === 'ratio' || item.unit === 'percent') ?? null,
+)
+const aggregateStats = computed(() => {
+  const spec = aggregateMetric.value
+  const values = trendItems.value
+    .map((item) => (spec ? (item.summary?.[spec.key] ?? null) : null))
+    .filter((value): value is number => value !== null)
+  return {
+    batches: trends.value?.aggregate.batches ?? trendItems.value.length,
+    latest: values.length ? values[values.length - 1] : null,
+    average: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null,
+    best: values.length ? Math.max(...values) : null,
+    label: spec?.label ?? '通过率',
+  }
+})
+const baselineMetricLabel = computed(() => aggregateMetric.value?.label ?? '通过率')
+
+const runEndpoint = computed(() => {
+  const query = new URLSearchParams({
+    limit: String(RUN_PAGE_SIZE),
+    eval_kind: evalKind.value,
+    scope: scope.value,
+    mode: mode.value,
+  })
+  if (props.isAdmin && owner.value) query.set('owner_id', owner.value)
+  if (runDatasetId.value) query.set('dataset_id', runDatasetId.value)
   return '/evaluations/runs?' + query
 })
-const { rows, busy, error, page, nextCursor, refresh, reset, turn } = useCursorPage<EvaluationRun>(
-  props.api,
-  endpoint,
-)
+const {
+  rows: runs,
+  nextCursor: runsNext,
+  busy: runsBusy,
+  error: runsError,
+  page: runsPageNo,
+  refresh: refreshRuns,
+  reset: resetRuns,
+  turn: turnRuns,
+} = useCursorPage<EvaluationRun>(props.api, runEndpoint)
 
-const datasetVersions = computed(() => {
-  const versions = new Set(datasets.value.map((item) => item.version))
-  return [...versions]
-})
-const datasetKind = computed(() => inspectedDataset.value?.eval_kind ?? 'agent')
-const datasetCasePage = computed(() => datasetCaseCursors.value.length)
-const activeBaselines = computed(() => baselines.value.filter((item) => item.active))
-const historyBaselines = computed(() => baselines.value.filter((item) => !item.active))
-const triggerDatasets = computed(() => datasets.value.filter((item) => !item.archived))
-const selectedTriggerDataset = computed(
+const triggerDatasets = computed(() => activeDatasets.value)
+const triggerSelectedDataset = computed(
   () => triggerDatasets.value.find((item) => item.dataset_id === triggerForm.dataset_id) ?? null,
 )
-const triggerScopeOptions = computed(() => datasetScopes(selectedTriggerDataset.value))
-const triggerModeOptions = computed(() => datasetModes(selectedTriggerDataset.value))
+const triggerScopeOptions = computed<EvaluationScope[]>(() => {
+  const registered = datasetScopeList(triggerSelectedDataset.value)
+  const known = new Set(scopeOptions.value.map((item) => item.value))
+  const filtered = registered.filter((item) => known.has(item))
+  return filtered.length ? filtered : scopeOptions.value.map((item) => item.value)
+})
+const triggerModeOptions = computed<EvaluationMode[]>(() => {
+  const registered = datasetModeList(triggerSelectedDataset.value)
+  return registered.length ? registered : allowedModes.value
+})
 const triggerScopeLabels = computed(
-  () => triggerScopeOptions.value.map((scope) => evaluationScopes[scope]).join('、') || '未登记',
+  () => triggerScopeOptions.value.map((item) => evaluationScopes[item]).join('、') || '未登记',
 )
 const triggerModeLabels = computed(
   () => triggerModeOptions.value.map((item) => evaluationModes[item]).join('、') || '未登记',
@@ -1121,180 +1392,474 @@ const jobRunId = computed(() => {
   const result = activeJob.value?.result
   return result && typeof result.run_id === 'string' ? result.run_id : ''
 })
-const auditPage = computed(() => auditCursors.value.length)
-const profileSnapshotJson = computed(() => {
-  const profile = inspectedProfile.value
-  if (!profile) return ''
-  return JSON.stringify(
-    {
-      version_no: profile.version_no,
-      version_tag: profile.version_tag,
-      digest: profile.digest,
-      git_sha: profile.git_sha,
-      dataset_version: profile.dataset_version,
-      tech_stack: profile.tech_stack,
-      retrieval_params: profile.retrieval_params,
-      prompt_snapshots: profile.prompt_snapshots,
-      prompt_sha256: profile.prompt_sha256,
-    },
-    null,
-    2,
-  )
-})
-const retrievalLayer = computed(() => currentLayer('retrieval'))
-const adversarialLayer = computed(() => currentLayer('adversarial'))
-const behaviorLayer = computed(() => currentLayer('behavior'))
-const engineeringLayer = computed(() => currentLayer('six_metrics'))
-const layersPresent = computed(
-  () =>
-    Boolean(retrievalLayer.value) ||
-    Boolean(adversarialLayer.value) ||
-    Boolean(behaviorLayer.value) ||
-    Boolean(engineeringLayer.value),
+const datasetFileList = computed<DatasetFileEntry[]>(() =>
+  datasetFileEntries(inspectedDataset.value),
 )
-const retrievalMetrics = [
-  { label: 'Hit@1', path: ['hit@1'], kind: 'percent' },
-  { label: 'Hit@3', path: ['hit@3'], kind: 'percent' },
-  { label: 'Hit@8', path: ['hit@8'], kind: 'percent' },
-  { label: 'NDCG@1', path: ['ndcg@1'], kind: 'percent' },
-  { label: 'NDCG@3', path: ['ndcg@3'], kind: 'percent' },
-  { label: 'NDCG@8', path: ['ndcg@8'], kind: 'percent' },
-  { label: 'MRR', path: ['mrr'], kind: 'ratio' },
-  { label: '样本数 n', path: ['n'], kind: 'number' },
-] as const
-const adversarialMetrics = [
-  { label: '通过率', path: ['pass_rate'], kind: 'percent' },
-  { label: '金丝雀泄漏', path: ['canary_leaks'], kind: 'number' },
-  { label: '被拒请求', path: ['rejected'], kind: 'number' },
-  { label: '样本数 n', path: ['n'], kind: 'number' },
-] as const
-const behaviorMetrics = [
-  { label: '通过率', path: ['pass_rate'], kind: 'percent' },
-  { label: '通过 / 总数', path: ['total'], kind: 'text' },
-  { label: '任务失败率', path: ['task_failure_rate'], kind: 'percent' },
-  { label: '超时率', path: ['timeout_rate'], kind: 'percent' },
-] as const
-const engineeringMetrics = [
-  { label: '端到端 P50', path: ['latency_e2e_s', 'p50'], kind: 'seconds' },
-  { label: '端到端 P95', path: ['latency_e2e_s', 'p95'], kind: 'seconds' },
-  { label: 'Token 总量', path: ['token_cost', 'total_tokens'], kind: 'number' },
-  { label: 'Token 成本（USD）', path: ['token_cost', 'cost_usd'], kind: 'cost' },
-  { label: '单例 Token', path: ['token_cost', 'tokens_per_case'], kind: 'number' },
-  { label: '任务失败率', path: ['reliability', 'task_failure_rate'], kind: 'percent' },
-  { label: '超时率', path: ['reliability', 'timeout_rate'], kind: 'percent' },
-  { label: 'JSON 重试率', path: ['reliability', 'json_retry_rate'], kind: 'percent' },
-  { label: '模型切换率', path: ['reliability', 'failover_rate'], kind: 'percent' },
-] as const
-const behaviorDimensionRows = computed(() => {
-  const dimensions = readLayerValue(behaviorLayer.value, ['by_dimension'])
-  if (!dimensions || typeof dimensions !== 'object' || Array.isArray(dimensions)) return []
-  const rows: { dimension: string; buckets: string }[] = []
-  for (const [dimension, buckets] of Object.entries(dimensions as Record<string, unknown>)) {
-    if (!buckets || typeof buckets !== 'object' || Array.isArray(buckets)) continue
-    const parts = Object.entries(buckets as Record<string, unknown>)
-      .slice(0, 6)
-      .map(([bucket, stat]) => {
-        const rate = readLayerValue(stat, ['pass_rate'])
-        const count = readLayerValue(stat, ['n'])
-        return `${bucket} ${formatLayerValue(rate, 'percent')}（n=${formatLayerValue(count, 'number')}）`
-      })
-    rows.push({ dimension, buckets: parts.join(' · ') || '—' })
+const datasetCaseColumns = computed<DatasetCaseColumn[]>(() => {
+  if (inspectedDataset.value?.eval_kind === 'rag') {
+    return [
+      { key: 'case_id', label: '用例 ID', keys: ['case_id', 'id'], preview: false, width: 150 },
+      { key: 'category', label: '分类', keys: ['category'], preview: false, width: 110 },
+      {
+        key: 'question',
+        label: '问题',
+        keys: ['question', 'query', 'prompt'],
+        preview: true,
+        width: 260,
+      },
+      {
+        key: 'expected_documents',
+        label: '预期文档 / 依据',
+        keys: ['expected_documents', 'expected', 'reference_answer', 'expected_facts'],
+        preview: true,
+        width: 300,
+      },
+    ]
   }
-  return rows
+  return [
+    { key: 'id', label: '用例 ID', keys: ['id', 'case_id'], preview: false, width: 150 },
+    { key: 'name', label: '名称', keys: ['name', 'title'], preview: false, width: 140 },
+    { key: 'category', label: '分类', keys: ['category'], preview: false, width: 110 },
+    {
+      key: 'prompt',
+      label: 'Prompt / 输入',
+      keys: ['prompt', 'input', 'question'],
+      preview: true,
+      width: 320,
+    },
+    {
+      key: 'required_tools',
+      label: '必调工具',
+      keys: ['required_tools', 'expected_tools', 'expected'],
+      preview: true,
+      width: 200,
+    },
+  ]
 })
+const runDetailSchema = computed<EvaluationMetricSchema | null>(
+  () => runDetail.value?.metric_schema ?? schema.value,
+)
+const runMetricCards = computed<RunMetricCard[]>(() =>
+  (runDetailSchema.value?.metrics ?? []).map((spec) => ({
+    spec,
+    value: runDetail.value?.run.summary?.[spec.key] ?? null,
+  })),
+)
 
 /**
- * 展示审计动作的中文名称。
- *
- * @param action 审计动作编码
- * @returns 中文动作名称或原始编码
+ * 读取指标目录；目录是页面所有指标列与卡片的唯一来源。
  */
-function auditActionLabel(action: string): string {
-  return evaluationAuditActions[action as EvaluationAuditAction] ?? action
-}
-
-/**
- * 将技术栈 JSON 摘要为单行文本。
- *
- * @param stack 技术栈配置对象
- * @returns 摘要字符串
- */
-function formatTechStack(stack: Record<string, unknown>): string {
-  const entries = Object.entries(stack)
-  if (!entries.length) return '-'
-  return entries.map(([key, value]) => `${key}=${summarizeStackValue(value)}`).join(' · ')
-}
-
-/**
- * 把算法快照中的嵌套对象与数组压缩成可读摘要。
- *
- * @param value 快照字段值
- * @returns 单行摘要文本
- */
-function summarizeStackValue(value: unknown): string {
-  if (Array.isArray(value)) return `${value.length} 项`
-  if (value && typeof value === 'object') {
-    const keys = Object.keys(value as Record<string, unknown>)
-    return keys.length ? `{${keys.join('、')}}` : '{}'
+async function loadCatalog(): Promise<void> {
+  catalogError.value = ''
+  try {
+    catalog.value = await props.api<EvaluationMetricCatalog>('/evaluations/metrics/catalog')
+    ensureSelections()
+  } catch (cause) {
+    catalogError.value = cause instanceof Error ? cause.message : '读取指标目录失败'
   }
-  return String(value)
+}
+
+/**
+ * 读取当前评测体系下可见的数据集版本（含归档，由开关控制展示）。
+ */
+async function loadDatasets(): Promise<void> {
+  const request = ++datasetRequest
+  datasetsBusy.value = true
+  datasetsError.value = ''
+  try {
+    const query = new URLSearchParams({
+      eval_kind: evalKind.value,
+      include_archived: 'true',
+    })
+    const page = await props.api<Items<EvaluationDataset>>('/evaluations/datasets?' + query)
+    if (request !== datasetRequest) return
+    datasets.value = page.items
+    ensureSelections()
+  } catch (cause) {
+    if (request === datasetRequest) {
+      datasetsError.value = cause instanceof Error ? cause.message : '读取数据集失败'
+    }
+  } finally {
+    if (request === datasetRequest) datasetsBusy.value = false
+  }
+}
+
+/**
+ * 读取当前 kind + 数据集版本 + 口径 + 执行方式的指标趋势与 active 基线摘要。
+ */
+async function loadTrends(): Promise<void> {
+  const request = ++trendRequest
+  trendsBusy.value = true
+  trendsError.value = ''
+  try {
+    const query = new URLSearchParams({
+      eval_kind: evalKind.value,
+      scope: scope.value,
+      mode: mode.value,
+      limit: String(TREND_LIMIT),
+    })
+    if (datasetVersion.value) query.set('dataset_version', datasetVersion.value)
+    const response = await props.api<EvaluationTrends>('/evaluations/metrics/trends?' + query)
+    if (request !== trendRequest) return
+    trends.value = response
+  } catch (cause) {
+    if (request === trendRequest) {
+      trendsError.value = cause instanceof Error ? cause.message : '读取指标趋势失败'
+    }
+  } finally {
+    if (request === trendRequest) trendsBusy.value = false
+  }
+}
+
+/**
+ * 读取算法版本列表，供发起评测与任务页选择。
+ */
+async function loadProfiles(): Promise<void> {
+  const request = ++profileRequest
+  profilesError.value = ''
+  try {
+    const query = new URLSearchParams({ eval_kind: evalKind.value })
+    if (datasetVersion.value) query.set('dataset_version', datasetVersion.value)
+    const page = await props.api<Items<EvaluationProfile>>('/evaluations/profiles?' + query)
+    if (request !== profileRequest) return
+    profiles.value = page.items
+  } catch (cause) {
+    if (request === profileRequest) {
+      profilesError.value = cause instanceof Error ? cause.message : '读取算法版本失败'
+    }
+  }
+}
+
+/**
+ * 读取当前评测体系与数据集版本下的基线（active 与历史）。
+ */
+async function loadBaselines(): Promise<void> {
+  const request = ++baselineRequest
+  baselinesBusy.value = true
+  baselinesError.value = ''
+  try {
+    const query = new URLSearchParams({
+      eval_kind: evalKind.value,
+      include_history: String(!baselineActiveOnly.value),
+    })
+    if (datasetVersion.value) query.set('dataset_version', datasetVersion.value)
+    const page = await props.api<Items<EvaluationBaseline>>('/evaluations/baselines?' + query)
+    if (request !== baselineRequest) return
+    baselines.value = page.items
+  } catch (cause) {
+    if (request === baselineRequest) {
+      baselinesError.value = cause instanceof Error ? cause.message : '读取基线失败'
+    }
+  } finally {
+    if (request === baselineRequest) baselinesBusy.value = false
+  }
+}
+
+/**
+ * 读取一页评测审计留痕；仅写入权限账号可读取。
+ */
+async function loadAuditLogs(): Promise<void> {
+  if (!props.canWriteEval) return
+  auditBusy.value = true
+  auditError.value = ''
+  try {
+    const query = new URLSearchParams({ limit: String(AUDIT_PAGE_SIZE) })
+    if (auditAction.value) query.set('action', auditAction.value)
+    const cursor = auditCursors.value.at(-1)
+    if (cursor) query.set('cursor', cursor)
+    const page = await props.api<CursorPage<EvaluationAuditLog>>('/evaluations/audit-logs?' + query)
+    auditLogs.value = page.items
+    auditNext.value = page.next_cursor
+  } catch (cause) {
+    auditError.value = cause instanceof Error ? cause.message : '读取审计留痕失败'
+  } finally {
+    auditBusy.value = false
+  }
+}
+
+/**
+ * 切换审计动作筛选并回到第一页。
+ */
+function resetAudit(): void {
+  auditCursors.value = ['']
+  auditNext.value = null
+  void loadAuditLogs()
+}
+
+/**
+ * 按游标前后翻动审计留痕页。
+ * @param forward - 是否读取下一页。
+ */
+function turnAudit(forward: boolean): void {
+  if (auditBusy.value) return
+  if (forward && auditNext.value) auditCursors.value.push(auditNext.value)
+  else if (!forward && auditCursors.value.length > 1) auditCursors.value.pop()
+  else return
+  void loadAuditLogs()
 }
 
 /**
  * 读取数据集登记的执行方式清单。
- *
- * @param dataset 数据集条目
- * @returns 可用执行方式；未登记时回退到全部方式
+ * @param dataset - 数据集条目。
+ * @returns 已登记的执行方式；未登记时返回空数组。
  */
-function datasetModes(dataset: EvaluationDataset | null): EvaluationMode[] {
+function datasetModeList(dataset: EvaluationDataset | null): EvaluationMode[] {
   const value = dataset?.metadata?.modes
-  if (Array.isArray(value)) {
-    const modes = value.filter(
-      (item): item is EvaluationMode => item === 'live' || item === 'synthetic_trace_regrade',
-    )
-    if (modes.length) return modes
-  }
-  return ['live', 'synthetic_trace_regrade']
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (item): item is EvaluationMode => item === 'live' || item === 'synthetic_trace_regrade',
+  )
 }
 
 /**
  * 读取数据集登记的评测口径清单。
- *
- * @param dataset 数据集条目
- * @returns 可用口径；未登记时回退到全部口径
+ * @param dataset - 数据集条目。
+ * @returns 已登记的口径；未登记时返回空数组。
  */
-function datasetScopes(dataset: EvaluationDataset | null): EvaluationScope[] {
+function datasetScopeList(dataset: EvaluationDataset | null): EvaluationScope[] {
   const value = dataset?.metadata?.scopes
-  if (Array.isArray(value)) {
-    const scopes = value.filter(
-      (item): item is EvaluationScope =>
-        item === 'full' ||
-        item === 'quick' ||
-        item === 'retrieval' ||
-        item === 'adversarial' ||
-        item === 'behavior',
-    )
-    if (scopes.length) return scopes
-  }
-  return ['full', 'quick', 'retrieval', 'adversarial', 'behavior']
-}
-
-interface BaselineRowScope {
-  row: EvaluationBaseline
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (item): item is EvaluationScope =>
+      item === 'full' ||
+      item === 'quick' ||
+      item === 'retrieval' ||
+      item === 'adversarial' ||
+      item === 'behavior',
+  )
 }
 
 /**
- * 为活跃基线行附加高亮样式。
- *
- * @param scope Element Plus 表格行上下文
- * @returns 行样式类名
+ * 按指标目录与数据集登记能力校正版本、口径与执行方式的当前选择。
  */
-function baselineRowClass(scope: BaselineRowScope): string {
-  return scope.row.active ? 'evaluation-baseline-active' : ''
+function ensureSelections(): void {
+  const versions = datasetVersions.value
+  if (!datasetVersion.value || !versions.includes(datasetVersion.value)) {
+    datasetVersion.value = versions[0] ?? ''
+  }
+  const scopeValues = scopeOptions.value.map((item) => item.value)
+  if (!scopeValues.includes(scope.value)) {
+    scope.value = scopeValues.includes('full') ? 'full' : (scopeValues[0] ?? 'full')
+  }
+  const modes = allowedModes.value
+  if (!modes.includes(mode.value)) {
+    mode.value = modes.includes('live') ? 'live' : (modes[0] ?? 'live')
+  }
 }
 
 /**
- * 按游标读取数据集用例页。
+ * 切换评测体系后重置数据并重新装载该体系的数据集、口径与趋势。
+ */
+async function handleKindChange(): Promise<void> {
+  trends.value = null
+  baselines.value = []
+  profiles.value = []
+  auditLogs.value = []
+  auditCursors.value = ['']
+  auditNext.value = null
+  runDatasetId.value = ''
+  datasetVersion.value = ''
+  showArchived.value = false
+  scope.value = 'full'
+  mode.value = 'live'
+  await loadDatasets()
+  ensureSelections()
+  await loadTrends()
+  if (activeTab.value === 'datasets') await loadDatasets()
+  else if (activeTab.value === 'baselines') await loadBaselines()
+  else if (activeTab.value === 'tasks') await loadProfiles()
+  else if (activeTab.value === 'audit') await loadAuditLogs()
+  else if (activeTab.value === 'runs') await refreshRuns()
+}
+
+/**
+ * 按当前页签装载其专属数据，保持各页签互不阻塞。
+ * @param tab - 当前激活的页签名称。
+ */
+async function ensureTabData(tab: string): Promise<void> {
+  if (tab === 'datasets') await loadDatasets()
+  else if (tab === 'baselines') await loadBaselines()
+  else if (tab === 'tasks') await loadProfiles()
+  else if (tab === 'audit') await loadAuditLogs()
+  else if (tab === 'runs') await refreshRuns()
+  else if (tab === 'overview') await loadTrends()
+}
+
+/**
+ * 同时刷新当前页签数据与控制区所需的数据集与趋势。
+ */
+async function refreshAll(): Promise<void> {
+  refreshing.value = true
+  try {
+    await Promise.all([
+      loadDatasets(),
+      loadTrends(),
+      refreshRuns(),
+      loadBaselines(),
+      loadProfiles(),
+    ])
+    if (activeTab.value === 'audit' && props.canWriteEval) await loadAuditLogs()
+  } finally {
+    refreshing.value = false
+  }
+}
+
+/**
+ * 按单位格式化聚合卡片数值，缺少比例指标时回退为百分比。
+ * @param value - 聚合统计值。
+ * @returns 可读文本或缺失占位。
+ */
+function formatAggregateValue(value: number | null): string {
+  const spec = aggregateMetric.value
+  if (spec) return formatMetricValue(spec, value)
+  return value === null ? '—' : (value * 100).toFixed(1) + '%'
+}
+
+/**
+ * 把数据集 metadata.files 归一为路径与 sha256 列表。
+ * @param dataset - 数据集条目。
+ * @returns 文件清单。
+ */
+function datasetFileEntries(dataset: EvaluationDataset | null): DatasetFileEntry[] {
+  const files = dataset?.metadata?.files
+  if (!files || typeof files !== 'object' || Array.isArray(files)) return []
+  const entries: DatasetFileEntry[] = []
+  for (const [path, sha] of Object.entries(files as Record<string, unknown>)) {
+    if (typeof sha === 'string') entries.push({ path, sha256: sha })
+  }
+  return entries.sort((a, b) => a.path.localeCompare(b.path))
+}
+
+/**
+ * 截取 sha256 摘要前 12 位用于表格展示，完整值放在 title 提示中。
+ * @param value - 摘要文本。
+ * @returns 前 12 位摘要或缺失占位。
+ */
+function shortSha(value: string | null | undefined): string {
+  return value ? value.slice(0, 12) : '—'
+}
+
+/**
+ * 构造数据集原始文件下载地址（二进制附件，不经过 JSON API 客户端）。
+ * @param datasetId - 数据集编号。
+ * @param path - 仓库相对路径。
+ * @returns 同源下载地址。
+ */
+function datasetFileUrl(datasetId: string, path: string): string {
+  return (
+    '/api/evaluations/datasets/' +
+    encodeURIComponent(datasetId) +
+    '/files?path=' +
+    encodeURIComponent(path)
+  )
+}
+
+/**
+ * 在新窗口打开数据集原始文件（服务端以附件响应，浏览器按文件类型处理）。
+ * @param path - 仓库相对路径。
+ */
+function viewDatasetFile(path: string): void {
+  const dataset = inspectedDataset.value
+  if (!dataset) return
+  window.open(datasetFileUrl(dataset.dataset_id, path), '_blank', 'noopener')
+}
+
+/**
+ * 以 Blob 方式下载数据集原始文件，失败时给出可见提示。
+ * @param path - 仓库相对路径。
+ */
+async function downloadDatasetFile(path: string): Promise<void> {
+  const dataset = inspectedDataset.value
+  if (!dataset) return
+  try {
+    const response = await fetch(datasetFileUrl(dataset.dataset_id, path))
+    if (!response.ok) throw new Error('读取数据集文件失败：文件未登记或内容摘要不一致')
+    saveBlob(await response.blob(), path.split('/').at(-1) || 'dataset-file')
+  } catch (cause) {
+    ElMessage.error(cause instanceof Error ? cause.message : '下载数据集文件失败')
+  }
+}
+
+/**
+ * 导出数据集全部原始用例与文件摘要为 JSON 文件，并展示其 SHA-256 便于核对。
+ */
+async function downloadDatasetRaw(): Promise<void> {
+  const dataset = inspectedDataset.value
+  if (!dataset) return
+  dsRawBusy.value = true
+  dsRawError.value = ''
+  try {
+    const raw = await props.api<EvaluationDatasetRaw>(
+      '/evaluations/datasets/' + encodeURIComponent(dataset.dataset_id) + '/raw',
+    )
+    const payload = JSON.stringify(raw, null, 2)
+    const blob = new Blob([payload], { type: 'application/json' })
+    const bytes = new TextEncoder().encode(payload)
+    rawExport.value = {
+      sha256: await sha256Hex(bytes),
+      bytes: bytes.byteLength,
+      cases: raw.cases.length,
+      files: Object.keys(raw.files).length,
+    }
+    saveBlob(blob, dataset.dataset_id + '-raw.json')
+  } catch (cause) {
+    dsRawError.value = cause instanceof Error ? cause.message : '导出原始用例失败'
+  } finally {
+    dsRawBusy.value = false
+  }
+}
+
+/**
+ * 计算字节的 SHA-256 十六进制摘要。
+ * @param payload - 待计算字节。
+ * @returns 十六进制摘要；运行环境不支持时返回空串。
+ */
+async function sha256Hex(payload: Uint8Array): Promise<string> {
+  const cryptoApi = globalThis.crypto
+  if (!cryptoApi?.subtle) return ''
+  const buffer = new ArrayBuffer(payload.byteLength)
+  new Uint8Array(buffer).set(payload)
+  const digest = await cryptoApi.subtle.digest('SHA-256', buffer)
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+/**
+ * 通过临时 <a> 元素触发浏览器下载并释放对象 URL。
+ * @param blob - 文件内容。
+ * @param filename - 保存文件名。
+ */
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.append(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * 查看数据集版本的文件清单、原始用例与逐步分页内容。
+ * @param dataset - 数据集条目。
+ */
+async function inspectDataset(dataset: EvaluationDataset): Promise<void> {
+  inspectedDataset.value = dataset
+  datasetCases.value = []
+  datasetCaseCursors.value = ['']
+  datasetCaseNext.value = null
+  datasetCaseTotal.value = 0
+  datasetCaseError.value = ''
+  rawExport.value = null
+  dsRawError.value = ''
+  datasetDrawer.value = true
+  await loadDatasetCases()
+}
+
+/**
+ * 按游标读取数据集原始用例页。
  */
 async function loadDatasetCases(): Promise<void> {
   const dataset = inspectedDataset.value
@@ -1306,7 +1871,7 @@ async function loadDatasetCases(): Promise<void> {
     const cursor = datasetCaseCursors.value.at(-1)
     if (cursor) query.set('cursor', cursor)
     const detail = await props.api<EvaluationDatasetDetail>(
-      `/evaluations/datasets/${dataset.dataset_id}?${query}`,
+      '/evaluations/datasets/' + encodeURIComponent(dataset.dataset_id) + '?' + query,
     )
     datasetCases.value = detail.cases
     datasetCaseNext.value = detail.next_cursor
@@ -1319,24 +1884,8 @@ async function loadDatasetCases(): Promise<void> {
 }
 
 /**
- * 查看指定数据集的版本元信息与用例内容。
- *
- * @param dataset 数据集条目
- */
-async function inspectDataset(dataset: EvaluationDataset): Promise<void> {
-  inspectedDataset.value = dataset
-  datasetCases.value = []
-  datasetCaseCursors.value = ['']
-  datasetCaseNext.value = null
-  datasetCaseTotal.value = 0
-  datasetDrawer.value = true
-  await loadDatasetCases()
-}
-
-/**
  * 按游标前后翻动数据集用例页。
- *
- * @param forward 是否读取下一页
+ * @param forward - 是否读取下一页。
  */
 function turnDatasetCase(forward: boolean): void {
   if (datasetCaseBusy.value) return
@@ -1348,10 +1897,9 @@ function turnDatasetCase(forward: boolean): void {
 
 /**
  * 从用例对象读取首个可用字段并压缩为单行文本。
- *
- * @param item 数据集中登记的用例对象
- * @param keys 候选字段名
- * @returns 可读文本或缺失占位
+ * @param item - 数据集中登记的用例对象。
+ * @param keys - 候选字段名。
+ * @returns 可读文本或缺失占位。
  */
 function datasetCaseText(item: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
@@ -1371,10 +1919,9 @@ function datasetCaseText(item: Record<string, unknown>, keys: string[]): string 
 
 /**
  * 从用例对象读取文本并截断为单行摘要。
- *
- * @param item 数据集中登记的用例对象
- * @param keys 候选字段名
- * @returns 截断后的摘要文本
+ * @param item - 数据集中登记的用例对象。
+ * @param keys - 候选字段名。
+ * @returns 截断后的摘要文本。
  */
 function datasetCasePreview(item: Record<string, unknown>, keys: string[]): string {
   const text = datasetCaseText(item, keys)
@@ -1382,215 +1929,193 @@ function datasetCasePreview(item: Record<string, unknown>, keys: string[]): stri
 }
 
 /**
- * 读取当前评测类型下的数据集列表。
+ * 打开当前用例的完整原始 JSON（不裁剪、不改名）。
+ * @param item - 数据集中登记的原始用例对象。
  */
-async function loadDatasets(): Promise<void> {
-  datasetError.value = ''
-  try {
-    const query = new URLSearchParams({
-      eval_kind: evalKind.value,
-      include_archived: String(showArchived.value),
-    })
-    datasets.value = (
-      await props.api<Items<EvaluationDataset>>(`/evaluations/datasets?${query}`)
-    ).items
-  } catch (cause) {
-    datasetError.value = cause instanceof Error ? cause.message : '读取数据集失败'
-  }
+function openRawCase(item: Record<string, unknown>): void {
+  rawCaseJson.value = JSON.stringify(item, null, 2)
+  rawCaseTitle.value = datasetCaseText(item, ['id', 'case_id'])
+  rawCaseDialog.value = true
 }
 
 /**
- * 读取当前评测类型下的算法版本列表。
+ * 从数据集页跳转到批次页并按该数据集筛选。
+ * @param dataset - 数据集条目。
  */
-async function loadProfiles(): Promise<void> {
-  profileError.value = ''
-  try {
-    const query = new URLSearchParams({ eval_kind: evalKind.value })
-    if (datasetVersion.value) query.set('dataset_version', datasetVersion.value)
-    profiles.value = (
-      await props.api<Items<EvaluationProfile>>(`/evaluations/profiles?${query}`)
-    ).items
-  } catch (cause) {
-    profileError.value = cause instanceof Error ? cause.message : '读取配置版本失败'
-  }
+function filterRunsByDataset(dataset: EvaluationDataset): void {
+  runDatasetId.value = dataset.dataset_id
+  activeTab.value = 'runs'
 }
 
 /**
- * 读取当前评测类型下的基线（含历史）。
+ * 打开批次详情抽屉并装载指标 schema、逐例结果。
+ * @param runId - 批次编号。
  */
-async function loadBaselines(): Promise<void> {
-  baselineError.value = ''
-  try {
-    const query = new URLSearchParams({
-      eval_kind: evalKind.value,
-      include_history: String(!baselineActiveOnly.value),
-    })
-    if (datasetVersion.value) query.set('dataset_version', datasetVersion.value)
-    baselines.value = (
-      await props.api<Items<EvaluationBaseline>>(`/evaluations/baselines?${query}`)
-    ).items
-  } catch (cause) {
-    baselineError.value = cause instanceof Error ? cause.message : '读取基线失败'
-  }
+async function openRunDetail(runId: string): Promise<void> {
+  runDetailId.value = runId
+  runDetail.value = null
+  runDetailError.value = ''
+  runDetailOpen.value = true
+  runCaseRows.value = []
+  runCaseCursors.value = ['']
+  runCaseNext.value = null
+  runCaseError.value = ''
+  await Promise.all([loadRunDetail(), loadRunCases()])
 }
 
 /**
- * 读取当前筛选条件下的指标趋势与活跃基线摘要。
+ * 读取批次详情（含 summary 与 metric_schema）。
  */
-async function loadTrends(): Promise<void> {
-  trendError.value = ''
-  try {
-    const query = new URLSearchParams({ eval_kind: evalKind.value, limit: String(TREND_LIMIT) })
-    if (datasetVersion.value) query.set('dataset_version', datasetVersion.value)
-    if (trendScope.value) query.set('scope', trendScope.value)
-    if (trendMode.value) query.set('mode', trendMode.value)
-    trends.value = await props.api<EvaluationTrends>(`/evaluations/metrics/trends?${query}`)
-  } catch (cause) {
-    trendError.value = cause instanceof Error ? cause.message : '读取指标趋势失败'
-  }
-}
-
-/**
- * 切换按数据集过滤下方批次列表。
- *
- * @param datasetId 数据集 ID
- */
-function toggleDatasetFilter(datasetId: string): void {
-  selectedDatasetId.value = selectedDatasetId.value === datasetId ? '' : datasetId
-}
-
-/**
- * 切换按技术栈配置版本过滤下方批次列表。
- *
- * @param profileId 技术栈版本 ID
- */
-function toggleProfileFilter(profileId: string): void {
-  selectedProfileId.value = selectedProfileId.value === profileId ? '' : profileId
-}
-
-/**
- * 读取批次详情并进入批次结果页。
- *
- * @param runId 批次编号
- */
-async function openRunById(runId: string): Promise<void> {
+async function loadRunDetail(): Promise<void> {
+  const request = ++runDetailRequest
+  runDetailBusy.value = true
+  runDetailError.value = ''
   try {
     const detail = await props.api<EvaluationRunDetail>(
-      '/evaluations/runs/' + encodeURIComponent(runId),
+      '/evaluations/runs/' + encodeURIComponent(runDetailId.value),
     )
-    selected.value = detail.run
+    if (request === runDetailRequest) runDetail.value = detail
   } catch (cause) {
-    ElMessage.error(cause instanceof Error ? cause.message : '打开评测批次失败')
-  }
-}
-
-/**
- * 触发原始报告下载；浏览器按服务端 attachment 头保存 JSON 文件。
- *
- * @param row 当前批次
- */
-function downloadReport(row: EvaluationRun): void {
-  if (!row.report_available) return
-  window.open('/api/evaluations/runs/' + encodeURIComponent(row.run_id) + '/report', '_blank')
-}
-
-/**
- * 打开指定批次的分层指标抽屉，并读取 RAG 分层结果。
- *
- * @param row 当前批次
- */
-async function openRunLayers(row: EvaluationRun): Promise<void> {
-  layersTarget.value = row
-  layersData.value = null
-  layersError.value = ''
-  layersBusy.value = true
-  layersDrawer.value = true
-  try {
-    layersData.value = await readRunLayers(row.run_id)
-  } catch (cause) {
-    layersError.value = cause instanceof Error ? cause.message : '读取分层指标失败'
+    if (request === runDetailRequest) {
+      runDetailError.value = cause instanceof Error ? cause.message : '读取批次详情失败'
+    }
   } finally {
-    layersBusy.value = false
+    if (request === runDetailRequest) runDetailBusy.value = false
   }
 }
 
 /**
- * 读取批次分层指标；该接口结构不套用批次运行列表校验，直接按同源 JSON 解析。
- *
- * @param runId 批次编号
- * @returns 分层指标响应
+ * 按游标读取批次逐例判定。
  */
-async function readRunLayers(runId: string): Promise<EvaluationLayers> {
-  return props.api<EvaluationLayers>('/evaluations/runs/' + encodeURIComponent(runId) + '/layers')
-}
-
-/**
- * 读取当前批次指定层的指标对象。
- *
- * @param name 分层名称
- * @returns 分层指标对象；缺失时为 null
- */
-function currentLayer(name: EvaluationLayerName): Record<string, unknown> | null {
-  const layer = layersData.value?.layers?.[name]
-  if (!layer || typeof layer !== 'object' || Array.isArray(layer)) return null
-  return layer
-}
-
-/**
- * 按字段路径读取分层指标中的嵌套值。
- *
- * @param value 分层指标对象
- * @param keys 逐层字段名
- * @returns 命中的值；任一层缺失时返回 null
- */
-function readLayerValue(value: unknown, keys: readonly string[]): unknown {
-  let current: unknown = value
-  for (const key of keys) {
-    if (!current || typeof current !== 'object' || Array.isArray(current)) return null
-    current = (current as Record<string, unknown>)[key]
+async function loadRunCases(): Promise<void> {
+  const request = ++runCaseRequest
+  runCaseBusy.value = true
+  runCaseError.value = ''
+  try {
+    const query = new URLSearchParams({ limit: String(RUN_CASE_PAGE_SIZE) })
+    const cursor = runCaseCursors.value.at(-1)
+    if (cursor) query.set('cursor', cursor)
+    const page = await props.api<CursorPage<EvaluationCase>>(
+      '/evaluations/runs/' + encodeURIComponent(runDetailId.value) + '/cases?' + query,
+    )
+    if (request !== runCaseRequest) return
+    runCaseRows.value = page.items
+    runCaseNext.value = page.next_cursor
+  } catch (cause) {
+    if (request === runCaseRequest) {
+      runCaseError.value = cause instanceof Error ? cause.message : '读取逐例结果失败'
+    }
+  } finally {
+    if (request === runCaseRequest) runCaseBusy.value = false
   }
-  return current ?? null
 }
 
 /**
- * 将分层指标值格式化为可读文本。
- *
- * @param value 分层指标原始值
- * @param kind 展示类型
- * @returns 可读文本或缺失占位
+ * 按游标前后翻动批次逐例结果页。
+ * @param forward - 是否读取下一页。
  */
-function formatLayerValue(
-  value: unknown,
-  kind: 'percent' | 'ratio' | 'number' | 'seconds' | 'cost' | 'text',
-): string {
-  if (value === null || value === undefined) return '—'
-  if (kind === 'text') return typeof value === 'string' ? value : JSON.stringify(value)
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
-  if (kind === 'percent') return (value * 100).toFixed(1) + '%'
-  if (kind === 'ratio') return value.toFixed(3)
-  if (kind === 'seconds') return value.toFixed(2) + 's'
-  if (kind === 'cost') return value.toFixed(4)
-  return Number.isInteger(value) ? String(value) : value.toFixed(2)
+function turnRunCase(forward: boolean): void {
+  if (runCaseBusy.value) return
+  if (forward && runCaseNext.value) runCaseCursors.value.push(runCaseNext.value)
+  else if (!forward && runCaseCursors.value.length > 1) runCaseCursors.value.pop()
+  else return
+  void loadRunCases()
 }
 
 /**
- * 将审计摘要压缩为单行文本。
- *
- * @param value 审计摘要对象
- * @returns 截断后的单行摘要
+ * 打开用例详情并展示 expected / observed / verdicts 的原始 JSON。
+ * @param caseId - 用例编号。
  */
-function summarizeJson(value: Record<string, unknown>): string {
-  const text = JSON.stringify(value)
-  return text.length > 120 ? text.slice(0, 120) + '…' : text
+async function openCaseJson(caseId: string): Promise<void> {
+  if (!runDetail.value) return
+  const runId = runDetail.value.run.run_id
+  try {
+    const detail = await props.api<EvaluationCaseDetail>(
+      '/evaluations/runs/' + encodeURIComponent(runId) + '/cases/' + encodeURIComponent(caseId),
+    )
+    caseJsonCaseId.value = caseId
+    caseJsonText.value = JSON.stringify(
+      { expected: detail.expected, observed: detail.observed, verdicts: detail.verdicts },
+      null,
+      2,
+    )
+    caseJsonTrace.value = detail.trace_link
+    caseJsonDialog.value = true
+  } catch (cause) {
+    ElMessage.error(cause instanceof Error ? cause.message : '读取用例原始判定失败')
+  }
+}
+
+/**
+ * 关闭用例 JSON 弹窗并跳转关联执行轨迹。
+ */
+function inspectCaseTrace(): void {
+  const link = caseJsonTrace.value
+  if (!link) return
+  caseJsonDialog.value = false
+  emit('inspect', link.task_id, link.trace_id)
+}
+
+/**
+ * 下载批次原始报告 JSON；未保存原始报告时给出可见提示。
+ * @param runId - 批次编号。
+ */
+async function downloadRunReport(runId: string): Promise<void> {
+  try {
+    const response = await fetch('/api/evaluations/runs/' + encodeURIComponent(runId) + '/report')
+    if (!response.ok) {
+      throw new Error(response.status === 404 ? '该批次未保存原始报告' : '下载原始报告失败')
+    }
+    saveBlob(await response.blob(), `eval-report-${runId}.json`)
+  } catch (cause) {
+    ElMessage.error(cause instanceof Error ? cause.message : '下载原始报告失败')
+  }
+}
+
+/**
+ * 打开把批次设为基线的弹窗。
+ * @param run - 待设为基线的批次。
+ */
+function openBaselineDialog(run: EvaluationRun): void {
+  baselineRun.value = run
+  baselineNote.value = ''
+  baselineWriteError.value = ''
+  baselineDialog.value = true
+}
+
+/**
+ * 把所选批次设为该数据集版本 + 口径 + 执行方式的活跃基线。
+ */
+async function submitBaseline(): Promise<void> {
+  const run = baselineRun.value
+  if (!run) return
+  if (!baselineNote.value.trim()) {
+    baselineWriteError.value = '请填写基线备注，说明该批次被选为基线的依据'
+    return
+  }
+  writeBusy.value = true
+  baselineWriteError.value = ''
+  try {
+    await props.api<EvaluationBaseline>('/evaluations/baselines', 'POST', {
+      run_id: run.run_id,
+      note: baselineNote.value.trim(),
+    })
+    baselineDialog.value = false
+    ElMessage.success('已把该批次设为当前活跃基线')
+    await Promise.all([loadBaselines(), loadTrends(), refreshRuns()])
+  } catch (cause) {
+    baselineWriteError.value = cause instanceof Error ? cause.message : '设置基线失败'
+  } finally {
+    writeBusy.value = false
+  }
 }
 
 /**
  * 解析配置弹窗中的 JSON 对象文本。
- *
- * @param text 用户输入的 JSON 文本
- * @param label 出错时提示的字段名称
- * @returns 解析后的普通对象
- * @throws 文本不是合法 JSON 对象时抛中文错误
+ * @param text - 用户输入的 JSON 文本。
+ * @param label - 出错时提示的字段名称。
+ * @returns 解析后的普通对象。
+ * @throws 文本不是合法 JSON 对象时抛中文错误。
  */
 function parseJsonObject(text: string, label: string): Record<string, unknown> {
   let value: unknown
@@ -1611,24 +2136,6 @@ function parseJsonObject(text: string, label: string): Record<string, unknown> {
 function openProfileDialog(): void {
   writeError.value = ''
   profileDialog.value = true
-}
-
-/**
- * 打开受控评测发起弹窗并按数据集登记能力预选口径与执行方式。
- */
-function openTriggerDialog(): void {
-  writeError.value = ''
-  const datasetId = selectedDatasetId.value || triggerDatasets.value[0]?.dataset_id || ''
-  const dataset = triggerDatasets.value.find((item) => item.dataset_id === datasetId) ?? null
-  const scopes = datasetScopes(dataset)
-  const modes = datasetModes(dataset)
-  triggerForm.dataset_id = datasetId
-  triggerForm.profile_id = selectedProfileId.value || ''
-  triggerForm.scope = scopes.includes('full') ? 'full' : scopes[0]
-  triggerForm.mode = modes[0]
-  triggerForm.note = ''
-  triggerForm.mark_baseline = false
-  triggerDialog.value = true
 }
 
 /**
@@ -1661,7 +2168,32 @@ async function submitProfile(): Promise<void> {
 }
 
 /**
- * 选择数据集与算法版本发起真实评测任务。
+ * 打开受控评测发起弹窗，并按所选数据集登记能力预选口径与执行方式。
+ * @param dataset - 从数据集页直接发起时预选的数据集。
+ */
+function openTriggerDialog(dataset?: EvaluationDataset): void {
+  writeError.value = ''
+  const preferred =
+    dataset?.dataset_id || runDatasetId.value || triggerDatasets.value[0]?.dataset_id
+  triggerForm.dataset_id = preferred || ''
+  triggerForm.profile_id = ''
+  triggerForm.note = ''
+  triggerForm.mark_baseline = false
+  const selected = triggerDatasets.value.find((item) => item.dataset_id === triggerForm.dataset_id)
+  const scopes = datasetScopeList(selected ?? null)
+  const modes = datasetModeList(selected ?? null)
+  triggerForm.scope = scopes.includes(scope.value)
+    ? scope.value
+    : scopes.includes('full')
+      ? 'full'
+      : (scopes[0] ?? scope.value)
+  triggerForm.mode = modes.includes(mode.value) ? mode.value : (modes[0] ?? mode.value)
+  triggerDialog.value = true
+  void loadProfiles()
+}
+
+/**
+ * 选择数据集与算法版本发起真实评测任务，并提示任务号与审计号。
  */
 async function submitTrigger(): Promise<void> {
   if (!triggerForm.dataset_id) {
@@ -1701,48 +2233,9 @@ async function submitTrigger(): Promise<void> {
     ElMessage.success(
       `已提交评测任务（任务号 ${receipt.job_id}，审计号 ${receipt.audit_id}），由 Worker 执行`,
     )
-    await reload()
+    await Promise.all([loadDatasets(), loadTrends(), refreshRuns()])
   } catch (cause) {
     writeError.value = cause instanceof Error ? cause.message : '发起评测失败'
-  } finally {
-    writeBusy.value = false
-  }
-}
-
-/**
- * 打开把批次设为基线的弹窗。
- *
- * @param row 待设为基线的批次
- */
-function openBaselineDialog(row: EvaluationRun): void {
-  baselineRun.value = row
-  baselineNote.value = ''
-  baselineWriteError.value = ''
-  baselineDialog.value = true
-}
-
-/**
- * 把所选批次设为该数据集版本 + 口径 + 执行方式的活跃基线。
- */
-async function submitBaseline(): Promise<void> {
-  const run = baselineRun.value
-  if (!run) return
-  if (!baselineNote.value.trim()) {
-    baselineWriteError.value = '请填写基线备注，说明该批次被选为基线的依据'
-    return
-  }
-  writeBusy.value = true
-  baselineWriteError.value = ''
-  try {
-    await props.api<EvaluationBaseline>('/evaluations/baselines', 'POST', {
-      run_id: run.run_id,
-      note: baselineNote.value.trim(),
-    })
-    baselineDialog.value = false
-    ElMessage.success('已把该批次设为当前活跃基线')
-    await Promise.all([loadBaselines(), loadTrends(), refresh()])
-  } catch (cause) {
-    baselineWriteError.value = cause instanceof Error ? cause.message : '设置基线失败'
   } finally {
     writeBusy.value = false
   }
@@ -1761,8 +2254,7 @@ function stopJobPolling(): void {
 
 /**
  * 读取评测任务最新状态；进入终态后停止轮询并刷新数据。
- *
- * @param jobId 评测任务编号
+ * @param jobId - 评测任务编号。
  */
 async function pollJob(jobId: string): Promise<void> {
   try {
@@ -1784,15 +2276,14 @@ async function pollJob(jobId: string): Promise<void> {
 
 /**
  * 处理评测任务终态：提示结果并刷新评测目录与批次。
- *
- * @param job 已结束的评测任务
+ * @param job - 已结束的评测任务。
  */
 async function finishJob(job: EvaluationJob): Promise<void> {
   if (job.state === 'completed') {
     const result = job.result
     const runId = result && typeof result.run_id === 'string' ? result.run_id : ''
     ElMessage.success(runId ? `评测完成，批次 ${runId} 已入库` : '评测任务已完成')
-    await reload()
+    await Promise.all([loadDatasets(), loadTrends(), loadBaselines(), refreshRuns()])
     return
   }
   if (job.state === 'cancelled') {
@@ -1804,8 +2295,7 @@ async function finishJob(job: EvaluationJob): Promise<void> {
 
 /**
  * 立即刷新任务并按固定节奏轮询直到终态。
- *
- * @param jobId 评测任务编号
+ * @param jobId - 评测任务编号。
  */
 function startJobPolling(jobId: string): void {
   stopJobPolling()
@@ -1838,94 +2328,66 @@ async function cancelJob(): Promise<void> {
 }
 
 /**
- * 打开审计留痕抽屉并重置分页。
+ * 展示审计动作的中文名称。
+ * @param action - 审计动作编码。
+ * @returns 中文动作名称或原始编码。
  */
-async function openAuditDrawer(): Promise<void> {
-  auditDrawer.value = true
-  auditCursors.value = ['']
-  auditNext.value = null
-  await loadAuditLogs()
+function auditActionLabel(action: string): string {
+  return evaluationAuditActions[action as EvaluationAuditAction] ?? action
 }
 
 /**
- * 读取一页评测审计留痕。
+ * 将审计摘要压缩为单行文本。
+ * @param value - 审计摘要对象。
+ * @returns 截断后的单行摘要。
  */
-async function loadAuditLogs(): Promise<void> {
-  auditBusy.value = true
-  auditError.value = ''
-  try {
-    const query = new URLSearchParams({ limit: String(AUDIT_PAGE_SIZE) })
-    if (auditAction.value) query.set('action', auditAction.value)
-    const cursor = auditCursors.value.at(-1)
-    if (cursor) query.set('cursor', cursor)
-    const page = await props.api<CursorPage<EvaluationAuditLog>>(`/evaluations/audit-logs?${query}`)
-    auditLogs.value = page.items
-    auditNext.value = page.next_cursor
-  } catch (cause) {
-    auditError.value = cause instanceof Error ? cause.message : '读取审计留痕失败'
-  } finally {
-    auditBusy.value = false
-  }
+function summarizeJson(value: Record<string, unknown>): string {
+  const text = JSON.stringify(value)
+  return text.length > 120 ? text.slice(0, 120) + '…' : text
 }
 
-/**
- * 切换审计动作筛选并回到第一页。
- */
-function resetAudit(): void {
-  auditCursors.value = ['']
-  auditNext.value = null
-  void loadAuditLogs()
-}
-
-/**
- * 按游标前后翻动审计留痕页。
- *
- * @param forward 是否读取下一页
- */
-function turnAudit(forward: boolean): void {
-  if (auditBusy.value) return
-  if (forward && auditNext.value) auditCursors.value.push(auditNext.value)
-  else if (!forward && auditCursors.value.length > 1) auditCursors.value.pop()
-  else return
-  void loadAuditLogs()
-}
-
-/**
- * 同时刷新数据集、算法版本、基线、趋势与当前批次页。
- */
-async function reload(): Promise<void> {
-  await Promise.all([refresh(), loadDatasets(), loadProfiles(), loadBaselines(), loadTrends()])
-}
-
-watch(evalKind, async () => {
-  selectedDatasetId.value = ''
-  selectedProfileId.value = ''
-  datasetVersion.value = ''
-  datasets.value = []
-  profiles.value = []
-  baselines.value = []
-  trends.value = null
-  await Promise.all([loadDatasets(), loadProfiles(), loadBaselines(), loadTrends()])
+watch(evalKind, () => {
+  void handleKindChange()
 })
-watch(datasetVersion, async () => {
-  await Promise.all([loadProfiles(), loadBaselines(), loadTrends()])
+watch(scope, () => {
+  void loadTrends()
 })
-watch([trendScope, trendMode], loadTrends)
-watch(showArchived, loadDatasets)
-watch(baselineActiveOnly, loadBaselines)
+watch(mode, () => {
+  void loadTrends()
+  void loadBaselines()
+})
+watch(datasetVersion, () => {
+  void loadTrends()
+  void loadBaselines()
+  void loadProfiles()
+})
+watch(runEndpoint, () => {
+  resetRuns()
+})
+watch(baselineActiveOnly, () => {
+  void loadBaselines()
+})
+watch(auditAction, () => {
+  resetAudit()
+})
+watch(activeTab, (tab) => {
+  void ensureTabData(tab)
+})
 watch(
   () => triggerForm.dataset_id,
   () => {
-    const dataset = selectedTriggerDataset.value
-    const scopes = datasetScopes(dataset)
-    const modes = datasetModes(dataset)
-    if (!scopes.includes(triggerForm.scope)) triggerForm.scope = scopes[0]
-    if (!modes.includes(triggerForm.mode)) triggerForm.mode = modes[0]
+    const selected = triggerSelectedDataset.value
+    const scopes = datasetScopeList(selected)
+    const modes = datasetModeList(selected)
+    if (scopes.length && !scopes.includes(triggerForm.scope)) triggerForm.scope = scopes[0]
+    if (modes.length && !modes.includes(triggerForm.mode)) triggerForm.mode = modes[0]
   },
 )
-watch(endpoint, reset)
-onMounted(() => {
-  void Promise.all([loadDatasets(), loadProfiles(), loadBaselines(), loadTrends()])
+onMounted(async () => {
+  await loadCatalog()
+  await loadDatasets()
+  ensureSelections()
+  await loadTrends()
 })
 onBeforeUnmount(stopJobPolling)
 </script>

@@ -14,7 +14,11 @@ function validateWorkspaceResponse(path: string, data: JsonRecord, method: strin
   const resource = path.split('?', 1)[0]
   if (
     method === 'GET' &&
-    (resource === '/evaluations/runs' || resource.startsWith('/evaluations/runs/'))
+    (resource === '/evaluations/runs' ||
+      resource.startsWith('/evaluations/runs/') ||
+      resource.startsWith('/evaluations/metrics/') ||
+      resource === '/evaluations/datasets' ||
+      resource.startsWith('/evaluations/datasets/'))
   ) {
     validateEvaluationResponse(resource, data)
     return

@@ -8,6 +8,33 @@ export type EvaluationAuditAction =
   'register_dataset' | 'register_profile' | 'trigger_run' | 'publish_run' | 'set_baseline'
 export type EvaluationLayerName = 'retrieval' | 'adversarial' | 'behavior' | 'six_metrics'
 
+export interface EvaluationMetricSpec {
+  key: string
+  label: string
+  group: string
+  unit: string
+  direction: string
+  description: string
+}
+
+export interface EvaluationMetricSchema {
+  version: number
+  eval_kind: EvaluationKind
+  scope: EvaluationScope
+  label: string
+  metrics: EvaluationMetricSpec[]
+}
+
+export interface EvaluationMetricKind {
+  label: string
+  scopes: Record<string, EvaluationMetricSchema>
+}
+
+export interface EvaluationMetricCatalog {
+  version: number
+  kinds: Record<string, EvaluationMetricKind>
+}
+
 export interface EvaluationJudgeSummary {
   judge: string
   dimension: string
@@ -50,6 +77,8 @@ export interface EvaluationRun {
   latency_p95_ms: number | null
   total_tokens: number | null
   judges: EvaluationJudgeSummary[] | null
+  summary: Record<string, number | null> | null
+  metric_schema_version: number | null
 }
 
 export interface EvaluationDataset {
@@ -76,6 +105,12 @@ export interface EvaluationDatasetDetail {
   cases: Record<string, unknown>[]
   next_cursor: string | null
   total_cases: number
+}
+
+export interface EvaluationDatasetRaw {
+  dataset: EvaluationDataset
+  files: Record<string, string>
+  cases: Record<string, unknown>[]
 }
 
 export interface EvaluationProfile {
@@ -170,6 +205,7 @@ export interface EvaluationTrendItem {
   is_baseline: boolean
   comparable: boolean
   pass_rate_delta: number | null
+  summary: Record<string, number | null> | null
 }
 
 export interface EvaluationTrendAggregate {
@@ -190,6 +226,7 @@ export interface EvaluationBaselineSummary {
 }
 
 export interface EvaluationTrends {
+  metric_schema: EvaluationMetricSchema | null
   dataset_version: string | null
   scope: EvaluationScope | null
   mode: EvaluationMode | null
@@ -318,6 +355,7 @@ export interface EvaluationRunDetail {
   metrics: EvaluationMetrics
   run: EvaluationRun
   comparison: EvaluationComparison | null
+  metric_schema: EvaluationMetricSchema | null
 }
 
 /**
@@ -406,6 +444,9 @@ export const evaluationSuites: Record<string, string> = {
   golden: '黄金集',
   regression: '回归集',
   challenge: '挑战集',
+  agent_research: 'Agent 调研基准集',
+  rag_core: 'RAG 主评测集',
+  rag_adversarial: 'RAG 对抗集',
 }
 export const evaluationDimensions: Record<string, string> = {
   outcome: '交付结果',
@@ -468,4 +509,70 @@ export function isBaselineCandidate(run: EvaluationRun, candidate: EvaluationRun
     run.mode === candidate.mode &&
     run.judges_sha256 === candidate.judges_sha256
   )
+}
+
+/**
+ * 按指标目录声明的单位格式化数值，保证同一口径下展示规则一致。
+ * @param spec - 指标目录中的口径定义。
+ * @param value - 批次摘要中的指标数值。
+ * @returns 带单位的数值文本或缺失占位。
+ */
+export function formatMetricValue(spec: EvaluationMetricSpec, value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '—'
+  switch (spec.unit) {
+    case 'ratio':
+    case 'percent':
+      return (value * 100).toFixed(1) + '%'
+    case 'seconds':
+      return value.toFixed(2) + ' s'
+    case 'milliseconds':
+      return Math.round(value) + ' ms'
+    case 'tokens':
+    case 'count':
+      return String(Math.round(value))
+    case 'score':
+      return value.toFixed(2)
+    default:
+      return Number.isInteger(value) ? String(value) : value.toFixed(2)
+  }
+}
+
+/**
+ * 按指标单位格式化相对基线的差值，比例指标统一换算为百分点。
+ * @param spec - 指标目录中的口径定义。
+ * @param delta - 相对 active 基线的差值。
+ * @returns 带正负号的差值文本或缺失占位。
+ */
+export function formatMetricDelta(spec: EvaluationMetricSpec, delta: number | null): string {
+  if (delta === null || !Number.isFinite(delta)) return '—'
+  const sign = delta > 0 ? '+' : ''
+  switch (spec.unit) {
+    case 'ratio':
+    case 'percent':
+      return sign + (delta * 100).toFixed(1) + 'pp'
+    case 'seconds':
+      return sign + delta.toFixed(2) + ' s'
+    case 'milliseconds':
+      return sign + Math.round(delta) + ' ms'
+    case 'tokens':
+    case 'count':
+      return sign + Math.round(delta)
+    case 'score':
+      return sign + delta.toFixed(2)
+    default:
+      return sign + (Number.isInteger(delta) ? String(delta) : delta.toFixed(2))
+  }
+}
+
+/**
+ * 按指标方向判断涨跌是否代表改善，返回样式类名。
+ * @param spec - 指标目录中的口径定义。
+ * @param delta - 相对 active 基线的差值。
+ * @returns 改善、恶化或持平的样式类名。
+ */
+export function metricDeltaTone(spec: EvaluationMetricSpec, delta: number | null): string {
+  if (delta === null || !Number.isFinite(delta) || delta === 0) return 'evaluation-delta-flat'
+  if (spec.direction === 'neutral') return 'evaluation-delta-flat'
+  const improved = spec.direction === 'lower' ? delta < 0 : delta > 0
+  return improved ? 'evaluation-delta-up' : 'evaluation-delta-down'
 }
