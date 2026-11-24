@@ -47,7 +47,7 @@ def _clean_eval_center():
 
 
 def _setup() -> None:
-    """初始化测试企业与四种正式身份，清空评测中心写入痕迹。"""
+    """初始化演示企业与四种现有正式账号，清空评测中心写入痕迹。"""
     spec = importlib.util.spec_from_file_location("v3_setup", PROJECT / "scripts/manage_database.py")
     setup = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(setup)

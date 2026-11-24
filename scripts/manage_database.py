@@ -47,8 +47,8 @@ def seed_test():
         raise RuntimeError("测试初始化仅允许测试环境")
     with database_connection() as c:
         tenant="tenant_test"
-        c.execute("INSERT INTO tenants(id,code,name,mode) VALUES(%s,'mofa','手机配件电商 · 测试企业','test') ON CONFLICT(id) DO NOTHING",(tenant,))
-        nodes=organization(c,tenant,"手机配件电商 · 测试企业")
+        c.execute("INSERT INTO tenants(id,code,name,mode) VALUES(%s,'mofa','手机配件电商 · 演示企业','test') ON CONFLICT(id) DO NOTHING",(tenant,))
+        nodes=organization(c,tenant,"手机配件电商 · 演示企业")
         users={}
         hashed=hash_password("123456","test")
         for username,display,admin in [("admin","系统管理员",True),("staff","运营员工",False),("leader","运营组长",False),("boss","公司老板",False)]:
@@ -66,7 +66,7 @@ def seed_test():
           ("procurement","供应链采购协同与供应商日常管理指引","采购组负责品牌官方配件及核心耗材供应商对接、准入资质审核与出厂批次抽检。非本组经办人员查阅进货明细及供应商底价需单独授权。","采购组","org",2),
           ("boss","企业经营战略与核心商业秘密保护规定","公司核心经营指标、战略采购底价协议及关键供应商股权合作事宜归属三级核心商业秘密，由企业法定代表人统一管理，严格禁止向未经审核的第三方外部模型出境传输。","公司","company",3)]
         for tag,title,body,node,scope,level in samples:add_doc(c,tenant,users["boss"],"test_doc_"+tag,title,body,nodes[node],scope,level)
-    print("测试企业与四种身份已初始化")
+    print("演示企业与四种现有正式账号已初始化")
 
 def bootstrap_owner():
     with database_connection() as c:

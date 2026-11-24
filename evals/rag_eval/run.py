@@ -140,7 +140,7 @@ def preflight_check(*, need_http: bool = True, need_embedding: bool = True) -> N
         u = fetch_one(c, "SELECT id FROM users WHERE username=%s", (ADVERSARIAL_IDENTITY["username"],))
         if not u:
             raise SystemExit(
-                f"测评账号 {ADVERSARIAL_IDENTITY['username']} 不存在，请先运行 "
+                f"登录账号 {ADVERSARIAL_IDENTITY['username']} 不存在，请先运行 "
                 "PYTHONPATH=src ECOM_ENV_FILE=.env .venv/bin/python -m evals.dataset.seed"
             )
         if need_http:

@@ -69,7 +69,7 @@ curl -fsS http://127.0.0.1:18555/health
 
 1. 确认 `migrate` 退出码为 `0`，API 和向量服务返回健康状态。
 2. 准备目标租户及公司组织根，执行 `docker compose exec api python scripts/manage_database.py bootstrap-owner` 创建首位老板账号。
-3. 用测试身份核对资料的阅读与下载权限，提交知识问答并在轨迹中台检查执行节点。首次使用第三方 PDF 时核对页码和引用。 [问答验收](../knowledge-base/)
+3. 用现有正式业务账号（如 `staff`）核对资料的阅读与下载权限，提交知识问答并在轨迹中台检查执行节点。首次使用第三方 PDF 时核对页码和引用。 [问答验收](../knowledge-base/)
 
 ## 评测中心与评测任务
 

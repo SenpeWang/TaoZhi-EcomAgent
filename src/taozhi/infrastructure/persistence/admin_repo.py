@@ -34,7 +34,7 @@ def find_tenant_by_code(conn: Any, tenant_code: str) -> dict | None:
 
 
 def list_quick_login_rows(conn: Any, tenant_id: str) -> list[dict]:
-    """查询用于快捷体验账号展示的正式在职账号清单（排除 syn_* 测评账号）。"""
+    """查询用于快捷体验账号展示的现有正式在职账号清单。"""
     return fetch_all(
         conn,
         "SELECT u.username,u.display_name,u.system_admin,"

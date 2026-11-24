@@ -30,6 +30,8 @@
 
 关闭快捷登录的正式部署禁止演示弱口令：使用默认 `taozhi2026eval`（或自定义 ≥12 位口令），不要设置 `ECOM_EVAL_PASSWORD=123456`。
 
+**不存在独立测试账号**：本地演示、评测与集成测试统一使用现有正式业务账号 `owner`/`admin`/`leader`/`staff`；数据集里的 `SYN_A_*` 等只是逻辑身份，由 seed 映射到这些账号，不创建单独登录账号，也不区分“测试账号”与“正式账号”。
+
 ## 目录结构
 
 ```
@@ -74,8 +76,8 @@ PYTHONPATH=src .venv/bin/python -m evals.dataset.seed --clean
   依赖 `data/` 目录（不进 Git，换机即失效）；缺一个即整例不可评估（覆盖率显式暴露）。
 - **不编造标准答案**：资料写"未知"的题，预期行为是如实说明资料不足；`unanswerable`
   用例给的是"必须出现的说明性措辞"（如 `未标注`/`待确认`），不是编出来的数值。
-- **身份是数据不是代码**：逻辑身份→登录名在 org.yaml，seed 建档、run_evals 解析；
-  口令由 `ECOM_EVAL_PASSWORD`/`EVAL_PASSWORD` 统一（本地演示与快捷登录一致，正式环境 ≥12 位）。
+- **身份是数据不是代码**：逻辑身份→登录名在 org.yaml，seed 映射到现有正式业务账号（不新建测试账号）、
+  run_evals 解析；口令由 `ECOM_EVAL_PASSWORD`/`EVAL_PASSWORD` 统一（本地演示与快捷登录一致，正式环境 ≥12 位）。
 - **夹具可直接写 published**：绕过发布审批流——这是测试夹具，不是业务资料。
 - **`COMPANY_ROOT` 占位**：身份/文档可写 `node: COMPANY_ROOT`，seed 插入前解析为公司根节点。
 - **权限语义实测**：`seed --verify` 用 `can_read()` 跑 10 条矩阵
