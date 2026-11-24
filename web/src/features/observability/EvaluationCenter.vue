@@ -1339,11 +1339,14 @@ const aggregateStats = computed(() => {
     label: spec?.label ?? '通过率',
   }
 })
+const runPassMetricKey = computed(() => {
+  if (scope.value === 'adversarial' || scope.value === 'quick') return 'adversarial.pass_rate'
+  if (scope.value === 'full' || scope.value === 'behavior') return 'behavior.pass_rate'
+  return 'task_completion'
+})
 const baselineMetricLabel = computed(() => {
-  const spec = aggregateMetric.value
-  return spec && (spec.key === 'task_completion' || spec.key === 'pass_rate')
-    ? spec.label
-    : '通过率'
+  const key = runPassMetricKey.value
+  return metrics.value.find((item) => item.key === key)?.label ?? '通过率'
 })
 
 const runEndpoint = computed(() => {

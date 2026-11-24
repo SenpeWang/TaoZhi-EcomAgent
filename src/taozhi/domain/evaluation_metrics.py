@@ -2,14 +2,15 @@
 
 同一（评测类型 + 口径）的批次必须使用同一组指标键与单位，界面与接口都从本目录渲染；
 不同类型/口径的指标不同属于预期。指标值从批次的 `metrics` 原始报告或批次主字段提取，
-不在展示层自行拼装或改名。
+不在展示层自行拼装或改名。展示名优先采用检索（IR）、RAGAS、Agent 评测与安全评测的
+通用术语，中英对照，避免自造简称。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -18,9 +19,9 @@ class MetricSpec:
 
     Attributes:
         key: 指标键，批次摘要与界面列的唯一标识。
-        label: 中文展示名。
-        group: 指标分组（检索/对抗/行为/工程/执行）。
-        unit: 数值单位：ratio / percent / seconds / milliseconds / tokens / count。
+        label: 中英对照展示名，采用通用评测术语。
+        group: 指标分组（任务效果/工具调用/事实性/检索/安全/回答质量/性能/成本）。
+        unit: 数值单位：ratio / percent / seconds / milliseconds / tokens / count / score。
         source: 取值来源：run 表示批次主字段，metrics 表示原始报告指标。
         path: run 模式为字段名，metrics 模式为指标路径。
         direction: 越高越好 higher、越低越好 lower、中性 neutral。
@@ -48,95 +49,135 @@ def _metric(key: str, label: str, group: str, unit: str, *path: str,
 
 
 AGENT_FULL: tuple[MetricSpec, ...] = (
-    _run("task_completion", "任务完成率", "执行", "ratio", "pass_rate",
-         description="通过用例数 ÷ 批次用例总数，未判定计入分母"),
-    _run("mean_score", "平均得分", "执行", "score", "mean_score"),
-    _metric("required_tool_coverage", "必调工具覆盖率", "工具执行", "ratio",
-            "required_tool_coverage", "rate"),
-    _metric("parameter_accuracy", "参数准确率", "工具执行", "ratio",
+    _run("task_completion", "任务成功率（Task Success Rate）", "任务效果", "ratio", "pass_rate",
+         description="通过用例数 ÷ 可判定用例数；不可判定用例单列"),
+    _run("mean_score", "平均分（Average Score）", "任务效果", "score", "mean_score"),
+    _metric("required_tool_coverage", "必需工具覆盖率（Required Tool Coverage）", "工具调用",
+            "ratio", "required_tool_coverage", "rate",
+            description="命中必需工具数 ÷ 必需工具总数，不把未知工具计入分母"),
+    _metric("parameter_accuracy", "参数准确率（Argument Accuracy）", "工具调用", "ratio",
             "parameter_accuracy", "rate"),
-    _metric("reference_fact_coverage", "事实与引用覆盖", "事实", "ratio",
-            "reference_fact_coverage", "rate"),
-    _metric("call_coverage_among_known", "调用覆盖率", "工具执行", "ratio",
-            "call_coverage_among_known", "rate"),
-    _run("latency_p50_ms", "耗时 P50", "性能", "milliseconds", "latency_p50_ms",
+    _metric("reference_fact_coverage", "事实召回率（Fact Recall）", "事实性", "ratio",
+            "reference_fact_coverage", "rate",
+            description="命中的参考事实数 ÷ 参考事实总数"),
+    _metric("call_coverage_among_known", "模型调用计量覆盖率（Call Coverage）", "工程", "ratio",
+            "call_coverage_among_known", "rate",
+            description="已计量模型调用数 ÷ 已知模型调用数，不代表工具调用质量"),
+    _run("latency_p50_ms", "P50 延迟（Latency）", "性能", "milliseconds", "latency_p50_ms",
          direction="lower"),
-    _run("latency_p95_ms", "耗时 P95", "性能", "milliseconds", "latency_p95_ms",
+    _run("latency_p95_ms", "P95 延迟（Latency）", "性能", "milliseconds", "latency_p95_ms",
          direction="lower"),
-    _run("total_tokens", "Token 总量", "成本", "tokens", "total_tokens",
+    _run("total_tokens", "Token 用量（Token Usage）", "成本", "tokens", "total_tokens",
          direction="lower"),
+    _run("failed_cases", "失败用例数（Failed Cases）", "任务效果", "count", "failed_cases",
+         direction="lower"),
+    _run("unassessable_cases", "不可判定用例数（Unassessable Cases）", "任务效果", "count",
+         "unassessable_cases", direction="lower"),
 )
 
 RAG_FULL: tuple[MetricSpec, ...] = (
-    _metric("retrieval.hit@8", "检索 Hit@8", "检索", "ratio", "retrieval", "hit@8"),
-    _metric("retrieval.recall@8", "检索 Recall@8", "检索", "ratio", "retrieval", "recall@8"),
-    _metric("retrieval.mrr", "检索 MRR", "检索", "ratio", "retrieval", "mrr"),
-    _metric("adversarial.pass_rate", "对抗通过率", "对抗", "ratio", "adversarial", "pass_rate"),
-    _metric("adversarial.canary_leaks", "金丝雀泄漏", "对抗", "count", "adversarial",
-            "canary_leaks", direction="lower"),
-    _metric("behavior.pass_rate", "行为通过率", "行为", "ratio", "behavior", "pass_rate"),
-    _metric("behavior.faithfulness.micro", "声明级忠实度", "行为", "ratio",
-            "behavior", "faithfulness", "micro"),
-    _metric("six_metrics.answer_accuracy.accuracy", "答案准确率", "行为", "ratio",
-            "six_metrics", "answer_accuracy", "accuracy"),
-    _metric("latency_e2e.p50", "端到端 P50", "性能", "seconds", "six_metrics",
-            "latency_e2e_s", "p50", direction="lower"),
-    _metric("latency_e2e.p95", "端到端 P95", "性能", "seconds", "six_metrics",
-            "latency_e2e_s", "p95", direction="lower"),
-    _metric("token_cost.total_tokens", "Token 总量", "成本", "tokens",
+    _metric("retrieval.hit@8", "Hit@8（命中率）", "检索", "ratio", "retrieval", "hit@8",
+            description="命中至少一个预期文档的用例占比"),
+    _metric("retrieval.recall@8", "Recall@8（召回率）", "检索", "ratio", "retrieval", "recall@8",
+            description="召回的相关文档数 ÷ 全部相关文档数"),
+    _metric("retrieval.mrr", "MRR（平均倒数排名）", "检索", "ratio", "retrieval", "mrr"),
+    _metric("retrieval.precision@8", "Precision@8（精确率）", "检索", "ratio",
+            "retrieval", "precision@8",
+            description="前 8 条中相关文档占比，分母固定为 8"),
+    _metric("retrieval.ndcg@8", "nDCG@8（归一化折损累计增益）", "检索", "ratio",
+            "retrieval", "ndcg@8"),
+    _metric("adversarial.pass_rate", "对抗用例通过率（Adversarial Pass Rate）", "安全", "ratio",
+            "adversarial", "pass_rate"),
+    _metric("adversarial.canary_leaks", "金丝雀泄漏数（Canary Leaks）", "安全", "count",
+            "adversarial", "canary_leaks", direction="lower"),
+    _metric("l3_compliance_rate", "L3 合规率（L3 Compliance）", "安全", "ratio",
+            "six_metrics", "quality_extended", "l3_compliance", "compliance_rate",
+            description="涉密拦截场景中未发生外部模型调用的比例，未测时为未判定"),
+    _metric("behavior.pass_rate", "回答通过率（Pass Rate）", "回答质量", "ratio",
+            "behavior", "pass_rate"),
+    _metric("behavior.faithfulness.micro", "忠实度（Faithfulness）", "回答质量", "ratio",
+            "behavior", "faithfulness", "micro",
+            description="声明级（claim-level）判定：被答案支持的声明数 ÷ 声明总数"),
+    _metric("six_metrics.answer_accuracy.accuracy", "答案准确率（Answer Accuracy）", "回答质量",
+            "ratio", "six_metrics", "answer_accuracy", "accuracy"),
+    _metric("behavior.false_refusal_rate", "误拒率（False Refusal Rate）", "回答质量", "ratio",
+            "behavior", "refusal", "false_refusal_rate", direction="lower",
+            description="本可回答却被拒答的比例，越低越好"),
+    _metric("behavior.citation_in_bounds", "引用准确率（Citation Accuracy）", "回答质量", "ratio",
+            "behavior", "citation", "in_bounds_rate",
+            description="引用全部命中可访问且属于答案证据范围的比例"),
+    _metric("behavior.fact_recall", "事实召回率（Fact Recall）", "回答质量", "ratio",
+            "behavior", "fact_recall", "mean"),
+    _metric("latency_e2e.p50", "P50 端到端延迟（E2E Latency）", "性能", "seconds",
+            "six_metrics", "latency_e2e_s", "p50", direction="lower"),
+    _metric("latency_e2e.p95", "P95 端到端延迟（E2E Latency）", "性能", "seconds",
+            "six_metrics", "latency_e2e_s", "p95", direction="lower"),
+    _metric("token_cost.total_tokens", "被测系统 Token 用量（SUT Token Usage）", "成本", "tokens",
             "six_metrics", "token_cost", "total_tokens", direction="lower"),
+    _metric("judge_token_cost.total_tokens", "评审模型 Token 用量（Judge Token Usage）", "成本",
+            "tokens", "six_metrics", "judge_token_cost", "total_tokens", direction="lower"),
 )
 
 RAG_ADVERSARIAL: tuple[MetricSpec, ...] = (
-    _metric("adversarial.pass_rate", "对抗通过率", "对抗", "ratio", "adversarial", "pass_rate"),
-    _metric("adversarial.canary_leaks", "金丝雀泄漏", "对抗", "count", "adversarial",
-            "canary_leaks", direction="lower"),
-    _metric("adversarial.rejected", "被拒绝数", "对抗", "count", "adversarial", "rejected",
-            direction="neutral"),
-    _metric("adversarial.latency_p95_s", "对抗 P95", "性能", "seconds",
+    _metric("adversarial.pass_rate", "对抗用例通过率（Adversarial Pass Rate）", "安全", "ratio",
+            "adversarial", "pass_rate"),
+    _metric("adversarial.canary_leaks", "金丝雀泄漏数（Canary Leaks）", "安全", "count",
+            "adversarial", "canary_leaks", direction="lower"),
+    _metric("adversarial.rejected", "拒绝回答数（Rejected）", "安全", "count",
+            "adversarial", "rejected", direction="neutral"),
+    _metric("l3_compliance_rate", "L3 合规率（L3 Compliance）", "安全", "ratio",
+            "six_metrics", "quality_extended", "l3_compliance", "compliance_rate"),
+    _metric("adversarial.latency_p95_s", "P95 延迟（Latency）", "性能", "seconds",
             "adversarial", "slo", "p95_s", direction="lower"),
-    _metric("adversarial.tokens", "对抗 Token", "成本", "tokens",
+    _metric("adversarial.tokens", "被测系统 Token 用量（SUT Token Usage）", "成本", "tokens",
             "adversarial", "sut_cost", "total_tokens", direction="lower"),
 )
 
 RAG_QUICK: tuple[MetricSpec, ...] = (
-    _metric("retrieval.hit@8", "检索 Hit@8", "检索", "ratio", "retrieval", "hit@8"),
-    _metric("retrieval.recall@8", "检索 Recall@8", "检索", "ratio", "retrieval", "recall@8"),
-    _metric("retrieval.mrr", "检索 MRR", "检索", "ratio", "retrieval", "mrr"),
-    _metric("adversarial.pass_rate", "对抗通过率", "对抗", "ratio", "adversarial", "pass_rate"),
-    _metric("adversarial.canary_leaks", "金丝雀泄漏", "对抗", "count", "adversarial",
-            "canary_leaks", direction="lower"),
-    _metric("latency_e2e.p95", "端到端 P95", "性能", "seconds", "six_metrics",
-            "latency_e2e_s", "p95", direction="lower"),
-    _metric("token_cost.total_tokens", "Token 总量", "成本", "tokens",
+    _metric("retrieval.hit@8", "Hit@8（命中率）", "检索", "ratio", "retrieval", "hit@8"),
+    _metric("retrieval.recall@8", "Recall@8（召回率）", "检索", "ratio", "retrieval", "recall@8"),
+    _metric("retrieval.mrr", "MRR（平均倒数排名）", "检索", "ratio", "retrieval", "mrr"),
+    _metric("adversarial.pass_rate", "对抗用例通过率（Adversarial Pass Rate）", "安全", "ratio",
+            "adversarial", "pass_rate"),
+    _metric("adversarial.canary_leaks", "金丝雀泄漏数（Canary Leaks）", "安全", "count",
+            "adversarial", "canary_leaks", direction="lower"),
+    _metric("latency_e2e.p95", "P95 端到端延迟（E2E Latency）", "性能", "seconds",
+            "six_metrics", "latency_e2e_s", "p95", direction="lower"),
+    _metric("token_cost.total_tokens", "被测系统 Token 用量（SUT Token Usage）", "成本", "tokens",
             "six_metrics", "token_cost", "total_tokens", direction="lower"),
 )
 
 RAG_RETRIEVAL: tuple[MetricSpec, ...] = (
-    _metric("retrieval.hit@8", "检索 Hit@8", "检索", "ratio", "retrieval", "hit@8"),
-    _metric("retrieval.recall@8", "检索 Recall@8", "检索", "ratio", "retrieval", "recall@8"),
-    _metric("retrieval.mrr", "检索 MRR", "检索", "ratio", "retrieval", "mrr"),
-    _metric("retrieval.ndcg@8", "检索 nDCG@8", "检索", "ratio", "retrieval", "ndcg@8"),
-    _metric("retrieval.latency_p95_s", "检索 P95", "性能", "seconds",
+    _metric("retrieval.hit@8", "Hit@8（命中率）", "检索", "ratio", "retrieval", "hit@8"),
+    _metric("retrieval.recall@8", "Recall@8（召回率）", "检索", "ratio", "retrieval", "recall@8"),
+    _metric("retrieval.mrr", "MRR（平均倒数排名）", "检索", "ratio", "retrieval", "mrr"),
+    _metric("retrieval.ndcg@8", "nDCG@8（归一化折损累计增益）", "检索", "ratio",
+            "retrieval", "ndcg@8"),
+    _metric("retrieval.latency_p95_s", "P95 检索延迟（Retrieval Latency）", "性能", "seconds",
             "retrieval", "latency_p95_s", direction="lower"),
-    _metric("retrieval.tokens", "检索 Token", "成本", "tokens",
+    _metric("retrieval.tokens", "被测系统 Token 用量（SUT Token Usage）", "成本", "tokens",
             "retrieval", "sut_cost", "total_tokens", direction="lower"),
 )
 
 RAG_BEHAVIOR: tuple[MetricSpec, ...] = (
-    _metric("behavior.pass_rate", "行为通过率", "行为", "ratio", "behavior", "pass_rate"),
-    _metric("behavior.faithfulness.micro", "声明级忠实度", "行为", "ratio",
-            "behavior", "faithfulness", "micro"),
-    _metric("behavior.answer_accuracy", "答案准确率", "行为", "ratio",
+    _metric("behavior.pass_rate", "回答通过率（Pass Rate）", "回答质量", "ratio",
+            "behavior", "pass_rate"),
+    _metric("behavior.faithfulness.micro", "忠实度（Faithfulness）", "回答质量", "ratio",
+            "behavior", "faithfulness", "micro",
+            description="声明级（claim-level）判定：被答案支持的声明数 ÷ 声明总数"),
+    _metric("behavior.answer_accuracy", "答案准确率（Answer Accuracy）", "回答质量", "ratio",
             "behavior", "answer_accuracy", "accuracy"),
-    _metric("behavior.fact_recall", "事实召回", "行为", "ratio", "behavior", "fact_recall", "mean"),
-    _metric("behavior.false_refusal_rate", "误拒率", "行为", "ratio",
-            "behavior", "refusal", "false_refusal_rate", direction="lower"),
-    _metric("behavior.citation_in_bounds", "引用合规率", "行为", "ratio",
-            "behavior", "citation", "in_bounds_rate"),
-    _metric("behavior.latency_p95_s", "行为 P95", "性能", "seconds",
+    _metric("behavior.fact_recall", "事实召回率（Fact Recall）", "回答质量", "ratio",
+            "behavior", "fact_recall", "mean"),
+    _metric("behavior.false_refusal_rate", "误拒率（False Refusal Rate）", "回答质量", "ratio",
+            "behavior", "refusal", "false_refusal_rate", direction="lower",
+            description="本可回答却被拒答的比例，越低越好"),
+    _metric("behavior.citation_in_bounds", "引用准确率（Citation Accuracy）", "回答质量", "ratio",
+            "behavior", "citation", "in_bounds_rate",
+            description="引用全部命中可访问且属于答案证据范围的比例"),
+    _metric("behavior.latency_p95_s", "P95 延迟（Latency）", "性能", "seconds",
             "behavior", "slo", "p95_s", direction="lower"),
-    _metric("behavior.tokens", "行为 Token", "成本", "tokens",
+    _metric("behavior.tokens", "被测系统 Token 用量（SUT Token Usage）", "成本", "tokens",
             "behavior", "sut_cost", "total_tokens", direction="lower"),
 )
 
@@ -155,9 +196,9 @@ KIND_LABELS = {"agent": "Agent 调研评测", "rag": "RAG 知识问答评测"}
 SCOPE_LABELS = {
     "full": "全量",
     "quick": "快速",
-    "adversarial": "对抗层",
-    "retrieval": "检索层",
-    "behavior": "行为层",
+    "adversarial": "对抗测试",
+    "retrieval": "检索测试",
+    "behavior": "回答质量",
 }
 
 
