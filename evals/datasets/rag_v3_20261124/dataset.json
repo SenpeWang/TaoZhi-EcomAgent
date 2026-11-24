@@ -8,11 +8,11 @@
       "name": "rag_core",
       "description": "RAG 三层评测主集：540 例（6 大类 × 6 用途）+ 91 篇语料夹具。",
       "case_count": 540,
-      "content_sha256": "67dc01268ce78cd4233e9ccf42e7c5fc190c47d94f166add9d9c83cd19171a20",
+      "content_sha256": "5614d150208c30f6ba7609a89ae1e4524047f5ba4e42c0fc217e77548f98d318",
       "files": {
         "cases.jsonl": "5614d150208c30f6ba7609a89ae1e4524047f5ba4e42c0fc217e77548f98d318",
         "corpus_docs.jsonl": "53c8da2619ca0e06524630208c5bbe2daa8d1811f0141851346ecc466d9efbbd",
-        "manifest.json": "9c3a8914a87b098f5185681eb3320d9e4c48605f2fa20424178a03f2640a9864"
+        "manifest.json": "8888e46d232c71c01fa4004ff03d92ae8a1c19c7c671b9115179139628a98ab3"
       },
       "modes": [
         "live"

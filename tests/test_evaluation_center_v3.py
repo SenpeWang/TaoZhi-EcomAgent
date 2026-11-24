@@ -291,7 +291,7 @@ def test_metric_catalog_summary_and_dataset_raw_transparency() -> None:
     assert metric_keys == [
         "task_completion", "mean_score", "required_tool_coverage", "parameter_accuracy",
         "reference_fact_coverage", "call_coverage_among_known", "latency_p50_ms",
-        "latency_p95_ms", "total_tokens", "failed_cases", "unassessable_cases",
+        "latency_p95_ms", "total_tokens",
     ]
     assert set(catalog["kinds"]["rag"]["scopes"]) == {
         "full", "quick", "adversarial", "retrieval", "behavior",

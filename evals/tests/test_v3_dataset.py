@@ -199,3 +199,19 @@ def test_agent_heldout_is_excluded_by_default():
     cases = [{"id": "A", "track": "golden"}, {"id": "B", "track": "heldout"}]
     assert [case["id"] for case in filter_heldout(cases, False)] == ["A"]
     assert [case["id"] for case in filter_heldout(cases, True)] == ["A", "B"]
+
+
+def test_rag_descriptor_content_sha_matches_files():
+    descriptor = json.loads((RAG / "dataset.json").read_text(encoding="utf-8"))
+    core = descriptor["suites"]["rag_core"]
+    adv = descriptor["suites"]["rag_adversarial"]
+    assert core["content_sha256"] == hashlib.sha256((RAG / "cases.jsonl").read_bytes()).hexdigest()
+    assert adv["content_sha256"] == hashlib.sha256((RAG / "redteam.json").read_bytes()).hexdigest()
+
+
+def test_seed_spec_matches_dataset_version():
+    from evals.dataset import seed as seed_module
+
+    assert seed_module.spec_dir("rag_v3_20261124").name == "spec_v3"
+    assert seed_module.spec_dir("rag_v2_20261124").name == "spec"
+    assert (seed_module.SPEC / "fixtures.yaml").is_file()

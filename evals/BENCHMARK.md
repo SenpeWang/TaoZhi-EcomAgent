@@ -5,8 +5,6 @@
 
 标注 `[待接线]` 的条目是尚未落到代码的部分（第 11 节有清单），其余均为现行口径。
 
-本文件使用指标的定义名与公式；界面展示名统一由 [`src/taozhi/domain/evaluation_metrics.py`](../src/taozhi/domain/evaluation_metrics.py) 提供，采用检索（IR）、RAGAS、Agent 评测与安全评测的通用术语。
-
 ---
 
 ## 1. 模块边界

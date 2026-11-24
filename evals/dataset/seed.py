@@ -41,8 +41,19 @@ from taozhi.infrastructure.persistence.metric_execution import BUILTIN_BUSINESS_
 sys.path.insert(0, str(ROOT))
 from evals import runtime_snapshot
 
-SPEC = Path(__file__).resolve().parent / "spec"
-GEN = ROOT / "evals/datasets" / runtime_snapshot.current_dataset_version("rag")
+DATASET_VERSION = runtime_snapshot.current_dataset_version("rag")
+GEN = ROOT / "evals/datasets" / DATASET_VERSION
+
+
+def spec_dir(version: str) -> Path:
+    """返回与数据集版本匹配的规格目录；v3 起使用 spec_v3。"""
+    spec_v3 = Path(__file__).resolve().parent / "spec_v3"
+    if version.startswith("rag_v3") and spec_v3.is_dir():
+        return spec_v3
+    return Path(__file__).resolve().parent / "spec"
+
+
+SPEC = spec_dir(DATASET_VERSION)
 EVAL_PASSWORD = os.environ.get("ECOM_EVAL_PASSWORD") or "taozhi2026eval"
 SYN_PREFIX = "SYN_"
 
@@ -233,6 +244,8 @@ def ensure_eval_metrics(conn, tenant_id, boss_id) -> int:
 
 def seed_grants(conn, tenant_id, fixtures, user_ids):
     n = 0
+    conn.execute("DELETE FROM document_grants WHERE tenant_id=%s AND left(document_id, 4)=%s",
+                 (tenant_id, SYN_PREFIX))
     for g in fixtures.get("grants", []):
         uid = user_ids[g["user"]]
         conn.execute("DELETE FROM document_grants WHERE tenant_id=%s AND document_id=%s AND user_id=%s",
@@ -264,6 +277,29 @@ VERIFY_MATRIX = [
     ("SYN_A_STAFF001", "SYN_CORPUS_LX20", True, "检索语料可读"),
 ]
 
+VERIFY_MATRIX_V3 = [
+    ("SYN_A_STAFF002", "SYN_DOC_A_OP01", False, "员工无授权，组长级文档不可读"),
+    ("SYN_A_LDR001", "SYN_DOC_A_OP01", True, "组长 grade=2 达到 level=2"),
+    ("SYN_A_STAFF001", "SYN_DOC_A_OP01", False, "员工无 OP01 授权（同账号多身份不可分别授权）"),
+    ("SYN_A_STAFF003", "SYN_DOC_A_OP01", False, "员工无 OP01 授权"),
+    ("SYN_A_STAFF002", "SYN_DOC_A_DENY01", False, "deny 授权优先于密级通路"),
+    ("SYN_A_STAFF001", "SYN_DOC_A_DRAFT01", False, "草稿状态员工不可读"),
+    ("SYN_A_BOSS001", "SYN_DOC_A_BOSS01", True, "老板可读老板级"),
+    ("SYN_A_BOSS001", "SYN_DOC_A_FIN_AI", True, "老板可读 L3 ai_allowed 财务文档"),
+    ("SYN_A_LDR001", "SYN_DOC_A_FIN_AI", False, "组长 grade=2 不可读 level=3 财务文档"),
+    ("SYN_A_STAFF001", "SYN_DOC_A_FIN_AI", False, "员工 grade=1 不可读 level=3 财务文档"),
+    ("SYN_A_LDR001", "SYN_DOC_A_CS01", False, "运营组长不可跨部门读 SYN_NODE_CS org 文档"),
+    ("SYN_A_STAFF004", "SYN_DOC_A_CS01", False, "CS 一线员工 grade=1 不可读 CS level=2 文档"),
+    ("SYN_A_STAFF001", "SYN_DOC_A_BOSS01", False, "level=3 仅老板"),
+    ("SYN_A_STAFF001", "SYN_DOC_A_PUB01", True, "公司级公开资料全员可读"),
+    ("SYN_A_STAFF001", "SYN_CORPUS_LX20", True, "检索语料可读"),
+    ("SYN_A_STAFF001", "SYN_DOC_A_FIN02", True, "员工 FIN02 有效授权"),
+]
+
+def verify_matrix() -> list[tuple[str, str, bool, str]]:
+    """按当前规格目录选择验收矩阵：v3 使用账号级授权口径。"""
+    return VERIFY_MATRIX_V3 if SPEC.name == "spec_v3" else VERIFY_MATRIX
+
 
 def verify(conn, tenant_id, org, fixtures, user_ids):
     problems = []
@@ -290,7 +326,7 @@ def verify(conn, tenant_id, org, fixtures, user_ids):
             problems.append(f"账号缺失 {i['username']}")
         elif not verify_password(EVAL_PASSWORD, row["password_hash"]):
             problems.append(f"账号 {i['username']} 口令与 EVAL_PASSWORD 不符")
-    for logical, doc_id, expect, why in VERIFY_MATRIX:
+    for logical, doc_id, expect, why in verify_matrix():
         p = load_principal(conn, user_ids[logical])
         d = fetch_one(conn, "SELECT * FROM documents WHERE tenant_id=%s AND id=%s", (tenant_id, doc_id))
         if not d:
