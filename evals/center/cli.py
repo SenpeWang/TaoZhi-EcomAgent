@@ -58,11 +58,19 @@ def _collect_reports(directory: Path, kind: str) -> list[Path]:
 
 
 def _cmd_register(args: argparse.Namespace) -> int:
-    version = args.version or datasets.current_version()
+    versions: dict[str, str] = {}
+    if args.version:
+        versions["rag"] = args.version
+        versions["agent"] = args.version
+    if args.rag_version:
+        versions["rag"] = args.rag_version
+    if args.agent_version:
+        versions["agent"] = args.agent_version
     tenant_id, actor_id = _identity(args)
     with database_connection() as conn:
-        rows = datasets.register(conn, version, tenant_id, actor_id, refresh=args.refresh)
-    _print_json({"version": version, "datasets": [row["dataset_id"] for row in rows]})
+        rows = datasets.register(conn, versions or None, tenant_id, actor_id, refresh=args.refresh)
+    resolved = {suite: datasets.current_version(suite) for suite in datasets.SUITES}
+    _print_json({"versions": resolved, "datasets": [row["dataset_id"] for row in rows]})
     return 0
 
 
@@ -121,9 +129,10 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
 
 
 def _check_datasets(failures: list[str]) -> dict:
-    version = datasets.current_version()
+    versions = {suite: datasets.current_version(suite) for suite in datasets.SUITES}
     checked = 0
     for suite in datasets.SUITES:
+        version = versions[suite]
         try:
             definition = datasets.validate_suite(version, suite)
             cases = datasets.suite_cases(version, suite)
@@ -134,7 +143,7 @@ def _check_datasets(failures: list[str]) -> dict:
         if expected and len(cases) != expected:
             failures.append(f"数据集 {suite} 用例数 {len(cases)} 与描述符 {expected} 不一致")
         checked += 1
-    return {"version": version, "checked_suites": checked}
+    return {"version": versions["rag_core"], "versions": versions, "checked_suites": checked}
 
 
 def _run_check(tenant_code: str) -> tuple[list[str], dict]:
@@ -146,14 +155,16 @@ def _run_check(tenant_code: str) -> tuple[list[str], dict]:
     tenant_id, _actor_id = publish.resolve_owner(tenant_code, "owner")
     store = get_blob_store()
     with database_connection() as conn:
-        version = stats["version"]
-        registered = fetch_all(
-            conn, "SELECT dataset_id, suite, version, archived, case_count, cases_payload "
-                  "FROM eval_datasets WHERE version=%s ORDER BY dataset_id", (version,))
+        versions = stats["versions"]
+        registered: list[dict] = []
+        for suite in datasets.SUITES:
+            registered.extend(fetch_all(
+                conn, "SELECT dataset_id, suite, version, archived, case_count, cases_payload "
+                      "FROM eval_datasets WHERE version=%s ORDER BY dataset_id", (versions[suite],)))
         for row in registered:
             suite = row.get("suite") or ""
             try:
-                actual = len(datasets.suite_cases(version, suite))
+                actual = len(datasets.suite_cases(row["version"], suite))
             except ValueError as exc:
                 failures.append(f"数据集 {row['dataset_id']} 用例装载失败：{exc}")
                 continue
@@ -253,7 +264,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     register = sub.add_parser("register", help="登记数据集版本")
-    register.add_argument("--version", help="数据集版本目录名，默认当前最新版本")
+    register.add_argument("--version", help="同时指定 RAG 与 Agent 的数据集版本")
+    register.add_argument("--rag-version", help="RAG 数据集版本，默认最新 rag_v*")
+    register.add_argument("--agent-version", help="Agent 数据集版本，默认最新 agent_v*")
     register.add_argument("--refresh", action="store_true",
                           help="用仓库原始用例覆盖已登记 payload（存量数据透明化刷新）")
     _add_identity(register, actor_name="actor")

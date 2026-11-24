@@ -34,7 +34,7 @@ from evals import runtime_snapshot
 EVALS = ROOT / "evals"
 REPORTS = EVALS / "reports"
 CALIB = REPORTS / "calibration"
-CASES = EVALS / "datasets" / runtime_snapshot.current_dataset_version() / "rag" / "cases.jsonl"
+CASES = EVALS / "datasets" / runtime_snapshot.current_dataset_version("rag") / "cases.jsonl"
 DIMS = ("pass", "faithful", "relevant")
 
 

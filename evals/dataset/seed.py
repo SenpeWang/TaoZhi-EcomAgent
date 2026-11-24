@@ -42,7 +42,7 @@ sys.path.insert(0, str(ROOT))
 from evals import runtime_snapshot
 
 SPEC = Path(__file__).resolve().parent / "spec"
-GEN = ROOT / "evals/datasets" / runtime_snapshot.current_dataset_version() / "rag"
+GEN = ROOT / "evals/datasets" / runtime_snapshot.current_dataset_version("rag")
 EVAL_PASSWORD = os.environ.get("ECOM_EVAL_PASSWORD") or "taozhi2026eval"
 SYN_PREFIX = "SYN_"
 

@@ -30,26 +30,48 @@ MODEL_ENV_KEYS = (
 )
 
 
-def dataset_versions() -> list[str]:
-    """列出仓库内带版本描述符的数据集版本目录（按名称排序）。"""
-    return sorted(
-        path.parent.name
-        for path in DATASETS.glob("*/dataset.json")
-        if path.is_file()
-    )
+SUITE_EVAL_KIND: dict[str, str] = {
+    "rag_core": "rag",
+    "rag_adversarial": "rag",
+    "agent_research": "agent",
+}
+EVAL_KINDS: tuple[str, ...] = ("rag", "agent")
 
 
-def current_dataset_version() -> str:
-    """返回当前使用的数据集版本（目录名最大者，版本号即目录名）。"""
-    versions = dataset_versions()
+def suite_eval_kind(suite: str) -> str:
+    """返回套件所属评测体系（rag / agent）。"""
+    kind = SUITE_EVAL_KIND.get(suite)
+    if kind is None:
+        raise ValueError(f"未知数据集套件：{suite}")
+    return kind
+
+
+def dataset_versions(eval_kind: str | None = None) -> list[str]:
+    """列出带描述符的数据集版本；可按 rag/agent 体系过滤。"""
+    names = [path.parent.name for path in DATASETS.glob("*/dataset.json") if path.is_file()]
+    if eval_kind is None:
+        names = [name for name in names if name.startswith(("rag_", "agent_"))]
+    else:
+        names = [name for name in names if name.startswith(f"{eval_kind}_")]
+    return sorted(names)
+
+
+def current_dataset_version(eval_kind: str = "rag") -> str:
+    """返回指定体系当前使用的数据集版本（该体系目录名最大者）。"""
+    versions = dataset_versions(eval_kind)
     if not versions:
-        raise RuntimeError("仓库内没有可用的数据集版本描述符 dataset.json")
+        raise RuntimeError(f"仓库内没有可用的 {eval_kind} 数据集版本描述符 dataset.json")
     return versions[-1]
+
+
+def current_version_for_suite(suite: str) -> str:
+    """返回套件所属体系的最新版本。"""
+    return current_dataset_version(suite_eval_kind(suite))
 
 
 def load_descriptor(version: str | None = None) -> dict:
     """读取数据集版本描述符；缺失或结构非法时给出明确错误。"""
-    resolved = version or current_dataset_version()
+    resolved = version or current_dataset_version("rag")
     path = DATASETS / resolved / "dataset.json"
     if not path.is_file():
         raise RuntimeError(f"数据集版本描述符不存在：{path}")
@@ -83,7 +105,7 @@ def verify_suite_files(version: str, suite: str) -> None:
 
 def dataset_meta(suite: str, version: str | None = None) -> dict:
     """返回数据集版本元数据，供报告内嵌与入库校验。"""
-    resolved = version or current_dataset_version()
+    resolved = version or current_version_for_suite(suite)
     descriptor = load_descriptor(resolved)
     definition = descriptor["suites"][suite]
     return {

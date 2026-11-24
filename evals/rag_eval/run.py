@@ -49,7 +49,7 @@ INCLUDE_HELDOUT = os.environ.get("ECOM_EVAL_INCLUDE_HELDOUT") == "1"
 import metrics
 from evals import runtime_snapshot
 
-DATASET_DIR = EVALS / "datasets" / runtime_snapshot.current_dataset_version() / "rag"
+DATASET_DIR = EVALS / "datasets" / runtime_snapshot.current_dataset_version("rag")
 CASES = DATASET_DIR / "cases.jsonl"
 GOLDEN = DATASET_DIR / "redteam.json"
 MANIFEST = DATASET_DIR / "manifest.json"

@@ -6,8 +6,8 @@
 
 用法::
 
-    .venv/bin/python -m evals.agent_eval.generate --out evals/datasets/v2_20261124/agent
-    .venv/bin/python -m evals.agent_eval.generate --out evals/datasets/v2_20261124/agent --check
+    .venv/bin/python -m evals.agent_eval.generate --out evals/datasets/agent_v2_20261124
+    .venv/bin/python -m evals.agent_eval.generate --out evals/datasets/agent_v2_20261124 --check
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from evals.agent_eval.reporting import FAILURE_LABELS
 
 ROOT = Path(__file__).resolve().parents[2]
 V1_DIR = ROOT / "evals" / "datasets" / "v1_20261123" / "agent"
-DEFAULT_OUT = ROOT / "evals" / "datasets" / "v2_20261124" / "agent"
+DEFAULT_OUT = ROOT / "evals" / "datasets" / "agent_v2_20261124"
 
 ALL_TOOLS = (
     "search_web",
@@ -1964,8 +1964,8 @@ def validate_on_disk(out: Path, built: dict) -> tuple[list[str], list[str]]:
     return errors, _summary_lines(built)
 
 
-V2_DIR = ROOT / "evals" / "datasets" / "v2_20261124" / "agent"
-V3_DEFAULT_OUT = ROOT / "evals" / "datasets" / "v3_20261124" / "agent"
+V2_DIR = ROOT / "evals" / "datasets" / "agent_v2_20261124"
+V3_DEFAULT_OUT = ROOT / "evals" / "datasets" / "agent_v3_20261124"
 V3_PER_CAPABILITY = 90
 V3_REDTEAM_COUNT = 60
 V3_TOTAL = len(naming.AGENT_CAPABILITIES) * V3_PER_CAPABILITY + V3_REDTEAM_COUNT

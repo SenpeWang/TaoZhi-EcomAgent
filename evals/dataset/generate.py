@@ -247,7 +247,7 @@ def sha256_file(p: Path) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="从 spec 生成独立评测数据集")
-    ap.add_argument("--out", default=str(ROOT / "evals/datasets/v2_20261124/rag"))
+    ap.add_argument("--out", default=str(ROOT / "evals/datasets/rag_v2_20261124"))
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

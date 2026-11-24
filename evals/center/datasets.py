@@ -16,9 +16,11 @@ MAX_CASES_PAYLOAD_BYTES = 2 * 1024 * 1024
 _AGENT_SUITE = "agent_research"
 
 
-def current_version() -> str:
-    """返回当前仓库登记的最新数据集版本（目录名）。"""
-    return runtime_snapshot.current_dataset_version()
+def current_version(suite: str | None = None) -> str:
+    """返回指定套件所属体系的最新数据集版本；缺省按 RAG 处理。"""
+    if suite:
+        return runtime_snapshot.current_version_for_suite(suite)
+    return runtime_snapshot.current_dataset_version("rag")
 
 
 def load_descriptor(version: str | None = None) -> dict:
@@ -65,7 +67,8 @@ def version_for_content_sha(suite: str, digest: str) -> str | None:
     """按内容摘要反查数据集版本，供历史报告归属校验。"""
     if not digest:
         return None
-    for version in reversed(runtime_snapshot.dataset_versions()):
+    kind = runtime_snapshot.suite_eval_kind(suite)
+    for version in reversed(runtime_snapshot.dataset_versions(kind)):
         try:
             definition = suite_definition(version, suite)
         except (ValueError, RuntimeError):
@@ -89,7 +92,7 @@ def _agent_cases(version: str, definition: dict) -> list[dict]:
     from evals.agent_eval.reporting import fingerprint
 
     count = int(definition.get("case_count") or 0)
-    if version == runtime_snapshot.current_dataset_version():
+    if version == runtime_snapshot.current_version_for_suite("agent_research"):
         catalog = sorted(AGENT_BENCHMARK_CASES, key=lambda case: case["id"])
         expected = definition.get("content_sha256") or ""
         actual = fingerprint(catalog)
@@ -97,7 +100,7 @@ def _agent_cases(version: str, definition: dict) -> list[dict]:
             raise ValueError(
                 f"agent_research 用例目录摘要与 {version} 描述符不一致：期望 {expected} 实际 {actual}")
     else:
-        path = runtime_snapshot.DATASETS / version / "agent" / "research_cases.json"
+        path = runtime_snapshot.DATASETS / version / "research_cases.json"
         if not path.is_file():
             raise ValueError(f"数据集文件缺失：{path}")
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -117,7 +120,7 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 
 def _rag_core_cases(version: str, definition: dict) -> list[dict]:
-    rows = _read_jsonl(runtime_snapshot.DATASETS / version / "rag" / "cases.jsonl")
+    rows = _read_jsonl(runtime_snapshot.DATASETS / version / "cases.jsonl")
     count = int(definition.get("case_count") or 0)
     if count and len(rows) != count:
         raise ValueError(f"rag_core 用例数与 {version} 描述符不一致：期望 {count} 实际 {len(rows)}")
@@ -125,7 +128,7 @@ def _rag_core_cases(version: str, definition: dict) -> list[dict]:
 
 
 def _rag_adversarial_cases(version: str, definition: dict) -> list[dict]:
-    base = runtime_snapshot.DATASETS / version / "rag"
+    base = runtime_snapshot.DATASETS / version
     path = base / "redteam.json"
     if not path.is_file():
         path = base / "golden_adversarial.json"
@@ -183,7 +186,7 @@ def case_index(version: str | None, suite: str) -> dict[str, dict]:
         case_id 到原始用例定义的映射；文件缺失或结构非法时返回空映射。
     """
     try:
-        cases = _raw_cases(version or current_version(), suite)
+        cases = _raw_cases(version or current_version(suite), suite)
     except (ValueError, RuntimeError, OSError):
         return {}
     key_field = "case_id" if suite == "rag_core" else "id"
@@ -266,13 +269,13 @@ def ensure_legacy_dataset(conn: Any, eval_kind: str, suite: str, report_git: str
     return evaluation_repo.upsert_dataset(conn, legacy_dataset_fields(eval_kind, suite, report_git, source=source))
 
 
-def register(conn: Any, version: str, tenant_id: str, actor_id: str,
+def register(conn: Any, versions: dict[str, str] | None, tenant_id: str, actor_id: str,
              *, refresh: bool = False) -> list[dict]:
     """幂等登记当前版本的全部套件数据集，并为首次登记或刷新写审计。
 
     Args:
         conn: 数据库连接（调用方事务内）。
-        version: 数据集版本。
+        versions: 按体系或套件指定的版本；缺省使用各体系最新版本。
         tenant_id: 租户编号，写入审计。
         actor_id: 操作账号编号，写入审计。
         refresh: 为 True 时用仓库原始用例覆盖已登记的 cases_payload/用例数/元数据，
@@ -284,7 +287,10 @@ def register(conn: Any, version: str, tenant_id: str, actor_id: str,
     from taozhi.infrastructure.persistence import evaluation_repo
 
     registered = []
+    resolved = versions or {}
     for suite in SUITES:
+        kind = runtime_snapshot.suite_eval_kind(suite)
+        version = resolved.get(suite) or resolved.get(kind) or current_version(suite)
         fields = dataset_fields(version, suite)
         existing = evaluation_repo.dataset_row(conn, fields["dataset_id"])
         if existing is not None and refresh:

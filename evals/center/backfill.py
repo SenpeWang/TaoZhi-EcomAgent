@@ -73,7 +73,7 @@ def backfill(tenant_code: str = "mofa", owner_username: str = "owner", reset: bo
         含数据集数、批次数、用例数、active 基线条数与跳过报告数的汇总。
     """
     tenant_id, actor_id = publish.resolve_owner(tenant_code, owner_username)
-    version = datasets.current_version()
+    versions = {suite: datasets.current_version(suite) for suite in datasets.SUITES}
     skipped = 0
     duplicates = 0
     with database_connection() as conn:
@@ -82,7 +82,7 @@ def backfill(tenant_code: str = "mofa", owner_username: str = "owner", reset: bo
                 "TRUNCATE TABLE eval_case_results, eval_run_reports, eval_baselines, "
                 "eval_runs, eval_datasets, eval_audit_logs"
             )
-        datasets.register(conn, version, tenant_id, actor_id)
+        datasets.register(conn, versions, tenant_id, actor_id)
 
         first_baseline = BASELINE_DIR / LEGACY_RAG_BASELINES[0]
         report_git = _read_json(first_baseline).get("git") or ""
@@ -146,7 +146,7 @@ def backfill(tenant_code: str = "mofa", owner_username: str = "owner", reset: bo
                 _store_if_missing(conn, tenant_id, result, payload)
                 duplicates += 1
 
-        merged_runs = _merge_legacy_agent_datasets(conn, tenant_id, actor_id, version)
+        merged_runs = _merge_legacy_agent_datasets(conn, tenant_id, actor_id, versions["agent_research"])
 
         rag_active = None
         if len(rag_results) >= 2:
@@ -158,7 +158,8 @@ def backfill(tenant_code: str = "mofa", owner_username: str = "owner", reset: bo
         print("评测中心只接收真实执行批次，跳过 Agent 合成回放基线设置")
 
         stats = {
-            "version": version,
+            "version": versions["rag_core"],
+            "versions": versions,
             "datasets": fetch_one(conn, "SELECT count(*) AS n FROM eval_datasets")["n"],
             "datasets_active": fetch_one(conn, "SELECT count(*) AS n FROM eval_datasets WHERE NOT archived")["n"],
             "legacy_datasets": fetch_one(conn, "SELECT count(*) AS n FROM eval_datasets WHERE archived")["n"],

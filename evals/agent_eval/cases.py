@@ -153,7 +153,7 @@ AGENT_LIVE_CASES: List[Dict[str, Any]] = [
 
 def _load_synthetic_cases() -> list[dict]:
     base = Path(__file__).resolve().parents[1] / "datasets"
-    candidates = sorted(base.glob("*/agent/research_cases.json"), key=lambda item: item.parent.parent.name)
+    candidates = sorted(base.glob("agent_v*/research_cases.json"), key=lambda item: item.parent.name)
     if not candidates:
         raise ValueError("未找到可用的调研合成用例集")
     path = candidates[-1]

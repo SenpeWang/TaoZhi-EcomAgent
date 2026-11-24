@@ -61,7 +61,7 @@ SOURCES: Dict[str, Tuple[str, str]] = {
         "https://arxiv.org/abs/1805.04655",
     ),
     "project_internal": ("本项目判定器与 BENCHMARK 口径",
-                         "../../../BENCHMARK.md"),
+                         "../../BENCHMARK.md"),
 }
 
 RAG_CAPABILITIES: Tuple[str, ...] = (

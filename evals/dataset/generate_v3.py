@@ -13,7 +13,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = Path(__file__).resolve().parent / "spec_v3"
-DEFAULT_OUT = ROOT / "evals" / "datasets" / "v3_20261124" / "rag"
+DEFAULT_OUT = ROOT / "evals" / "datasets" / "rag_v3_20261124"
 
 TRACK_COUNTS = {"golden": 30, "capability": 20, "regression": 15, "challenge": 10, "heldout": 15}
 TRACK_DIFFICULTY = {"golden": "medium", "capability": "hard", "regression": "easy",
@@ -205,7 +205,7 @@ def build_case(recipe: str, item: dict, frame: str, *, capability: str, sub: str
                         "supply_chain", "finance", "data", "security") else "product",
         "test_identity": {"logical_id": identity["logical_id"], "username": identity["username"],
                           "note": "身份由 spec_v3/org.yaml 建档，seed 映射到正式业务账号"},
-        "dataset": "v3_20261124/rag",
+        "dataset": "rag_v3_20261124",
     }
     return case
 
@@ -316,7 +316,7 @@ def build_dataset() -> tuple[list[dict], list[dict], list[dict], dict]:
     by_track = Counter(case["track"] for case in cases)
     by_sub = Counter((case["capability"], case["category"]) for case in cases)
     manifest = {
-        "dataset": "v3_20261124/rag",
+        "dataset": "rag_v3_20261124",
         "seed": scenarios["seed"],
         "spec_sha256": {path.name: sha256_file(path) for path in sorted(SPEC.glob("*.yaml"))},
         "counts": {

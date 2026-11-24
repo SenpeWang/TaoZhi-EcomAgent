@@ -253,7 +253,7 @@ def _resolve_rag_dataset(conn: Any, raw: dict, *, dataset_id: str | None, datase
     if legacy:
         report_git = raw.get("git") if isinstance(raw.get("git"), str) else ""
         row = datasets.ensure_legacy_dataset(conn, "rag", suite, report_git, source=mode)
-        return _dataset_row_fields(row, verified=False, catalog_version=datasets.current_version())
+        return _dataset_row_fields(row, verified=False, catalog_version=datasets.current_version(suite))
     version = block.get("version")
     if version:
         version = str(version)
@@ -286,7 +286,7 @@ def _resolve_rag_dataset(conn: Any, raw: dict, *, dataset_id: str | None, datase
         if row["suite"] and row["suite"] != suite:
             raise ValueError(f"报告口径对应的套件 {suite} 与数据集套件 {row['suite']} 不一致")
         verified = bool(row.get("content_sha256"))
-        catalog_version = row["version"] if verified else datasets.current_version()
+        catalog_version = row["version"] if verified else datasets.current_version(suite)
         return _dataset_row_fields(row, verified=verified, catalog_version=catalog_version)
     raise ValueError("RAG 报告未内嵌数据集版本，无法验证内容摘要；历史报告请使用 --legacy，"
                      "或显式指定 --dataset-id")
@@ -405,7 +405,7 @@ def _rag_gate(raw: dict) -> bool:
 def _rag_report(raw: dict, payload_sha: str, dataset: dict, *, scope: str, mode: str,
                 path: Path) -> tuple[dict, list[dict]]:
     """把 RAG 三层报告投影为统一批次与逐例判定。"""
-    catalog_version = dataset.get("_catalog_version") or datasets.current_version()
+    catalog_version = dataset.get("_catalog_version") or datasets.current_version("rag_core")
     cases_index = datasets.case_index(catalog_version, "rag_core")
     adv_index = datasets.case_index(catalog_version, "rag_adversarial")
     rows = [
