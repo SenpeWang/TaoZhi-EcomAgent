@@ -5,7 +5,12 @@ export type EvaluationScope = 'full' | 'quick' | 'retrieval' | 'adversarial' | '
 export type EvaluationJobState =
   'queued' | 'running' | 'review' | 'completed' | 'cancelled' | 'failed' | 'rejected' | 'legacy'
 export type EvaluationAuditAction =
-  'register_dataset' | 'register_profile' | 'trigger_run' | 'publish_run' | 'set_baseline'
+  | 'register_dataset'
+  | 'register_profile'
+  | 'trigger_run'
+  | 'publish_run'
+  | 'set_baseline'
+  | 'purge_data'
 export type EvaluationLayerName = 'retrieval' | 'adversarial' | 'behavior' | 'six_metrics'
 
 export interface EvaluationMetricSpec {
@@ -476,6 +481,7 @@ export const evaluationAuditActions: Record<EvaluationAuditAction, string> = {
   trigger_run: '触发评测',
   publish_run: '入库批次',
   set_baseline: '设置基线',
+  purge_data: '清理评测数据',
 }
 
 /**

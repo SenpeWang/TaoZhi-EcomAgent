@@ -13,7 +13,8 @@
 }
 .evaluation-filters .el-select,
 .evaluation-baseline-header .el-select {
-  width: min(215px, 100%);
+  width: 215px;
+  flex: 0 0 auto;
 }
 .evaluation-case-filter {
   width: 145px;
@@ -378,10 +379,10 @@
   gap: 5px;
   font-size: 12px;
   color: var(--tz-ink-muted);
-  min-width: 0;
+  min-width: 190px;
 }
 .evaluation-control-item .el-select {
-  width: min(190px, 100%);
+  width: 100%;
 }
 .evaluation-control-summary {
   flex: 1 1 260px;

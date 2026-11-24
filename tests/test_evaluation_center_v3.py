@@ -392,3 +392,19 @@ def test_rag_case_detail_accepts_colon_case_ids() -> None:
                        params={"limit": 1, "cursor": page["next_cursor"]}).json()
     assert second["items"][0]["case_id"] == "behavior:GEN-T-002"
     assert admin.get(f"/api/evaluations/runs/{run_id}/runs").status_code in (404, 405)
+
+
+def test_audit_log_accepts_purge_data_action() -> None:
+    """审计读接口必须接受数据清理动作 purge_data，避免整页响应校验失败。"""
+    _setup()
+    admin = _login("admin")
+    owner = _owner("admin")
+    with database_connection() as conn:
+        evaluation_repo.insert_audit_log(
+            conn, owner["tenant_id"], owner["id"], "purge_data", "purge_all",
+            {"mode": "all", "runs": 3},
+        )
+    response = admin.get("/api/evaluations/audit-logs", params={"limit": 30})
+    assert response.status_code == 200, response.text
+    actions = [item["action"] for item in response.json()["items"]]
+    assert "purge_data" in actions

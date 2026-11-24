@@ -112,7 +112,9 @@
                       formatMetricDelta(card.spec, card.delta)
                     }}</span>
                   </template>
-                  <template v-else>环比基线 —（不可比或缺少同口径基线）</template>
+                  <template v-else
+                    >环比基线 —（{{ baselineTrend ? '不可比或缺测' : '无同口径基线' }}）</template
+                  >
                 </span>
                 <small class="evaluation-meta"
                   >active 基线值 {{ formatMetricValue(card.spec, card.baseline) }} ·
@@ -748,6 +750,7 @@
       v-model="rawCaseDialog"
       :title="rawCaseTitle ? `原始用例 JSON：${rawCaseTitle}` : '原始用例 JSON'"
       width="min(880px, 94vw)"
+      :z-index="3000"
     >
       <p class="evaluation-meta">以下为该用例登记在数据集中的完整原始字段，未裁剪、未改名。</p>
       <pre class="evaluation-json">{{ rawCaseJson }}</pre>
@@ -886,7 +889,12 @@
       </template>
     </el-drawer>
 
-    <el-dialog v-model="caseJsonDialog" title="用例原始判定 JSON" width="min(900px, 94vw)">
+    <el-dialog
+      v-model="caseJsonDialog"
+      title="用例原始判定 JSON"
+      width="min(900px, 94vw)"
+      :z-index="3000"
+    >
       <p class="evaluation-meta">
         用例 {{ caseJsonCaseId }} · 以下为服务端返回的 expected / observed / verdicts
         原始字段，未裁剪。
@@ -902,7 +910,12 @@
       <pre class="evaluation-json">{{ caseJsonText }}</pre>
     </el-dialog>
 
-    <el-dialog v-model="profileDialog" title="登记不可变技术栈 / Prompt 版本" width="560px">
+    <el-dialog
+      v-model="profileDialog"
+      title="登记不可变技术栈 / Prompt 版本"
+      width="560px"
+      :z-index="3000"
+    >
       <el-form label-position="top">
         <el-form-item label="版本标签（唯一；留空按序号自动编号）">
           <el-input v-model="profileForm.version_tag" placeholder="留空自动编号，如 algo-v3" />
@@ -927,7 +940,12 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="triggerDialog" title="选择数据集与算法版本发起评测" width="560px">
+    <el-dialog
+      v-model="triggerDialog"
+      title="选择数据集与算法版本发起评测"
+      width="560px"
+      :z-index="3000"
+    >
       <el-form label-position="top">
         <el-form-item label="评测数据集版本">
           <el-select v-model="triggerForm.dataset_id" style="width: 100%">
@@ -998,7 +1016,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="baselineDialog" title="设为评测基线" width="500px">
+    <el-dialog v-model="baselineDialog" title="设为评测基线" width="500px" :z-index="3000">
       <el-form label-position="top">
         <el-form-item label="基线批次">
           <span>{{ baselineRun ? baselineRun.run_id : '—' }}</span>
@@ -1258,7 +1276,7 @@ const scopeOptions = computed<{ value: EvaluationScope; label: string }[]>(() =>
   if (kind) {
     return Object.entries(kind.scopes).map(([value, item]) => ({
       value: value as EvaluationScope,
-      label: item.label,
+      label: evaluationScopes[value as EvaluationScope] ?? item.label,
     }))
   }
   const fallback: EvaluationScope[] =
@@ -1291,13 +1309,11 @@ const baselineTrend = computed(() => {
     null
   )
 })
-const baselineComparable = computed(
-  () =>
-    Boolean(latestTrend.value) &&
-    Boolean(baselineTrend.value) &&
-    latestTrend.value!.comparable &&
-    latestTrend.value!.run_id !== baselineTrend.value!.run_id,
-)
+const baselineComparable = computed(() => {
+  const latest = latestTrend.value
+  const baseline = baselineTrend.value
+  return Boolean(latest && baseline && latest.comparable)
+})
 const baselineHint = computed(() => {
   if (!trends.value) return ''
   if (!trends.value.baseline)
@@ -1335,7 +1351,12 @@ const aggregateStats = computed(() => {
     label: spec?.label ?? '通过率',
   }
 })
-const baselineMetricLabel = computed(() => aggregateMetric.value?.label ?? '通过率')
+const baselineMetricLabel = computed(() => {
+  const spec = aggregateMetric.value
+  return spec && (spec.key === 'task_completion' || spec.key === 'pass_rate')
+    ? spec.label
+    : '通过率'
+})
 
 const runEndpoint = computed(() => {
   const query = new URLSearchParams({
