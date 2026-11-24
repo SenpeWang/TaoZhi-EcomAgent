@@ -7,12 +7,12 @@ REPORTS_DIR ?= $(PROJECT_ROOT)/evals/reports/agent_eval
 PUBLISH_ARGS ?=
 REPORT ?=
 BACKFILL_ARGS ?=
-CENTER_VERSION ?= v1_20261123
+CENTER_VERSION ?= v3_20261124
 REGISTER_ARGS ?=
 TEST_ENV := ECOM_MODE=test PYTHONPATH=$(PROJECT_ROOT)/src
 COMPOSE := docker compose
 
-.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check evals-center-register evals-center-publish evals-center-backfill evals-center-check evals-center-purge
+.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check evals-center-register evals-center-publish evals-center-backfill evals-center-check evals-center-purge evals-agent-heldout
 
 GIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null)
 COMMIT_BASE ?= origin/main
@@ -127,8 +127,11 @@ evals-agent-publish:
 	@$(MAKE) --no-print-directory evals-publish
 
 evals-agent-replay:
-	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/v1_20261123/agent/web_replay.json
-	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/v1_20261123/agent/research_replay.json
+	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/v3_20261124/agent/web_replay.json
+	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/v3_20261124/agent/research_replay.json
+
+evals-agent-heldout:
+	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --include-heldout --replay evals/datasets/v3_20261124/agent/research_replay.json
 
 evals-sync:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }

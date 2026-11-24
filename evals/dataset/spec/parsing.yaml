@@ -106,3 +106,33 @@ documents:
       - ["最小起订量", "100 台"]
       - ["版本标识", "五页全表V5"]
     facts: ["多页采购合集 2026Q4", "WZ-30", "Qi2 15W", "100 台", "PARSE-MULTI-5P"]
+
+  - doc_id: SYN_PARSE_PDF_T07
+    title: 保修条款（PDF 多页）
+    format: pdf
+    pages: 2
+    header: 保修制度 2026 版
+    footer: 文档编号 PARSE-WARRANTY-2P
+    rows:
+      - ["整机保修", "18 个月"]
+      - ["配件保修", "12 个月"]
+      - ["受理时效", "48 小时"]
+    facts: ["18 个月", "12 个月", "48 小时", "PARSE-WARRANTY-2P"]
+
+  - doc_id: SYN_PARSE_PDF_T08
+    title: 物流时效与赔付表（PDF）
+    format: pdf
+    rows:
+      - ["华东时效", "24 小时"]
+      - ["偏远时效", "72 小时"]
+      - ["赔付上限", "100 元"]
+    facts: ["24 小时", "72 小时", "100 元"]
+
+  - doc_id: SYN_PARSE_DOCX_T06
+    title: 开票流程（DOCX 表格）
+    format: docx
+    rows:
+      - ["专票税率", "13%"]
+      - ["开票时限", "7 个工作日"]
+      - ["红冲期限", "30 日"]
+    facts: ["13%", "7 个工作日", "30 日"]

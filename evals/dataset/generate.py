@@ -134,20 +134,20 @@ def emit_corpus_docs(fixtures, corpus):
 
 _DEFAULT_DOMAIN_BY_CAT = {
     "product": "product",
-    "compat": "compatibility",
-    "aftersale": "after_sales",
+    "compatibility": "compatibility",
+    "after_sales": "after_sales",
     "calculation": "after_sales",
-    "troubleshoot": "coach",
-    "coach": "coach",
+    "troubleshooting": "sales_coaching",
+    "sales_coaching": "sales_coaching",
     "operations": "operations",
-    "supply": "supply",
+    "supply_chain": "supply_chain",
     "finance": "finance",
     "chatbi": "data",
-    "role": "security",
-    "grant": "security",
+    "role_based_access": "security",
+    "access_grant": "security",
     "revocation": "security",
-    "injection": "security",
-    "leakage": "security",
+    "prompt_injection": "security",
+    "data_leakage": "security",
 }
 
 
@@ -247,7 +247,7 @@ def sha256_file(p: Path) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="从 spec 生成独立评测数据集")
-    ap.add_argument("--out", default=str(ROOT / "evals/datasets/v1_20261123/rag"))
+    ap.add_argument("--out", default=str(ROOT / "evals/datasets/v2_20261124/rag"))
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -294,7 +294,7 @@ def main() -> int:
         "identities": [i["logical_id"] for i in org["identities"]],
         "canaries": fixtures["canaries"],
         "notes": "确定性生成：同 spec 同种子输出逐字节一致；manifest 不含时间戳，"
-                 "版本信息由 git 承担。对抗层沿用 evals/datasets/golden_adversarial.json，"
+                 "版本信息由 git 承担。对抗层单独登记为同目录 golden_adversarial.json，"
                  "其权限用例由本包夹具背书。",
     }
     (out / "cases.jsonl").write_text(

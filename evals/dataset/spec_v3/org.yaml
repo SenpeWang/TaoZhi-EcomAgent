@@ -1,0 +1,49 @@
+version: 1
+
+nodes:
+  - id: SYN_NODE_OP
+    name: 评测-产品适配组
+    kind: team
+    parent_by_name: 电商运营部
+  - id: SYN_NODE_CS
+    name: 评测-售后组
+    kind: team
+    parent_by_name: 电商运营部
+
+identities:
+  - logical_id: SYN_A_STAFF001
+    username: staff
+    display_name: 运营员工
+    role: employee
+    node: SYN_NODE_OP
+  - logical_id: SYN_A_STAFF002
+    username: staff
+    display_name: 运营员工
+    role: employee
+    node: SYN_NODE_OP
+  - logical_id: SYN_A_STAFF003
+    username: staff
+    display_name: 运营员工
+    role: employee
+    node: SYN_NODE_OP
+  - logical_id: SYN_A_STAFF004
+    username: staff
+    display_name: 运营员工
+    role: employee
+    node: SYN_NODE_CS
+  - logical_id: SYN_A_LDR001
+    username: leader
+    display_name: 运营组长
+    role: leader
+    node: SYN_NODE_OP
+  - logical_id: SYN_A_BOSS001
+    username: owner
+    display_name: 公司老板
+    role: boss
+    node: COMPANY_ROOT
+  - logical_id: SYN_A_ADMIN001
+    username: admin
+    display_name: 系统管理员
+    role: employee
+    node: SYN_NODE_OP
+    system_admin: true

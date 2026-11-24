@@ -1,0 +1,201 @@
+version: 1
+
+documents:
+  - doc_id: SYN_PARSE_PDF_T01
+    title: LX-30 120W 氮化镓充电器规格表（PDF）
+    format: pdf
+    header: 内部资料 请勿外传
+    rows:
+      - ["功率", "120W"]
+      - ["接口", "双 C 口"]
+      - ["协议", "PD3.0"]
+    facts: ["120W", "双 C 口", "PD3.0"]
+
+  - doc_id: SYN_PARSE_PDF_T02
+    title: 退款政策（PDF 页眉页脚版）
+    format: pdf
+    header: 售后制度 版本 V2.1
+    footer: 生效日期 2026-09-01
+    rows:
+      - ["退款时限", "48 小时"]
+      - ["审批层级", "逐级上报"]
+    facts: ["V2.1", "48 小时", "生效日期 2026-09-01"]
+
+  - doc_id: SYN_PARSE_PDF_T03
+    title: LX-21 140W 充电器参数（PDF 多页）
+    format: pdf
+    pages: 2
+    rows:
+      - ["重量", "210g"]
+      - ["价格", "299 元"]
+      - ["场景", "笔记本与手机同充"]
+    facts: ["210g", "299 元"]
+
+  - doc_id: SYN_PARSE_PDF_T04
+    title: iPhone 15 快充兼容表（PDF）
+    format: pdf
+    header: 兼容性速查 V1.4
+    rows:
+      - ["机型", "iPhone 15"]
+      - ["结论", "支持 PD 快充，峰值 65W"]
+    facts: ["iPhone 15", "峰值 65W"]
+
+  - doc_id: SYN_PARSE_PDF_T05
+    title: 换货流程说明（PDF）
+    format: pdf
+    footer: 客服中心 2026 年修订
+    rows:
+      - ["换货周期", "15 天"]
+      - ["运费", "包邮"]
+    facts: ["15 天", "包邮"]
+
+  - doc_id: SYN_PARSE_DOCX_T01
+    title: LX-21 140W 充电器规格表（DOCX 表格）
+    format: docx
+    rows:
+      - ["功率", "140W"]
+      - ["接口", "三 C 口"]
+      - ["协议", "PD3.1 EPR"]
+    facts: ["140W", "三 C 口", "PD3.1 EPR"]
+
+  - doc_id: SYN_PARSE_DOCX_T02
+    title: 商品资料备案（DOCX 页眉页脚）
+    format: docx
+    header: 备案编号 BA-2026-0917
+    footer: 版本 V3.0
+    rows:
+      - ["备案主体", "绿联数码"]
+      - ["有效期", "三年"]
+    facts: ["BA-2026-0917", "V3.0", "三年"]
+
+  - doc_id: SYN_PARSE_DOCX_T03
+    title: 售后政策（DOCX）
+    format: docx
+    rows:
+      - ["退款时限", "24 小时"]
+      - ["无理由期限", "7 天"]
+    facts: ["24 小时", "7 天"]
+
+  - doc_id: SYN_PARSE_DOCX_T04
+    title: MC-500 磁吸线参数（DOCX 表格）
+    format: docx
+    rows:
+      - ["重量", "46g"]
+      - ["线长", "1.5m"]
+      - ["功率", "240W"]
+    facts: ["46g", "1.5m", "240W"]
+
+  - doc_id: SYN_PARSE_DOCX_T05
+    title: 保修条款（DOCX）
+    format: docx
+    header: 保修政策 2026 版
+    rows:
+      - ["保修期", "12 个月"]
+      - ["受理渠道", "官方旗舰店"]
+    facts: ["12 个月", "官方旗舰店", "保修政策 2026 版"]
+
+  - doc_id: SYN_PARSE_PDF_T06
+    title: WZ-30 多页渠道供货参数表（5 页 PDF）
+    format: pdf
+    pages: 5
+    header: 多页采购合集 2026Q4
+    footer: 文档编号 PARSE-MULTI-5P
+    rows:
+      - ["型号", "WZ-30"]
+      - ["无线功率", "Qi2 15W"]
+      - ["最小起订量", "100 台"]
+      - ["版本标识", "五页全表V5"]
+    facts: ["多页采购合集 2026Q4", "WZ-30", "Qi2 15W", "100 台", "PARSE-MULTI-5P"]
+
+  - doc_id: SYN_PARSE_PDF_T07
+    title: 保修条款（PDF 多页）
+    format: pdf
+    pages: 2
+    header: 保修制度 2026 版
+    footer: 文档编号 PARSE-WARRANTY-2P
+    rows:
+      - ["整机保修", "18 个月"]
+      - ["配件保修", "12 个月"]
+      - ["受理时效", "48 小时"]
+    facts: ["18 个月", "12 个月", "48 小时", "PARSE-WARRANTY-2P"]
+
+  - doc_id: SYN_PARSE_PDF_T08
+    title: 物流时效与赔付表（PDF）
+    format: pdf
+    rows:
+      - ["华东时效", "24 小时"]
+      - ["偏远时效", "72 小时"]
+      - ["赔付上限", "100 元"]
+    facts: ["24 小时", "72 小时", "100 元"]
+
+  - doc_id: SYN_PARSE_DOCX_T06
+    title: 开票流程（DOCX 表格）
+    format: docx
+    rows:
+      - ["专票税率", "13%"]
+      - ["开票时限", "7 个工作日"]
+      - ["红冲期限", "30 日"]
+    facts: ["13%", "7 个工作日", "30 日"]
+
+  - doc_id: SYN_PARSE_PDF_T09
+    title: LX-22 100W 充电器规格表（PDF）
+    format: pdf
+    header: 产品规格内部版 2026Q4
+    rows:
+      - ["功率", "100W"]
+      - ["接口", "双 C 口"]
+      - ["协议", "PD3.0 与 PPS"]
+      - ["重量", "168g"]
+    facts: ["100W", "双 C 口", "PD3.0 与 PPS", "168g"]
+
+  - doc_id: SYN_PARSE_PDF_T10
+    title: 平台佣金率规范（PDF 页眉页脚版）
+    format: pdf
+    header: 财务合规 2026Q4
+    footer: 生效日期 2026-10-01
+    rows:
+      - ["天猫佣金率", "4.5%"]
+      - ["抖音佣金率", "3%"]
+      - ["小程序佣金率", "2%"]
+    facts: ["4.5%", "3%", "2%", "生效日期 2026-10-01"]
+
+  - doc_id: SYN_PARSE_PDF_T11
+    title: 质量召回响应规范（PDF 多页）
+    format: pdf
+    pages: 2
+    header: 质量体系文件
+    footer: 文档编号 PARSE-RECALL-2P
+    rows:
+      - ["冻结时限", "24 小时"]
+      - ["渠道下架", "12 小时"]
+      - ["回收时限", "72 小时"]
+    facts: ["24 小时", "12 小时", "72 小时", "PARSE-RECALL-2P"]
+
+  - doc_id: SYN_PARSE_DOCX_T07
+    title: 以旧换新折抵规则 V2.0（DOCX 表格）
+    format: docx
+    rows:
+      - ["A 级折抵", "55%"]
+      - ["B 级折抵", "40%"]
+      - ["折抵上限", "1000 元"]
+    facts: ["55%", "40%", "1000 元"]
+
+  - doc_id: SYN_PARSE_DOCX_T08
+    title: 会员积分规则 V2.0（DOCX 页眉页脚）
+    format: docx
+    header: 会员体系文件 2026-11-01
+    footer: 版本 V2.0
+    rows:
+      - ["积分有效期", "12 个月"]
+      - ["兑换比例", "100 积分抵 1 元"]
+      - ["抵扣上限", "订单金额 20%"]
+    facts: ["2026-11-01", "V2.0", "12 个月", "100 积分抵 1 元", "订单金额 20%"]
+
+  - doc_id: SYN_PARSE_DOCX_T09
+    title: 上门安装服务制度（DOCX 表格）
+    format: docx
+    rows:
+      - ["服务费", "39 元"]
+      - ["上门时效", "48 小时"]
+      - ["偏远加收", "20 元"]
+    facts: ["39 元", "48 小时", "20 元"]

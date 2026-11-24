@@ -1,0 +1,121 @@
+{
+  "dataset": "generated/v2",
+  "seed": 20261018,
+  "spec_sha256": {
+    "corpus.yaml": "4bd29fe6a64ebadc8f1eccbf2f83af59ba64cad333fd4315269635d382cb50a1",
+    "fixtures.yaml": "1e6f96a260ba15fc65f8ec0e1b930630d3dbe529e36b9515ef7ecf2dbd12df79",
+    "org.yaml": "1c86ee2652329d95c2029d3faee59566ac5509d6d5d543d7278b03fae51e40a4",
+    "parsing.yaml": "3065e5f3f1bfa08c517cf08591c65e46c14bd978a8a02567965aae086420bc16",
+    "templates.yaml": "fc21a28ddc78968df2d258da6127e3bf3777a8d996569d4b3f70c999dd7de087"
+  },
+  "counts": {
+    "cases": 200,
+    "by_category": {
+      "access_grant": 3,
+      "after_sales": 7,
+      "ambiguity": 5,
+      "calculation": 8,
+      "chatbi": 12,
+      "citation": 7,
+      "compatibility": 10,
+      "conflict": 6,
+      "data_leakage": 3,
+      "edge_case": 5,
+      "exclusion": 4,
+      "finance": 4,
+      "insufficient_evidence": 8,
+      "long_context": 7,
+      "multi_document": 9,
+      "multi_turn": 14,
+      "operations": 6,
+      "parsing": 11,
+      "product": 16,
+      "prompt_injection": 4,
+      "revocation": 3,
+      "robustness": 16,
+      "role_based_access": 8,
+      "sales_coaching": 5,
+      "supply_chain": 6,
+      "timeliness": 8,
+      "troubleshooting": 5
+    },
+    "by_dimension": {
+      "answerability": {
+        "answerable": 148,
+        "partial": 16,
+        "unanswerable": 36
+      },
+      "qtype": {
+        "aggregation": 2,
+        "ambiguity": 5,
+        "comparison": 14,
+        "edge_case": 16,
+        "fact": 96,
+        "false_premise": 2,
+        "multi_hop": 16,
+        "process": 8,
+        "security": 32,
+        "troubleshooting": 9
+      },
+      "difficulty": {
+        "easy": 47,
+        "hard": 62,
+        "medium": 91
+      },
+      "source": {
+        "adversarial": 15,
+        "badcase": 7,
+        "real": 6,
+        "synthetic": 172
+      },
+      "risk": {
+        "high": 46,
+        "low": 109,
+        "medium": 45
+      }
+    },
+    "by_domain_role": {
+      "after_sales": 17,
+      "compatibility": 12,
+      "data": 12,
+      "finance": 4,
+      "operations": 8,
+      "product": 105,
+      "sales_coaching": 12,
+      "security": 23,
+      "supply_chain": 7
+    },
+    "by_identity_role": {
+      "boss": 11,
+      "employee": 178,
+      "leader": 11
+    },
+    "templates": 180
+  },
+  "docs": {
+    "total": 56,
+    "by_kind": {
+      "conflict": 4,
+      "fixture": 9,
+      "guide": 17,
+      "parsing": 14,
+      "policy": 5,
+      "product": 7
+    }
+  },
+  "identities": [
+    "SYN_A_STAFF001",
+    "SYN_A_STAFF002",
+    "SYN_A_STAFF003",
+    "SYN_A_STAFF004",
+    "SYN_A_LDR001",
+    "SYN_A_BOSS001",
+    "SYN_A_ADMIN001"
+  ],
+  "canaries": [
+    "SYN-CANARY-A01",
+    "SYN-CANARY-A-COST",
+    "SYN-CANARY-A-PROC"
+  ],
+  "notes": "确定性生成：同 spec 同种子输出逐字节一致；manifest 不含时间戳，版本信息由 git 承担。对抗层单独登记为同目录 golden_adversarial.json，其权限用例由本包夹具背书。"
+}
