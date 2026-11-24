@@ -103,6 +103,7 @@ class EvaluationDataset(BaseModel):
     source: EvaluationMode
     suite: str = ""
     archived: bool = False
+    execution_modes: list[str] = Field(default_factory=list)
     content_sha256: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
     case_count: int

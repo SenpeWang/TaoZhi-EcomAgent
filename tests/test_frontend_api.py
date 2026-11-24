@@ -260,7 +260,8 @@ import { workspaceNavigation } from './web/src/app/workspaceNavigation.ts'
 import { evaluationMeasures, evaluationRunPath, evaluationSource, formatEvaluationRatio, isBaselineCandidate } from './web/src/features/observability/evaluationTypes.ts'
 
 const pages = workspaceNavigation({id:'member'}, {}, 0, 0).flatMap(group => group.items)
-assert.ok(pages.find(item => item.page === '评测中心'))
+assert.ok(pages.find(item => item.page === '测评启动'))
+assert.ok(pages.find(item => item.page === '测评结果'))
 assert.deepEqual(workspaceNavigation({must_change:true}, {}, 0, 0)
   .flatMap(group => group.items.map(item => item.page)), ['个人中心'])
 const run = {run_id:'test-a', mode:'live',dataset_sha256:'1'.repeat(64),judges_sha256:'2'.repeat(64),

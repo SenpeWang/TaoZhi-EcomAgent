@@ -21,6 +21,7 @@ AGENT_DATASET = "agent_research"
 AGENT_MIN_SCHEMA = 3
 SCOPE_VALUES = ("full", "quick", "retrieval", "adversarial", "behavior")
 MODE_VALUES = ("live", "synthetic_trace_regrade")
+REAL_EVAL_MODES: tuple[str, ...] = ("live",)
 _RAG_LAYERS = ("retrieval", "adversarial", "behavior", "six_metrics")
 _DROPPED_LAYER_KEYS = ("per_case", "detail")
 
@@ -542,6 +543,8 @@ def publish_report(path: Path, *, tenant_id: str, owner_id: str, kind: str = "au
                                            mode=resolved_mode, legacy=legacy)
             run, rows = _rag_report(raw, payload_sha, dataset, scope=resolved_scope,
                                     mode=resolved_mode, path=path)
+        if run.get("mode") not in REAL_EVAL_MODES:
+            raise ValueError("评测中心只接收真实执行（live）报告，合成/回放结果不进入评测中心")
         if profile_id:
             run["profile_id"] = profiles.ensure_profile(
                 conn, tenant_id, owner_id, run["eval_kind"], run["dataset_version"],

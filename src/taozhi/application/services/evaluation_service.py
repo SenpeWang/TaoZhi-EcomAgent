@@ -11,6 +11,8 @@ from taozhi.domain.entities import Principal
 from taozhi.config import ROOT
 from taozhi.domain import evaluation_metrics
 from taozhi.domain.errors import Denied
+
+REAL_EVAL_MODES: tuple[str, ...] = ("live",)
 from taozhi.domain.evaluation_comparison import pair_case_results
 from taozhi.domain.roles import ROLE_LEVEL_BOSS
 from taozhi.infrastructure.knowledge.storage import get_blob_store
@@ -77,12 +79,21 @@ def list_runs(p: Principal, *, owner_id: str | None, eval_kind: str | None, mode
     return {"items": items, "next_cursor": following}
 
 
+def real_modes(metadata: dict | None) -> list[str]:
+    """返回数据集可用于评测中心真实结果的执行方式（仅 live）。"""
+    declared = (metadata or {}).get("modes") or ["live"]
+    modes = [mode for mode in declared if mode in REAL_EVAL_MODES]
+    return modes or ["live"]
+
+
 def list_datasets(p: Principal, *, eval_kind: str | None = None, version: str | None = None,
                   include_archived: bool = False) -> dict:
     """汇总当前账号可见范围内的数据集版本与批次指标。"""
     with database_connection() as conn:
         rows = evaluation_repo.datasets(conn, p.tenant_id, visible_owner_id(p), eval_kind=eval_kind,
                                         version=version, include_archived=include_archived)
+    for row in rows:
+        row["execution_modes"] = real_modes(row.get("metadata"))
     return {"items": rows}
 
 
@@ -93,6 +104,7 @@ def get_dataset(p: Principal, dataset_id: str, *, cursor: str | None, limit: int
         row = evaluation_repo.dataset_detail(conn, p.tenant_id, visible_owner_id(p), dataset_id)
     if row is None:
         raise Denied("评测数据集不存在", "NOT_FOUND", 404)
+    row["execution_modes"] = real_modes(row.get("metadata"))
     payload = row.pop("cases_payload") or []
     if suite:
         payload = [case for case in payload if (case.get("suite") or "") == suite]
@@ -311,9 +323,10 @@ def trigger(p: Principal, payload: dict) -> dict:
         allowed_scopes = metadata.get("scopes") or ["full"]
         if payload["scope"] not in allowed_scopes:
             raise Denied(f"该数据集支持的口径为 {'、'.join(allowed_scopes)}", "INVALID_SCOPE", 422)
-        allowed_modes = metadata.get("modes") or ["live"]
+        allowed_modes = real_modes(metadata)
         if payload["mode"] not in allowed_modes:
-            raise Denied(f"该数据集支持的执行方式为 {'、'.join(allowed_modes)}", "INVALID_MODE", 422)
+            raise Denied("评测中心只接收真实执行（live）结果，合成/回放结果不进入评测中心",
+                         "REAL_MODE_ONLY", 422)
         if payload.get("profile_id"):
             profile = evaluation_repo.profile_by_id(conn, p.tenant_id, payload["profile_id"])
             if profile is None or profile["eval_kind"] != payload["eval_kind"]:

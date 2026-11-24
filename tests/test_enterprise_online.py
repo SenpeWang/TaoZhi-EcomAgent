@@ -1581,8 +1581,8 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
     }
     baseline = {
         "schema_version": REPORT_SCHEMA_VERSION, "run_id": "baseline", "timestamp": "20261120_120000_000001",
-        "mode": "synthetic_trace_regrade", "dataset_sha256": "a" * 64, "judges_sha256": "b" * 64,
-        "gate": {"passed": True}, "transcript_sha256": "1" * 64,
+        "mode": "live", "dataset_sha256": "a" * 64, "judges_sha256": "b" * 64,
+        "gate": {"passed": True}, "transcript_sha256": None, "counterexamples_sha256": None,
         "metrics": {**group_metrics([]), "selected": 2, "passed": 2},
         "case_results": [sample, {**sample, "case_id": "SYN-B"}],
     }
@@ -1608,7 +1608,7 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
     current = {
         **baseline, "run_id": "candidate", "gate": {"passed": False},
         "metrics": {**baseline["metrics"], "passed": 1, "failed": 1},
-        "transcript_sha256": "1" * 64, "counterexamples_sha256": "2" * 64, "model_config_sha256": "3" * 64,
+        "transcript_sha256": None, "counterexamples_sha256": None, "model_config_sha256": "3" * 64,
         "case_results": [{**sample, "status": "failed", "score": 0}, baseline["case_results"][1]],
         "comparison": {"baseline_sha256": fingerprint(baseline)},
     }
@@ -1616,8 +1616,8 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
     admin, staff = clients["admin"], clients["staff"]
     listing = staff.get(url).json()["items"]
     assert [item["run_id"] for item in listing] == ["candidate"]
-    for key in ("transcript_sha256", "counterexamples_sha256", "model_config_sha256"):
-        assert listing[0][key] == current[key]
+    assert listing[0]["transcript_sha256"] is None and listing[0]["counterexamples_sha256"] is None
+    assert listing[0]["model_config_sha256"] == current["model_config_sha256"]
     assert listing[0]["dataset_name"] == "agent_research"
     assert listing[0]["dataset_id"] == "agent_research-v0_legacy"
     assert listing[0]["dataset_version"] == "v0_legacy"
@@ -1627,7 +1627,7 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
     catalog = admin.get("/api/evaluations/datasets", params={"include_archived": "true"}).json()["items"]
     entry = next(item for item in catalog if item["dataset_id"] == listing[0]["dataset_id"])
     assert entry["batch_count"] == 2 and entry["case_count"] == 2 and entry["passed_batches"] == 1
-    assert entry["source"] == "synthetic_trace_regrade"
+    assert entry["source"] == "live"
     assert staff.get("/api/evaluations/runs", params={"dataset_id": listing[0]["dataset_id"]}).status_code == 200
     catalog_ids = {item["dataset_id"] for item in staff.get(
         "/api/evaluations/datasets", params={"include_archived": "true"}).json()["items"]}
@@ -1656,6 +1656,7 @@ def test_evaluation_import_permissions_baselines_and_pagination(clients, tmp_pat
     assert admin.get(f"{url}/candidate/comparison", params={"baseline_id": "baseline"}).json() == compared
     assert admin.get(f"{url}/candidate/comparison", params={"baseline_id": "candidate"}).status_code == 422
     assert publish({**baseline, "run_id": "other_mode", "mode": "live", "transcript_sha256": None,
+                    "judges_sha256": "c" * 64,
                     "comparison": {"baseline_sha256": fingerprint(current)}}, tenant, users["staff"])
     assert staff.get(f"{url}/other_mode").json()["comparison"] is None
     assert staff.get(f"{url}/candidate/comparison", params={"baseline_id": "other_mode"}).status_code == 422

@@ -75,7 +75,7 @@ make evals-center-register                     # 登记 V1 数据集版本（幂
 make evals-center-publish REPORT="$REPORT_PATH"
 ```
 
-进入「运行分析 → 评测中心」，页面分为「概览 / 数据集 / 批次 / 基线 / 任务 / 审计」页签：顶部先选评测类型、数据集版本、口径与执行方式，概览与批次均按同一口径渲染同一组指标；「数据集」页签可查看登记文件清单、完整原始用例与原始 JSON/文件下载，链路可追溯。可按数据集版本、算法版本、口径与门禁状态筛选批次，打开批次查看逐例预期、实际工具步骤、判定维度与故障类型，并下载原始报告。对照基线要求数据集版本、口径、执行方式与判定器版本一致；真实执行只有在关联到获准查看的业务任务时才可打开轨迹中台，合成回放展示各步观测，参数只显示字段名。CLI 生成新报告时可附加 `--publish "$TENANT_ID" "$OWNER_ID"` 同步归档，门禁失败的批次也可查看。完整版本模型、接口与 Worker 执行见下文「评测中心」。
+进入「运行分析 → 测评启动 / 测评结果」，两者各含 `Agent`、`RAG` 二级目录。「测评启动」登记算法版本、选择数据集版本/口径/真实执行方式发起评测并跟踪任务；「测评结果」按「概览 / 数据集 / 批次 / 基线 / 审计」展示结果，指标卡与批次列由指标目录按口径动态渲染；「数据集」页签可查看登记文件清单、完整原始用例与原始 JSON/文件下载，链路可追溯。可按数据集版本、算法版本、口径与门禁状态筛选批次，打开批次查看逐例预期、实际工具步骤、判定维度与故障类型，并下载原始报告。对照基线要求数据集版本、口径、执行方式与判定器版本一致；真实执行只有在关联到获准查看的业务任务时才可打开轨迹中台。CLI 生成新报告时可附加 `--publish "$TENANT_ID" "$OWNER_ID"` 同步归档，门禁失败的批次也可查看。完整版本模型、接口与 Worker 执行见下文「评测中心」。
 
 ### 复现合成正例与反例
 
@@ -84,7 +84,7 @@ PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay ev
 PYTHONPATH=src python -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/v1_20261123/agent/research_replay.json --counterexamples evals/datasets/v1_20261123/agent/research_counterexamples.json --compare "$BASELINE_REPORT"
 ```
 
-第二条命令的 `BASELINE_REPORT` 取第一条打印的报告路径。反例保留输入、版本与其余观测，只修改一个执行步骤或答案，门禁将按设计返回非零退出码。两批均归档后，在评测中心选择「合成反例复核」批次，并与「合成回放」批次对照，即可查看每个用例由通过变为失败的原因。批次详情会展示报告中可用的回放记录、反例集和模型配置的 SHA-256 摘要，供复核时确认版本。
+第二条命令的 `BASELINE_REPORT` 取第一条打印的报告路径。反例保留输入、版本与其余观测，只修改一个执行步骤或答案，门禁将按设计返回非零退出码。合成报告与反例报告用于本地/CI 回归对比，直接在报告内按用例配对查看修复与退化；评测中心只接收真实执行（`live`）结果，合成回放不进入中心。
 
 | 工作 | 入口与输出 |
 |---|---|
@@ -189,7 +189,9 @@ make evals-archive-check   # 校验快照可读并把登记 md5 同步为当前�
 
 ## 评测中心
 
-工作台「运行分析 → 评测中心」的写入链路只有一条：`evals/center`。数据集登记、报告发布、算法版本、基线与历史回填都从它进入；`evals/agent_eval/publish.py` 与 `evals/rag_eval/publish.py` 保留为兼容旧命令的薄入口，内部委托同一实现。读取走 `/api/evaluations/*`，写入仅限老板与系统管理员，并写 `eval_audit_logs` 留痕。
+评测中心只接收真实执行（`live`）结果：`publish` 拒绝合成/回放报告，触发接口对非 `live` 方式返回 `REAL_MODE_ONLY`；合成回放仅用于本地与 CI 回归。
+
+工作台「运行分析 → 测评启动 / 测评结果」的写入链路只有一条：`evals/center`。数据集登记、报告发布、算法版本、基线与历史回填都从它进入；`evals/agent_eval/publish.py` 与 `evals/rag_eval/publish.py` 保留为兼容旧命令的薄入口，内部委托同一实现。读取走 `/api/evaluations/*`，写入仅限老板与系统管理员，并写 `eval_audit_logs` 留痕。
 
 ### 版本模型
 
@@ -200,7 +202,7 @@ make evals-archive-check   # 校验快照可读并把登记 md5 同步为当前�
 | 批次 | 报告自带 `run_id` | `eval_runs` 同时记录 `dataset_id`/`dataset_version`、`scope`、`mode` 与 `profile_id`，形成「数据集版本 × 算法版本 × 口径 × 执行方式」四元组。 |
 | 基线 | `baseline_id` | 绑定 `(eval_kind, dataset_version, scope, mode)` 的唯一 active；设置新基线时旧基线转历史保留，不清空。 |
 
-- 口径 `scope`：`full` / `quick` / `retrieval` / `adversarial` / `behavior`；执行方式 `mode`：`live` / `synthetic_trace_regrade`。触发评测时两者的取值必须落在数据集描述符登记的 `scopes`/`modes` 内。
+- 口径 `scope`：`full` / `quick` / `retrieval` / `adversarial` / `behavior`；评测中心执行方式 `mode` 只有 `live`（真实执行）。数据集接口通过 `execution_modes` 暴露可用于中心的方式；合成回放（`synthetic_trace_regrade`）仅在本地/CI 运行器使用，不进入评测中心。触发评测时 `scope` 必须落在数据集描述符登记的 `scopes` 内。
 - 历史缺失内嵌快照的报告统一绑定当时运行时快照的 `algo-v1`，不冒充后来的算法版本。
 
 ### V0 / V1 归属
@@ -242,7 +244,7 @@ make evals-center-check                             # 数据集 sha / 基线唯�
 
 | 方法与路径 | 用途 | 权限 |
 | --- | --- | --- |
-| `GET /api/evaluations/datasets` | 数据集版本目录，支持 `eval_kind`、`version`、`include_archived` | 登录账号，按可见发起人范围汇总 |
+| `GET /api/evaluations/datasets` | 数据集版本目录，含 `execution_modes`（评测中心可用的真实执行方式），支持 `eval_kind`、`version`、`include_archived` | 登录账号，按可见发起人范围汇总 |
 | `GET /api/evaluations/datasets/{dataset_id}` | 数据集详情与原始用例清单（完整字段），`cursor` 偏移分页，可按 `suite` 过滤 | 同上 |
 | `GET /api/evaluations/datasets/{dataset_id}/raw` | 数据集全部原始用例与登记文件 sha256，供链路透明查看/下载 | 同上 |
 | `GET /api/evaluations/datasets/{dataset_id}/files` | 按登记清单下载数据集原始文件（`path` 参数），响应头 `X-Content-Sha256` 校验 | 同上，未登记路径拒绝 |
@@ -271,7 +273,7 @@ make evals-center-check                             # 数据集 sha / 基线唯�
 评测任务与资料解析、问答共用任务队列，`jobs.kind=evaluation`：
 
 1. `POST /runs/trigger` 先校验数据集未归档、类型/口径/执行方式与描述符一致、算法版本存在，且同租户没有排队或执行中的评测任务，然后创建任务并写 `trigger_run` 审计。
-2. Worker 认领后由 [`src/taozhi/application/evaluation/execution.py`](../src/taozhi/application/evaluation/execution.py) 启动运行器子进程：Agent 走 `python -m evals.agent_eval.runner --output-dir … --progress-jsonl …`（合成回放追加 `--dataset synthetic --replay …`）；RAG 按口径走 `python -m evals.rag_eval.run` 的 `--full`/`--quick`/`--retrieval-only`/`--adversarial-only`/`--behavior-only`，并带 `--report-path … --progress-jsonl …`。
+2. Worker 认领后由 [`src/taozhi/application/evaluation/execution.py`](../src/taozhi/application/evaluation/execution.py) 启动运行器子进程：Agent 以真实调研模式走 `python -m evals.agent_eval.runner --output-dir … --progress-jsonl …`；RAG 按口径走 `python -m evals.rag_eval.run` 的 `--full`/`--quick`/`--retrieval-only`/`--adversarial-only`/`--behavior-only`，并带 `--report-path … --progress-jsonl …`。评测中心只执行真实结果。
 3. 运行器逐阶段追加进度 JSONL，Worker 尾随写入任务阶段、百分比并同步生成 `task_events` 进度事件；取消请求会终止整个子进程组（先 `SIGTERM` 后 `SIGKILL`），超时由 `ECOM_EVAL_TIMEOUT_SECONDS`（默认 3600 秒）约束。
 4. 运行结束定位报告文件，调用 `evals.center.cli publish` 完成校验、对象存储与落库；成功最后一行 JSON 回填 `job.result`，并写 `publish_run` 审计。
 5. 门禁失败不等于执行失败：`gate_passed=false` 的报告照常入库、任务按 `completed` 结束；只有运行器崩溃、缺报告、超时或入库校验失败才记 `failed`，取消记 `cancelled`。

@@ -72,7 +72,7 @@ def _register_dataset() -> None:
     """登记一个 V1 Agent 数据集版本（用例内容足够覆盖分页与预览）。"""
     cases = [
         {"id": f"AGENT-T-{index:03d}", "name": f"用例 {index}", "category": "sourcing",
-         "suite": "benchmark", "execution_mode": "synthetic_trace_regrade", "prompt": f"问题 {index}"}
+         "suite": "benchmark", "execution_mode": "live", "prompt": f"问题 {index}"}
         for index in range(1, 6)
     ]
     with database_connection() as conn:
@@ -82,13 +82,13 @@ def _register_dataset() -> None:
             "eval_kind": "agent",
             "version": "v1_20261123",
             "description": "Agent 调研基准 V1",
-            "source": "synthetic_trace_regrade",
+            "source": "live",
             "suite": "agent_research",
             "content_sha256": "c" * 64,
             "case_count": 22,
             "cases_payload": cases,
             "metadata": {
-                "modes": ["live", "synthetic_trace_regrade"],
+                "modes": ["live"],
                 "scopes": ["full"],
                 "files": {"agent/research_cases.json": _research_cases_sha()},
             },
@@ -107,7 +107,7 @@ def _insert_run(owner: dict, run_id: str, *, day: int, pass_rate: float, gate: b
     report = {
         "run_id": run_id,
         "created_at": datetime(2026, 11, day, 4, 0, tzinfo=timezone.utc),
-        "mode": "synthetic_trace_regrade",
+        "mode": "live",
         "eval_kind": "agent",
         "scope": "full",
         "git_sha": "a1b2c3d4",
@@ -123,7 +123,7 @@ def _insert_run(owner: dict, run_id: str, *, day: int, pass_rate: float, gate: b
         "dataset_content_sha256": "c" * 64,
         "dataset_case_count": 22,
         "cases_payload": [],
-        "dataset_metadata": {"modes": ["live", "synthetic_trace_regrade"], "scopes": ["full"]},
+        "dataset_metadata": {"modes": ["live"], "scopes": ["full"]},
         "schema_version": 4,
         "metrics": {"provenance": {"comparable": True}, "task_completion": {"rate": pass_rate}},
         "gate_passed": gate,
@@ -229,7 +229,7 @@ def test_trigger_creates_real_evaluation_job_and_cancel() -> None:
     admin = _login("admin")
     staff = _login("staff")
     body = {"eval_kind": "agent", "dataset_id": DATASET_ID, "scope": "full",
-            "mode": "synthetic_trace_regrade", "note": "回归验证", "mark_baseline": False}
+            "mode": "live", "note": "回归验证", "mark_baseline": False}
     assert staff.post("/api/evaluations/runs/trigger", json=body).status_code == 403
 
     triggered = admin.post("/api/evaluations/runs/trigger", json=body)
@@ -250,6 +250,20 @@ def test_trigger_creates_real_evaluation_job_and_cancel() -> None:
     assert admin.post(f"/api/evaluations/jobs/{receipt['job_id']}/cancel").status_code == 409
 
 
+def test_synthetic_mode_rejected_for_real_results() -> None:
+    """评测中心只接收真实执行结果：合成/回放方式在触发阶段被拒绝。"""
+    _setup()
+    _register_dataset()
+    admin = _login("admin")
+    datasets = admin.get("/api/evaluations/datasets").json()["items"]
+    assert all(item["execution_modes"] == ["live"] for item in datasets)
+    body = {"eval_kind": "agent", "dataset_id": DATASET_ID, "scope": "full",
+            "mode": "synthetic_trace_regrade"}
+    rejected = admin.post("/api/evaluations/runs/trigger", json=body)
+    assert rejected.status_code == 422
+    assert rejected.json()["code"] == "REAL_MODE_ONLY"
+
+
 def test_dataset_detail_not_found_and_invalid_scope_rejected() -> None:
     """未知数据集返回 404，超出数据集声明范围的口径在触发阶段被拒绝。"""
     _setup()
@@ -257,7 +271,7 @@ def test_dataset_detail_not_found_and_invalid_scope_rejected() -> None:
     admin = _login("admin")
     assert admin.get("/api/evaluations/datasets/unknown-v9").status_code == 404
     body = {"eval_kind": "agent", "dataset_id": DATASET_ID, "scope": "quick",
-            "mode": "synthetic_trace_regrade"}
+            "mode": "live"}
     rejected = admin.post("/api/evaluations/runs/trigger", json=body)
     assert rejected.status_code == 422
     assert rejected.json()["code"] == "INVALID_SCOPE"

@@ -60,9 +60,9 @@ def _register_dataset() -> None:
         evaluation_repo.upsert_dataset(conn, {
             "dataset_id": DATASET_ID, "name": "agent_research", "eval_kind": "agent",
             "version": "v1_20261123", "description": "Agent 调研基准 V1",
-            "source": "synthetic_trace_regrade", "suite": "agent_research",
+            "source": "live", "suite": "agent_research",
             "content_sha256": "c" * 64, "case_count": 22, "cases_payload": [],
-            "metadata": {"modes": ["live", "synthetic_trace_regrade"], "scopes": ["full"]},
+            "metadata": {"modes": ["live"], "scopes": ["full"]},
         })
 
 
@@ -77,7 +77,7 @@ def _admin() -> TestClient:
 def _queue_job(client: TestClient) -> dict:
     response = client.post("/api/evaluations/runs/trigger", json={
         "eval_kind": "agent", "dataset_id": DATASET_ID, "scope": "full",
-        "mode": "synthetic_trace_regrade", "note": "worker 任务测试",
+        "mode": "live", "note": "worker 任务测试",
     })
     assert response.status_code == 202, response.text
     return job_repo.claim_next_job("worker_test")
@@ -107,7 +107,7 @@ def test_process_evaluation_job_reports_progress_and_publishes(monkeypatch) -> N
     def fake_publish(job, report_path):
         receipt = {"run_id": "run_fake_001", "created": True, "gate_passed": True, "dataset_id": DATASET_ID,
                    "eval_kind": "agent", "dataset_version": "v1_20261123", "scope": "full",
-                   "mode": "synthetic_trace_regrade"}
+                   "mode": "live"}
         return [sys.executable, "-c", f"import json;print(json.dumps({receipt!r}))"]
 
     monkeypatch.setattr(execution, "_runner_command", fake_runner)
