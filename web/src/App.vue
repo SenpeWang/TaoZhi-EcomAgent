@@ -29,15 +29,23 @@
 
       <nav class="sidebar-nav" aria-label="主导航">
         <template v-for="group in navigationGroups" :key="group.title">
-          <div class="nav-group-label">{{ group.title }}</div>
+          <div
+            class="nav-group-label"
+            :class="{ 'nav-group-directory': group.items.some((item) => Boolean(item.kind)) }"
+          >
+            {{ group.title }}
+          </div>
           <button
             v-for="item in group.items"
-            :key="item.page"
+            :key="`${item.page}:${item.kind || ''}`"
             type="button"
             class="nav-item-btn"
-            :class="{ active: currentPage === item.page }"
-            :aria-current="currentPage === item.page ? 'page' : undefined"
-            @click="navigate(item.page)"
+            :class="{
+              active: isNavItemActive(item),
+              'nav-item-child': Boolean(item.kind),
+            }"
+            :aria-current="isNavItemActive(item) ? 'page' : undefined"
+            @click="navigate(item.page, item.kind)"
           >
             <svg
               class="nav-svg-icon"
@@ -50,7 +58,7 @@
             >
               <path v-for="path in item.iconPaths" :key="path" :d="path" />
             </svg>
-            <span class="nav-label">{{ item.page }}</span>
+            <span class="nav-label">{{ item.label }}</span>
             <span v-if="item.badge" class="nav-badge-count">{{ item.badge }}</span>
           </button>
         </template>
@@ -77,20 +85,22 @@
         <div class="topbar-breadcrumb">
           <span class="bc-platform">{{ workspaceInfo.name || '企业工作台' }}</span>
           <span class="bc-slash">/</span>
-          <span class="bc-current">{{
-            user.must_change ? '账号安全' : currentPageDefinition.group
-          }}</span>
+          <span class="bc-current">{{ breadcrumbText }}</span>
         </div>
 
         <select
           class="mobile-navigation"
           aria-label="工作台导航"
-          :value="currentPage"
-          @change="navigate(($event.target as HTMLSelectElement).value)"
+          :value="currentNavigationValue"
+          @change="navigateFromSelect"
         >
           <optgroup v-for="group in navigationGroups" :key="group.title" :label="group.title">
-            <option v-for="item in group.items" :key="item.page" :value="item.page">
-              {{ item.page }}
+            <option
+              v-for="item in group.items"
+              :key="`${item.page}:${item.kind || ''}`"
+              :value="navigationValue(item)"
+            >
+              {{ item.label }}
             </option>
           </optgroup>
         </select>
@@ -142,7 +152,10 @@
       <main class="content">
         <div class="page-heading">
           <div>
-            <h1>{{ currentPage }}</h1>
+            <h1>
+              {{ currentPage }}
+              <span v-if="currentKindLabel" class="page-heading-kind">{{ currentKindLabel }}</span>
+            </h1>
             <p>{{ currentPageDefinition.description }}</p>
           </div>
         </div>
@@ -180,11 +193,13 @@
         />
 
         <EvaluationCenter
-          v-else-if="currentPage === '评测中心' && !user.must_change"
-          :key="`${user.id}:${user.role_level}`"
+          v-else-if="isEvaluationWorkspacePage && !user.must_change"
+          :key="`${user.id}:${user.role_level}:${currentPage}:${currentEvaluationKind}`"
           :api="api"
           :is-admin="isAdmin(user)"
           :can-write-eval="isAdmin(user) || Boolean(user.is_boss)"
+          :view="evaluationView"
+          :kind="currentEvaluationKind"
           @inspect="openTrace"
         />
 
@@ -297,7 +312,13 @@ import { requestApi } from './app/workspaceApi'
 import { useWorkspaceAction } from './shared/useWorkspaceAction'
 import { levelText } from './shared/labels'
 import robotUrl from './assets/robot.svg'
-import { workspaceNavigation, workspacePages, type WorkspacePage } from './app/workspaceNavigation'
+import {
+  isEvaluationPage,
+  workspaceNavigation,
+  workspacePages,
+  type WorkspaceNavItem,
+  type WorkspacePage,
+} from './app/workspaceNavigation'
 import { isAdmin, isAdministrationPage, type ManagedUser } from './features/administration/types'
 import AccountCenter from './features/administration/AccountCenter.vue'
 import BiView from './features/bi/BiView.vue'
@@ -318,6 +339,7 @@ import type { Items } from './shared/apiTypes'
 import type { Dashboard, LoginResponse, QuickAccount, WorkspaceInfo } from './app/workspaceTypes'
 import type { DocumentListItem } from './features/documents/types'
 import type { Task } from './features/tasks/types'
+import type { EvaluationKind } from './features/observability/evaluationTypes'
 
 const workspaceInfo = ref<WorkspaceInfo>({
   name: '',
@@ -326,7 +348,8 @@ const workspaceInfo = ref<WorkspaceInfo>({
   quick_accounts: [],
 })
 const user = ref<User | null>(null)
-const currentPage = ref<WorkspacePage>('工作概览')
+const currentPage = ref<WorkspacePage>('测评启动')
+const currentEvaluationKind = ref<EvaluationKind>('agent')
 const { busy, action } = useWorkspaceAction()
 const documentManager = ref<InstanceType<typeof DocumentManager> | null>(null)
 const organizations = ref<Organization[]>([])
@@ -397,6 +420,62 @@ const navigationGroups = computed(() =>
   ),
 )
 const currentPageDefinition = computed(() => workspacePages[currentPage.value])
+const navigationItems = computed<WorkspaceNavItem[]>(() =>
+  navigationGroups.value.flatMap((group) => group.items),
+)
+const currentNavigationItem = computed<WorkspaceNavItem | null>(() => {
+  const exact = navigationItems.value.find((item) => isNavItemActive(item))
+  return exact ?? null
+})
+const currentKindLabel = computed(() => {
+  const kind = currentNavigationItem.value?.kind
+  return kind === 'agent' ? 'Agent' : kind === 'rag' ? 'RAG' : ''
+})
+const isEvaluationWorkspacePage = computed(() => isEvaluationPage(currentPage.value))
+const evaluationView = computed<'launch' | 'results'>(() =>
+  currentPage.value === '测评启动' ? 'launch' : 'results',
+)
+const breadcrumbText = computed(() => {
+  if (user.value?.must_change) return '账号安全'
+  const group = currentPageDefinition.value.group
+  const leaf = currentNavigationItem.value
+  return leaf?.kind ? `${group} / ${leaf.label}` : group
+})
+
+/**
+ * 判断导航项是否对应当前页面与评测体系。
+ * @param item - 导航叶子项。
+ * @returns 是否为当前选中项。
+ */
+function isNavItemActive(item: WorkspaceNavItem): boolean {
+  if (item.page !== currentPage.value) return false
+  if (!item.kind) return true
+  return item.kind === currentEvaluationKind.value
+}
+
+/**
+ * 把导航项编码为移动端下拉框的可解析取值。
+ * @param item - 导航叶子项。
+ * @returns 页面名，或「页面|评测体系」编码。
+ */
+function navigationValue(item: WorkspaceNavItem): string {
+  return item.kind ? `${item.page}|${item.kind}` : item.page
+}
+
+const currentNavigationValue = computed(() => {
+  const item = currentNavigationItem.value
+  return item ? navigationValue(item) : currentPage.value
+})
+
+/**
+ * 处理移动端导航下拉框选择，解析可选的评测体系编码后跳转。
+ * @param event - 下拉框变更事件。
+ */
+function navigateFromSelect(event: Event): void {
+  const target = event.target
+  if (!(target instanceof HTMLSelectElement)) return
+  void navigate(target.value)
+}
 
 /**
  * 获取当前登录用户的首字缩写。
@@ -497,7 +576,8 @@ function clearSession(): void {
   approvals.value = []
   users.value = []
   dashboard.value = emptyDashboard
-  currentPage.value = '工作概览'
+  currentPage.value = '测评启动'
+  currentEvaluationKind.value = 'agent'
   loginForm.password = ''
   clearTaskWorkspace()
 }
@@ -567,7 +647,8 @@ async function signIn(): Promise<void> {
     const signedUser = result.user
     user.value = signedUser
     loginForm.password = ''
-    currentPage.value = signedUser.must_change ? '个人中心' : '工作概览'
+    currentPage.value = signedUser.must_change ? '个人中心' : '测评启动'
+    currentEvaluationKind.value = 'agent'
     await load()
   })
 }
@@ -604,19 +685,35 @@ function handleUserCommand(cmd: string): void {
 }
 
 /**
- * 切换菜单并加载对应页面数据。
- * @param name - 菜单名称。
+ * 切换菜单并加载对应页面数据；评测体系页面由二级项携带 kind 编码。
+ * @param target - 页面名称，或「页面|评测体系」编码。
+ * @param kind - 侧边栏直接传入的评测体系。
  */
-async function navigate(name: string): Promise<void> {
-  const destination = navigationGroups.value
-    .flatMap((group) => group.items)
-    .find((item) => item.page === name)
+async function navigate(target: string, kind?: EvaluationKind): Promise<void> {
+  const [pageName, encodedKind] = target.split('|')
+  const page = pageName as WorkspacePage
+  const requestedKind: EvaluationKind | undefined =
+    encodedKind === 'agent' || encodedKind === 'rag' ? encodedKind : kind
+  const destination =
+    navigationItems.value.find((item) =>
+      requestedKind
+        ? item.page === page && item.kind === requestedKind
+        : item.page === page && !item.kind,
+    ) ?? navigationItems.value.find((item) => item.page === page)
   if (!destination) return
   if (currentPage.value === '知识问答' && destination.page !== currentPage.value) newQuestion()
   currentPage.value = destination.page
-  if (name !== '轨迹中台' && name !== '评测中心' && name !== '系统状态' && name !== '操作日志') {
-    await action(load)
-  }
+  if (destination.kind) currentEvaluationKind.value = destination.kind
+  if (!isLazyPage(destination.page)) await action(load)
+}
+
+/**
+ * 判断页面是否自行装载数据，无需工作台整体刷新。
+ * @param page - 工作台页面名称。
+ * @returns 是否为延迟装载页面。
+ */
+function isLazyPage(page: WorkspacePage): boolean {
+  return isEvaluationPage(page) || page === '轨迹中台' || page === '系统状态' || page === '操作日志'
 }
 
 /**
@@ -677,3 +774,38 @@ onMounted(async () => {
   } catch {}
 })
 </script>
+
+<style scoped>
+.nav-group-directory {
+  padding-top: 18px;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.nav-item-btn.nav-item-child {
+  height: 34px;
+  padding-left: 32px;
+  font-size: 12.5px;
+}
+
+.nav-item-btn.nav-item-child .nav-svg-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+}
+
+.nav-item-btn.nav-item-child.active .nav-svg-icon {
+  opacity: 1;
+}
+
+.page-heading-kind {
+  margin-left: 10px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--tz-primary-soft);
+  color: var(--tz-primary);
+  font-size: 13px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+</style>

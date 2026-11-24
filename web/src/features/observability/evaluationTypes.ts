@@ -95,6 +95,7 @@ export interface EvaluationDataset {
   source: EvaluationMode
   suite: string
   archived: boolean
+  execution_modes?: string[]
   content_sha256: string
   metadata: Record<string, unknown>
   case_count: number

@@ -194,6 +194,7 @@ function validDataset(item: unknown): boolean {
     typeof item.name === 'string' &&
     typeof item.version === 'string' &&
     typeof item.archived === 'boolean' &&
+    (item.execution_modes === undefined || isStringList(item.execution_modes)) &&
     typeof item.case_count === 'number' &&
     isRecord(item.metadata)
   )

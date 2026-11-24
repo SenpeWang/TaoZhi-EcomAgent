@@ -1,4 +1,5 @@
 import type { Capabilities, User } from '../features/administration/types'
+import type { EvaluationKind } from '../features/observability/evaluationTypes'
 
 type PageAccess = 'member' | 'reviewer' | 'permissionManager' | 'systemManager' | 'auditor'
 
@@ -60,17 +61,23 @@ const workspacePages = {
     iconPaths: ['M4 5h9M8 12h12M4 19h10', 'M4 3v4M8 10v4M4 17v4'],
     access: 'member',
   },
-  评测中心: {
-    group: '运行分析',
-    description: '查阅调研评测批次，对比基线并定位失败用例。',
-    iconPaths: ['M8 5H5v15h14V5h-3', 'M9 3h6v4H9z', 'M8 12l1 1 2-2M13 12h3M8 16h8'],
-    access: 'member',
-  },
   系统状态: {
     group: '运行分析',
     description: '查看数据库、后台任务服务与数据源的连接状态。',
     iconPaths: ['M22 12h-4l-3 9L9 3l-3 9H2'],
     access: 'systemManager',
+  },
+  测评启动: {
+    group: '测评启动',
+    description: '登记算法版本，选择数据集与评测口径发起真实调研，并跟踪任务进度。',
+    iconPaths: ['M8 5H5v15h14V5h-3', 'M9 3h6v4H9z', 'M8 12l1 1 2-2M13 12h3M8 16h8'],
+    access: 'member',
+  },
+  测评结果: {
+    group: '测评结果',
+    description: '查看评测概览与趋势、数据集原始内容、批次与基线，管理员可查审计留痕。',
+    iconPaths: ['M3 3v18h18', 'M7 15l3-3 3 2 4-5'],
+    access: 'member',
   },
   权限审批: {
     group: '组织与权限',
@@ -105,13 +112,69 @@ const workspacePages = {
 export type WorkspacePage = keyof typeof workspacePages
 export { workspacePages }
 
-interface NavigationGroup {
+export interface WorkspaceNavItem {
+  page: WorkspacePage
+  kind?: EvaluationKind
+  label: string
+  iconPaths: string[]
+  badge?: number
+}
+
+export interface NavigationGroup {
   title: string
-  items: { page: WorkspacePage; iconPaths: string[]; badge?: number }[]
+  items: WorkspaceNavItem[]
+}
+
+const evaluationDirectoryPages: WorkspacePage[] = ['测评启动', '测评结果']
+
+const evaluationNavigationDirectories: NavigationGroup[] = [
+  {
+    title: '测评启动',
+    items: [
+      {
+        page: '测评启动',
+        kind: 'agent',
+        label: 'Agent',
+        iconPaths: ['M8 5H5v15h14V5h-3', 'M9 3h6v4H9z', 'M8 12l1 1 2-2M13 12h3M8 16h8'],
+      },
+      {
+        page: '测评启动',
+        kind: 'rag',
+        label: 'RAG',
+        iconPaths: ['M10 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14z', 'M21 21l-4.35-4.35'],
+      },
+    ],
+  },
+  {
+    title: '测评结果',
+    items: [
+      {
+        page: '测评结果',
+        kind: 'agent',
+        label: 'Agent',
+        iconPaths: ['M3 3v18h18', 'M7 15l3-3 3 2 4-5'],
+      },
+      {
+        page: '测评结果',
+        kind: 'rag',
+        label: 'RAG',
+        iconPaths: ['M10 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14z', 'M21 21l-4.35-4.35'],
+      },
+    ],
+  },
+]
+
+/**
+ * 判断页面是否为评测体系页面。
+ * @param page - 工作台页面名称。
+ * @returns 是否为测评启动或测评结果页面。
+ */
+export function isEvaluationPage(page: WorkspacePage): boolean {
+  return evaluationDirectoryPages.includes(page)
 }
 
 /**
- * 按实际身份组织菜单，并为可办理的事项附上数量。
+ * 按实际身份组织菜单，并为可办理的事项附上数量；评测体系渲染为两级目录。
  * @param user - 当前登录成员。
  * @param capabilities - 服务端授予的业务权限。
  * @param pendingApprovals - 待处理的权限申请数。
@@ -126,7 +189,12 @@ export function workspaceNavigation(
 ): NavigationGroup[] {
   if (!user) return []
   if (user.must_change) {
-    return [{ title: '账号安全', items: [{ page: '个人中心', iconPaths: shieldIconPaths }] }]
+    return [
+      {
+        title: '账号安全',
+        items: [{ page: '个人中心', label: '个人中心', iconPaths: shieldIconPaths }],
+      },
+    ]
   }
   const allowed: Record<PageAccess, boolean> = {
     member: true,
@@ -141,11 +209,19 @@ export function workspaceNavigation(
   }
   const groups = new Map<string, NavigationGroup>()
   for (const page of Object.keys(workspacePages) as WorkspacePage[]) {
+    if (isEvaluationPage(page)) continue
     const { access, group, iconPaths } = workspacePages[page]
     if (!allowed[access]) continue
     const section: NavigationGroup = groups.get(group) ?? { title: group, items: [] }
-    section.items.push({ page, iconPaths, badge: badges[page] })
+    section.items.push({ page, label: page, iconPaths, badge: badges[page] })
     groups.set(group, section)
   }
-  return Array.from(groups.values())
+  const navigation = Array.from(groups.values())
+  const analysisIndex = navigation.findIndex((group) => group.title === '运行分析')
+  navigation.splice(
+    analysisIndex >= 0 ? analysisIndex + 1 : 0,
+    0,
+    ...evaluationNavigationDirectories,
+  )
+  return navigation
 }

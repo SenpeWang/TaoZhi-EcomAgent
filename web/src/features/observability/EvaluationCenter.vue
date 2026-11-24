@@ -2,20 +2,10 @@
   <section class="panel evaluation-center">
     <div class="section-heading">
       <div>
-        <h3>{{ isAdmin ? '企业评测中心' : '我的评测中心' }}</h3>
-        <small class="evaluation-meta">
-          {{
-            evalKind === 'agent'
-              ? '多智能体协同调研与工具轨迹评测 · 指标口径与数据集内容透明可查'
-              : '企业知识文档 RAG 检索、对抗与行为评测 · 指标口径与数据集内容透明可查'
-          }}
-        </small>
+        <h3>{{ centerTitle }}</h3>
+        <small class="evaluation-meta">{{ centerSubtitle }}</small>
       </div>
       <div class="evaluation-head-actions">
-        <el-radio-group v-model="evalKind" size="small" aria-label="切换评测体系">
-          <el-radio-button value="agent">AGENT 评测</el-radio-button>
-          <el-radio-button value="rag">RAG 评测</el-radio-button>
-        </el-radio-group>
         <el-button :loading="refreshing" @click="refreshAll">刷新</el-button>
       </div>
     </div>
@@ -71,7 +61,7 @@
     />
 
     <el-tabs v-model="activeTab" class="evaluation-tabs">
-      <el-tab-pane label="概览" name="overview">
+      <el-tab-pane v-if="view === 'results'" label="概览" name="overview">
         <div class="evaluation-tab">
           <el-alert
             v-if="trendsError"
@@ -217,7 +207,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="数据集" name="datasets">
+      <el-tab-pane v-if="view === 'results'" label="数据集" name="datasets">
         <div class="evaluation-tab">
           <div class="evaluation-subsection-head">
             <h4>评测数据集（按版本目录管理）</h4>
@@ -289,20 +279,13 @@
                 <el-button link type="primary" @click="filterRunsByDataset(row)"
                   >筛选批次</el-button
                 >
-                <el-button
-                  v-if="canWriteEval && !row.archived"
-                  link
-                  type="primary"
-                  @click="openTriggerDialog(row)"
-                  >发起评测</el-button
-                >
               </template>
             </el-table-column>
           </el-table>
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="批次" name="runs">
+      <el-tab-pane v-if="view === 'results'" label="批次" name="runs">
         <div class="evaluation-tab">
           <div class="evaluation-subsection-head">
             <h4>评测批次</h4>
@@ -419,7 +402,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="基线" name="baselines">
+      <el-tab-pane v-if="view === 'results'" label="基线" name="baselines">
         <div class="evaluation-tab">
           <div class="evaluation-subsection-head">
             <h4>评测基线</h4>
@@ -499,10 +482,10 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="任务" name="tasks">
+      <el-tab-pane v-if="view === 'launch'" label="发起评测" name="launch">
         <div class="evaluation-tab">
           <div class="evaluation-subsection-head">
-            <h4>评测任务</h4>
+            <h4>发起真实评测</h4>
             <div v-if="canWriteEval" class="evaluation-filters evaluation-filters-inline">
               <el-button @click="openProfileDialog">登记算法版本</el-button>
               <el-button type="primary" @click="openTriggerDialog()">发起评测</el-button>
@@ -510,14 +493,14 @@
           </div>
           <p class="evaluation-meta">
             评测由 Worker
-            真实执行；触发时评测口径选项来自指标目录，执行方式按所选数据集登记的能力过滤，成功后返回任务号与审计号。
+            真实执行：登记不可变算法版本，选择数据集、口径与真实执行方式后触发，页面只展示任务号、审计号与当前任务进度；批次、基线与审计留痕请到「测评结果」查看。
           </p>
           <el-alert
             v-if="!canWriteEval"
             type="info"
             show-icon
             :closable="false"
-            title="当前账号可查看评测批次，触发/取消/设基线等写入操作需要企业负责人或系统管理员权限。"
+            title="当前账号可查看评测任务进度，触发/取消评测与登记算法版本需要企业负责人或系统管理员权限。"
           />
           <el-alert v-if="jobError" type="error" show-icon :title="jobError" :closable="false" />
           <p v-if="profilesError" class="evaluation-meta">{{ profilesError }}</p>
@@ -563,7 +546,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane v-if="canWriteEval" label="审计" name="audit">
+      <el-tab-pane v-if="view === 'results' && canWriteEval" label="审计" name="audit">
         <div class="evaluation-tab">
           <div class="evaluation-subsection-head">
             <h4>评测审计留痕</h4>
@@ -803,7 +786,7 @@
             >下载原始报告</el-button
           >
           <el-button
-            v-if="canWriteEval && runDetail.run.dataset_id"
+            v-if="view === 'results' && canWriteEval && runDetail.run.dataset_id"
             @click="openBaselineDialog(runDetail.run)"
             >设为基线</el-button
           >
@@ -940,12 +923,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog
-      v-model="triggerDialog"
-      title="选择数据集与算法版本发起评测"
-      width="560px"
-      :z-index="3000"
-    >
+    <el-dialog v-model="triggerDialog" title="选择数据集与算法版本发起评测" width="560px">
       <el-form label-position="top">
         <el-form-item label="评测数据集版本">
           <el-select v-model="triggerForm.dataset_id" style="width: 100%">
@@ -1143,11 +1121,28 @@ interface RawExportSummary {
   files: number
 }
 
-const props = defineProps<{ isAdmin: boolean; canWriteEval: boolean; api: ApiClient }>()
+const props = defineProps<{
+  isAdmin: boolean
+  canWriteEval: boolean
+  api: ApiClient
+  view: 'launch' | 'results'
+  kind: EvaluationKind
+}>()
 const emit = defineEmits<{ (e: 'inspect', taskId: string, traceId: string): void }>()
 
-const evalKind = ref<EvaluationKind>('agent')
-const activeTab = ref('overview')
+const evalKind = computed<EvaluationKind>(() => props.kind)
+const centerTitle = computed(() => {
+  const kindLabel = props.kind === 'agent' ? 'Agent' : 'RAG'
+  return `${kindLabel} ${props.view === 'launch' ? '评测启动' : '测评结果'}`
+})
+const centerSubtitle = computed(() => {
+  const owner = props.isAdmin ? '企业' : '我的'
+  if (props.view === 'launch') {
+    return `${owner}评测启动：登记算法版本，选择数据集、口径与真实执行方式发起评测，并跟踪当前任务进度。`
+  }
+  return `${owner}评测结果：概览指标与趋势、数据集原始内容、批次与基线${props.canWriteEval ? '，以及管理员写权限可见的审计留痕' : ''}。`
+})
+const activeTab = ref(props.view === 'launch' ? 'launch' : 'overview')
 const owner = ref('all')
 const scope = ref<EvaluationScope>('full')
 const mode = ref<EvaluationMode>('live')
@@ -1267,10 +1262,7 @@ const selectedVersionDatasets = computed(() =>
 const primaryDataset = computed(
   () => selectedVersionDatasets.value[0] ?? activeDatasets.value[0] ?? null,
 )
-const allowedModes = computed<EvaluationMode[]>(() => {
-  const modes = datasetModeList(primaryDataset.value)
-  return modes.length ? modes : ['live']
-})
+const allowedModes = computed<EvaluationMode[]>(() => datasetExecutionModes(primaryDataset.value))
 const scopeOptions = computed<{ value: EvaluationScope; label: string }[]>(() => {
   const kind = catalog.value?.kinds[evalKind.value]
   if (kind) {
@@ -1390,10 +1382,9 @@ const triggerScopeOptions = computed<EvaluationScope[]>(() => {
   const filtered = registered.filter((item) => known.has(item))
   return filtered.length ? filtered : scopeOptions.value.map((item) => item.value)
 })
-const triggerModeOptions = computed<EvaluationMode[]>(() => {
-  const registered = datasetModeList(triggerSelectedDataset.value)
-  return registered.length ? registered : allowedModes.value
-})
+const triggerModeOptions = computed<EvaluationMode[]>(() =>
+  datasetExecutionModes(triggerSelectedDataset.value),
+)
 const triggerScopeLabels = computed(
   () => triggerScopeOptions.value.map((item) => evaluationScopes[item]).join('、') || '未登记',
 )
@@ -1620,16 +1611,18 @@ function turnAudit(forward: boolean): void {
 }
 
 /**
- * 读取数据集登记的执行方式清单。
+ * 读取数据集可用于评测中心真实结果的执行方式：优先接口的 execution_modes，缺省时从元数据过滤。
  * @param dataset - 数据集条目。
- * @returns 已登记的执行方式；未登记时返回空数组。
+ * @returns 仅包含真实执行的执行方式；无登记时回退为 live。
  */
-function datasetModeList(dataset: EvaluationDataset | null): EvaluationMode[] {
-  const value = dataset?.metadata?.modes
-  if (!Array.isArray(value)) return []
-  return value.filter(
-    (item): item is EvaluationMode => item === 'live' || item === 'synthetic_trace_regrade',
-  )
+function datasetExecutionModes(dataset: EvaluationDataset | null): EvaluationMode[] {
+  const declaredModes: unknown[] = dataset?.execution_modes?.length
+    ? dataset.execution_modes
+    : Array.isArray(dataset?.metadata?.modes)
+      ? dataset.metadata.modes
+      : []
+  const modes = declaredModes.filter((item): item is EvaluationMode => item === 'live')
+  return modes.length ? modes : ['live']
 }
 
 /**
@@ -1669,57 +1662,32 @@ function ensureSelections(): void {
 }
 
 /**
- * 切换评测体系后重置数据并重新装载该体系的数据集、口径与趋势。
- */
-async function handleKindChange(): Promise<void> {
-  trends.value = null
-  baselines.value = []
-  profiles.value = []
-  auditLogs.value = []
-  auditCursors.value = ['']
-  auditNext.value = null
-  runDatasetId.value = ''
-  datasetVersion.value = ''
-  showArchived.value = false
-  scope.value = 'full'
-  mode.value = 'live'
-  await loadDatasets()
-  ensureSelections()
-  await loadTrends()
-  if (activeTab.value === 'datasets') await loadDatasets()
-  else if (activeTab.value === 'baselines') await loadBaselines()
-  else if (activeTab.value === 'tasks') await loadProfiles()
-  else if (activeTab.value === 'audit') await loadAuditLogs()
-  else if (activeTab.value === 'runs') await refreshRuns()
-}
-
-/**
  * 按当前页签装载其专属数据，保持各页签互不阻塞。
  * @param tab - 当前激活的页签名称。
  */
 async function ensureTabData(tab: string): Promise<void> {
   if (tab === 'datasets') await loadDatasets()
   else if (tab === 'baselines') await loadBaselines()
-  else if (tab === 'tasks') await loadProfiles()
+  else if (tab === 'launch') await loadProfiles()
   else if (tab === 'audit') await loadAuditLogs()
   else if (tab === 'runs') await refreshRuns()
   else if (tab === 'overview') await loadTrends()
 }
 
 /**
- * 同时刷新当前页签数据与控制区所需的数据集与趋势。
+ * 同时刷新当前页面职责范围内的数据与顶部控制区所需的目录。
  */
 async function refreshAll(): Promise<void> {
   refreshing.value = true
   try {
-    await Promise.all([
-      loadDatasets(),
-      loadTrends(),
-      refreshRuns(),
-      loadBaselines(),
-      loadProfiles(),
-    ])
-    if (activeTab.value === 'audit' && props.canWriteEval) await loadAuditLogs()
+    const requests: Promise<void>[] = [loadDatasets(), loadProfiles()]
+    if (props.view === 'results') {
+      requests.push(loadTrends(), refreshRuns(), loadBaselines())
+    }
+    await Promise.all(requests)
+    if (props.view === 'results' && activeTab.value === 'audit' && props.canWriteEval) {
+      await loadAuditLogs()
+    }
   } finally {
     refreshing.value = false
   }
@@ -2202,7 +2170,7 @@ function openTriggerDialog(dataset?: EvaluationDataset): void {
   triggerForm.mark_baseline = false
   const selected = triggerDatasets.value.find((item) => item.dataset_id === triggerForm.dataset_id)
   const scopes = datasetScopeList(selected ?? null)
-  const modes = datasetModeList(selected ?? null)
+  const modes = datasetExecutionModes(selected ?? null)
   triggerForm.scope = scopes.includes(scope.value)
     ? scope.value
     : scopes.includes('full')
@@ -2367,29 +2335,30 @@ function summarizeJson(value: Record<string, unknown>): string {
   return text.length > 120 ? text.slice(0, 120) + '…' : text
 }
 
-watch(evalKind, () => {
-  void handleKindChange()
-})
 watch(scope, () => {
-  void loadTrends()
+  if (props.view === 'results') void loadTrends()
 })
 watch(mode, () => {
-  void loadTrends()
-  void loadBaselines()
+  if (props.view === 'results') {
+    void loadTrends()
+    void loadBaselines()
+  }
 })
 watch(datasetVersion, () => {
-  void loadTrends()
-  void loadBaselines()
+  if (props.view === 'results') {
+    void loadTrends()
+    void loadBaselines()
+  }
   void loadProfiles()
 })
 watch(runEndpoint, () => {
-  resetRuns()
+  if (props.view === 'results') resetRuns()
 })
 watch(baselineActiveOnly, () => {
-  void loadBaselines()
+  if (props.view === 'results') void loadBaselines()
 })
 watch(auditAction, () => {
-  resetAudit()
+  if (props.view === 'results') resetAudit()
 })
 watch(activeTab, (tab) => {
   void ensureTabData(tab)
@@ -2399,7 +2368,7 @@ watch(
   () => {
     const selected = triggerSelectedDataset.value
     const scopes = datasetScopeList(selected)
-    const modes = datasetModeList(selected)
+    const modes = datasetExecutionModes(selected)
     if (scopes.length && !scopes.includes(triggerForm.scope)) triggerForm.scope = scopes[0]
     if (modes.length && !modes.includes(triggerForm.mode)) triggerForm.mode = modes[0]
   },
@@ -2408,7 +2377,8 @@ onMounted(async () => {
   await loadCatalog()
   await loadDatasets()
   ensureSelections()
-  await loadTrends()
+  if (props.view === 'results') await loadTrends()
+  else await loadProfiles()
 })
 onBeforeUnmount(stopJobPolling)
 </script>
