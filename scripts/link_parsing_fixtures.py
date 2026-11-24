@@ -15,7 +15,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from evals.dataset.parsing import build  # noqa: E402
+from evals.dataset.parsing import build
 
 from taozhi.infrastructure.knowledge.storage import get_blob_store
 from taozhi.infrastructure.persistence import job_repo
