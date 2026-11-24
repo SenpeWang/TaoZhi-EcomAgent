@@ -55,16 +55,13 @@
 | `evals/dataset/` | 独立评测数据包：规格、契约校验、确定性生成与幂等灌库 |
 | `evals/dataset/spec/` | V2 数据包规格（组织/夹具/语料/模板） |
 | `evals/dataset/spec_v3/` | V3 数据包规格（6 大类 × 6 用途场景），唯一事实来源 |
-| `evals/datasets/` | 评测数据集按版本目录（如 `v3_20261124`）管理，随代码进 Git 可 diff |
-| `evals/datasets/v1_20261123/` | V1 基准评测数据集（历史只读留档，含版本总览 `README.md`） |
-| `evals/datasets/v1_20261123/agent/` | V1 Agent 调研基准用例、标准回放轨迹、定向反例与 `README.md` |
-| `evals/datasets/v1_20261123/rag/` | V1 RAG 三层评测集（180 例主集、42 篇语料、18 例对抗集）与 `README.md` |
-| `evals/datasets/v2_20261124/` | V2 历史基准评测数据集（只读留档，含版本总览 `README.md`） |
-| `evals/datasets/v2_20261124/agent/` | V2 Agent 调研基准（200 例：10 例实测 + 190 例合成回放）、观测、反例与 `README.md` |
-| `evals/datasets/v2_20261124/rag/` | V2 RAG 三层评测集（200 例主集、56 篇语料、30 例对抗集）与 `README.md` |
-| `evals/datasets/v3_20261124/` | V3 当前基准数据集（6 大类 × 6 用途，全合成，含 README 参考来源） |
-| `evals/datasets/v3_20261124/rag/` | V3 RAG 数据集（540 主集 + 60 红队、语料与命名登记） |
-| `evals/datasets/v3_20261124/agent/` | V3 Agent 数据集（600 合成回放 + 观测 + 反例、命名登记） |
+| `evals/datasets/` | 评测数据集按 `rag_<版本>` / `agent_<版本>` 目录管理，随代码进 Git 可 diff |
+| `evals/datasets/rag_v1_20261123/` | RAG V1 历史只读数据集（180 主集 + 18 对抗） |
+| `evals/datasets/agent_v1_20261123/` | Agent V1 历史只读数据集（12 合成回放） |
+| `evals/datasets/rag_v2_20261124/` | RAG V2 历史只读数据集（200 主集 + 30 对抗） |
+| `evals/datasets/agent_v2_20261124/` | Agent V2 历史只读数据集（190 合成回放） |
+| `evals/datasets/rag_v3_20261124/` | RAG V3 当前数据集（540 主集 + 60 红队、91 语料） |
+| `evals/datasets/agent_v3_20261124/` | Agent V3 当前数据集（600 合成回放 + 10 实测） |
 | `evals/reports/` | 运行产物不入库（.gitignore 全忽略） |
 | `evals/tests/` | 评估代码自身的单元测试，必须进 CI |
 | `tests/` | 单元与企业边界验收，测试事实自行构造 |

@@ -1,0 +1,28 @@
+{
+  "version": "agent_v1_20261123",
+  "created_at": "2026-11-23",
+  "notes": "V1 基准评测数据集：Agent 调研基准与 RAG 三层评测集。内容以本描述符登记的文件 sha256 为准，任何文件内容变更必须新增版本目录并升级版本号；批次报告内嵌 version 与 content_sha256，入库时逐项校验。",
+  "suites": {
+    "agent_research": {
+      "eval_kind": "agent",
+      "name": "agent_research",
+      "description": "Agent 调研基准：10 例内联 live 用例 + 12 例合成回放用例，附带反例集与回放观测。",
+      "case_count": 22,
+      "content_sha256": "c91b8a82ffce9b9604c3d9a9adc4dd06de9d823dd4984216cf0297a3fc993812",
+      "catalog": "evals.agent_eval.cases:AGENT_BENCHMARK_CASES",
+      "files": {
+        "research_cases.json": "358592554bf361cec1f419a26d2e59e3426d2f490b67c30f991cceaf907419d6",
+        "research_counterexamples.json": "08691e6d70141e425bd3de07adb7d6677ed73f5e98ad826e19119c17d19a70a6",
+        "research_replay.json": "0e0baf60b06482809a0949d2f922546b4e5cc8ef0bcada3a7b2fabfc0b95f483",
+        "web_replay.json": "eea5a4d31bd2c0e8051e3679df9f71bf114f4443d0d651caa64c64b6aed9dab9"
+      },
+      "modes": [
+        "live",
+        "synthetic_trace_regrade"
+      ],
+      "scopes": [
+        "full"
+      ]
+    }
+  }
+}

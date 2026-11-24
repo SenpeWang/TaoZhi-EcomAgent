@@ -1,0 +1,46 @@
+{
+  "version": "rag_v1_20261123",
+  "created_at": "2026-11-23",
+  "notes": "V1 基准评测数据集：Agent 调研基准与 RAG 三层评测集。内容以本描述符登记的文件 sha256 为准，任何文件内容变更必须新增版本目录并升级版本号；批次报告内嵌 version 与 content_sha256，入库时逐项校验。",
+  "suites": {
+    "rag_core": {
+      "eval_kind": "rag",
+      "name": "rag_core",
+      "description": "RAG 三层评测主集：180 例问答题 + 42 篇语料夹具（检索、生成行为两层）。",
+      "case_count": 180,
+      "content_sha256": "226b70b81976ed7e0eef777300322ed7604c4c869dc8610b7019202719da18a7",
+      "files": {
+        "cases.jsonl": "226b70b81976ed7e0eef777300322ed7604c4c869dc8610b7019202719da18a7",
+        "corpus_docs.jsonl": "c900de49d196cb85c9dd414f56f3812fbd2346e9d1b3d78798f849895f7a38fb",
+        "manifest.json": "fe68830ecd79ee9c78338dd7d3ebc77e45e71a1b2d923269d097e5ee24a8f99d"
+      },
+      "modes": [
+        "live"
+      ],
+      "scopes": [
+        "full",
+        "quick",
+        "retrieval",
+        "behavior"
+      ]
+    },
+    "rag_adversarial": {
+      "eval_kind": "rag",
+      "name": "rag_adversarial",
+      "description": "RAG 对抗层：18 例注入、越权、撤权与金丝雀泄漏规则题。",
+      "case_count": 18,
+      "content_sha256": "46524e60b17d088d0e03de8d1e539c35f6d47d2549ddd74f35e1a1974f9ee6b7",
+      "files": {
+        "golden_adversarial.json": "46524e60b17d088d0e03de8d1e539c35f6d47d2549ddd74f35e1a1974f9ee6b7"
+      },
+      "modes": [
+        "live"
+      ],
+      "scopes": [
+        "adversarial",
+        "full",
+        "quick"
+      ]
+    }
+  }
+}

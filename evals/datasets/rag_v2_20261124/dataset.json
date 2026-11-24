@@ -1,28 +1,8 @@
 {
-  "version": "v2_20261124",
+  "version": "rag_v2_20261124",
   "created_at": "2026-11-24",
   "notes": "V2 基准评测数据集：分类口径统一为业界标准名称；RAG 主集 200 例 + 对抗集 30 例，Agent 200 例（10 例实测 + 190 例合成回放）。内容以本描述符登记的文件 sha256 为准，任何文件内容变更必须新增版本目录并升级版本号；批次报告内嵌 version 与 content_sha256，入库时逐项校验。合成回放仅用于本地与 CI 回归，不进入评测中心。",
   "suites": {
-    "agent_research": {
-      "eval_kind": "agent",
-      "name": "agent_research",
-      "description": "Agent 调研基准：10 例实测 + 190 例固定证据合成回放用例，附带观测与定向反例。",
-      "case_count": 200,
-      "content_sha256": "da23e6951664a81595ecbcc8e6d0694621a0cbe15b24c2a71976f942b965fa4b",
-      "catalog": "evals.agent_eval.cases:AGENT_BENCHMARK_CASES",
-      "files": {
-        "agent/research_cases.json": "206487cc6c2567b5e88e3d2b328b5d54975155a6198240552d63db00b7b806a0",
-        "agent/research_replay.json": "4e5e4e458d3d810a3fc1a48fed09d23c46ca60b6bd6a57c84ad4f07554f40b7a",
-        "agent/research_counterexamples.json": "8df6fa26aea0a2d0519d71d22d3632d5ca61e7b82a8f5c9ab56d69501e279eb5",
-        "agent/web_replay.json": "eea5a4d31bd2c0e8051e3679df9f71bf114f4443d0d651caa64c64b6aed9dab9"
-      },
-      "modes": [
-        "live"
-      ],
-      "scopes": [
-        "full"
-      ]
-    },
     "rag_core": {
       "eval_kind": "rag",
       "name": "rag_core",
@@ -30,9 +10,9 @@
       "case_count": 200,
       "content_sha256": "890279845237d21dd084700eca451e93e924d9c2c74c85ea8e03c6d46105d485",
       "files": {
-        "rag/cases.jsonl": "890279845237d21dd084700eca451e93e924d9c2c74c85ea8e03c6d46105d485",
-        "rag/corpus_docs.jsonl": "38c6b0fa8efc4b4009d028d1cb1ec3306119a0351467847bd04a59614c56098b",
-        "rag/manifest.json": "f909f7c4753527a1436ca3d94c3cdd21d25a0783b4ed159eae3c546ae8a14aea"
+        "cases.jsonl": "890279845237d21dd084700eca451e93e924d9c2c74c85ea8e03c6d46105d485",
+        "corpus_docs.jsonl": "38c6b0fa8efc4b4009d028d1cb1ec3306119a0351467847bd04a59614c56098b",
+        "manifest.json": "f909f7c4753527a1436ca3d94c3cdd21d25a0783b4ed159eae3c546ae8a14aea"
       },
       "modes": [
         "live"
@@ -51,7 +31,7 @@
       "case_count": 30,
       "content_sha256": "729a292af7842881c0f49d9f80473b153933acc89c5231c336aa1934fe44b57b",
       "files": {
-        "rag/golden_adversarial.json": "729a292af7842881c0f49d9f80473b153933acc89c5231c336aa1934fe44b57b"
+        "golden_adversarial.json": "729a292af7842881c0f49d9f80473b153933acc89c5231c336aa1934fe44b57b"
       },
       "modes": [
         "live"

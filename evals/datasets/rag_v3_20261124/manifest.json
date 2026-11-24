@@ -1,5 +1,5 @@
 {
-  "dataset": "v3_20261124/rag",
+  "dataset": "rag_v3_20261124",
   "seed": 20261124,
   "spec_sha256": {
     "corpus.yaml": "dcc24ca73f795512a232358f88809eb1b8b1f59d35ee802096a677317491ad42",

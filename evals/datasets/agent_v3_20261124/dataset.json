@@ -1,0 +1,27 @@
+{
+  "version": "agent_v3_20261124",
+  "created_at": "2026-11-24",
+  "notes": "V3 全合成基准数据集：RAG/Agent 各 6 个能力大类 × 6 种用途（golden/capability/regression/challenge/heldout/redteam），约 600 例/体系；子类命名登记见 evals/naming.py 与各数据集 README。合成回放只用于本地与 CI 回归，不进入评测中心。",
+  "suites": {
+    "agent_research": {
+      "eval_kind": "agent",
+      "name": "agent_research",
+      "description": "Agent 调研基准：10 例实测 + 600 例合成回放（6 大类 × 6 用途，含 60 红队）。",
+      "case_count": 610,
+      "content_sha256": "36106efc85a7cba0575248e0b92cfa43367f0147bb7843dae5cbb6c775f0dd44",
+      "catalog": "evals.agent_eval.cases:AGENT_BENCHMARK_CASES",
+      "files": {
+        "research_cases.json": "c2bec9bfbbb3661a8456246ed401736453613ad41b7f06f943f095472ac862e6",
+        "research_replay.json": "0f071e89cc5a3b3f6600c3a5e0a849527ee5cec7ccacd1001fb1ab1495f8bfad",
+        "research_counterexamples.json": "45e6ec3a585da0c200936f55b9c76afc4ce2ec5d7b99ab678f24be8a96ce34e2",
+        "web_replay.json": "eea5a4d31bd2c0e8051e3679df9f71bf114f4443d0d651caa64c64b6aed9dab9"
+      },
+      "modes": [
+        "live"
+      ],
+      "scopes": [
+        "full"
+      ]
+    }
+  }
+}

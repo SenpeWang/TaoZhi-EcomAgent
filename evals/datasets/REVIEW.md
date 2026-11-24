@@ -1,6 +1,6 @@
 # V3 数据集核对清单
 
-生成时间：2026-11-24；数据目录：`evals/datasets/v3_20261124/`。
+生成时间：2026-11-24；数据目录：`evals/datasets/rag_v3_20261124/` 与 `evals/datasets/agent_v3_20261124/`。
 
 ## 1. 规模
 
@@ -96,8 +96,8 @@ RAG：6 大类 / 32 子类；Agent：6 大类 / 31 子类。
 ## 6. 核对命令
 
 ```bash
-python -m evals.dataset.generate_v3 --check        # RAG 快照与生成器一致性
-python -m evals.agent_eval.generate --version v3 --out evals/datasets/v3_20261124/agent --check
+python -m evals.dataset.generate_v3 --out evals/datasets/rag_v3_20261124 --check
+python -m evals.agent_eval.generate --version v3 --out evals/datasets/agent_v3_20261124 --check
 make evals-tests && make evals-agent-replay && make evals-center-check
 ```
 

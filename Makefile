@@ -7,7 +7,9 @@ REPORTS_DIR ?= $(PROJECT_ROOT)/evals/reports/agent_eval
 PUBLISH_ARGS ?=
 REPORT ?=
 BACKFILL_ARGS ?=
-CENTER_VERSION ?= v3_20261124
+CENTER_VERSION ?=
+CENTER_RAG_VERSION ?=
+CENTER_AGENT_VERSION ?=
 REGISTER_ARGS ?=
 TEST_ENV := ECOM_MODE=test PYTHONPATH=$(PROJECT_ROOT)/src
 COMPOSE := docker compose
@@ -127,11 +129,11 @@ evals-agent-publish:
 	@$(MAKE) --no-print-directory evals-publish
 
 evals-agent-replay:
-	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/v3_20261124/agent/web_replay.json
-	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/v3_20261124/agent/research_replay.json
+	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_v3_20261124/web_replay.json
+	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_v3_20261124/research_replay.json
 
 evals-agent-heldout:
-	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --include-heldout --replay evals/datasets/v3_20261124/agent/research_replay.json
+	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --include-heldout --replay evals/datasets/agent_v3_20261124/research_replay.json
 
 evals-sync:
 	@test -x "$(PHOENIX_PY)" || { echo "缺 Phoenix 客户端：$(PHOENIX_PY)"; echo "搭建方式见 evals/README.md 的 Phoenix 同步一节"; exit 1; }
@@ -148,7 +150,7 @@ evals-archive-check:
 	$(PYTHON) scripts/archive_baseline.py check
 
 evals-center-register:
-	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli register --version $(CENTER_VERSION) $(REGISTER_ARGS)
+	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli register $(if $(CENTER_VERSION),--version $(CENTER_VERSION),) $(if $(CENTER_RAG_VERSION),--rag-version $(CENTER_RAG_VERSION),) $(if $(CENTER_AGENT_VERSION),--agent-version $(CENTER_AGENT_VERSION),) $(REGISTER_ARGS)
 
 evals-center-publish:
 	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli publish $(if $(REPORT),--report $(REPORT),) $(PUBLISH_ARGS)
