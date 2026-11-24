@@ -1,4 +1,4 @@
-"""评测中心命令行：数据集登记、报告发布、基线设置、历史回填与入库自检。"""
+"""评测中心命令行：数据集登记、报告发布、基线设置、历史版本迁移、历史回填与入库自检。"""
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,7 @@ from typing import Any
 
 from evals.center import backfill as backfill_module
 from evals.center import purge as purge_module
-from evals.center import baselines, datasets, publish
+from evals.center import baselines, datasets, publish, version_migration
 from taozhi.infrastructure.persistence.database import database_connection, fetch_all
 
 SCOPES = publish.SCOPE_VALUES
@@ -120,6 +120,14 @@ def _cmd_baseline(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_migrate_versions(args: argparse.Namespace) -> int:
+    """历史数据集版本前缀迁移；默认 dry-run，--apply 才写库。"""
+    with database_connection() as conn:
+        result = version_migration.apply(conn) if args.apply else version_migration.plan(conn)
+    _print_json(result)
+    return 0
+
+
 def _cmd_backfill(args: argparse.Namespace) -> int:
     stats = backfill_module.backfill(tenant_code=_tenant_code(args),
                                      owner_username=args.owner_username or "owner",
@@ -160,7 +168,8 @@ def _run_check(tenant_code: str) -> tuple[list[str], dict]:
         for suite in datasets.SUITES:
             registered.extend(fetch_all(
                 conn, "SELECT dataset_id, suite, version, archived, case_count, cases_payload "
-                      "FROM eval_datasets WHERE version=%s ORDER BY dataset_id", (versions[suite],)))
+                      "FROM eval_datasets WHERE version=%s AND suite=%s ORDER BY dataset_id",
+                (versions[suite], suite)))
         for row in registered:
             suite = row.get("suite") or ""
             try:
@@ -296,6 +305,10 @@ def build_parser() -> argparse.ArgumentParser:
     baseline.add_argument("--note", default="")
     _add_identity(baseline, actor_name="actor")
     baseline.set_defaults(handler=_cmd_baseline)
+
+    migrate = sub.add_parser("migrate-versions", help="历史数据集版本补 rag_/agent_ 前缀（默认 dry-run）")
+    migrate.add_argument("--apply", action="store_true", help="确认执行；缺省只输出迁移计划")
+    migrate.set_defaults(handler=_cmd_migrate_versions)
 
     backfill = sub.add_parser("backfill", help="回填历史评测数据")
     backfill.add_argument("--tenant-code")

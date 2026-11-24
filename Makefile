@@ -14,7 +14,7 @@ REGISTER_ARGS ?=
 TEST_ENV := ECOM_MODE=test PYTHONPATH=$(PROJECT_ROOT)/src
 COMPOSE := docker compose
 
-.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check evals-center-register evals-center-publish evals-center-backfill evals-center-check evals-center-purge evals-agent-heldout
+.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check evals-center-register evals-center-publish evals-center-backfill evals-center-check evals-center-purge evals-agent-heldout evals-center-migrate-versions
 
 GIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null)
 COMMIT_BASE ?= origin/main
@@ -163,6 +163,9 @@ evals-center-check:
 
 evals-center-purge:
 	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli purge $(PURGE_ARGS)
+
+evals-center-migrate-versions:
+	ECOM_MODE=production PYTHONPATH=$(PROJECT_ROOT)/src $(PYTHON) -m evals.center.cli migrate-versions $(if $(APPLY),--apply,)
 
 evals-pipeline:
 	@$(MAKE) --no-print-directory evals-full || { code=$$?; \

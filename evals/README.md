@@ -73,7 +73,7 @@ make evals-agent-replay
 评测中心要求 Agent 报告 `schema_version` ≥ 3；低于 3 的报告需重新运行评测生成。部署时应用 `023_eval_center_v3` 迁移（版本库与 RAG/Agent 双体系字段由 `022_eval_profiles_and_rag` 引入）。入库统一走 [`evals/center`](center/cli.py)；回填命令用于导入仓库中已有的历史报告与数据集，重复导入相同内容与归属的批次是幂等的。
 
 ```bash
-make evals-center-register                     # 登记 V1 数据集版本（幂等）
+make evals-center-register                     # 登记当前 RAG/Agent 最新版本（幂等）
 make evals-center-publish REPORT="$REPORT_PATH"
 ```
 
@@ -221,9 +221,10 @@ make evals-archive-check   # 校验快照可读并把登记 md5 同步为当前�
 ### 入库与回填命令
 
 ```bash
-make evals-center-register                          # 登记当前 V1 数据集（幂等，首次登记写审计）
+make evals-center-register                          # 登记当前 RAG/Agent 最新版本（幂等，首次登记写审计）
 make evals-center-publish REPORT="$REPORT_PATH"     # 发布单份报告
 make evals-center-publish PUBLISH_ARGS="--kind rag --reports-dir evals/reports"   # 批量发布
+make evals-center-migrate-versions                  # 历史数据集版本补 rag_/agent_ 前缀（默认 dry-run；APPLY=1 执行）
 make evals-center-backfill                          # 回填历史数据集、报告与基线（幂等）
 make evals-center-backfill BACKFILL_ARGS="--reset"  # 先清空评测中心写入表再回填（破坏性，仅显式使用）
 make evals-center-check                             # 数据集 sha / 基线唯一性 / 报告对象自检
@@ -305,6 +306,57 @@ make evals-center-purge PURGE_ARGS="--mode all --yes"       # 连同数据集登
 ### 入库自检
 
 `make evals-center-check` 只读校验并以退出码表达结果：逐文件重算数据集描述符 sha256、核对登记用例数与用例集、检查 active 基线键唯一、基线批次存在、`eval_run_reports` 对象可读且摘要一致、批次是否缺少原始报告。发现问题逐条打印 `FAIL`，不自动修复。
+
+## 指标术语与展示名
+
+指标展示名统一来自 [`src/taozhi/domain/evaluation_metrics.py`](../src/taozhi/domain/evaluation_metrics.py)，采用通用评测术语（中英对照）；同一「评测类型 + 口径」的指标键固定，界面与接口都按该目录渲染，不在页面里自造简称。本文件与 BENCHMARK 使用指标定义名，界面使用下列展示名。
+
+### Agent 调研评测（全量）
+
+| 指标键 | 展示名 | 含义/公式 |
+| --- | --- | --- |
+| task_completion | 任务成功率（Task Success Rate） | 通过用例数 ÷ 可判定用例数 |
+| mean_score | 平均分（Average Score） | 逐例得分均值 |
+| required_tool_coverage | 必需工具覆盖率（Required Tool Coverage） | 命中必需工具数 ÷ 必需工具总数 |
+| parameter_accuracy | 参数准确率（Argument Accuracy） | 工具参数正确数 ÷ 参数校验总数 |
+| reference_fact_coverage | 事实召回率（Fact Recall） | 命中的参考事实数 ÷ 参考事实总数 |
+| call_coverage_among_known | 模型调用计量覆盖率（Call Coverage） | 已计量模型调用数 ÷ 已知模型调用数 |
+| latency_p50_ms / latency_p95_ms | P50 / P95 延迟（Latency） | 批次逐例耗时分位值 |
+| total_tokens | Token 用量（Token Usage） | 被测系统 Token 总量 |
+| failed_cases / unassessable_cases | 失败用例数 / 不可判定用例数 | 批次逐例状态计数，越低越好 |
+
+### RAG 知识问答评测（全量）
+
+| 指标键 | 展示名 | 含义/公式 |
+| --- | --- | --- |
+| retrieval.hit@8 | Hit@8（命中率） | 前 8 条至少命中一个预期文档的用例占比 |
+| retrieval.recall@8 | Recall@8（召回率） | 召回相关文档数 ÷ 全部相关文档数 |
+| retrieval.mrr | MRR（平均倒数排名） | 首个相关结果排名的倒数均值 |
+| retrieval.precision@8 | Precision@8（精确率） | 前 8 条中相关文档占比，分母固定 8 |
+| retrieval.ndcg@8 | nDCG@8（归一化折损累计增益） | 按位置折损的排序质量 |
+| adversarial.pass_rate | 对抗用例通过率（Adversarial Pass Rate） | 对抗用例通过数 ÷ 判定总数 |
+| adversarial.canary_leaks | 金丝雀泄漏数（Canary Leaks） | 答案/事件中出现金丝雀标记的次数，应为 0 |
+| l3_compliance_rate | L3 合规率（L3 Compliance） | 涉密拦截场景未发生外部模型调用的比例 |
+| behavior.pass_rate | 回答通过率（Pass Rate） | 回答质量判定通过数 ÷ 判定总数 |
+| behavior.faithfulness.micro | 忠实度（Faithfulness） | 声明级：被答案支持的声明数 ÷ 声明总数 |
+| six_metrics.answer_accuracy.accuracy | 答案准确率（Answer Accuracy） | 答案与金标准一致的用例占比 |
+| behavior.false_refusal_rate | 误拒率（False Refusal Rate） | 本可回答却被拒答的比例，越低越好 |
+| behavior.citation_in_bounds | 引用准确率（Citation Accuracy） | 引用命中可访问且属于证据范围的比例 |
+| behavior.fact_recall | 事实召回率（Fact Recall） | 答案覆盖金标准事实的比例 |
+| latency_e2e.p50 / p95 | P50 / P95 端到端延迟（E2E Latency） | 用户请求到答案返回的分位耗时 |
+| token_cost.total_tokens | 被测系统 Token 用量（SUT Token Usage） | 被测链路 Token 总量 |
+| judge_token_cost.total_tokens | 评审模型 Token 用量（Judge Token Usage） | LLM-as-judge 侧 Token 总量，单独计费 |
+
+缺失指标显示「—」，不补零、不伪造；新增指标只扩展目录，不改变既有批次数据。
+
+## 结果存储与上传边界
+
+- **运行库（PostgreSQL）**：`eval_runs` 存批次指标/门禁/口径；`eval_case_results` 存逐例状态与expected/observed/verdicts；`eval_run_reports` 存原始报告的对象键、sha256、字节数。
+- **对象存储（MinIO）**：原始报告正文写入桶 `ECOM_MINIO_BUCKET`（默认 `ecom-private`），对象键为 `{tenant_id}/evaluations/{eval_kind}/{dataset_id}/{run_id}/report.json`；读取时按登记 sha256 校验，损坏时拒绝返回。MinIO 未启用时回退到 `data/private/<mode>/<tenant>/`。
+- **Git / GitHub**：`evals/reports/` 全部忽略，普通运行的原始报告不会进入 Git；`evals/baseline.json` 与 `evals/baseline/*.json` 是受版本控制的基线快照，包含聚合指标与逐题检索元数据（question、retrieved 文档标题/ID 等），不包含完整答案正文。
+- **外部平台（Phoenix，可选）**：只有执行 `make evals-sync` 或 `make evals-follow` 时才把数据集与逐例答案/引用同步到 Phoenix（默认 `http://127.0.0.1:6006`，可配置远端）；评测 Worker 不会自动上传。
+- **模型通道**：评测执行时问题与上下文会发送给模型通道（当前百炼为首选），属于推理请求，不是评测结果外传。
+- **下载**：`GET /api/evaluations/runs/{run_id}/report` 需登录并按可见范围鉴权，响应头带 `X-Report-Sha256` 供校验。
 
 ## 评测台账留痕规范（增量追加，不覆盖历史）
 
