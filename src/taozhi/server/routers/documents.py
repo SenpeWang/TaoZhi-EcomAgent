@@ -130,6 +130,23 @@ def original(doc_id: str, p=Depends(identity)):
     )
 
 
+@router.get("/{doc_id}/pages")
+def pages(doc_id: str, p=Depends(identity)):
+    """返回 PDF 原件总页数；非老板或无原件按统一错误返回。"""
+    return service.document_pdf_page_count(p, doc_id)
+
+
+@router.get("/{doc_id}/pages/{page_no}.png")
+def page_image(doc_id: str, page_no: int, p=Depends(identity)):
+    """把 PDF 原件某页渲染为 PNG，供页面内翻页查看。"""
+    spec = service.render_document_pdf_page(p, doc_id, page_no)
+    return Response(
+        spec["data"],
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
 @router.get("/{doc_id}/download")
 def download(doc_id: str, p=Depends(identity)):
     """受控下载脱敏文本或（老板视角）预签名/代理直出原生附件文件。"""

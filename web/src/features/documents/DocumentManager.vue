@@ -92,17 +92,42 @@
       <el-alert v-if="detail.error" type="error" :title="detail.error" :closable="false" />
       <el-tabs v-model="detailTab" class="document-tabs">
         <el-tab-pane label="原始文档" name="original">
-          <pre v-if="detail.body" class="document-body">{{ detail.body }}</pre>
+          <article
+            v-if="detail.body && detail.mime_type === 'text/markdown'"
+            ref="markdownHost"
+            class="document-markdown"
+          />
+          <template
+            v-else-if="
+              detail.body &&
+              detail.mime_type === 'application/pdf' &&
+              detail.has_original &&
+              user.is_boss
+            "
+          >
+            <div v-if="pdfTotal" class="pdf-viewer">
+              <div class="pdf-toolbar">
+                <el-button size="small" :disabled="pdfPage <= 1" @click="pdfPage -= 1">
+                  上一页
+                </el-button>
+                <span>第 {{ pdfPage }} / {{ pdfTotal }} 页</span>
+                <el-button size="small" :disabled="pdfPage >= pdfTotal" @click="pdfPage += 1">
+                  下一页
+                </el-button>
+                <el-link :href="originalUrl" target="_blank" type="primary"> 在新窗口打开 </el-link>
+              </div>
+              <img class="document-pdf" :src="pdfPageUrl" :alt="`PDF 第 ${pdfPage} 页`" />
+            </div>
+            <iframe v-else class="document-pdf" :src="originalUrl" title="PDF 原件" />
+            <p class="chunk-note">当前按 PDF 原件版面展示，使用上一页 / 下一页浏览全部页面。</p>
+          </template>
+          <pre v-else-if="detail.body" class="document-body">{{ detail.body }}</pre>
           <el-empty v-else description="当前仅可查看文档基本信息，暂未获准阅读正文" />
-          <p v-if="detail.has_original && user.is_boss" class="chunk-note">
-            <el-link
-              v-if="detail.mime_type === 'application/pdf'"
-              :href="'/api/documents/' + encodeURIComponent(detail.id) + '/original'"
-              target="_blank"
-              type="primary"
-            >
-              查看归档原件（PDF）
-            </el-link>
+          <p
+            v-if="detail.mime_type === 'application/pdf' && detail.has_original && !user.is_boss"
+            class="chunk-note"
+          >
+            PDF 原件仅企业负责人可在页面内查看，此处为脱敏正文；如需原件请联系资料负责人。
           </p>
         </el-tab-pane>
         <el-tab-pane label="切片与词嵌入" name="chunks">
@@ -365,12 +390,13 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch, watchEffect } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { levelText, stateTag, stateText } from '../../shared/labels'
 import { useWorkspaceAction } from '../../shared/useWorkspaceAction'
 import { isAdmin } from '../administration/types'
 import type { ManagedUser, Organization, User } from '../administration/types'
+import { renderMarkdown } from './markdown'
 import type {
   DocumentChunkIndex,
   DocumentListItem,
@@ -432,6 +458,23 @@ const historyOpen = ref(false)
 const detailTab = ref<'original' | 'chunks'>('original')
 const chunkIndex = ref<DocumentChunkIndex | null>(null)
 const chunkError = ref('')
+const markdownHost = ref<HTMLElement | null>(null)
+
+watchEffect(() => {
+  if (markdownHost.value) {
+    markdownHost.value.innerHTML = renderMarkdown(detail.value?.body || '')
+  }
+})
+const originalUrl = computed(() =>
+  detail.value ? '/api/documents/' + encodeURIComponent(detail.value.id) + '/original' : '',
+)
+const pdfPage = ref(1)
+const pdfTotal = ref(0)
+const pdfPageUrl = computed(() =>
+  detail.value
+    ? '/api/documents/' + encodeURIComponent(detail.value.id) + '/pages/' + pdfPage.value + '.png'
+    : '',
+)
 const history = ref<DocumentVersion[]>([])
 const accessOpen = ref(false)
 const accessId = ref('')
@@ -468,6 +511,8 @@ function closeDocument(): void {
   detailTab.value = 'original'
   chunkIndex.value = null
   chunkError.value = ''
+  pdfPage.value = 1
+  pdfTotal.value = 0
   selectedFile.value = null
   docForm.id = docForm.title = docForm.body = ''
   history.value = []
@@ -533,6 +578,32 @@ function vectorColor(value: number): string {
   const alpha = (0.12 + magnitude * 0.88).toFixed(2)
   return value >= 0 ? `rgba(64, 158, 255, ${alpha})` : `rgba(245, 108, 108, ${alpha})`
 }
+
+/** 读取 PDF 原件总页数；仅在老板查看带原件的 PDF 时请求一次。 */
+async function loadPdfMeta(): Promise<void> {
+  const document = detail.value
+  if (!document || document.mime_type !== 'application/pdf') return
+  if (!document.has_original || !props.user.is_boss || pdfTotal.value) return
+  const request = selection
+  await action(async () => {
+    try {
+      const page = await props.api<{ total: number }>(
+        '/documents/' + encodeURIComponent(document.id) + '/pages',
+      )
+      if (request !== selection || detail.value?.id !== document.id) return
+      pdfTotal.value = page.total
+    } catch {
+      pdfTotal.value = 0
+    }
+  })
+}
+
+watch(
+  () => [detail.value?.id, detailTab.value] as const,
+  ([id, tab]) => {
+    if (id && tab === 'original') void loadPdfMeta()
+  },
+)
 
 watch(detailTab, (tab) => {
   if (tab === 'chunks') void loadChunks()
@@ -864,5 +935,72 @@ defineExpose({ openDocument })
   height: 14px;
   border-radius: 2px;
   background: var(--el-fill-color-light);
+}
+
+.document-markdown {
+  max-height: 60vh;
+  overflow: auto;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.document-markdown :deep(h1) {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+
+.document-markdown :deep(h2) {
+  margin: 18px 0 8px;
+  font-size: 17px;
+}
+
+.document-markdown :deep(table) {
+  width: 100%;
+  margin: 12px 0;
+  border-collapse: collapse;
+}
+
+.document-markdown :deep(th),
+.document-markdown :deep(td) {
+  padding: 6px 8px;
+  text-align: left;
+  border: 1px solid var(--el-border-color);
+}
+
+.document-markdown :deep(blockquote) {
+  margin: 12px 0;
+  padding: 8px 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border-left: 3px solid var(--el-border-color);
+}
+
+.document-markdown :deep(pre) {
+  padding: 10px 12px;
+  overflow: auto;
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
+}
+
+.document-markdown :deep(code) {
+  font-family: var(--el-font-family-monospace, monospace);
+}
+
+.pdf-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.document-pdf {
+  display: block;
+  width: 100%;
+  height: 62vh;
+  object-fit: contain;
+  background: var(--el-fill-color-light);
+  border: 0;
 }
 </style>

@@ -434,6 +434,44 @@ def prepare_original_preview(p: Principal, doc_id: str) -> dict[str, Any]:
         }
 
 
+def _load_pdf_original(p: Principal, doc_id: str) -> bytes:
+    """校验老板身份与下载权限后返回当前版本的 PDF 原件字节。"""
+    with database_connection() as c:
+        d = get_document(c, p, doc_id)
+        if not p.boss:
+            raise Denied("原件预览仅限企业负责人", "FORBIDDEN", 403)
+        if not can_download(c, p, d):
+            raise Denied("没有资料下载权限", "NOT_FOUND", 404)
+        v = document_repo.get_document_version(c, d["id"], d["current_version"])
+        if not v["blob_name"] or v["mime_type"] != "application/pdf":
+            raise Denied("该资料没有 PDF 原件", "NOT_FOUND", 404)
+        try:
+            return get_blob_store().open_blob(p.tenant_id, v["blob_name"])
+        except Exception as exc:
+            raise Denied("原件不可用", "NOT_FOUND", 404) from exc
+
+
+def document_pdf_page_count(p: Principal, doc_id: str) -> dict[str, int]:
+    """返回 PDF 原件的总页数，供前端翻页查看。"""
+    import fitz
+
+    data = _load_pdf_original(p, doc_id)
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        return {"total": doc.page_count}
+
+
+def render_document_pdf_page(p: Principal, doc_id: str, page_no: int) -> dict[str, Any]:
+    """把 PDF 原件的指定页渲染为 PNG，避免依赖浏览器内置 PDF 插件。"""
+    import fitz
+
+    data = _load_pdf_original(p, doc_id)
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        if page_no < 1 or page_no > doc.page_count:
+            raise Denied("页码超出范围", "INVALID", 400)
+        pixmap = doc[page_no - 1].get_pixmap(dpi=144)
+        return {"data": pixmap.tobytes("png"), "total": doc.page_count}
+
+
 def list_knowledge_map(p: Principal) -> list[dict[str, Any]]:
     """读取当前用户可见的已发布文档实体关联图谱。"""
     with database_connection() as c:
