@@ -277,6 +277,35 @@ class AntiHallucinationJudge:
         return _verdict("AntiHallucinationJudge", "outcome", issues, "报告未包含已知的伪造轨迹文案")
 
 
+class BudgetJudge:
+    """核对工具调用次数与端到端耗时是否超出用例声明的预算。"""
+
+    def __init__(self, max_tool_calls: int | None = None,
+                 max_elapsed_seconds: float | None = None) -> None:
+        self.max_tool_calls = max_tool_calls
+        self.max_elapsed_seconds = max_elapsed_seconds
+
+    def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        issues = []
+        calls = [call for call in result.tool_calls if call.get("dispatched") is not False]
+        if self.max_tool_calls is not None and len(calls) > self.max_tool_calls:
+            issues.append(_issue(
+                "budget_exceeded",
+                f"工具调用 {len(calls)} 次超出预算 {self.max_tool_calls} 次",
+            ))
+        elapsed = result.elapsed
+        if self.max_elapsed_seconds is not None:
+            if elapsed is None:
+                issues.append(_issue("missing_observation", "未采集端到端耗时，预算无法判定"))
+            elif float(elapsed) > float(self.max_elapsed_seconds):
+                issues.append(_issue(
+                    "budget_exceeded",
+                    f"耗时 {float(elapsed):.1f}s 超出预算 {float(self.max_elapsed_seconds):.1f}s",
+                ))
+        return _verdict("BudgetJudge", "trajectory", issues, "工具调用次数与耗时均在预算内",
+                        tool_calls_total=len(calls), elapsed_seconds=elapsed)
+
+
 class SteeringJudge:
     """检查干预指令的交付结果，以及有序观测中工具调用是否随指令切换。"""
 
@@ -403,4 +432,6 @@ def evaluate_case(case: dict, result: AgentRunResult) -> list[JudgeVerdict]:
     if case.get("steering_keyword"):
         phases = {phase: case["tool_expectations"][index] for phase, index in case.get("steering_boundary", {}).items()}
         verdicts.append(SteeringJudge(case["steering_keyword"], phases).evaluate(result))
+    if case.get("max_tool_calls") is not None or case.get("max_elapsed_seconds") is not None:
+        verdicts.append(BudgetJudge(case.get("max_tool_calls"), case.get("max_elapsed_seconds")).evaluate(result))
     return verdicts

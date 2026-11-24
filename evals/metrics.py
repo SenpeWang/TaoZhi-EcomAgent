@@ -73,6 +73,54 @@ def ndcg_at_k(ranked: Sequence[str], relevant: Iterable[str], k: int) -> float:
     return float(dcg / ideal) if ideal > 0 else 0.0
 
 
+def pass_at_k(success_counts: Sequence[int], trial_counts: Sequence[int], k: int) -> float | None:
+    """pass@k 的无偏估计：每个任务 k 次尝试中至少一次成功的平均概率。
+
+    Args:
+        success_counts: 每个任务的成功 trial 数。
+        trial_counts: 每个任务的 trial 总数。
+        k: 采样次数；必须不大于每个任务的最小 trial 数。
+
+    Returns:
+        平均 pass@k；无法估计时返回 None。
+    """
+    from math import comb
+
+    if not success_counts or k < 1:
+        return None
+    if any(n < k for n in trial_counts):
+        return None
+    values = []
+    for successes, trials in zip(success_counts, trial_counts):
+        total = comb(trials, k)
+        values.append(1.0 - (comb(trials - successes, k) / total if trials - successes >= k else 0.0))
+    return float(sum(values) / len(values))
+
+
+def pass_pow_k_estimate(success_counts: Sequence[int], trial_counts: Sequence[int], k: int) -> float | None:
+    """pass^k 的无偏估计：每个任务 k 次尝试全部成功的平均概率。"""
+    from math import comb
+
+    if not success_counts or k < 1:
+        return None
+    if any(n < k for n in trial_counts):
+        return None
+    values = [comb(successes, k) / comb(trials, k)
+              for successes, trials in zip(success_counts, trial_counts)]
+    return float(sum(values) / len(values))
+
+
+def wilson_interval(successes: int, total: int, z: float = 1.96) -> tuple[float, float] | None:
+    """二项比例的 Wilson 95% 置信区间；样本为空时返回 None。"""
+    if total <= 0:
+        return None
+    p = successes / total
+    denom = 1 + z * z / total
+    centre = (p + z * z / (2 * total)) / denom
+    half = z * ((p * (1 - p) / total + z * z / (4 * total * total)) ** 0.5) / denom
+    return (max(0.0, round(centre - half, 4)), min(1.0, round(centre + half, 4)))
+
+
 def pass_pow_k(runs: Sequence[bool]) -> float:
     """pass^k：同一用例跑 k 次是否全部通过（非确定性系统必须看这个）。
 

@@ -12,6 +12,8 @@ from taozhi.domain.research import ALL_RESEARCH_TOOLS, StopReason
 
 from .contracts import REPORT_SCHEMA_VERSION, expectation_notes, required_tool_names
 from .harness import AgentRunResult
+from evals.metrics import wilson_interval
+
 from .judges import JudgeVerdict, matches_any_arguments
 
 FAILURE_LABELS = {
@@ -29,12 +31,14 @@ FAILURE_LABELS = {
     "reference_fact": "报告缺少参考事实",
     "evidence_citation": "参考事实缺少对应证据",
     "forbidden_claim": "报告出现标注禁止的结论",
+    "budget_exceeded": "工具调用或耗时超出预算",
 }
 
 COUNTERS = (
     "required_tool_hits", "required_tool_total", "required_tool_unknown", "parameter_hits", "parameter_total",
     "parameter_unknown", "selection_hits", "selection_total", "selection_unknown",
     "forbidden_executions", "forbidden_attempts", "fact_hits", "fact_total", "fact_unknown",
+    "tool_calls_total", "elapsed_seconds",
 )
 
 TOOL_PARAMETERS = {"query", "keyword", "url", "limit", "max_chars", "timeout", "timezone"}
@@ -173,6 +177,7 @@ def group_metrics(records: list[dict]) -> dict:
         "selected": len(records), "observed": sum(r["observed"] for r in records),
         "passed": states["passed"], "failed": states["failed"], "unassessable": states["unassessable"],
         "task_completion": _ratio(states["passed"], states["passed"] + states["failed"]),
+        "task_completion_ci95": wilson_interval(states["passed"], states["passed"] + states["failed"]),
         "dimensions": dimension_metrics,
         "required_tool_coverage": {
             **_ratio(counts["required_tool_hits"], counts["required_tool_total"] - counts["required_tool_unknown"]),

@@ -5,10 +5,13 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
-AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
+AGENT_LIVE_CASES: List[Dict[str, Any]] = [
     {
         "id": "AGENT-STD-001",
-        "category": "full_research",
+        "capability": "task_completion",
+        "category": "task_completion",
+        "track": "capability",
+        "topic": "full_research",
         "name": "标准全景调研协同测试（正常流程）",
         "prompt": "对【智能保温杯】进行全景电商市场调研，覆盖消费者痛点、一手出厂底价与海外对标。",
         "keyword": "智能保温杯",
@@ -19,7 +22,10 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "AGENT-SCAN-002",
-        "category": "sourcing_comparison",
+        "capability": "task_completion",
+        "category": "task_completion",
+        "track": "capability",
+        "topic": "sourcing_comparison",
         "name": "供应链一手出厂价与海外零售对标测试（复杂多步）",
         "prompt": "深入 1688 批发市场与海外亚马逊平台，对比【磁吸手机壳】的一手出厂底价与美元零售价，测算套利毛利。",
         "keyword": "磁吸手机壳",
@@ -30,7 +36,10 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "AGENT-WEB-003",
-        "category": "web_intelligence",
+        "capability": "tool_use",
+        "category": "tool_correctness",
+        "track": "capability",
+        "topic": "web_intelligence",
         "name": "纯全网网页检索与评价提取边界测试（边界隔离防越权）",
         "prompt": "检索全网关于【骨传导运动耳机】的最新行业趋势、主流热销卖点与买家高频差评点。",
         "keyword": "骨传导运动耳机",
@@ -41,7 +50,10 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "AGENT-STEER-004",
-        "category": "dynamic_steering",
+        "capability": "planning_and_adaptation",
+        "category": "mid_trajectory_steering",
+        "track": "capability",
+        "topic": "dynamic_steering",
         "name": "运行期动态干预与实时重规划测试（复杂多步）",
         "prompt": "调研【大容量充电宝】的供应链货源。",
         "keyword": "大容量充电宝",
@@ -54,7 +66,10 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "AGENT-ERR-005",
+        "capability": "planning_and_adaptation",
         "category": "error_recovery",
+        "track": "capability",
+        "topic": "error_recovery",
         "name": "冷门品类与数据源降级容错测试（异常容错自愈）",
         "prompt": "对【极冷门高精密特种陶瓷轴承】进行调研，评估在源头工厂货源极稀缺情况下的降级分析与风险研报能力。",
         "keyword": "极冷门高精密特种陶瓷轴承",
@@ -65,7 +80,10 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "AGENT-CAT-006",
-        "category": "full_research",
+        "capability": "task_completion",
+        "category": "task_completion",
+        "track": "capability",
+        "topic": "full_research",
         "name": "桌面静音加湿器全景市场调研（数码小家电品类）",
         "prompt": "调研【桌面静音加湿器】的全网消费者痛点与 1688 源头工厂出厂价与亚马逊售价。",
         "keyword": "桌面静音加湿器",
@@ -76,7 +94,10 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "AGENT-CAT-007",
-        "category": "sourcing_comparison",
+        "capability": "task_completion",
+        "category": "task_completion",
+        "track": "capability",
+        "topic": "sourcing_comparison",
         "name": "户外轻量冲锋衣一手货源与跨境零售对标（服饰户外品类）",
         "prompt": "深入 1688 批发市场探寻【户外轻量冲锋衣】的出厂底价，并与海外亚马逊价格进行毛利对比测算。",
         "keyword": "户外轻量冲锋衣",
@@ -87,7 +108,10 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "AGENT-CAT-008",
-        "category": "sourcing_comparison",
+        "capability": "task_completion",
+        "category": "task_completion",
+        "track": "capability",
+        "topic": "sourcing_comparison",
         "name": "氨基酸温和洁面乳源头工厂起订量与配方成本核验（美妆个护品类）",
         "prompt": "调取 1688 批发货源探查【氨基酸温和洁面乳】的一手代工出厂价与起订批量梯度。",
         "keyword": "氨基酸温和洁面乳",
@@ -98,7 +122,10 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "AGENT-CAT-009",
-        "category": "full_research",
+        "capability": "task_completion",
+        "category": "task_completion",
+        "track": "capability",
+        "topic": "full_research",
         "name": "智能自动猫砂盆跨境高客单价溢价分析（宠物智能硬件品类）",
         "prompt": "对【智能自动猫砂盆】开展全景市场调研，比对国内 1688 出厂价与海外亚马逊高溢价零售空间。",
         "keyword": "智能自动猫砂盆",
@@ -109,7 +136,10 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "AGENT-SEC-010",
-        "category": "web_intelligence",
+        "capability": "tool_use",
+        "category": "tool_correctness",
+        "track": "capability",
+        "topic": "web_intelligence",
         "name": "纯全网用户真实口碑与差评分析防越权测试（边界隔离防越权）",
         "prompt": "仅检索全网关于【人体工学办公椅】的用户真实口碑、高频腰部支撑差评点与行业趋势。",
         "keyword": "人体工学办公椅",
@@ -122,7 +152,11 @@ AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = [
 
 
 def _load_synthetic_cases() -> list[dict]:
-    path = Path(__file__).resolve().parents[1] / "datasets" / "v1_20261123" / "agent" / "research_cases.json"
+    base = Path(__file__).resolve().parents[1] / "datasets"
+    candidates = sorted(base.glob("*/agent/research_cases.json"), key=lambda item: item.parent.parent.name)
+    if not candidates:
+        raise ValueError("未找到可用的调研合成用例集")
+    path = candidates[-1]
     catalog = json.loads(path.read_text(encoding="utf-8"))
     if catalog.get("schema_version") != 1 or catalog.get("source") != "synthetic":
         raise ValueError("无法识别调研回放用例集版本或来源")
@@ -132,4 +166,4 @@ def _load_synthetic_cases() -> list[dict]:
     return cases
 
 
-AGENT_BENCHMARK_CASES.extend(_load_synthetic_cases())
+AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = list(AGENT_LIVE_CASES) + _load_synthetic_cases()

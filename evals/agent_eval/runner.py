@@ -60,12 +60,16 @@ def run_agent_evaluations(cases: list[dict], *,
                           replay_file: Path | None = None, reports_dir: Path | None = None,
                           catalog: list[dict] | None = None, compare_file: Path | None = None,
                           counterexamples_file: Path | None = None, publish_to: tuple[str, str] | None = None,
-                          log_path: Path | None = None) -> dict:
+                          log_path: Path | None = None, trials: int = 1) -> dict:
     """通过同一组判定器评估实际运行或已有记录，将来源写入独立报告。"""
     dataset = cases if catalog is None else catalog
     validate_cases(dataset)
     if not cases:
         raise ValueError("未选中用例")
+    if trials < 1:
+        raise ValueError("trials 必须为正整数")
+    if replay_file is not None and trials != 1:
+        raise ValueError("合成回放不支持 trials>1：回放记录本身已固定")
     indices = {case["id"]: case for case in dataset}
     if len({case["id"] for case in cases}) != len(cases) or any(indices.get(c["id"]) != c for c in cases):
         raise ValueError("运行用例包含重复或未登记的定义")
@@ -115,6 +119,7 @@ def run_agent_evaluations(cases: list[dict], *,
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     run_id = f"{timestamp}_{uuid4().hex[:8]}"
     records = []
+    trial_status: dict[str, list[bool]] = {}
     for index, case in enumerate(cases, start=1):
         case_id = case["id"]
         runtime_snapshot.write_progress(
@@ -123,19 +128,26 @@ def run_agent_evaluations(cases: list[dict], *,
             progress=5 + int(85 * index / len(cases)),
             detail=case_id,
         )
-        if replay_file is None:
-            result = harness.run(case)
-        elif case_id in captured:
-            try:
-                result = replay_transcript(case, captured[case_id])
-            except (ValueError, TypeError, KeyError) as exc:
-                raise ValueError(f"用例 {case_id} 的执行记录格式无效") from exc
-        else:
-            result = None
-        checks = evaluate_case(case, result) if result is not None else []
-        record = case_record(case, result, checks)
-        records.append(record)
-        print(f"[{case_id}] {record['status']}")
+        runs: list[bool] = []
+        first_record = None
+        for trial in range(1 if replay_file is not None else trials):
+            if replay_file is None:
+                result = harness.run(case)
+            elif case_id in captured:
+                try:
+                    result = replay_transcript(case, captured[case_id])
+                except (ValueError, TypeError, KeyError) as exc:
+                    raise ValueError(f"用例 {case_id} 的执行记录格式无效") from exc
+            else:
+                result = None
+            checks = evaluate_case(case, result) if result is not None else []
+            record = case_record(case, result, checks)
+            runs.append(record["status"] == "passed")
+            if first_record is None:
+                first_record = record
+        trial_status[case_id] = runs
+        records.append(first_record)
+        print(f"[{case_id}] {first_record['status']}")
 
     metrics = group_metrics(records)
     scores = [r["score"] for r in records if r["score"] is not None]
@@ -151,6 +163,12 @@ def run_agent_evaluations(cases: list[dict], *,
         "metrics": metrics,
         "suites": {suite: group_metrics([r for r in records if r["suite"] == suite])
                    for suite in sorted({r["suite"] for r in records})},
+        "capabilities": {capability: group_metrics([r for r in records
+                                                   if (indices.get(r["case_id"]) or {}).get("capability") == capability])
+                         for capability in sorted({(indices.get(r["case_id"]) or {}).get("capability")
+                                                   for r in records} - {None})},
+        "trials": trials,
+        "reliability": _reliability(trial_status, trials),
         "gate": release_gate(records), "case_results": records,
     }
     if baseline is not None:
@@ -180,6 +198,33 @@ def run_agent_evaluations(cases: list[dict], *,
     return report
 
 
+def filter_heldout(cases: list[dict], include: bool) -> list[dict]:
+    """heldout 只用于发布前复核；日常回放默认排除，避免把留出集当训练信号。"""
+    return list(cases) if include else [case for case in cases if case.get("track") != "heldout"]
+
+
+def _reliability(trial_status: dict[str, list[bool]], trials: int) -> dict:
+    """按 trial 汇总一次成功率、pass@k 与 pass^k（k=trials）。"""
+    from evals.metrics import pass_at_k, pass_pow_k_estimate
+
+    success_counts = [sum(runs) for runs in trial_status.values()]
+    trial_counts = [len(runs) for runs in trial_status.values()]
+    total = sum(trial_counts)
+    passed_once = sum(1 for runs in trial_status.values() if any(runs))
+    passed_all = sum(1 for runs in trial_status.values() if all(runs))
+    return {
+        "trials": trials,
+        "cases": len(trial_status),
+        "pass_at_1": round(sum(success_counts) / total, 4) if total else None,
+        "pass_at_k": (round(pass_at_k(success_counts, trial_counts, trials), 4)
+                      if trials > 1 and pass_at_k(success_counts, trial_counts, trials) is not None else None),
+        "pass_pow_k": (round(pass_pow_k_estimate(success_counts, trial_counts, trials), 4)
+                       if trials > 1 and pass_pow_k_estimate(success_counts, trial_counts, trials) is not None else None),
+        "cases_passed_once": passed_once,
+        "cases_passed_all": passed_all,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """缺少记录、硬失败和统计回归使用非零退出码。"""
     parser = argparse.ArgumentParser(description="调研 Agent 评测与合成轨迹重评")
@@ -191,6 +236,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--publish", nargs=2, metavar=("TENANT_ID", "OWNER_ID"), help="在已配置的工作台数据库归档本次结果")
     parser.add_argument("--output-dir", type=Path, help="报告目录，合成重评另存于其子目录")
     parser.add_argument("--progress-jsonl", type=Path, help="运行进度 JSONL，供评测任务面板轮询")
+    parser.add_argument("--trials", type=int, default=1, help="每个用例重复 trial 数（仅 live；用于 pass@k/pass^k）")
+    parser.add_argument("--include-heldout", action="store_true",
+                        help="纳入 heldout 留出集（仅发布前复核；也可用 ECOM_EVAL_INCLUDE_HELDOUT=1）")
     args = parser.parse_args(argv)
     if args.dataset and args.replay is None:
         parser.error("合成数据集需要 --replay 执行记录")
@@ -201,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
         selected = [case for case in selected if case.get("execution_mode") == "synthetic_trace_regrade"]
     elif args.replay is None and args.case is None:
         selected = [case for case in selected if case.get("execution_mode") != "synthetic_trace_regrade"]
+    include_heldout = args.include_heldout or os.environ.get("ECOM_EVAL_INCLUDE_HELDOUT") == "1"
+    selected = filter_heldout(selected, include_heldout)
     if not selected:
         parser.error("未找到指定用例")
     try:
@@ -211,7 +261,8 @@ def main(argv: list[str] | None = None) -> int:
         report = run_agent_evaluations(selected, replay_file=args.replay,
                                        reports_dir=args.output_dir, catalog=AGENT_BENCHMARK_CASES,
                                        compare_file=args.compare, counterexamples_file=args.counterexamples,
-                                       publish_to=tuple(args.publish) if args.publish else None)
+                                       publish_to=tuple(args.publish) if args.publish else None,
+                                       trials=args.trials)
     except (OSError, UnicodeError, json.JSONDecodeError):
         parser.error("无法读取评测文件或写入报告")
     except ValueError as exc:

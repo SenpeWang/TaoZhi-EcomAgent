@@ -38,8 +38,11 @@ from taozhi.domain.passwords import hash_password, verify_password
 from taozhi.infrastructure.persistence.access_repo import can_read, can_read_metric, load_principal
 from taozhi.infrastructure.persistence.metric_execution import BUILTIN_BUSINESS_METRICS
 
+sys.path.insert(0, str(ROOT))
+from evals import runtime_snapshot
+
 SPEC = Path(__file__).resolve().parent / "spec"
-GEN = ROOT / "evals/datasets/v1_20261123/rag"
+GEN = ROOT / "evals/datasets" / runtime_snapshot.current_dataset_version() / "rag"
 EVAL_PASSWORD = os.environ.get("ECOM_EVAL_PASSWORD") or "taozhi2026eval"
 SYN_PREFIX = "SYN_"
 

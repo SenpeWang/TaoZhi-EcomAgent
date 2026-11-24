@@ -11,13 +11,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from evals import naming
+
 SPEC = Path(__file__).resolve().parent / "spec"
 
-RETRIEVAL_CATEGORIES = ("product", "compat", "aftersale", "multi_doc", "insufficient", "conflict",
-                        "robust", "troubleshoot", "edge", "timeliness", "citation", "long_context",
-                        "operations", "supply", "coach", "finance", "calculation", "exclusion")
-AMBIGUOUS_CATEGORIES = ("ambiguous",)
-PERMISSION_CATEGORIES = ("role", "grant", "revocation", "injection", "leakage")
+RETRIEVAL_CATEGORIES = ("product", "compatibility", "after_sales", "multi_document",
+                        "insufficient_evidence", "conflict", "robustness", "troubleshooting",
+                        "edge_case", "timeliness", "citation", "long_context", "operations",
+                        "supply_chain", "sales_coaching", "finance", "calculation", "exclusion")
+AMBIGUOUS_CATEGORIES = ("ambiguity",)
+PERMISSION_CATEGORIES = ("role_based_access", "access_grant", "revocation",
+                         "prompt_injection", "data_leakage")
 MULTI_TURN_CATEGORIES = ("multi_turn",)
 PARSING_CATEGORIES = ("parsing",)
 CHATBI_CATEGORIES = ("chatbi",)
@@ -27,23 +31,25 @@ KNOWN_CATEGORIES = (RETRIEVAL_CATEGORIES + PERMISSION_CATEGORIES
 
 DIM_VALUES = {
     "answerability": ("answerable", "partial", "unanswerable"),
-    "qtype": ("fact", "process", "multihop", "compare", "troubleshoot",
-              "edge", "ambiguous", "security"),
+    "qtype": ("fact", "process", "multi_hop", "comparison", "aggregation",
+              "false_premise", "troubleshooting", "edge_case", "ambiguity", "security"),
     "difficulty": ("easy", "medium", "hard"),
     "source": ("synthetic", "badcase", "adversarial", "real"),
     "risk": ("high", "medium", "low"),
 }
 
-DOMAIN_ROLES = ("product", "compatibility", "after_sales", "coach", "operations", "supply", "finance", "data", "security")
+DOMAIN_ROLES = ("product", "compatibility", "after_sales", "sales_coaching", "operations",
+                "supply_chain", "finance", "data", "security")
 ROLE_TYPES_MIN = {"employee": 100, "leader": 6, "boss": 6}
 
 COVERAGE_MIN = {
-    "answerability": {"answerable": 72, "partial": 8, "unanswerable": 22},
-    "qtype": {"fact": 45, "process": 3, "multihop": 6, "compare": 9,
-              "troubleshoot": 5, "edge": 7, "ambiguous": 4, "security": 16},
-    "difficulty": {"easy": 22, "medium": 30, "hard": 25},
-    "source": {"synthetic": 70, "badcase": 4, "adversarial": 4, "real": 4},
-    "risk": {"high": 18, "medium": 14, "low": 35},
+    "answerability": {"answerable": 130, "partial": 12, "unanswerable": 30},
+    "qtype": {"fact": 80, "process": 6, "multi_hop": 12, "comparison": 10,
+              "aggregation": 2, "false_premise": 2, "troubleshooting": 6,
+              "edge_case": 10, "ambiguity": 4, "security": 26},
+    "difficulty": {"easy": 35, "medium": 45, "hard": 40},
+    "source": {"synthetic": 120, "badcase": 5, "adversarial": 5, "real": 5},
+    "risk": {"high": 30, "medium": 22, "low": 60},
 }
 
 REQUIRED_FIELDS = ("case_id", "category", "dataset", "test_identity", "question",
@@ -99,7 +105,17 @@ def validate_case(case: dict, doc_ids: set, identities: set, canaries: set,
     for f in REQUIRED_FIELDS:
         if f not in case:
             errs.append(f"{cid}: 缺字段 {f}")
-    if case.get("category") not in KNOWN_CATEGORIES:
+    if "capability" in case:
+        capability = case.get("capability")
+        if capability not in naming.RAG_CAPABILITIES:
+            errs.append(f"{cid}: 未知大类 capability={capability!r}")
+        elif case.get("category") not in naming.RAG_SUBCATEGORIES.get(capability, {}):
+            errs.append(f"{cid}: 子类 {case.get('category')!r} 不属于大类 {capability!r}")
+        if case.get("track") not in naming.TRACKS:
+            errs.append(f"{cid}: 未知用途 track={case.get('track')!r}")
+        if not isinstance(case.get("topic"), str) or not case["topic"].strip():
+            errs.append(f"{cid}: v3 用例必须给非空 topic")
+    elif case.get("category") not in KNOWN_CATEGORIES:
         errs.append(f"{cid}: 未知类别 {case.get('category')!r}")
     if "domain_role" in case and case["domain_role"] not in DOMAIN_ROLES:
         errs.append(f"{cid}: 未知领域角色 domain_role={case['domain_role']!r}")
@@ -135,12 +151,12 @@ def validate_case(case: dict, doc_ids: set, identities: set, canaries: set,
     if not (case.get("reference_answer") or "").strip():
         errs.append(f"{cid}: reference_answer 不能为空（用于 Answer Correctness 对比）")
     cat = case.get("category")
-    if cat in RETRIEVAL_CATEGORIES + PARSING_CATEGORIES:
+    if "capability" not in case and cat in RETRIEVAL_CATEGORIES + PARSING_CATEGORIES:
         facts = case.get("expected_facts") or []
         if not facts:
             errs.append(f"{cid}: 检索类用例必须给 expected_facts（可判定锚点）")
         docs = case.get("expected_documents") or []
-        allow_empty_docs = (cat == "insufficient" and bool(case.get("out_of_corpus")))
+        allow_empty_docs = (cat == "insufficient_evidence" and bool(case.get("out_of_corpus")))
         if not docs and not allow_empty_docs:
             errs.append(f"{cid}: 检索类用例必须给 expected_documents")
         for d in docs:
@@ -204,19 +220,41 @@ def validate_coverage(cases: list) -> list:
     return errs
 
 
-def validate_cases(cases: list) -> list:
+def validate_v3_coverage(cases: list, redteam_count: int = 0) -> list:
+    """v3 覆盖校验：6 大类 × 5 用途各 90 例；红队数量由调用方声明（可独立成文件）。"""
+    errs = []
+    expected = {"golden": 30, "capability": 20, "regression": 15, "challenge": 10, "heldout": 15}
+    counts: dict = {}
+    for case in cases:
+        key = (case.get("capability"), case.get("track"))
+        counts[key] = counts.get(key, 0) + 1
+    for capability in naming.RAG_CAPABILITIES:
+        for track, minimum in expected.items():
+            got = counts.get((capability, track), 0)
+            if got != minimum:
+                errs.append(f"v3 {capability}/{track} 期望 {minimum} 例，实际 {got}")
+    redteam = sum(1 for case in cases if case.get("track") == "redteam")
+    if redteam != redteam_count:
+        errs.append(f"v3 红队期望 {redteam_count} 例，实际 {redteam}")
+    return errs
+
+
+def validate_cases(cases: list, *, redteam_count: int = 0) -> list:
     doc_ids, identities, canaries = known_doc_ids(), known_identities(), known_canaries()
     seen_ids, seen_questions = set(), set()
     errs = []
     for case in cases:
         errs += validate_case(case, doc_ids, identities, canaries, seen_ids, seen_questions)
-    errs += validate_coverage(cases)
+    if any("capability" in case for case in cases):
+        errs += validate_v3_coverage(cases, redteam_count)
+    else:
+        errs += validate_coverage(cases)
     return errs
 
 
 def main() -> int:
     import json
-    target = sys.argv[1] if len(sys.argv) > 1 else "evals/datasets/v1_20261123/rag/cases.jsonl"
+    target = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).resolve().parents[1] / "datasets" / "v3_20261124" / "rag" / "cases.jsonl")
     path = Path(target)
     if not path.exists():
         print(f"数据集不存在: {path}", file=sys.stderr)

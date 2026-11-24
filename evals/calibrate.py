@@ -26,12 +26,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "evals"))
+sys.path.insert(0, str(ROOT))
 import metrics
+
+from evals import runtime_snapshot
 
 EVALS = ROOT / "evals"
 REPORTS = EVALS / "reports"
 CALIB = REPORTS / "calibration"
-CASES = EVALS / "datasets/v1_20261123/rag/cases.jsonl"
+CASES = EVALS / "datasets" / runtime_snapshot.current_dataset_version() / "rag" / "cases.jsonl"
 DIMS = ("pass", "faithful", "relevant")
 
 

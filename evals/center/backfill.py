@@ -154,20 +154,8 @@ def backfill(tenant_code: str = "mofa", owner_username: str = "owner", reset: bo
             _ensure_baseline(conn, tenant_id, actor_id, rag_results[1]["run_id"], "RAG 当前原始基线（20261117）")
             rag_active = rag_results[1]["run_id"]
 
-        agent_run = fetch_one(
-            conn,
-            "SELECT run_id FROM eval_runs WHERE tenant_id=%s AND eval_kind='agent' AND dataset_id=%s "
-            "AND mode='synthetic_trace_regrade' AND gate_passed "
-            "AND passed_cases+failed_cases+unassessable_cases=12 "
-            "ORDER BY created_at DESC, run_id DESC LIMIT 1",
-            (tenant_id, datasets.dataset_id(version, "agent_research")),
-        )
         agent_baseline = None
-        if agent_run is None:
-            print("未找到 V1 合成回放中门禁通过且为 12 例的批次，跳过 Agent 基线设置")
-        else:
-            agent_baseline = agent_run["run_id"]
-            _ensure_baseline(conn, tenant_id, actor_id, agent_baseline, "Agent V1 合成回放基线")
+        print("评测中心只接收真实执行批次，跳过 Agent 合成回放基线设置")
 
         stats = {
             "version": version,

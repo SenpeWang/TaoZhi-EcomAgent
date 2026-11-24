@@ -6,13 +6,40 @@ from graphlib import CycleError, TopologicalSorter
 
 from taozhi.domain.research import ALL_RESEARCH_TOOLS
 
+from evals import naming
+
 REPORT_SCHEMA_VERSION = 4
+
+AGENT_CATEGORIES = (
+    "tool_selection",
+    "argument_correctness",
+    "multi_step_planning",
+    "dependency_ordering",
+    "error_recovery",
+    "empty_result",
+    "ambiguity_clarification",
+    "dynamic_steering",
+    "access_control",
+    "prompt_injection",
+    "hallucination_control",
+    "task_completion",
+    "cost_efficiency",
+    "multi_turn",
+    "refusal",
+    "numerical_reasoning",
+    "temporal_reasoning",
+    "conflict_resolution",
+    "boundary_value",
+    "evidence_attribution",
+)
 
 CASE_FIELDS = {
     "id", "category", "name", "prompt", "keyword", "suite", "critical",
     "required_tools", "forbidden_tools", "allowed_tools", "tool_expectations", "tool_order",
     "reference_facts", "forbidden_claims", "required_sections", "min_chars", "min_data_count",
     "steering", "steering_keyword", "steering_boundary", "execution_mode", "fixture_version",
+    "max_tool_calls", "max_elapsed_seconds", "turns",
+    "capability", "track", "topic",
 }
 
 
@@ -154,6 +181,19 @@ def validate_cases(cases: list[dict]) -> None:
                 raise ValueError("存在未登记的字段或尚未支持的判定条件")
             if case.get("suite", "benchmark") not in {"benchmark", "golden", "regression", "challenge"}:
                 raise ValueError("未知的用例分组")
+            if "capability" in case:
+                capability = case["capability"]
+                if capability not in naming.AGENT_CAPABILITIES:
+                    raise ValueError(f"未知的大类 capability：{capability!r}")
+                allowed = naming.AGENT_SUBCATEGORIES[capability]
+                if case.get("category") not in allowed:
+                    raise ValueError(f"子类 {case.get('category')!r} 不属于大类 {capability!r}")
+                if case.get("track") not in naming.TRACKS:
+                    raise ValueError(f"未知的用途 track：{case.get('track')!r}")
+                if not isinstance(case.get("topic"), str) or not case["topic"].strip():
+                    raise ValueError("v3 用例必须给非空 topic")
+            elif "category" in case and case["category"] not in AGENT_CATEGORIES:
+                raise ValueError(f"未知的能力分类：{case.get('category')!r}")
             if "execution_mode" in case and case["execution_mode"] != "synthetic_trace_regrade":
                 raise ValueError("未知的限定执行模式")
             if "fixture_version" in case and (type(case["fixture_version"]) is not int or case["fixture_version"] < 1):
@@ -162,9 +202,19 @@ def validate_cases(cases: list[dict]) -> None:
                 raise ValueError("用例需要名称和用户输入")
             if "critical" in case and type(case["critical"]) is not bool:
                 raise ValueError("critical 需要布尔值")
-            for key in ("min_chars", "min_data_count"):
+            for key in ("min_chars", "min_data_count", "max_tool_calls"):
                 if key in case and (type(case[key]) is not int or case[key] < 0):
                     raise ValueError(f"{key} 需要非负整数")
+            if "max_elapsed_seconds" in case and (
+                    isinstance(case["max_elapsed_seconds"], bool)
+                    or not isinstance(case["max_elapsed_seconds"], (int, float))
+                    or not case["max_elapsed_seconds"] > 0):
+                raise ValueError("max_elapsed_seconds 需要正数")
+            if "turns" in case:
+                turns = case["turns"]
+                if not isinstance(turns, list) or not turns or any(
+                        not isinstance(turn, str) or len(turn.strip()) < 4 for turn in turns):
+                    raise ValueError("turns 需要至少一条不少于 4 字的前置轮")
             _strings(case.get("required_sections", []), "required_sections")
             steering = _strings(case.get("steering", []), "steering")
             marker = case.get("steering_keyword", "")

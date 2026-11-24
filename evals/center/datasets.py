@@ -12,7 +12,7 @@ from evals import runtime_snapshot
 
 SUITES: tuple[str, ...] = ("agent_research", "rag_core", "rag_adversarial")
 LEGACY_VERSION = "v0_legacy"
-MAX_CASES_PAYLOAD_BYTES = 400 * 1024
+MAX_CASES_PAYLOAD_BYTES = 2 * 1024 * 1024
 _AGENT_SUITE = "agent_research"
 
 
@@ -80,16 +80,31 @@ def _payload_size(cases: Iterable[dict]) -> int:
 
 
 def _agent_cases(version: str, definition: dict) -> list[dict]:
-    from evals.agent_eval.cases import AGENT_BENCHMARK_CASES
+    """装载指定版本的 Agent 用例。
+
+    当前版本按 `cases.py` 全量目录复算指纹；历史版本的实测用例分类已随标准命名
+    演进，无法复算历史指纹，改为校验该版本合成文件可读、用例数与描述符一致。
+    """
+    from evals.agent_eval.cases import AGENT_BENCHMARK_CASES, AGENT_LIVE_CASES
     from evals.agent_eval.reporting import fingerprint
 
-    catalog = sorted(AGENT_BENCHMARK_CASES, key=lambda case: case["id"])
-    expected = definition.get("content_sha256") or ""
-    actual = fingerprint(catalog)
-    if expected and actual != expected:
-        raise ValueError(
-            f"agent_research 用例目录摘要与 {version} 描述符不一致：期望 {expected} 实际 {actual}")
     count = int(definition.get("case_count") or 0)
+    if version == runtime_snapshot.current_dataset_version():
+        catalog = sorted(AGENT_BENCHMARK_CASES, key=lambda case: case["id"])
+        expected = definition.get("content_sha256") or ""
+        actual = fingerprint(catalog)
+        if expected and actual != expected:
+            raise ValueError(
+                f"agent_research 用例目录摘要与 {version} 描述符不一致：期望 {expected} 实际 {actual}")
+    else:
+        path = runtime_snapshot.DATASETS / version / "agent" / "research_cases.json"
+        if not path.is_file():
+            raise ValueError(f"数据集文件缺失：{path}")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        synthetic = payload.get("cases") if isinstance(payload, dict) else None
+        if not isinstance(synthetic, list):
+            raise ValueError(f"合成用例文件结构非法：{path}")
+        catalog = sorted(list(AGENT_LIVE_CASES) + synthetic, key=lambda case: case["id"])
     if count and len(catalog) != count:
         raise ValueError(f"agent_research 用例数与 {version} 描述符不一致：期望 {count} 实际 {len(catalog)}")
     return catalog
@@ -110,7 +125,10 @@ def _rag_core_cases(version: str, definition: dict) -> list[dict]:
 
 
 def _rag_adversarial_cases(version: str, definition: dict) -> list[dict]:
-    path = runtime_snapshot.DATASETS / version / "rag" / "golden_adversarial.json"
+    base = runtime_snapshot.DATASETS / version / "rag"
+    path = base / "redteam.json"
+    if not path.is_file():
+        path = base / "golden_adversarial.json"
     if not path.is_file():
         raise ValueError(f"数据集文件缺失：{path}")
     payload = json.loads(path.read_text(encoding="utf-8"))

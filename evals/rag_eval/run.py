@@ -41,15 +41,18 @@ sys.path.insert(0, str(ROOT / "evals"))
 sys.path.insert(0, str(ROOT))
 EVALS = ROOT / "evals"
 OUT_DIR = Path(os.environ.get("ECOM_EVAL_REPORT_DIR") or (EVALS / "reports"))
-CASES = EVALS / "datasets/v1_20261123/rag/cases.jsonl"
-GOLDEN = EVALS / "datasets/v1_20261123/rag/golden_adversarial.json"
 BASELINE = EVALS / "baseline.json"
-MANIFEST = EVALS / "datasets/v1_20261123/rag/manifest.json"
 LIVE = OUT_DIR / "live.jsonl"
 PROGRESS_FILE = os.environ.get("ECOM_EVAL_PROGRESS_FILE") or ""
+INCLUDE_HELDOUT = os.environ.get("ECOM_EVAL_INCLUDE_HELDOUT") == "1"
 
 import metrics
 from evals import runtime_snapshot
+
+DATASET_DIR = EVALS / "datasets" / runtime_snapshot.current_dataset_version() / "rag"
+CASES = DATASET_DIR / "cases.jsonl"
+GOLDEN = DATASET_DIR / "redteam.json"
+MANIFEST = DATASET_DIR / "manifest.json"
 
 import httpx
 
@@ -61,6 +64,11 @@ from taozhi.infrastructure.persistence.database import database_connection, fetc
 from taozhi.infrastructure.persistence.access_repo import load_principal
 from evals.dataset import schema as dataset_schema
 from evals.dataset.seed import EVAL_PASSWORD
+
+
+def _eligible(case: dict) -> bool:
+    """留出集不进入日常报告；发布前通过 ECOM_EVAL_INCLUDE_HELDOUT=1 单独跑。"""
+    return INCLUDE_HELDOUT or case.get("track") != "heldout"
 
 
 def resolve_eval_node(conn):
@@ -365,11 +373,18 @@ def phase_retrieval():
     from taozhi.application.rag.query_expansion import build_hyde_vector
     from taozhi.infrastructure.knowledge.retriever import search_documents
     cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
+    cases = [case for case in cases if _eligible(case)]
     if ONLY_CATS:
         cases = [c for c in cases if c["category"] in ONLY_CATS]
-    retrieval_cats = set(dataset_schema.RETRIEVAL_CATEGORIES) - {"insufficient", "conflict"}
-    chosen = [c for c in cases
-              if c["category"] in retrieval_cats and not c.get("out_of_corpus") and (c.get("expected_documents") or [])]
+    if any("capability" in case for case in cases):
+        chosen = [c for c in cases if c.get("capability") == "retrieval"
+                  and c.get("answerability") != "unanswerable"
+                  and not c.get("out_of_corpus") and (c.get("expected_documents") or [])]
+    else:
+        retrieval_cats = set(dataset_schema.RETRIEVAL_CATEGORIES) - {"insufficient_evidence", "conflict"}
+        chosen = [c for c in cases
+                  if c["category"] in retrieval_cats and not c.get("out_of_corpus")
+                  and (c.get("expected_documents") or [])]
     assert load_config().mode == "production", "检索层评测必须对企业正式库执行"
     with database_connection() as c:
         eval_user = fetch_one(c, "SELECT id FROM users WHERE username=%s", (ADVERSARIAL_IDENTITY["username"],))
@@ -631,7 +646,10 @@ def _sla_limit_s(case: dict) -> float:
     """按题型复杂度动态计算单题 E2E SLA 上限（阈值来自 ECOM_EVAL_SLA_* / CLI，不写死）。"""
     qtype = case.get("qtype") or ""
     diff = case.get("difficulty") or ""
-    if qtype in ("multihop", "compare") or diff == "hard" and case.get("category") in ("long_context", "multi_doc", "timeliness"):
+    if qtype in ("multi_hop", "comparison", "aggregation") or diff == "hard" and (
+            case.get("capability") in ("retrieval", "multi_turn_and_long_context")
+            or case.get("category") in ("information_extraction", "multi_session_reasoning",
+                                        "temporal_reasoning", "knowledge_updates", "multi_turn")):
         return float(SLA_COMPLEX_S)
     return float(SLA_SIMPLE_S)
 
@@ -807,6 +825,7 @@ def phase_behavior():
     from concurrent.futures import ThreadPoolExecutor
 
     cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
+    cases = [case for case in cases if _eligible(case)]
     if ONLY_CATS:
         cases = [c for c in cases if c["category"] in ONLY_CATS]
     by_cat = {}
@@ -1126,6 +1145,16 @@ def phase_behavior():
         summary["by_dimension"][dim] = {
             k: {"n": v["n"], "pass_rate": round(v["pass"] / v["n"], 3)} for k, v in sorted(agg.items())
         }
+    by_capability = {}
+    for capability in sorted({case.get("capability") for case in chosen if case.get("capability")}):
+        bucket = [d for d in detail if (dims.get(d["id"]) or {}).get("capability") == capability]
+        passed = sum(1 for d in bucket if d["pass"])
+        by_capability[capability] = {
+            "n": len(bucket), "passed": passed,
+            "pass_rate": round(passed / len(bucket), 3) if bucket else None,
+            "ci95": metrics.wilson_interval(passed, len(bucket)),
+        }
+    summary["by_capability"] = by_capability
     summary["pass_rate"] = round(total_p / total_n, 3) if total_n else None
     summary["total"] = f"{total_p}/{total_n}"
     summary["detail"] = detail
