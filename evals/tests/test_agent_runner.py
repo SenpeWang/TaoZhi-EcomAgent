@@ -10,7 +10,7 @@ from evals.agent_eval.publish import project_report
 
 
 def case(case_id, **changes):
-    return {"id": case_id, "name": "合成网页调研", "category": "web_intelligence",
+    return {"id": case_id, "name": "合成网页调研", "category": "tool_selection",
             "prompt": "请查询合成商品。", "keyword": "SYN-K9", "required_tools": ["search_web"],
             "required_sections": ["依据"], "min_chars": 2, "forbidden_tools": ["search_amazon"], **changes}
 

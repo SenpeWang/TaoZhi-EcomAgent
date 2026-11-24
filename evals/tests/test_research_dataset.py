@@ -17,8 +17,8 @@ from evals.agent_eval.runner import read_synthetic_replay
 
 DATASETS = Path(__file__).resolve().parents[1] / "datasets"
 CASES = {case["id"]: case for case in AGENT_BENCHMARK_CASES if case.get("execution_mode") == "synthetic_trace_regrade"}
-OBSERVATIONS, _ = read_synthetic_replay(DATASETS / "v1_20261123/agent/research_replay.json", set(CASES))
-COUNTEREXAMPLES = json.loads((DATASETS / "v1_20261123/agent/research_counterexamples.json").read_text(encoding="utf-8"))
+OBSERVATIONS, _ = read_synthetic_replay(DATASETS / "v3_20261124/agent/research_replay.json", set(CASES))
+COUNTEREXAMPLES = json.loads((DATASETS / "v3_20261124/agent/research_counterexamples.json").read_text(encoding="utf-8"))
 VARIANTS = {row["case_id"]: row for row in COUNTEREXAMPLES["counterexamples"]}
 
 
@@ -34,11 +34,16 @@ def test_research_dataset_catalog_and_coverage():
     assert COUNTEREXAMPLES["source"] == "synthetic"
     assert COUNTEREXAMPLES["schema_version"] == 1
     assert {case["suite"] for case in CASES.values()} == {"benchmark", "challenge"}
-    assert {case["category"] for case in CASES.values()} >= {
-        "tier_pricing", "currency_comparison", "web_intelligence", "empty_result",
-        "partial_source_failure", "model_disambiguation", "dynamic_steering", "pack_unit",
-        "effective_date", "source_conflict", "sample_denominator", "zero_value",
+    from evals import naming
+    categories = {case["category"] for case in CASES.values()}
+    assert categories >= {
+        "task_completion", "tool_correctness", "groundedness", "plan_adherence",
+        "multi_turn", "prompt_injection", "harmful_task_refusal", "temporal_reasoning",
     }
+    for case in CASES.values():
+        assert case["capability"] in naming.AGENT_CAPABILITIES
+        assert case["category"] in naming.AGENT_SUBCATEGORIES[case["capability"]]
+        assert case["track"] in naming.TRACKS
 
 
 @pytest.mark.parametrize("case_id", sorted(CASES))
