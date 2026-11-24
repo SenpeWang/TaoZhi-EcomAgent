@@ -60,7 +60,7 @@ def test_batch_metrics_and_judge_summary_are_projected():
 
 def test_verified_dataset_version_binds_registered_projection():
     """内嵌数据集描述符与内容摘要一致时归入 V1，并标记可比。"""
-    version = datasets.current_version()
+    version = datasets.current_version("agent_research")
     definition = datasets.suite_definition(version, "agent_research")
     raw = record()
     raw.update(dataset_sha256=definition["content_sha256"],

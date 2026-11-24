@@ -1,4 +1,4 @@
-"""V3 数据集、命名登记与统计口径的一致性校验。"""
+"""V3 数据集、命名登记与统计口径的一致性校验（rag_v3/agent_v3 独立版本）。"""
 import hashlib
 import json
 from pathlib import Path
@@ -12,7 +12,9 @@ from evals.dataset import schema as rag_schema
 from evals.metrics import pass_at_k, pass_pow_k_estimate, wilson_interval
 
 ROOT = Path(__file__).resolve().parents[2]
-V3 = ROOT / "evals/datasets/v3_20261124"
+DATASETS = ROOT / "evals/datasets"
+RAG = DATASETS / "rag_v3_20261124"
+AGENT = DATASETS / "agent_v3_20261124"
 TRACK_COUNTS = {"golden": 30, "capability": 20, "regression": 15, "challenge": 10, "heldout": 15}
 ANTHROPIC_LINKS = (
     "https://www.anthropic.com/research/demystifying-evals-for-ai-agents",
@@ -26,21 +28,24 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_descriptor_registers_v3_suites_and_files():
-    descriptor = json.loads((V3 / "dataset.json").read_text(encoding="utf-8"))
-    assert descriptor["version"] == "v3_20261124"
-    suites = descriptor["suites"]
-    assert set(suites) == {"agent_research", "rag_core", "rag_adversarial"}
-    assert suites["rag_core"]["case_count"] == 540
-    assert suites["rag_adversarial"]["case_count"] == 60
-    assert suites["agent_research"]["case_count"] == len(AGENT_BENCHMARK_CASES) == 610
-    for suite, definition in suites.items():
-        for relative, expected in definition["files"].items():
-            assert sha256(V3 / relative) == expected, f"{suite} 文件摘要不一致：{relative}"
+def test_descriptors_are_split_by_system():
+    rag = json.loads((RAG / "dataset.json").read_text(encoding="utf-8"))
+    agent = json.loads((AGENT / "dataset.json").read_text(encoding="utf-8"))
+    assert rag["version"] == "rag_v3_20261124"
+    assert agent["version"] == "agent_v3_20261124"
+    assert set(rag["suites"]) == {"rag_core", "rag_adversarial"}
+    assert set(agent["suites"]) == {"agent_research"}
+    assert rag["suites"]["rag_core"]["case_count"] == 540
+    assert rag["suites"]["rag_adversarial"]["case_count"] == 60
+    assert agent["suites"]["agent_research"]["case_count"] == len(AGENT_BENCHMARK_CASES) == 610
+    for base, descriptor in ((RAG, rag), (AGENT, agent)):
+        for definition in descriptor["suites"].values():
+            for relative, expected in definition["files"].items():
+                assert sha256(base / relative) == expected, f"{base.name} 文件摘要不一致：{relative}"
 
 
 def test_rag_v3_counts_and_contracts():
-    cases = [json.loads(line) for line in (V3 / "rag/cases.jsonl").read_text(encoding="utf-8").splitlines()
+    cases = [json.loads(line) for line in (RAG / "cases.jsonl").read_text(encoding="utf-8").splitlines()
              if line.strip()]
     assert len(cases) == 540
     assert rag_schema.validate_cases(cases) == []
@@ -53,7 +58,7 @@ def test_rag_v3_counts_and_contracts():
     for capability, subs in naming.RAG_SUBCATEGORIES.items():
         assert {sub for cap, sub in categories if cap == capability} == set(subs)
     documents = [json.loads(line) for line in
-                 (V3 / "rag/corpus_docs.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+                 (RAG / "corpus_docs.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(documents) >= 80
     doc_ids = {doc["doc_id"] for doc in documents}
     for case in cases:
@@ -61,7 +66,7 @@ def test_rag_v3_counts_and_contracts():
 
 
 def test_rag_redteam_contract():
-    cases = json.loads((V3 / "rag/redteam.json").read_text(encoding="utf-8"))["cases"]
+    cases = json.loads((RAG / "redteam.json").read_text(encoding="utf-8"))["cases"]
     assert len(cases) == 60
     for case in cases:
         assert case["track"] == "redteam"
@@ -77,10 +82,10 @@ def test_rag_redteam_contract():
 
 
 def test_agent_v3_counts_and_contracts():
-    cases = json.loads((V3 / "agent/research_cases.json").read_text(encoding="utf-8"))["cases"]
-    observations = json.loads((V3 / "agent/research_replay.json").read_text(encoding="utf-8"))["observations"]
+    cases = json.loads((AGENT / "research_cases.json").read_text(encoding="utf-8"))["cases"]
+    observations = json.loads((AGENT / "research_replay.json").read_text(encoding="utf-8"))["observations"]
     counterexamples = json.loads(
-        (V3 / "agent/research_counterexamples.json").read_text(encoding="utf-8"))["counterexamples"]
+        (AGENT / "research_counterexamples.json").read_text(encoding="utf-8"))["counterexamples"]
     assert len(cases) == len(observations) == len(counterexamples) == 600
     validate_agent_cases(cases)
     for capability in naming.AGENT_CAPABILITIES:
@@ -93,16 +98,16 @@ def test_agent_v3_counts_and_contracts():
     assert {case["capability"] for case in redteam} == {"security_and_governance"}
     assert {case["category"] for case in cases} == {
         sub for subs in naming.AGENT_SUBCATEGORIES.values() for sub in subs}
-    descriptor = json.loads((V3 / "dataset.json").read_text(encoding="utf-8"))
+    descriptor = json.loads((AGENT / "dataset.json").read_text(encoding="utf-8"))
     assert descriptor["suites"]["agent_research"]["content_sha256"] == fingerprint(
         sorted(AGENT_BENCHMARK_CASES, key=lambda case: case["id"]))
 
 
 def test_readmes_carry_sources_and_naming_registry():
     for relative, capabilities, subcategories in (
-            ("rag/README.md", naming.RAG_CAPABILITIES, naming.RAG_SUBCATEGORIES),
-            ("agent/README.md", naming.AGENT_CAPABILITIES, naming.AGENT_SUBCATEGORIES)):
-        text = (V3 / relative).read_text(encoding="utf-8")
+            (RAG / "README.md", naming.RAG_CAPABILITIES, naming.RAG_SUBCATEGORIES),
+            (AGENT / "README.md", naming.AGENT_CAPABILITIES, naming.AGENT_SUBCATEGORIES)):
+        text = relative.read_text(encoding="utf-8")
         assert "参考来源与依据" in text
         assert "子类命名登记表" in text
         for link in ANTHROPIC_LINKS:
@@ -115,6 +120,47 @@ def test_readmes_carry_sources_and_naming_registry():
         assert "未经人工校准" in text
 
 
+def test_readme_covers_every_registered_source_link():
+    for readme, subcategories in ((RAG / "README.md", naming.RAG_SUBCATEGORIES),
+                                  (AGENT / "README.md", naming.AGENT_SUBCATEGORIES)):
+        text = readme.read_text(encoding="utf-8")
+        for entries in subcategories.values():
+            for _sub, (source, _state, _v2) in entries.items():
+                _name, url = naming.SOURCES[source]
+                assert url in text, f"{readme} 缺少来源链接：{url}"
+
+
+def test_rag_v3_generator_snapshot_matches_committed_files():
+    import os
+    import subprocess
+    import sys
+
+    pythonpath = os.pathsep.join(
+        [str(ROOT), str(ROOT / "src"), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+    env = {**os.environ, "PYTHONPATH": pythonpath}
+    result = subprocess.run([sys.executable, "-m", "evals.dataset.generate_v3", "--check",
+                             "--out", str(RAG)], cwd=ROOT, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "[OK]" in result.stdout
+
+
+def test_agent_v3_generator_snapshot_matches_committed_files():
+    import os
+    import subprocess
+    import sys
+
+    pythonpath = os.pathsep.join(
+        [str(ROOT), str(ROOT / "src"), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+    env = {**os.environ, "PYTHONPATH": pythonpath}
+    result = subprocess.run(
+        [sys.executable, "-m", "evals.agent_eval.generate", "--version", "v3",
+         "--out", str(AGENT), "--check"],
+        cwd=ROOT, env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "[OK]" in result.stdout
+
+
 def test_statistics_helpers():
     assert pass_at_k([1], [1], 1) == 1.0
     assert pass_at_k([0], [1], 1) == 0.0
@@ -124,23 +170,7 @@ def test_statistics_helpers():
     assert wilson_interval(0, 0) is None
 
 
-def test_rag_v3_generator_snapshot_matches_committed_files():
-    """generate_v3 --check 必须与仓库快照逐字节一致（spec/生成器漂移即失败）。"""
-    import os
-    import subprocess
-    import sys
-
-    pythonpath = os.pathsep.join(
-        [str(ROOT), str(ROOT / "src"), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)
-    env = {**os.environ, "PYTHONPATH": pythonpath}
-    result = subprocess.run([sys.executable, "-m", "evals.dataset.generate_v3", "--check"],
-                            cwd=ROOT, env=env, capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    assert "[OK]" in result.stdout
-
-
 def test_agent_reliability_pass_at_k_and_pass_pow_k():
-    """trials 汇总：pass@1 / pass@k / pass^k 必须按 trial 结果计算。"""
     from evals.agent_eval.runner import _reliability
 
     summary = _reliability({"a": [True, True], "b": [True, False], "c": [False, False]}, 2)
@@ -154,7 +184,6 @@ def test_agent_reliability_pass_at_k_and_pass_pow_k():
 
 
 def test_rag_heldout_is_excluded_unless_requested(monkeypatch):
-    """heldout 默认不进入日常报告，显式开关才纳入发布前复核。"""
     from evals.rag_eval import run as rag_run
 
     monkeypatch.setattr(rag_run, "INCLUDE_HELDOUT", False)
@@ -164,37 +193,7 @@ def test_rag_heldout_is_excluded_unless_requested(monkeypatch):
     assert rag_run._eligible({"track": "heldout"}) is True
 
 
-def test_agent_v3_generator_snapshot_matches_committed_files():
-    """agent generate --version v3 --check 必须与仓库快照逐字节一致。"""
-    import os
-    import subprocess
-    import sys
-
-    pythonpath = os.pathsep.join(
-        [str(ROOT), str(ROOT / "src"), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)
-    env = {**os.environ, "PYTHONPATH": pythonpath}
-    result = subprocess.run(
-        [sys.executable, "-m", "evals.agent_eval.generate", "--version", "v3",
-         "--out", str(V3 / "agent"), "--check"],
-        cwd=ROOT, env=env, capture_output=True, text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "[OK]" in result.stdout
-
-
-def test_readme_covers_every_registered_source_link():
-    """README 必须登记命名表里用到的每个来源链接（不允许来源只存在于代码）。"""
-    for relative, subcategories in (("rag/README.md", naming.RAG_SUBCATEGORIES),
-                                    ("agent/README.md", naming.AGENT_SUBCATEGORIES)):
-        readme = (V3 / relative).read_text(encoding="utf-8")
-        for entries in subcategories.values():
-            for _sub, (source, _state, _v2) in entries.items():
-                _name, url = naming.SOURCES[source]
-                assert url in readme, f"{relative} 缺少来源链接：{url}"
-
-
 def test_agent_heldout_is_excluded_by_default():
-    """Agent 日常回放默认排除 heldout；只有显式 include 才纳入。"""
     from evals.agent_eval.runner import filter_heldout
 
     cases = [{"id": "A", "track": "golden"}, {"id": "B", "track": "heldout"}]

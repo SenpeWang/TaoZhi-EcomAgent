@@ -17,8 +17,8 @@ from evals.agent_eval.runner import read_synthetic_replay
 
 DATASETS = Path(__file__).resolve().parents[1] / "datasets"
 CASES = {case["id"]: case for case in AGENT_BENCHMARK_CASES if case.get("execution_mode") == "synthetic_trace_regrade"}
-OBSERVATIONS, _ = read_synthetic_replay(DATASETS / "v3_20261124/agent/research_replay.json", set(CASES))
-COUNTEREXAMPLES = json.loads((DATASETS / "v3_20261124/agent/research_counterexamples.json").read_text(encoding="utf-8"))
+OBSERVATIONS, _ = read_synthetic_replay(DATASETS / "agent_v3_20261124/research_replay.json", set(CASES))
+COUNTEREXAMPLES = json.loads((DATASETS / "agent_v3_20261124/research_counterexamples.json").read_text(encoding="utf-8"))
 VARIANTS = {row["case_id"]: row for row in COUNTEREXAMPLES["counterexamples"]}
 
 

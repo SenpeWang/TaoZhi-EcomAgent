@@ -17,7 +17,7 @@ from taozhi.infrastructure.persistence.database import database_connection, fetc
 from taozhi.server.api import app
 
 PROJECT = Path(__file__).resolve().parents[1]
-DATASET_ID = "agent_research-v1_20261123"
+DATASET_ID = "agent_research-agent_v1_20261123"
 
 
 def _truncate_eval() -> None:
@@ -80,7 +80,7 @@ def _register_dataset() -> None:
             "dataset_id": DATASET_ID,
             "name": "agent_research",
             "eval_kind": "agent",
-            "version": "v1_20261123",
+            "version": "agent_v1_20261123",
             "description": "Agent 调研基准 V1",
             "source": "live",
             "suite": "agent_research",
@@ -90,14 +90,14 @@ def _register_dataset() -> None:
             "metadata": {
                 "modes": ["live"],
                 "scopes": ["full"],
-                "files": {"agent/research_cases.json": _research_cases_sha()},
+                "files": {"research_cases.json": _research_cases_sha()},
             },
         })
 
 
 def _research_cases_sha() -> str:
     """返回仓库内 Agent 基准用例文件的 sha256，用于数据集文件透明化用例。"""
-    payload = (PROJECT / "evals/datasets/v1_20261123/agent/research_cases.json").read_bytes()
+    payload = (PROJECT / "evals/datasets/agent_v1_20261123/research_cases.json").read_bytes()
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -117,7 +117,7 @@ def _insert_run(owner: dict, run_id: str, *, day: int, pass_rate: float, gate: b
         "baseline_sha256": None,
         "dataset_id": DATASET_ID,
         "dataset_name": "agent_research",
-        "dataset_version": "v1_20261123",
+        "dataset_version": "agent_v1_20261123",
         "dataset_description": "Agent 调研基准 V1",
         "dataset_suite": "agent_research",
         "dataset_content_sha256": "c" * 64,
@@ -168,7 +168,7 @@ def test_dataset_versions_baselines_reports_and_metrics() -> None:
 
     datasets = admin.get("/api/evaluations/datasets").json()["items"]
     assert [item["dataset_id"] for item in datasets] == [DATASET_ID]
-    assert datasets[0]["version"] == "v1_20261123"
+    assert datasets[0]["version"] == "agent_v1_20261123"
     assert datasets[0]["case_count"] == 22
 
     detail = admin.get(f"/api/evaluations/datasets/{DATASET_ID}").json()
@@ -179,7 +179,7 @@ def test_dataset_versions_baselines_reports_and_metrics() -> None:
     profile = admin.post("/api/evaluations/profiles", json={
         "eval_kind": "agent", "version_tag": "", "tech_stack": {"model": "demo-model"},
         "retrieval_params": {"top_k": 8}, "prompt_snapshots": {"planner": "sha"},
-        "git_sha": "a1b2c3d4", "dataset_version": "v1_20261123", "notes": "自动编号验证",
+        "git_sha": "a1b2c3d4", "dataset_version": "agent_v1_20261123", "notes": "自动编号验证",
     }).json()
     assert profile["version_tag"] == "algo-v1" and profile["version_no"] == 1
     assert profile["digest"]
@@ -306,7 +306,7 @@ def test_metric_catalog_summary_and_dataset_raw_transparency() -> None:
     assert runs[0]["metric_schema_version"] == catalog["version"]
 
     trends = admin.get("/api/evaluations/metrics/trends", params={
-        "eval_kind": "agent", "dataset_version": "v1_20261123", "scope": "full",
+        "eval_kind": "agent", "dataset_version": "agent_v1_20261123", "scope": "full",
     }).json()
     assert [metric["key"] for metric in trends["metric_schema"]["metrics"]] == metric_keys
     assert list(trends["items"][0]["summary"]) == metric_keys
@@ -317,17 +317,17 @@ def test_metric_catalog_summary_and_dataset_raw_transparency() -> None:
     assert len(body["cases"]) == 5
     assert body["cases"][0]["id"] == "AGENT-T-001" and "prompt" in body["cases"][0]
     sha = _research_cases_sha()
-    assert body["files"]["agent/research_cases.json"] == sha
+    assert body["files"]["research_cases.json"] == sha
 
     file_resp = admin.get(f"/api/evaluations/datasets/{DATASET_ID}/files",
-                          params={"path": "agent/research_cases.json"})
+                          params={"path": "research_cases.json"})
     assert file_resp.status_code == 200
     assert file_resp.headers["X-Content-Sha256"] == sha
 
     assert admin.get(f"/api/evaluations/datasets/{DATASET_ID}/files",
                      params={"path": "../AGENTS.md"}).status_code == 400
     assert admin.get(f"/api/evaluations/datasets/{DATASET_ID}/files",
-                     params={"path": "agent/unknown.json"}).status_code == 404
+                     params={"path": "unknown.json"}).status_code == 404
     assert admin.get("/api/evaluations/datasets/unknown-v9/raw").status_code == 404
 
 
@@ -348,9 +348,9 @@ def test_rag_case_detail_accepts_colon_case_ids() -> None:
         "judges_sha256": "j" * 64,
         "report_sha256": hashlib.sha256(run_id.encode()).hexdigest(),
         "baseline_sha256": None,
-        "dataset_id": "rag_metric-v1_20261123",
+        "dataset_id": "rag_metric-rag_v1_20261123",
         "dataset_name": "rag_metric",
-        "dataset_version": "v1_20261123",
+        "dataset_version": "rag_v1_20261123",
         "dataset_description": "RAG 指标用例",
         "dataset_suite": "rag_core",
         "dataset_content_sha256": "e" * 64,
