@@ -64,7 +64,7 @@ def test_quality_exposes_only_cited_facts_and_flags_the_unanswered_subject(monke
     monkeypatch.setattr(specialists, "validate_task_execution", lambda *_: (None, {"payload": {}}))
     streamed = []
     monkeypatch.setattr(specialists, "publish_answer_delta", lambda job, version, text, sources: streamed.append(text))
-    output = specialists.quality_node(state)
+    output = specialists.verify_claims(state)
     assert output["findings"] == [finding(0, quote)]
     assert "缺少可核验的保修条件资料。" in output["missing"]
     assert "缺少机型 MC-501 的对应依据。" in output["missing"]
@@ -85,8 +85,8 @@ def published_question(monkeypatch, question, documents, chosen):
         monkeypatch.setattr(module, "validate_task_execution", lambda *_: (None, {"payload": {}, "input_level": 1}))
     streamed = []
     monkeypatch.setattr(specialists, "publish_answer_delta", lambda job, version, text, sources: streamed.append(text))
-    state.update(specialists.quality_node(state))
-    state.update(publication.publish_node(state))
+    state.update(specialists.verify_claims(state))
+    state.update(publication.compose_answer(state))
     return state, "".join(streamed)
 
 

@@ -100,7 +100,7 @@ def test_only_verified_answer_paragraphs_are_streamed(monkeypatch, review, hard,
         assert (job_id, version, sources) == ("task", 2, source)
         deltas.append(text)
     monkeypatch.setattr(specialists, "publish_answer_delta", publish)
-    verified = specialists.quality_node(state)
+    verified = specialists.verify_claims(state)
     answer = "".join(cited_paragraphs(state["question"], evidence, verified["findings"]))
     assert answer == "型号为甲（来源：《规格表》）[1]\n\n交期三天（来源：《规格表》）[1]"
     assert len(deltas) == expected_deltas

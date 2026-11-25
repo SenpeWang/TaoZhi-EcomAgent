@@ -26,13 +26,13 @@ _TRACE_OPERATIONS = {
     "worker.bi": "经营问数流程",
     "worker.research": "选品调研流程",
     "worker.semantic_cache_hit": "复用已核验答案",
-    "pipeline.planning": "识别问题与分派角色",
-    "pipeline.retrieval": "检索授权文档",
-    "pipeline.retrieval_retry": "尝试补查授权文档",
+    "pipeline.analyze_question": "识别问题与分派角色",
+    "pipeline.retrieve_documents": "检索授权文档",
+    "pipeline.refine_query": "尝试补查授权文档",
     "knowledge.search": "检索授权资料",
     "knowledge.cache_lookup": "查询问答缓存",
-    "pipeline.specialists": "专业核验",
-    "pipeline.publication": "生成答复",
+    "pipeline.extract_claims": "专业核验",
+    "pipeline.compose_answer": "生成答复",
     "bi.bi_intent": "识别经营指标",
     "bi.data_query": "查询经营数据",
     "bi.query_metric": "检索经营指标",
@@ -46,8 +46,8 @@ _TRACE_OPERATIONS = {
     **CHAIN_OPERATIONS["GUARDRAIL"],
 }
 _KEY_ACTIVITY_STEPS = (
-    "worker.semantic_cache_hit", "pipeline.planning", "pipeline.retrieval", "pipeline.retrieval_retry",
-    "pipeline.specialists", "pipeline.publication",
+    "worker.semantic_cache_hit", "pipeline.analyze_question", "pipeline.retrieve_documents", "pipeline.refine_query",
+    "pipeline.extract_claims", "pipeline.compose_answer",
     "bi.bi_intent", "bi.bi_publish", "research.final_node", *CHAIN_CATEGORY_BY_NAME,
 )
 _TOOL_OUTCOMES = {

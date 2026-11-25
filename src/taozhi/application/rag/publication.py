@@ -18,6 +18,7 @@ from taozhi.domain.privacy import redact
 from taozhi.domain.question_context import recalls_previous_evidence, refers_to_previous_question
 from taozhi.domain.rag_verification import cited_paragraphs, document_addresses_question
 from taozhi.observability.tracing import record_diagnostic
+from .phases import RagPhase
 from .state import State
 
 _BUSINESS_FIELDS = {
@@ -76,7 +77,7 @@ def _answer_with_general_knowledge(question: str, state: State) -> tuple[str, di
     return reply, merged_usage
 
 
-def publish_node(state: State) -> dict:
+def compose_answer(state: State) -> dict:
     """确保公开参考、人工核验原文和内部结论各有明确来源与审核状态。"""
     _, job = validate_task_execution(state, "发布前校验权限与来源", 95)
     question = state["question"]
@@ -154,6 +155,7 @@ def publish_node(state: State) -> dict:
         "excerpt_indices": excerpt_indices,
         "hard_block": state["hard_block"] and basis not in ("public_reference", "general_knowledge"),
         "review": bool(job["payload"].get("require_review") and (substantive or not state["hard_block"])),
+        "phase": RagPhase.ANSWER_COMPOSED.value,
     }
     if extra_token_usage is not None:
         output["token_usage"] = extra_token_usage

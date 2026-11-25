@@ -8,6 +8,7 @@ from typing import Any
 from taozhi.application.bi.intent import detect_data_intent, may_request_metric
 from taozhi.application.bi.workflow import build_bi_result, build_bi_workflow
 from taozhi.application.common.task_guard import empty_token_usage, validate_task_execution
+from taozhi.application.rag.phases import RAG_GRAPH_VERSION
 from taozhi.domain.errors import Denied
 from taozhi.domain.question_context import recalls_previous_evidence, refers_to_previous_question, requested_business_resources
 from taozhi.infrastructure.persistence import job_repo
@@ -157,6 +158,7 @@ def process_question_job(job: dict[str, Any]) -> None:
         else:
             from taozhi.application.rag.workflow import build_rag_workflow
 
+            thread_id = f"{thread_id}:{RAG_GRAPH_VERSION}"
             flow = build_rag_workflow(saver)
         with node_span("worker.bi" if is_bi else "worker.question", "CHAIN"):
             state = flow.invoke(initial_state, {"configurable": {"thread_id": thread_id}})

@@ -43,13 +43,13 @@ const context = { ...base, category: 'CONTEXT', kind: 'CHAIN', name: 'context.pr
 assert.equal(activityAction(context).title, '组装报告证据上下文')
 assert.equal(activityResult(context), '0 份证据 · 320 字符')
 assert.equal(activityResult({...context, attributes:{'context.input_chars':2000,'context.output_chars':1500}}), '2000 → 1500 字符')
-const retrieval = {...context, name:'pipeline.retrieval', category:'CHAIN',
+const retrieval = {...context, name:'pipeline.retrieve_documents', category:'CHAIN',
   attributes:{'rag.retrieval_decision':'retry_weak_evidence'}}
 assert.equal(activityResult(retrieval), '首轮证据不足，进入补查')
-assert.equal(activityResult({...retrieval, name:'pipeline.specialists',
+assert.equal(activityResult({...retrieval, name:'pipeline.extract_claims',
   attributes:{'rag.verification_issue':'model_unavailable'}}), '核验模型暂时不可用')
 for (const [count, expected] of [[1,'未执行第二次检索'], [2,'已执行第二次检索']]) {
-  const retry = {...retrieval, name:'pipeline.retrieval_retry', attributes:{'rag.retrieval_search_count':count}}
+  const retry = {...retrieval, name:'pipeline.refine_query', attributes:{'rag.retrieval_search_count':count}}
   assert.equal(activityResult(retry), expected)
   assert.equal(spanFields(retry).find(item => item.key === 'rag.retrieval_search_count').value,count)
 }
@@ -59,7 +59,7 @@ for (const [reason, expected] of [
   ['no_authorized_evidence','缺少可用授权证据，跳过专家核验'],
   ['run_specialists','转入专家核验'], ['unknown',''],
 ]) {
-  const assembled = {...context, name:'pipeline.prepare_evidence', attributes:{'rag.retrieval_decision':reason}}
+  const assembled = {...context, name:'pipeline.prepare_context', attributes:{'rag.retrieval_decision':reason}}
   assert.equal(activityResult(assembled), expected)
 }
 const coordinator = {...base, kind:'AGENT', name:'research.orchestrator', attributes:{}}

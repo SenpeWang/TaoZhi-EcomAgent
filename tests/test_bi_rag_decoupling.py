@@ -22,14 +22,14 @@ def test_rag_and_bi_graphs_are_structurally_decoupled():
 
     rag_graph = build_rag_workflow(MemorySaver())
     rag_nodes = set(rag_graph.get_graph().nodes.keys())
-    assert {"planning", "retrieval", "specialists", "quality", "publication"}.issubset(rag_nodes)
+    assert {"analyze_question", "retrieve_documents", "extract_claims", "verify_claims", "compose_answer"}.issubset(rag_nodes)
     assert "data_query" not in rag_nodes
 
     bi_graph = build_bi_workflow(MemorySaver())
     bi_nodes = set(bi_graph.get_graph().nodes.keys())
     assert {"bi_intent", "data_query", "bi_publish"}.issubset(bi_nodes)
-    assert "retrieval" not in bi_nodes
-    assert "specialists" not in bi_nodes
+    assert "retrieve_documents" not in bi_nodes
+    assert "extract_claims" not in bi_nodes
 
 
 def test_detect_data_intent_skips_non_bi_and_flags_denied_metric():

@@ -21,6 +21,7 @@ from taozhi.infrastructure.persistence.database import database_connection
 from taozhi.infrastructure.knowledge.retriever import search_documents
 from taozhi.observability.tracing import node_span
 from taozhi.orchestration.controller import DeterministicController
+from .phases import RagPhase
 from .query_expansion import build_hyde_vector
 from .state import State
 
@@ -70,7 +71,7 @@ def _retrieval_metrics(state: State, search: dict, hyde: dict, retry: bool) -> d
     return update
 
 
-def retrieval_node(state: State) -> dict:
+def retrieve_documents(state: State) -> dict:
     """首轮仅检索可读文档，依据证据量与重排置信度决定后续节点。"""
     principal, job = validate_task_execution(state, "检索授权资料", 25)
     cfg = load_config()
@@ -93,10 +94,11 @@ def retrieval_node(state: State) -> dict:
         **_retrieval_metrics(state, search, hyde, retry=False),
         "prior_question_id": prior_id, "evidence": evidence, "sources": _document_sources(evidence),
         "retrieval_decision": decision, "retrieval_search_count": 1,
+        "phase": RagPhase.DOCUMENTS_RETRIEVED.value,
     }
 
 
-def retry_retrieval(state: State) -> dict:
+def refine_query(state: State) -> dict:
     """按需用新 HyDE 信号或不同关键词补查一次，按两轮排名融合证据。"""
     principal, job = validate_task_execution(state, "补充检索授权资料", 32)
     search, hyde = {}, {}
@@ -118,6 +120,7 @@ def retry_retrieval(state: State) -> dict:
     return {
         **_retrieval_metrics(state, search, hyde, retry=True),
         "evidence": evidence, "sources": _document_sources(evidence), "retrieval_search_count": search_count,
+        "phase": RagPhase.QUERY_REFINED.value,
     }
 
 
@@ -138,7 +141,7 @@ def _business_record(principal, kind: str, identifier: str, fields: tuple[str, .
     return {**item, "record": {key: value for key, value in row.items() if key in allowed}}
 
 
-def read_business_snapshot(state: State) -> dict:
+def fetch_live_data(state: State) -> dict:
     """仅从授权业务系统读取本次请求的字段，保留数据时间与记录标识。"""
     principal, job = validate_task_execution(state, "读取授权业务快照", 38)
     records = []
@@ -174,11 +177,12 @@ def read_business_snapshot(state: State) -> dict:
     return {
         "business": records, "evidence": [], "sources": sources, "hard_block": not sources,
         "external_blocked": not job["payload"].get("allow_external", True), "missing": missing,
+        "phase": RagPhase.LIVE_DATA_LOADED.value,
     }
 
 
-def prepare_evidence(state: State) -> dict:
-    """汇集合规会话与业务依据，并确定进入专家核验或直接发布。"""
+def prepare_context(state: State) -> dict:
+    """汇集授权会话与业务依据，并确定进入专家核验或直接发布。"""
     p, job = validate_task_execution(state, "准备授权证据与业务快照", 38)
     question = state["question"]
     evidence = state["evidence"]
@@ -231,4 +235,5 @@ def prepare_evidence(state: State) -> dict:
         else:
             message = "缺少可靠资料，无法给出事实结论。"
         update.update(missing=[message], review=bool(job["payload"].get("require_review") and not hard_block))
+    update["phase"] = RagPhase.CONTEXT_PREPARED.value
     return update

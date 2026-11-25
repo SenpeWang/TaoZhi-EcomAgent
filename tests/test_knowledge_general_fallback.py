@@ -71,9 +71,9 @@ def _patch_runtime(monkeypatch, *, allow_general_knowledge: bool, allow_external
     return calls
 
 
-def test_publish_node_uses_general_knowledge_only_when_allowed_and_non_enterprise(monkeypatch) -> None:
+def test_compose_answer_uses_general_knowledge_only_when_allowed_and_non_enterprise(monkeypatch) -> None:
     calls = _patch_runtime(monkeypatch, allow_general_knowledge=True, allow_external=True, llm_reply="今天是 2026 年 11 月 23 日。")
-    out = publication.publish_node(_base_state("今天是什么日期？", allow_general_knowledge=True))
+    out = publication.compose_answer(_base_state("今天是什么日期？", allow_general_knowledge=True))
 
     assert len(calls) == 1
     assert out["answer_basis"] == "general_knowledge"
@@ -95,18 +95,18 @@ def test_publish_node_uses_general_knowledge_only_when_allowed_and_non_enterpris
     assert built["specialists"] == []
 
 
-def test_publish_node_still_refuses_enterprise_question_even_with_general_knowledge(monkeypatch) -> None:
+def test_compose_answer_still_refuses_enterprise_question_even_with_general_knowledge(monkeypatch) -> None:
     calls = _patch_runtime(monkeypatch, allow_general_knowledge=True, allow_external=True)
-    out = publication.publish_node(_base_state("本店退货运费怎么算？", allow_general_knowledge=True))
+    out = publication.compose_answer(_base_state("本店退货运费怎么算？", allow_general_knowledge=True))
 
     assert calls == []
     assert out["answer_basis"] == "insufficient_evidence"
     assert out["hard_block"] is True
 
 
-def test_publish_node_refuses_when_general_knowledge_disabled(monkeypatch) -> None:
+def test_compose_answer_refuses_when_general_knowledge_disabled(monkeypatch) -> None:
     calls = _patch_runtime(monkeypatch, allow_general_knowledge=False, allow_external=True)
-    out = publication.publish_node(_base_state("今天是什么日期？", allow_general_knowledge=False))
+    out = publication.compose_answer(_base_state("今天是什么日期？", allow_general_knowledge=False))
 
     assert calls == []
     assert out["answer_basis"] == "insufficient_evidence"

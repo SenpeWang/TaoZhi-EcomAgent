@@ -25,7 +25,7 @@ from taozhi.orchestration.decision import DecisionPath
 def test_question_routes_to_explicit_roles_without_embeddings(monkeypatch, question, expected):
     monkeypatch.setattr(intent, "validate_task_execution", lambda *_: (None, {"question": question, "input_level": 1}))
     monkeypatch.setattr("taozhi.orchestration.decision.embedding_available", lambda: False)
-    assert intent.plan_node({})["selected_agents"] == expected
+    assert intent.analyze_question({})["selected_agents"] == expected
 
 
 def test_experts_respect_specification_priority_semantic_choice_and_limit(monkeypatch):
@@ -34,7 +34,7 @@ def test_experts_respect_specification_priority_semantic_choice_and_limit(monkey
     engine = Mock()
     engine.choice.return_value = SimpleNamespace(selected=["coach"], path=DecisionPath.FAST_SEMANTIC)
     monkeypatch.setattr(intent, "get_decision_engine", lambda: engine)
-    assert intent.plan_node({})["selected_agents"] == ["product", "coach", "after_sales"]
+    assert intent.analyze_question({})["selected_agents"] == ["product", "coach", "after_sales"]
     assert engine.choice.call_args.kwargs["allow_llm"] is False
 
 
@@ -73,7 +73,7 @@ def test_waiting_expert_rechecks_external_permission_before_reserving_model_call
     monkeypatch.setattr(specialists, "LLMClient", lambda *_args, **_kwargs: client)
 
     with pytest.raises(Denied) as denied:
-        specialists.domain_node(state)
+        specialists.extract_claims(state)
 
     assert denied.value.code == "SOURCE_CHANGED"
     pool.assert_called_once_with(max_workers=1)

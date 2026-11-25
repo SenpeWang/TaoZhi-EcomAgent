@@ -51,7 +51,11 @@ def rag(monkeypatch):
 
 def test_sufficient_evidence_skips_retry_and_handles_missing_model(rag):
     updates, state = rag.run()
-    assert list(updates) == ["planning", "retrieval", "prepare_evidence", "specialists", "quality", "publication"]
+    assert list(updates) == ["analyze_question", "retrieve_documents", "prepare_context", "extract_claims", "verify_claims", "compose_answer"]
+    assert [change["phase"] for change in updates.values()] == [
+        "question_analyzed", "documents_retrieved", "context_prepared",
+        "claims_extracted", "claims_verified", "answer_composed",
+    ]
     assert state["retrieval_search_count"] == 1
     assert state["retrieval_decision"] == "run_specialists" and not state["hard_block"]
     assert _build_question_result(state)["model_calls"] == 0 and "尚未配置" in state["missing"][0]
@@ -69,7 +73,7 @@ def test_empty_knowledge_base_keeps_public_definitions_separate(rag, question, a
     rag.search.return_value = []
     updates, state = rag.run()
     result = _build_question_result(state)
-    assert "specialists" not in updates and result["answer_basis"] == basis
+    assert "extract_claims" not in updates and result["answer_basis"] == basis
     assert result["guidance"] and not result["citations"]
     assert bool(result["public_sources"]) == (basis == "public_reference")
     assert state["review"] == (basis == "public_reference")
@@ -83,7 +87,8 @@ def test_live_values_require_the_matching_business_field(rag, monkeypatch):
     monkeypatch.setattr(retrieval, "lookup", lambda *_: {"available": True, "source": source, "record": record})
     updates, state = rag.run()
     result = _build_question_result(state)
-    assert list(updates) == ["planning", "business_snapshot", "publication"]
+    assert list(updates) == ["analyze_question", "fetch_live_data", "compose_answer"]
+    assert [change["phase"] for change in updates.values()] == ["question_analyzed", "live_data_loaded", "answer_composed"]
     assert result["answer_basis"] == "business_snapshot" and "可用库存：0" in result["answer"]
     assert "采购成本" not in result["answer"] and "销售价格" in result["missing"][0]
     assert not result["citations"] and state["sources"] == [source]
@@ -112,7 +117,8 @@ def test_current_snapshot_cannot_replace_historical_forecast_or_special_price(ra
     lookup = Mock()
     monkeypatch.setattr(retrieval, "lookup", lookup)
     updates, state = rag.run()
-    assert list(updates) == ["planning", "business_snapshot", "publication"]
+    assert list(updates) == ["analyze_question", "fetch_live_data", "compose_answer"]
+    assert [change["phase"] for change in updates.values()] == ["question_analyzed", "live_data_loaded", "answer_composed"]
     assert state["answer_basis"] == "insufficient_evidence" and state["hard_block"]
     assert any(reason in item for item in state["missing"])
     assert not state["sources"] and not state["public_sources"]
@@ -130,7 +136,8 @@ def test_live_price_reports_unanswered_policy_separately(rag, monkeypatch, polic
     snapshot = {"available": True, "record": record, "source": {"kind": "business", "level": 1}}
     monkeypatch.setattr(retrieval, "lookup", lambda *_: snapshot)
     updates, state = rag.run()
-    assert list(updates) == ["planning", "business_snapshot", "publication"]
+    assert list(updates) == ["analyze_question", "fetch_live_data", "compose_answer"]
+    assert [change["phase"] for change in updates.values()] == ["question_analyzed", "live_data_loaded", "answer_composed"]
     assert state["answer_basis"] == "business_snapshot" and "销售价格（分）：0" in state["answer"]
     assert "55" not in state["answer"]
     assert all(any(subject in gap for gap in state["missing"]) for subject in missing)
@@ -178,8 +185,12 @@ def test_retry_merges_new_evidence_and_accounts_for_hyde_once(rag, monkeypatch, 
     rag.hyde.side_effect = hyde
     monkeypatch.setattr(retrieval, "extract_search_keyword", lambda query: "新词")
     updates, state = rag.run()
-    assert updates["retrieval"]["retrieval_decision"] == reason
-    assert list(updates).count("retrieval_retry") == 1 and state["retrieval_search_count"] == 2
+    assert updates["retrieve_documents"]["retrieval_decision"] == reason
+    assert list(updates).count("refine_query") == 1 and state["retrieval_search_count"] == 2
+    assert [change["phase"] for change in updates.values()] == [
+        "question_analyzed", "documents_retrieved", "query_refined", "context_prepared",
+        "claims_extracted", "claims_verified", "answer_composed",
+    ]
     assert [doc["chunk_id"] for doc in state["evidence"]] == ["primary", "supplement"]
     assert state["timing"]["embed_ms"] == 6 and state["timing"]["pg_ann_ms"] == 10
     assert state["timing"]["hyde_ms"] == 4 and state["token_usage"]["total_tokens"] == 11
@@ -203,7 +214,7 @@ def test_no_model_routes_keep_review_and_publish_contract(rag, has_evidence, all
     rag.decision.selected = [role]
     updates, state = rag.run()
     result = _build_question_result(state)
-    assert "specialists" not in updates and "quality" not in updates
+    assert "extract_claims" not in updates and "verify_claims" not in updates
     assert result["hard_block"] == hard and state["review"] == review and result["model_calls"] == 0
     assert state["retrieval_decision"] == reason and result["missing"]
     if hard:
@@ -211,7 +222,7 @@ def test_no_model_routes_keep_review_and_publish_contract(rag, has_evidence, all
     else:
         assert state["evidence"][0]["quote"] in result["answer"] and "人工核验" in result["answer"]
     if not has_evidence:
-        assert "retrieval_retry" in updates and state["retrieval_search_count"] == 1
+        assert "refine_query" in updates and state["retrieval_search_count"] == 1
         rag.search.assert_called_once()
 
 
@@ -224,7 +235,7 @@ def test_model_free_graph_shows_only_applicable_manual_excerpts(rag, allow_exter
     ]
     updates, state = rag.run()
     result = _build_question_result(state)
-    assert ("specialists" in updates) == allow_external
+    assert ("extract_claims" in updates) == allow_external
     assert state["review"] and result["answer_basis"] == "source_excerpt" and not result["public_sources"]
     assert result["model_calls"] == 0 and not state["findings"] and not result["cache_hit"]
     assert [citation["cited"] for citation in result["citations"]] == [False, True]
@@ -238,7 +249,7 @@ def test_authorized_business_snapshot_is_evidence_with_no_documents(rag, monkeyp
     record = {"available": 7, "phone": "保密电话", "address": "保密地址", "purchase_cost_minor": 941}
     monkeypatch.setattr(retrieval, "lookup", lambda *_: {"available": True, "source": source, "record": record})
     updates, state = rag.run()
-    assert "specialists" in updates and not state["hard_block"] and state["review"]
+    assert "extract_claims" in updates and not state["hard_block"] and state["review"]
     assert state["sources"] == [source] and "可用库存：7" in state["answer"]
     assert state["business"][0]["record"] == {"available": 7}
     assert "保密" not in state["answer"] and "941" not in state["answer"]
@@ -264,7 +275,7 @@ def test_retained_conversation_source_checks_external_permission(rag, monkeypatc
     check = Mock(return_value=False)
     monkeypatch.setattr(retrieval, "sources_valid", check)
     updates, state = rag.run()
-    assert state["retrieval_decision"] == "external_processing_blocked" and "specialists" not in updates
+    assert state["retrieval_decision"] == "external_processing_blocked" and "extract_claims" not in updates
     assert previous in state["sources"] and check.call_args.args[2] == [previous]
     assert check.call_args.kwargs == {"external": True}
 

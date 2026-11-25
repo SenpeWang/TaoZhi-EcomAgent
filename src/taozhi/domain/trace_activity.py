@@ -7,8 +7,8 @@ ActivityCategory = SpanKind | Literal["CONTEXT", "GUARDRAIL"]
 
 CHAIN_OPERATIONS = {
     "CONTEXT": {
-        "pipeline.business_snapshot": "核对实时业务记录",
-        "pipeline.prepare_evidence": "汇集授权上下文并选择答复路径",
+        "pipeline.fetch_live_data": "核对实时业务记录",
+        "pipeline.prepare_context": "汇集授权上下文并选择答复路径",
         "context.recall_conversation": "读取会话历史证据",
         "context.prepare_specialist": "组装问答专家上下文",
         "context.prepare_coordinator": "组装协调员决策上下文",
@@ -18,7 +18,7 @@ CHAIN_OPERATIONS = {
     },
     "GUARDRAIL": {
         "research.authorize_tool": "检查工具调用权限",
-        "pipeline.quality": "校验事实与引用",
+        "pipeline.verify_claims": "校验事实与引用",
     },
 }
 CHAIN_CATEGORY_BY_NAME = {

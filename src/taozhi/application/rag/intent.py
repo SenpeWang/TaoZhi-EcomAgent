@@ -6,6 +6,7 @@ from taozhi.domain.privacy import redact
 from taozhi.domain.question_context import business_field_requests
 from taozhi.domain.rag_verification import SPECIALIST_AGENTS
 from taozhi.orchestration.decision import DecisionPath, get_decision_engine
+from .phases import RagPhase
 from .state import State
 
 _SPECIFICATION_TERMS = ("规格", "参数", "型号", "尺寸", "切幅", "幅宽", "材质")
@@ -37,8 +38,8 @@ def _select_specialists(question: str) -> list[str]:
     return list(dict.fromkeys(selected))[:3] or ["product"]
 
 
-def plan_node(state: State) -> dict:
-    """为实时业务字段选择权威系统，知识问题按主题分派专家。"""
+def analyze_question(state: State) -> dict:
+    """识别问题所需的实时业务字段，并为知识问题分派专家角色。"""
     _, job = validate_task_execution(state, "识别问题与答复依据", 10)
     question = job["question"]
     live_fields = business_field_requests(question)
@@ -56,4 +57,5 @@ def plan_node(state: State) -> dict:
         timing={},
         degraded={},
         token_usage=empty_token_usage(),
+        phase=RagPhase.QUESTION_ANALYZED.value,
     )

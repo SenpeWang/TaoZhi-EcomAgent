@@ -114,6 +114,8 @@ def traced_node(name: str, func: Callable[[Any], Any], span_prefix: str = "pipel
                     r = result or {}
                     if "answer_basis" in r:
                         span.set_attribute("rag.answer_basis", r["answer_basis"])
+                    if "phase" in r:
+                        span.set_attribute("rag.phase", r["phase"])
                     if "verification_issue" in r:
                         span.set_attribute("rag.verification_issue", r["verification_issue"])
                     if "retrieval_decision" in r:

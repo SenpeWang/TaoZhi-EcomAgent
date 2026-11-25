@@ -23,6 +23,7 @@ from taozhi.infrastructure.persistence.database import database_connection
 from taozhi.observability.tracing import node_span, record_diagnostic
 from taozhi.application.common.task_guard import authorized_running_task, empty_token_usage, merge_token_usage, validate_task_execution
 from taozhi.application.services.task_output import publish_answer_delta
+from .phases import RagPhase
 from .state import State
 
 class _SpecialistFinding(BaseModel):
@@ -38,13 +39,14 @@ class SpecialistOutput(BaseModel):
     missing: list[str] = Field(default_factory=list, description="给定资料中缺失且无法核验的要点")
 
 
-def domain_node(state: State) -> dict:
+def extract_claims(state: State) -> dict:
     """并发调度专家，从各自获准使用的资料中选取待核验的候选结论。"""
     validate_task_execution(state, "专业智能体多角色协同核验", 45)
     evidence = state["evidence"]
     settings = taozhi_config.get_settings()
     if not settings.api_key:
-        return {"findings": [], "missing": ["专业核验模型尚未配置。"], "verification_issue": "model_unconfigured"}
+        return {"findings": [], "missing": ["专业核验模型尚未配置。"], "verification_issue": "model_unconfigured",
+                "phase": RagPhase.CLAIMS_EXTRACTED.value}
 
     config = taozhi_config.load_config()
     selected_agents = state["selected_agents"]
@@ -52,7 +54,8 @@ def domain_node(state: State) -> dict:
         spent = count_model_calls(c, state["job_id"])
     if spent >= config.max_model_calls:
         return {"findings": [], "missing": ["本任务已达到模型调用预算。"], "model_calls": 0,
-                "usage": [], "verification_issue": "budget_exhausted"}
+                "usage": [], "verification_issue": "budget_exhausted",
+                "phase": RagPhase.CLAIMS_EXTRACTED.value}
     client_settings = settings.model_copy(
         update={
             "llm_timeout": config.specialist_timeout,
@@ -184,7 +187,8 @@ def domain_node(state: State) -> dict:
         "llm_failover_used": token_usage.get("failovers", 0) > 0,
         "specialist_failed": "failed" in outcomes,
     }
-    result = dict(findings=all_findings, missing=list(dict.fromkeys(all_missing)), model_calls=actual_calls, usage=all_usage, token_usage=token_usage, degraded=degraded)
+    result = dict(findings=all_findings, missing=list(dict.fromkeys(all_missing)), model_calls=actual_calls, usage=all_usage, token_usage=token_usage, degraded=degraded,
+                  phase=RagPhase.CLAIMS_EXTRACTED.value)
     if "failed" in outcomes:
         result["verification_issue"] = "model_unavailable"
     elif "budget_exhausted" in outcomes:
@@ -192,7 +196,7 @@ def domain_node(state: State) -> dict:
     return result
 
 
-def quality_node(state: State) -> dict:
+def verify_claims(state: State) -> dict:
     """逐条核验事实与引文，发布允许预览的结论并保留通过核验的事实。"""
     _, job = validate_task_execution(state, "事实、数字与引用核验", 82)
     review = job["payload"].get("require_review", False)
@@ -237,4 +241,5 @@ def quality_node(state: State) -> dict:
                 covered.update(label for key, label in (("available", "库存"), ("price_minor", "价格"), ("status", "订单状态")) if key in record)
         missing.extend(f"缺少可核验的{label}资料。" for label in sorted(subjects - covered))
     missing.extend(f"缺少机型 {model} 的对应依据。" for model in missing_models(state["question"], state["evidence"], findings))
-    return dict(findings=findings, missing=list(dict.fromkeys(missing)), review=review and not hard, hard_block=hard)
+    return dict(findings=findings, missing=list(dict.fromkeys(missing)), review=review and not hard, hard_block=hard,
+                phase=RagPhase.CLAIMS_VERIFIED.value)

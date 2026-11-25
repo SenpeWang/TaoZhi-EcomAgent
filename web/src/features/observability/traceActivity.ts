@@ -138,7 +138,7 @@ export function activityResult(entry: TraceActivity): string {
   if (entry.kind === 'RETRIEVER' && typeof attrs['retrieval.result_count'] === 'number') {
     details.push('检索到 ' + attrs['retrieval.result_count'] + ' 条')
   }
-  if (entry.name === 'pipeline.retrieval_retry') {
+  if (entry.name === 'pipeline.refine_query') {
     const searches = attrs['rag.retrieval_search_count']
     if (searches === 1) details.push('未执行第二次检索')
     if (searches === 2) details.push('已执行第二次检索')

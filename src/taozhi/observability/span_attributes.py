@@ -18,7 +18,7 @@ _IDENTIFIER = re.compile(r"[\w.,/-]{1,120}")
 _TEXT = {
     SpanAttributes.LLM_MODEL_NAME, SpanAttributes.AGENT_NAME, SpanAttributes.TOOL_NAME,
     SpanAttributes.EMBEDDING_MODEL_NAME, RerankerAttributes.RERANKER_MODEL_NAME,
-    "llm.endpoint_id", "tool.status", "subagent_id", "state.selected_agents", "error.type",
+    "llm.endpoint_id", "tool.status", "subagent_id", "state.selected_agents", "error.type", "rag.phase",
 }
 _NUMERIC = {
     SpanAttributes.LLM_TOKEN_COUNT_PROMPT, SpanAttributes.LLM_TOKEN_COUNT_COMPLETION,

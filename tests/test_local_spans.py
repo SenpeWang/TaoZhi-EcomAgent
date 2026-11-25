@@ -81,24 +81,25 @@ def test_retrieval_routes_export_only_declared_decisions_and_counts(monkeypatch)
     monkeypatch.setattr(tracing, "submit_span", rows.append)
     with tracing.job_trace("tenant", "job", 1, "task.ask"):
         for name, decision, count in (
-            ("retrieval", "retry_low_confidence", 1),
-            ("retrieval_retry", "private-query", 2),
-            ("prepare_evidence", "external_processing_blocked", 2),
+            ("retrieve_documents", "retry_low_confidence", 1),
+            ("refine_query", "private-query", 2),
+            ("prepare_context", "external_processing_blocked", 2),
         ):
             traced_node(name, dict.copy)({"retrieval_decision": decision, "retrieval_search_count": count})
-        traced_node("specialists", dict.copy)({"verification_issue": "model_unavailable"})
-        traced_node("publication", dict.copy)({"answer_basis": "source_excerpt", "verification_issue": "private-query"})
+        traced_node("extract_claims", dict.copy)({"verification_issue": "model_unavailable"})
+        traced_node("compose_answer", dict.copy)({"answer_basis": "source_excerpt", "verification_issue": "private-query", "phase": "answer_composed"})
 
     ended = {r["name"]: r["attributes"] for r in rows if r["status"] == "ok"}
-    assert ended["pipeline.retrieval"]["rag.retrieval_decision"] == "retry_low_confidence"
-    assert ended["pipeline.retrieval_retry"]["rag.retrieval_search_count"] == 2
-    assert ended["pipeline.prepare_evidence"]["rag.retrieval_decision"] == "external_processing_blocked"
-    assert ended["pipeline.specialists"]["rag.verification_issue"] == "model_unavailable"
-    assert ended["pipeline.publication"]["rag.answer_basis"] == "source_excerpt"
+    assert ended["pipeline.retrieve_documents"]["rag.retrieval_decision"] == "retry_low_confidence"
+    assert ended["pipeline.refine_query"]["rag.retrieval_search_count"] == 2
+    assert ended["pipeline.prepare_context"]["rag.retrieval_decision"] == "external_processing_blocked"
+    assert ended["pipeline.extract_claims"]["rag.verification_issue"] == "model_unavailable"
+    assert ended["pipeline.compose_answer"]["rag.answer_basis"] == "source_excerpt"
+    assert ended["pipeline.compose_answer"]["rag.phase"] == "answer_composed"
     assert "private-query" not in str(rows)
     assert set(ended) - {"task.ask"} <= set(_KEY_ACTIVITY_STEPS)
-    assert _span_display_name("CHAIN", "pipeline.retrieval_retry", {}) == "尝试补查授权文档"
-    assert activity_category("CHAIN", "pipeline.prepare_evidence") == "CONTEXT"
+    assert _span_display_name("CHAIN", "pipeline.refine_query", {}) == "尝试补查授权文档"
+    assert activity_category("CHAIN", "pipeline.prepare_context") == "CONTEXT"
 
 
 def test_running_and_failed_snapshots_only_store_operational_attributes(monkeypatch):

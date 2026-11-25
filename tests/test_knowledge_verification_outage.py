@@ -54,9 +54,9 @@ def test_unavailable_specialists_publish_only_relevant_excerpts(monkeypatch, kno
     client.chat_json.side_effect = TimeoutError("合成模型请求超时")
     monkeypatch.setattr(specialists, "LLMClient", Mock(return_value=client))
     state = knowledge_state
-    state.update(specialists.domain_node(state))
-    state.update(specialists.quality_node(state))
-    state.update(publication.publish_node(state))
+    state.update(specialists.extract_claims(state))
+    state.update(specialists.verify_claims(state))
+    state.update(publication.compose_answer(state))
     result = _build_question_result(state)
     assert state["verification_issue"] == issue and action in result["guidance"]
     assert result["answer_basis"] == "source_excerpt" and "自动核验未完成" in result["answer"]
@@ -78,7 +78,7 @@ def test_unrelated_or_reviewed_candidates_remain_uncited(knowledge_state, questi
     state.update(question=question, external_blocked=blocked, findings=[], missing=[])
     if issue:
         state["verification_issue"] = "model_unavailable"
-    state.update(publication.publish_node(state))
+    state.update(publication.compose_answer(state))
     result = _build_question_result(state)
     assert result["answer_basis"] == basis and not any(item["cited"] for item in result["citations"])
     assert all(item["quote"] not in result["answer"] for item in state["evidence"])
@@ -88,7 +88,7 @@ def test_distinct_policy_rows_cannot_combine_into_a_manual_reference(knowledge_s
     state = knowledge_state
     state.update(verification_issue="model_unavailable", findings=[], missing=[])
     state["evidence"][2]["quote"] = "A1 线下门店提供清洁服务。\nB2 线下门店保修三个月。"
-    state.update(publication.publish_node(state))
+    state.update(publication.compose_answer(state))
     assert state["answer_basis"] == "insufficient_evidence" and not state["excerpt_indices"]
 
 
@@ -97,7 +97,7 @@ def test_partial_specialist_failure_preserves_verified_findings(knowledge_state)
     quote = state["evidence"][2]["quote"]
     state.update(verification_issue="model_unavailable", missing=["另一个专业核验模型暂时不可用。"],
                  findings=[{"role": "after_sales", "evidence_index": 2, "claim": quote, "quote": quote}])
-    state.update(publication.publish_node(state))
+    state.update(publication.compose_answer(state))
     result = _build_question_result(state)
     assert result["answer_basis"] == "internal_evidence" and result["answer"] == quote + " [3]"
     assert state["excerpt_indices"] == [] and [doc["cited"] for doc in result["citations"]] == [False, False, True]

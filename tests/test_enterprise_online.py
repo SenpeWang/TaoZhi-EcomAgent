@@ -745,11 +745,11 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
     [root] = [s for s in spans if s["parent_span_id"] is None]
     assert (root["name"], root["kind"], root["status"]) == ("task.ask", "CHAIN", "ok")
     assert all(s["parent_span_id"] in by_id for s in spans if s is not root)
-    retrieval = next(s for s in spans if s["name"] == "pipeline.retrieval")
+    retrieval = next(s for s in spans if s["name"] == "pipeline.retrieve_documents")
     assert retrieval["kind"] == "CHAIN"
     assert retrieval["attributes"]["rag.retrieval_decision"] == "sufficient_evidence"
     assert retrieval["attributes"]["rag.retrieval_search_count"] == 1
-    prepared = next(s for s in spans if s["name"] == "pipeline.prepare_evidence")
+    prepared = next(s for s in spans if s["name"] == "pipeline.prepare_context")
     assert prepared["category"] == "CONTEXT" and prepared["attributes"]["rag.retrieval_decision"] == "run_specialists"
     tools = [s for s in spans if s["kind"] == "TOOL"]
     business_tools = [s for s in tools if s["parent_span_id"] == prepared["span_id"]]
@@ -778,7 +778,7 @@ def test_team_knowledge_filtered_before_model(monkeypatch, clients):
     for call in models:
         specialist = by_id[call["parent_span_id"]]
         assert specialist["kind"] == "AGENT" and specialist["name"] == "rag.specialist"
-        assert by_id[specialist["parent_span_id"]]["name"] == "pipeline.specialists"
+        assert by_id[specialist["parent_span_id"]]["name"] == "pipeline.extract_claims"
         specialist_roles.add(specialist["attributes"]["agent.name"])
         assert call["display_name"] == call["attributes"]["llm.model_name"] == model
         assert call["status"] == "ok"
