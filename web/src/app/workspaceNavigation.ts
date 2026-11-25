@@ -24,7 +24,7 @@ const workspacePages = {
     iconPaths: ['M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z', 'M5 20a7 7 0 0 1 14 0'],
     access: 'member',
   },
-  经营看板: {
+  数据中心: {
     group: '业务工作台',
     description: '查看授权范围内的经营指标，查询业务数据。',
     iconPaths: ['M3 3v18h18', 'M18 17V9', 'M13 17V5', 'M8 17v-3'],

@@ -217,7 +217,7 @@
           </article>
         </section>
       </template>
-      <el-empty v-else-if="!boardLoading" description="经营看板数据暂不可用" />
+      <el-empty v-else-if="!boardLoading" description="数据中心数据暂不可用" />
     </div>
 
     <div v-show="tab === 'chat'" class="chat">
@@ -636,7 +636,7 @@ function switchTab(t: 'board' | 'chat'): void {
 }
 
 /**
- * 拉取经营看板数据；失败时提示中文错误信息但不阻断页面。
+ * 拉取数据中心数据；失败时提示中文错误信息但不阻断页面。
  * @returns 异步完成后无返回值
  */
 async function loadBoard(): Promise<void> {
@@ -654,7 +654,7 @@ async function loadBoard(): Promise<void> {
     const msg =
       e instanceof Error && /[\u4e00-\u9fff]/.test(e.message)
         ? e.message
-        : '经营看板加载失败，请稍后重试'
+        : '数据中心加载失败，请稍后重试'
     ElMessage.error(msg)
   } finally {
     if (request === boardRequest) boardLoading.value = false
@@ -725,7 +725,7 @@ function refundTooltipValue(v: number): string {
 }
 
 /**
- * 渲染经营看板四组图表；对应数据集为空时跳过初始化。
+ * 渲染数据中心四组图表；对应数据集为空时跳过初始化。
  * @returns 图表绘制完成后无返回值。
  */
 function renderCharts(): void {

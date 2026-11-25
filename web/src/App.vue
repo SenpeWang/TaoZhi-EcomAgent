@@ -169,7 +169,7 @@
 
         <ResearchChatView v-else-if="currentPage === '选品调研'" :api="api" @inspect="openTrace" />
 
-        <BiView v-else-if="currentPage === '经营看板'" :api="api" />
+        <BiView v-else-if="currentPage === '数据中心'" :api="api" />
 
         <TraceCenter
           v-else-if="currentPage === '轨迹中台' && !user.must_change"
