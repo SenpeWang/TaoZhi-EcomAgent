@@ -1,0 +1,226 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1575" viewBox="0 0 1280 1575" role="img" aria-labelledby="title description" lang="zh-CN">
+  <title id="title">知识问答工作流与状态轮转</title>
+  <desc id="description">知识问答任务先做缓存复用与指标意图分流，再进入工作流：分析问题后读取实时业务数据或检索授权资料；证据不足或置信度低时补查一次，随后准备授权上下文，按条件进入专家抽取与结论校验，或直接定稿答复。节点为动词加宾语，阶段为过去分词，合法转移与 phases.py 的 TRANSITIONS 一致。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 8 4 0 8Z" fill="#486582"/>
+    </marker>
+    <marker id="arrow-dash" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 8 4 0 8Z" fill="#8b98a8"/>
+    </marker>
+    <style>
+      text { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #132b48; }
+      .title { font-size: 30px; font-weight: 700; }
+      .subtitle { font-size: 15px; fill: #3c5670; }
+      .node-title { font-size: 17px; font-weight: 700; }
+      .node-id { font-family: Consolas, "SFMono-Regular", ui-monospace, monospace; font-size: 11px; fill: #4a6b8f; }
+      .phase { font-family: Consolas, "SFMono-Regular", ui-monospace, monospace; font-size: 11.5px; fill: #41618a; }
+      .body { font-size: 14px; fill: #324e69; }
+      .caption { font-size: 12.5px; fill: #3c5670; }
+      .mono { font-family: Consolas, "SFMono-Regular", ui-monospace, monospace; font-size: 10.5px; fill: #2f4d6e; }
+      .edge { fill: none; stroke: #486582; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow); }
+      .edge-dash { fill: none; stroke: #8b98a8; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 5; marker-end: url(#arrow-dash); }
+      .edge-label { font-size: 12px; fill: #3c5670; text-anchor: middle; }
+      .table-head { font-size: 12.5px; font-weight: 700; fill: #24405e; }
+      .table-state { font-family: Consolas, "SFMono-Regular", ui-monospace, monospace; font-size: 11px; fill: #1f3b57; }
+      .table-node { font-family: Consolas, "SFMono-Regular", ui-monospace, monospace; font-size: 11px; fill: #2f5d7c; }
+      .table-condition { font-size: 11.5px; fill: #324e69; }
+      .table-next { font-family: Consolas, "SFMono-Regular", ui-monospace, monospace; font-size: 11px; fill: #245a3d; }
+      .foot { font-size: 11px; fill: #5b7590; }
+    </style>
+  </defs>
+
+  <rect x="1" y="1" width="1278" height="1573" rx="18" fill="#f5f8fc" stroke="#c3d3e4"/>
+
+  <g>
+    <text x="40" y="56" class="title">知识问答工作流</text>
+    <text x="40" y="88" class="subtitle">受控检索 · 专家抽取 · 确定性核验 · 证据分级发布</text>
+    <path d="M830 52h42" class="edge"/>
+    <text x="882" y="57" class="caption">动作流转</text>
+    <path d="M1000 52h42" class="edge-dash"/>
+    <text x="1052" y="57" class="caption">前置 / 旁路</text>
+  </g>
+
+  <g>
+    <rect x="40" y="108" width="1200" height="136" rx="12" fill="#eef3f8" stroke="#c8d6e5" stroke-width="1.5"/>
+    <text x="58" y="134" class="node-id">图外前置 · process_question_job</text>
+
+    <rect x="58" y="146" width="240" height="76" rx="8" fill="#ffffff" stroke="#c0cfdf" stroke-width="1.5"/>
+    <text x="74" y="170" class="node-title">提交与取权</text>
+    <text x="74" y="194" class="caption">载入主体、密级与外发开关</text>
+    <text x="74" y="212" class="caption">任务入队后由 Worker 认领</text>
+
+    <rect x="338" y="146" width="240" height="76" rx="8" fill="#ffffff" stroke="#c0cfdf" stroke-width="1.5"/>
+    <text x="354" y="170" class="node-title">语义缓存</text>
+    <text x="354" y="194" class="caption">命中后复检来源与权限</text>
+    <text x="354" y="212" class="caption">通过则直接完成，不进图</text>
+
+    <rect x="618" y="146" width="240" height="76" rx="8" fill="#ffffff" stroke="#c0cfdf" stroke-width="1.5"/>
+    <text x="634" y="170" class="node-title">指标分流</text>
+    <text x="634" y="194" class="caption">命中指标关键词转 ChatBI</text>
+    <text x="634" y="212" class="caption">另一工作流，旁路出图</text>
+
+    <rect x="898" y="146" width="324" height="76" rx="8" fill="#ffffff" stroke="#c0cfdf" stroke-width="1.5"/>
+    <text x="914" y="170" class="node-title">进入问答图</text>
+    <text x="914" y="194" class="caption">cache 未命中且非问数</text>
+    <text x="914" y="212" class="caption">编译 RAG 图并注入检查点</text>
+
+    <path d="M298 184h40" class="edge"/>
+    <path d="M578 184h40" class="edge"/>
+    <path d="M858 184h40" class="edge"/>
+    <path d="M1060 222v34H250v44" class="edge"/>
+    <text x="560" y="250" class="edge-label">cache 未命中且非问数</text>
+  </g>
+
+  <rect x="70" y="300" width="380" height="112" rx="10" fill="#eaf2fe" stroke="#a5bfe2" stroke-width="1.5"/>
+  <text x="90" y="330" class="node-title">分析问题</text>
+  <text x="90" y="349" class="node-id">analyze_question</text>
+  <text x="430" y="330" class="phase" text-anchor="end">question_analyzed</text>
+  <text x="90" y="378" class="body">识别实时业务字段；无则按主题选专家</text>
+  <text x="90" y="398" class="body">确定性路由，最多 3 位专家</text>
+
+  <rect x="830" y="300" width="380" height="112" rx="10" fill="#eef3f8" stroke="#bccbdb" stroke-width="1.5"/>
+  <text x="850" y="330" class="node-title">读取实时业务数据</text>
+  <text x="850" y="349" class="node-id">fetch_live_data</text>
+  <text x="1192" y="330" class="phase" text-anchor="end">live_data_loaded</text>
+  <text x="850" y="378" class="body">按 sku_id / order_id 读取库存、现价、订单状态</text>
+  <text x="850" y="398" class="body">字段白名单裁剪，保留数据时间</text>
+
+  <rect x="70" y="470" width="380" height="124" rx="10" fill="#e8f5f1" stroke="#9ccfbf" stroke-width="1.5"/>
+  <text x="90" y="500" class="node-title">检索授权资料</text>
+  <text x="90" y="519" class="node-id">retrieve_documents</text>
+  <text x="430" y="500" class="phase" text-anchor="end">documents_retrieved</text>
+  <text x="90" y="548" class="body">ES BM25 + pgvector ANN（可选 HyDE）</text>
+  <text x="90" y="568" class="body">仅当前用户可读的已发布文档，最多 10 条</text>
+
+  <rect x="520" y="470" width="300" height="124" rx="10" fill="#eaf6f2" stroke="#a9d3c6" stroke-width="1.5"/>
+  <text x="540" y="500" class="node-title">补查检索</text>
+  <text x="540" y="519" class="node-id">refine_query</text>
+  <text x="802" y="500" class="phase" text-anchor="end">query_refined</text>
+  <text x="540" y="548" class="body">改写关键词或重新生成 HyDE</text>
+  <text x="540" y="568" class="body">两轮结果按 RRF 融合</text>
+
+  <rect x="70" y="650" width="380" height="124" rx="10" fill="#fdf4e3" stroke="#e3c48d" stroke-width="1.5"/>
+  <text x="90" y="680" class="node-title">准备授权上下文</text>
+  <text x="90" y="699" class="node-id">prepare_context</text>
+  <text x="430" y="680" class="phase" text-anchor="end">context_prepared</text>
+  <text x="90" y="728" class="body">继承同会话已引用证据，校验来源/密级/外发</text>
+  <text x="90" y="748" class="body">决定进入专家抽取或直接定稿</text>
+
+  <rect x="70" y="830" width="380" height="112" rx="10" fill="#f2edfa" stroke="#c5b6de" stroke-width="1.5"/>
+  <text x="90" y="860" class="node-title">抽取候选结论</text>
+  <text x="90" y="879" class="node-id">extract_claims</text>
+  <text x="430" y="860" class="phase" text-anchor="end">claims_extracted</text>
+  <text x="90" y="908" class="body">最多 3 位专家并行，仅从授权资料逐字引用</text>
+  <text x="90" y="928" class="body">输出 findings / missing</text>
+
+  <rect x="520" y="830" width="300" height="112" rx="10" fill="#efe8fb" stroke="#c9b9e6" stroke-width="1.5"/>
+  <text x="540" y="860" class="node-title">校验结论与引文</text>
+  <text x="540" y="879" class="node-id">verify_claims</text>
+  <text x="802" y="860" class="phase" text-anchor="end">claims_verified</text>
+  <text x="540" y="908" class="body">逐字引文、算式、适用域与冲突检测</text>
+  <text x="540" y="928" class="body">剔除注入文本，保留可发布结论</text>
+
+  <rect x="70" y="1000" width="1140" height="104" rx="10" fill="#e9f7ec" stroke="#a9d5b4" stroke-width="1.5"/>
+  <text x="90" y="1030" class="node-title">定稿答复</text>
+  <text x="90" y="1049" class="node-id">compose_answer</text>
+  <text x="1192" y="1030" class="phase" text-anchor="end">answer_composed</text>
+  <text x="90" y="1076" class="body">依据：内部证据 / 业务快照 / 原文摘录 / 公开参考 / 通用知识 / 证据不足</text>
+  <text x="90" y="1094" class="body">待审核任务不展示正文；权限允许时流式输出</text>
+
+  <rect x="580" y="1128" width="120" height="30" rx="15" fill="#ffffff" stroke="#a9d5b4" stroke-width="1.5"/>
+  <text x="640" y="1148" class="caption" text-anchor="middle">END</text>
+
+  <path d="M450 356h380" class="edge"/>
+  <text x="640" y="346" class="edge-label mono">live_fields 非空</text>
+  <path d="M250 412v58" class="edge"/>
+  <text x="262" y="445" class="caption">否则：文档问答</text>
+  <path d="M450 532h70" class="edge"/>
+  <text x="485" y="522" class="edge-label">需补查</text>
+  <path d="M250 594v56" class="edge"/>
+  <text x="262" y="626" class="edge-label mono">sufficient_evidence</text>
+  <path d="M560 594v106h-110" class="edge"/>
+  <text x="505" y="690" class="edge-label">补查完成</text>
+  <path d="M250 774v56" class="edge"/>
+  <text x="262" y="806" class="edge-label mono">run_specialists</text>
+  <path d="M70 720H48v332h22" class="edge-dash"/>
+  <text transform="rotate(-90 32 890)" x="32" y="890" class="edge-label" text-anchor="middle">旁路：缺授权依据 / 未获外发 / 缺财务依据</text>
+  <path d="M450 886h70" class="edge"/>
+  <text x="485" y="876" class="edge-label">抽取完成</text>
+  <path d="M670 942v58" class="edge"/>
+  <text x="682" y="975" class="caption">核验完成</text>
+  <path d="M1100 412v588" class="edge"/>
+  <text x="1112" y="470" class="caption">仅实时业务字段</text>
+  <path d="M640 1104v24" class="edge"/>
+
+  <text x="58" y="1192" class="node-title">状态轮转（与 phases.py 的 TRANSITIONS 一致）</text>
+
+  <g>
+    <rect x="40" y="1204" width="1200" height="330" rx="10" fill="#ffffff" stroke="#c8d6e5" stroke-width="1.5"/>
+    <rect x="40" y="1204" width="1200" height="28" rx="10" fill="#e3ecf6"/>
+    <rect x="40" y="1220" width="1200" height="12" fill="#e3ecf6"/>
+    <text x="58" y="1224" class="table-head">当前状态</text>
+    <text x="258" y="1224" class="table-head">触发节点</text>
+    <text x="478" y="1224" class="table-head">条件</text>
+    <text x="1018" y="1224" class="table-head">下一状态</text>
+    <path d="M248 1204v330M468 1204v330M1008 1204v330" stroke="#dbe5ef" stroke-width="1"/>
+
+    <rect x="41" y="1232" width="1198" height="27" fill="#eff5fb"/>
+    <text x="58" y="1250" class="table-state">question_analyzed</text>
+    <text x="258" y="1250" class="table-node">fetch_live_data</text>
+    <text x="478" y="1250" class="table-condition">live_fields 非空</text>
+    <text x="1018" y="1250" class="table-next">live_data_loaded</text>
+
+    <text x="58" y="1277" class="table-state">question_analyzed</text>
+    <text x="258" y="1277" class="table-node">retrieve_documents</text>
+    <text x="478" y="1277" class="table-condition">否则（无实时业务字段）</text>
+    <text x="1018" y="1277" class="table-next">documents_retrieved</text>
+
+    <rect x="41" y="1286" width="1198" height="27" fill="#eff5fb"/>
+    <text x="58" y="1304" class="table-state">live_data_loaded</text>
+    <text x="258" y="1304" class="table-node">compose_answer</text>
+    <text x="478" y="1304" class="table-condition">固定</text>
+    <text x="1018" y="1304" class="table-next">answer_composed</text>
+
+    <text x="58" y="1331" class="table-state">documents_retrieved</text>
+    <text x="258" y="1331" class="table-node">refine_query</text>
+    <text x="478" y="1331" class="table-condition mono">retry_weak_evidence / retry_low_confidence</text>
+    <text x="1018" y="1331" class="table-next">query_refined</text>
+
+    <rect x="41" y="1340" width="1198" height="27" fill="#eff5fb"/>
+    <text x="58" y="1358" class="table-state">documents_retrieved</text>
+    <text x="258" y="1358" class="table-node">prepare_context</text>
+    <text x="478" y="1358" class="table-condition mono">sufficient_evidence</text>
+    <text x="1018" y="1358" class="table-next">context_prepared</text>
+
+    <text x="58" y="1385" class="table-state">query_refined</text>
+    <text x="258" y="1385" class="table-node">prepare_context</text>
+    <text x="478" y="1385" class="table-condition">固定</text>
+    <text x="1018" y="1385" class="table-next">context_prepared</text>
+
+    <rect x="41" y="1394" width="1198" height="27" fill="#eff5fb"/>
+    <text x="58" y="1412" class="table-state">context_prepared</text>
+    <text x="258" y="1412" class="table-node">extract_claims</text>
+    <text x="478" y="1412" class="table-condition mono">run_specialists</text>
+    <text x="1018" y="1412" class="table-next">claims_extracted</text>
+
+    <text x="58" y="1439" class="table-state">context_prepared</text>
+    <text x="258" y="1439" class="table-node">compose_answer</text>
+    <text x="478" y="1439" class="table-condition mono">no_authorized_evidence / external_processing_blocked / no_finance_evidence</text>
+    <text x="1018" y="1439" class="table-next">answer_composed</text>
+
+    <rect x="41" y="1448" width="1198" height="27" fill="#eff5fb"/>
+    <text x="58" y="1466" class="table-state">claims_extracted</text>
+    <text x="258" y="1466" class="table-node">verify_claims</text>
+    <text x="478" y="1466" class="table-condition">固定</text>
+    <text x="1018" y="1466" class="table-next">claims_verified</text>
+
+    <text x="58" y="1493" class="table-state">claims_verified</text>
+    <text x="258" y="1493" class="table-node">compose_answer</text>
+    <text x="478" y="1493" class="table-condition">固定</text>
+    <text x="1018" y="1493" class="table-next">answer_composed</text>
+  </g>
+
+  <text x="58" y="1556" class="foot">依据：src/taozhi/application/rag/phases.py · workflow.py · domain/rag_verification.py</text>
+  <text x="1222" y="1556" class="foot" text-anchor="end">设计不变量：权限前置检索 · 确定性核验 · 缺口显式化</text>
+</svg>
