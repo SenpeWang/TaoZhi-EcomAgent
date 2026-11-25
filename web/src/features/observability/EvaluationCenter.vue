@@ -311,7 +311,10 @@
           <p class="evaluation-meta">
             指标列由指标目录动态生成：{{ schema ? schema.label : '—' }}（schema v{{
               schema ? schema.version : '—'
-            }}，共 {{ metrics.length }} 项）；同一口径下所有批次共用同一组列。
+            }}，共
+            {{ metrics.length }}
+            项）；同一口径下所有批次共用同一组列。同一数据集、口径与执行方式再次运行会保留原批次并递增运行次数，可据此区分第
+            1 次 / 第 2 次运行与复跑来源。
           </p>
           <el-alert
             v-if="runsError"
@@ -334,6 +337,23 @@
                   {{ traceTime(row.created_at) }}
                 </button>
                 <small class="evaluation-meta">{{ row.run_id }}</small>
+              </template>
+            </el-table-column>
+            <el-table-column label="运行次数" width="108">
+              <template #default="{ row }">
+                <el-tooltip placement="top">
+                  <template #content>
+                    <div>批次：{{ row.run_id }}</div>
+                    <div>运行备注：{{ row.trigger_note || '—' }}</div>
+                    <div>重跑来源：{{ row.parent_run_id || '—' }}</div>
+                  </template>
+                  <span class="evaluation-run-seq">
+                    <el-tag v-if="row.run_seq" effect="plain" size="small"
+                      >第 {{ row.run_seq }} 次</el-tag
+                    >
+                    <span v-else class="evaluation-meta">—</span>
+                  </span>
+                </el-tooltip>
               </template>
             </el-table-column>
             <el-table-column label="数据集 / 算法版本" min-width="185">
@@ -374,13 +394,20 @@
                 <span v-else class="evaluation-meta">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="230" fixed="right">
+            <el-table-column label="操作" width="285" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openRunDetail(row.run_id)"
                   >查看详情</el-button
                 >
                 <el-button link type="primary" @click="downloadRunReport(row.run_id)"
                   >原始报告</el-button
+                >
+                <el-button
+                  v-if="canWriteEval && row.dataset_id && row.mode === 'live'"
+                  link
+                  type="primary"
+                  @click="openRerunDialog(row)"
+                  >复跑</el-button
                 >
                 <el-button
                   v-if="canWriteEval && row.dataset_id"
@@ -759,6 +786,9 @@
             {{ runDetail.run.gate_passed ? '门禁通过' : '门禁阻断' }}
           </el-tag>
           <el-tag v-if="runDetail.run.is_baseline" type="warning" size="small">当前基线</el-tag>
+          <el-tag v-if="runDetail.run.run_seq" effect="plain" size="small"
+            >第 {{ runDetail.run.run_seq }} 次运行</el-tag
+          >
           <span
             >{{ evaluationModeLabel(runDetail.run.mode) }} ·
             {{ evaluationScopeLabel(runDetail.run.scope) }}</span
@@ -769,6 +799,26 @@
           算法版本 {{ runDetail.run.profile_version_tag || '未绑定' }} · 发起人
           {{ runDetail.run.owner_name || runDetail.run.owner_id }}</small
         >
+        <p class="evaluation-meta">
+          运行次数 {{ runDetail.run.run_seq ? `第 ${runDetail.run.run_seq} 次` : '—' }} · 运行备注
+          {{ runDetail.run.trigger_note || '—' }} · 重跑来源
+          {{ runDetail.run.parent_run_id || '—' }}
+        </p>
+        <div v-if="runDetail.dataset_snapshot" class="evaluation-snapshot-bar">
+          <div>
+            <strong>数据集快照</strong>
+            <small class="evaluation-meta">
+              版本 {{ runDetail.dataset_snapshot.dataset_version }} · bundle
+              {{ shortSha(runDetail.dataset_snapshot.bundle_sha256) }} · 用例
+              {{ runDetail.dataset_snapshot.case_count }} · 快照
+              {{ runDetail.dataset_snapshot.snapshot_id }}
+            </small>
+          </div>
+          <el-button @click="openSnapshotCases(runDetail.run.run_id)">查看原始用例</el-button>
+        </div>
+        <p v-else class="evaluation-meta">
+          该批次没有数据集内容快照（历史批次未登记快照），无法查看本次运行使用的原始用例。
+        </p>
         <div class="evaluation-filters">
           <el-tag effect="plain" size="small"
             >用例 {{ runDetail.run.passed_cases }} / {{ runDetail.run.total_cases }} 通过</el-tag
@@ -789,6 +839,16 @@
             v-if="view === 'results' && canWriteEval && runDetail.run.dataset_id"
             @click="openBaselineDialog(runDetail.run)"
             >设为基线</el-button
+          >
+          <el-button
+            v-if="
+              view === 'results' &&
+              canWriteEval &&
+              runDetail.run.dataset_id &&
+              runDetail.run.mode === 'live'
+            "
+            @click="openRerunDialog(runDetail.run)"
+            >复跑</el-button
           >
         </div>
         <p v-if="runDetail.run.metric_schema_version" class="evaluation-meta">
@@ -880,7 +940,7 @@
     >
       <p class="evaluation-meta">
         用例 {{ caseJsonCaseId }} · 以下为服务端返回的 expected / observed / verdicts
-        原始字段，未裁剪。
+        原始字段，未裁剪； 末尾附该批次运行时固化的数据集原始用例。
       </p>
       <el-button
         v-if="caseJsonTrace"
@@ -891,6 +951,107 @@
         >查看关联执行轨迹</el-button
       >
       <pre class="evaluation-json">{{ caseJsonText }}</pre>
+      <h4>数据集原始用例</h4>
+      <p class="evaluation-meta">
+        用例摘要 sha256 {{ caseJsonDatasetSha256 || '—' }} ·
+        以下为该次运行数据集快照中保存的完整原始用例，未裁剪、未改名。
+      </p>
+      <pre class="evaluation-json">{{ caseJsonDatasetText }}</pre>
+    </el-dialog>
+
+    <el-drawer v-model="snapshotDrawer" title="数据集快照原始用例" size="72%">
+      <el-alert
+        v-if="snapshotError"
+        type="error"
+        show-icon
+        :title="snapshotError"
+        :closable="false"
+      />
+      <template v-else>
+        <div v-if="snapshotMeta" class="evaluation-filters">
+          <el-tag effect="plain" size="small">版本 {{ snapshotMeta.dataset_version }}</el-tag>
+          <el-tag type="info" effect="plain" size="small"
+            >bundle {{ shortSha(snapshotMeta.bundle_sha256) }}</el-tag
+          >
+          <el-tag type="success" effect="plain" size="small"
+            >用例 {{ snapshotMeta.case_count }}</el-tag
+          >
+          <span class="evaluation-meta">快照 {{ snapshotMeta.snapshot_id }}</span>
+          <el-button :loading="snapshotBusy" @click="loadSnapshotCases">刷新</el-button>
+        </div>
+        <p class="evaluation-meta">
+          以下为批次 <code>{{ snapshotRunId }}</code>
+          运行时固化的数据集原始用例（按套件与序号排序）；每条可查看完整 case_payload
+          JSON，不读取当前数据集。
+        </p>
+        <el-table
+          v-loading="snapshotBusy"
+          :data="snapshotCases"
+          row-key="case_id"
+          max-height="520"
+          empty-text="该快照没有登记原始用例"
+        >
+          <el-table-column label="套件" width="150">
+            <template #default="{ row }">{{
+              evaluationSuites[row.suite] || row.suite || '—'
+            }}</template>
+          </el-table-column>
+          <el-table-column label="用例 ID" width="170" prop="case_id" />
+          <el-table-column label="序号" width="80" prop="ordinal" />
+          <el-table-column label="用例摘要" width="150">
+            <template #default="{ row }">{{ shortSha(row.case_sha256) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="120" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openSnapshotCaseJson(row)"
+                >原始 JSON</el-button
+              >
+            </template>
+          </el-table-column>
+        </el-table>
+        <nav class="evaluation-pager" aria-label="数据集快照用例分页">
+          <span>第 {{ snapshotCursors.length }} 页 / 共 {{ snapshotTotal }} 条</span>
+          <el-button
+            :disabled="snapshotBusy || snapshotCursors.length === 1"
+            @click="turnSnapshotCase(false)"
+            >上一页</el-button
+          >
+          <el-button :disabled="snapshotBusy || !snapshotNext" @click="turnSnapshotCase(true)"
+            >下一页</el-button
+          >
+        </nav>
+      </template>
+    </el-drawer>
+
+    <el-dialog v-model="rerunDialog" title="复跑评测批次" width="560px">
+      <el-form label-position="top">
+        <el-form-item label="复跑来源批次">
+          <span>{{ rerunRun ? rerunRun.run_id : '—' }}</span>
+          <small class="evaluation-meta">
+            数据集版本 {{ rerunRun ? rerunRun.dataset_version || '—' : '—' }} · 算法版本
+            {{ rerunRun ? rerunRun.profile_version_tag || '未绑定' : '—' }} · 口径
+            {{ rerunRun ? evaluationScopeLabel(rerunRun.scope) : '—' }} · 执行方式
+            {{ rerunRun ? evaluationModeLabel(rerunRun.mode) : '—' }}
+          </small>
+        </el-form-item>
+        <p class="evaluation-meta">
+          复跑沿用该批次的数据集、口径、执行方式与算法版本，并带上重跑来源；提交后同一数据集、口径与执行方式下将记为第
+          {{ rerunNextSeq }} 次运行。
+        </p>
+        <el-form-item label="运行备注（写入新批次 trigger_note）">
+          <el-input
+            v-model="rerunNote"
+            maxlength="500"
+            show-word-limit
+            placeholder="说明本次复跑目的，例如：同数据集第二次运行"
+          />
+        </el-form-item>
+        <el-alert v-if="rerunError" type="error" :title="rerunError" :closable="false" />
+      </el-form>
+      <template #footer>
+        <el-button @click="rerunDialog = false">取消</el-button>
+        <el-button type="primary" :loading="rerunBusy" @click="submitRerun">确认复跑</el-button>
+      </template>
     </el-dialog>
 
     <el-dialog
@@ -975,12 +1136,12 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="本次评测备注">
+        <el-form-item label="本次运行备注（写入批次 trigger_note）">
           <el-input
             v-model="triggerForm.note"
             maxlength="500"
             show-word-limit
-            placeholder="说明本次测试目的"
+            placeholder="说明本次运行目的，可用于区分同一数据集多次运行"
           />
         </el-form-item>
         <el-form-item>
@@ -1056,6 +1217,7 @@ import {
   type EvaluationDataset,
   type EvaluationDatasetDetail,
   type EvaluationDatasetRaw,
+  type EvaluationDatasetSnapshot,
   type EvaluationJob,
   type EvaluationJobState,
   type EvaluationKind,
@@ -1066,6 +1228,8 @@ import {
   type EvaluationProfile,
   type EvaluationRun,
   type EvaluationRunDetail,
+  type EvaluationRunSnapshotCase,
+  type EvaluationRunSnapshotPage,
   type EvaluationScope,
   type EvaluationStatus,
   type EvaluationTriggerReceipt,
@@ -1079,6 +1243,7 @@ const TREND_LIMIT = 30
 const RUN_PAGE_SIZE = 25
 const DATASET_CASE_PAGE_SIZE = 20
 const RUN_CASE_PAGE_SIZE = 30
+const SNAPSHOT_CASE_PAGE_SIZE = 20
 const AUDIT_PAGE_SIZE = 30
 const JOB_POLL_MS = 3000
 const JOB_TERMINAL_STATES = new Set<EvaluationJobState>([
@@ -1203,6 +1368,18 @@ const caseJsonDialog = ref(false)
 const caseJsonText = ref('')
 const caseJsonCaseId = ref('')
 const caseJsonTrace = ref<{ task_id: string; trace_id: string } | null>(null)
+const caseJsonDatasetText = ref('')
+const caseJsonDatasetSha256 = ref<string | null>(null)
+
+const snapshotDrawer = ref(false)
+const snapshotRunId = ref('')
+const snapshotMeta = ref<EvaluationDatasetSnapshot | null>(null)
+const snapshotCases = ref<EvaluationRunSnapshotCase[]>([])
+const snapshotCursors = ref<string[]>([''])
+const snapshotNext = ref<string | null>(null)
+const snapshotTotal = ref(0)
+const snapshotBusy = ref(false)
+const snapshotError = ref('')
 
 const activeJob = ref<EvaluationJob | null>(null)
 const jobError = ref('')
@@ -1210,12 +1387,17 @@ const jobBusy = ref(false)
 
 const profileDialog = ref(false)
 const triggerDialog = ref(false)
+const rerunDialog = ref(false)
 const baselineDialog = ref(false)
 const writeBusy = ref(false)
 const writeError = ref('')
 const baselineWriteError = ref('')
 const baselineRun = ref<EvaluationRun | null>(null)
 const baselineNote = ref('')
+const rerunRun = ref<EvaluationRun | null>(null)
+const rerunNote = ref('')
+const rerunBusy = ref(false)
+const rerunError = ref('')
 const profileForm = reactive({
   version_tag: '',
   tech_stack_text: '{"model":"sensenova-6.8-flash","orchestration":"langgraph"}',
@@ -1238,6 +1420,7 @@ let baselineRequest = 0
 let profileRequest = 0
 let runDetailRequest = 0
 let runCaseRequest = 0
+let snapshotRequest = 0
 let jobTimer: number | null = null
 let polledJobId = ''
 
@@ -1403,6 +1586,7 @@ const jobRunId = computed(() => {
   const result = activeJob.value?.result
   return result && typeof result.run_id === 'string' ? result.run_id : ''
 })
+const rerunNextSeq = computed(() => (rerunRun.value?.run_seq ?? 0) + 1)
 const datasetFileList = computed<DatasetFileEntry[]>(() =>
   datasetFileEntries(inspectedDataset.value),
 )
@@ -2011,7 +2195,73 @@ function turnRunCase(forward: boolean): void {
 }
 
 /**
- * 打开用例详情并展示 expected / observed / verdicts 的原始 JSON。
+ * 打开批次数据集快照抽屉并读取第一页原始用例。
+ * @param runId - 批次编号。
+ */
+async function openSnapshotCases(runId: string): Promise<void> {
+  snapshotRunId.value = runId
+  snapshotMeta.value = null
+  snapshotCases.value = []
+  snapshotCursors.value = ['']
+  snapshotNext.value = null
+  snapshotTotal.value = 0
+  snapshotError.value = ''
+  snapshotDrawer.value = true
+  await loadSnapshotCases()
+}
+
+/**
+ * 按游标读取批次数据集快照中的原始用例页。
+ */
+async function loadSnapshotCases(): Promise<void> {
+  const request = ++snapshotRequest
+  snapshotBusy.value = true
+  snapshotError.value = ''
+  try {
+    const query = new URLSearchParams({ limit: String(SNAPSHOT_CASE_PAGE_SIZE) })
+    const cursor = snapshotCursors.value.at(-1)
+    if (cursor) query.set('cursor', cursor)
+    const page = await props.api<EvaluationRunSnapshotPage>(
+      '/evaluations/runs/' + encodeURIComponent(snapshotRunId.value) + '/dataset-snapshot?' + query,
+    )
+    if (request !== snapshotRequest) return
+    snapshotMeta.value = page.snapshot
+    snapshotCases.value = page.items
+    snapshotNext.value = page.next_cursor
+    snapshotTotal.value = page.total
+  } catch (cause) {
+    if (request === snapshotRequest) {
+      snapshotError.value = cause instanceof Error ? cause.message : '读取数据集快照用例失败'
+    }
+  } finally {
+    if (request === snapshotRequest) snapshotBusy.value = false
+  }
+}
+
+/**
+ * 按游标前后翻动数据集快照用例页。
+ * @param forward - 是否读取下一页。
+ */
+function turnSnapshotCase(forward: boolean): void {
+  if (snapshotBusy.value) return
+  if (forward && snapshotNext.value) snapshotCursors.value.push(snapshotNext.value)
+  else if (!forward && snapshotCursors.value.length > 1) snapshotCursors.value.pop()
+  else return
+  void loadSnapshotCases()
+}
+
+/**
+ * 展示快照用例的完整原始 case_payload JSON，复用数据集原始 JSON 弹窗。
+ * @param item - 快照中的原始用例记录。
+ */
+function openSnapshotCaseJson(item: EvaluationRunSnapshotCase): void {
+  rawCaseJson.value = JSON.stringify(item.case_payload, null, 2)
+  rawCaseTitle.value = item.suite + ' / ' + item.case_id
+  rawCaseDialog.value = true
+}
+
+/**
+ * 打开用例详情并展示 expected / observed / verdicts 与数据集快照原始用例。
  * @param caseId - 用例编号。
  */
 async function openCaseJson(caseId: string): Promise<void> {
@@ -2027,6 +2277,12 @@ async function openCaseJson(caseId: string): Promise<void> {
       null,
       2,
     )
+    caseJsonDatasetText.value = detail.dataset_case
+      ? JSON.stringify(detail.dataset_case, null, 2)
+      : runDetail.value.dataset_snapshot
+        ? '该用例未在数据集快照中匹配到原始定义（历史批次结果与快照用例编号不一致）。'
+        : '该批次没有数据集内容快照（历史批次未登记快照），无法查看数据集原始用例。'
+    caseJsonDatasetSha256.value = detail.dataset_case_sha256
     caseJsonTrace.value = detail.trace_link
     caseJsonDialog.value = true
   } catch (cause) {
@@ -2206,18 +2462,7 @@ async function submitTrigger(): Promise<void> {
       payload,
     )
     triggerDialog.value = false
-    activeJob.value = {
-      job_id: receipt.job_id,
-      state: receipt.status,
-      stage: '已提交，等待 Worker 执行',
-      progress: 0,
-      result: null,
-      error: '',
-      created_at: new Date().toISOString(),
-      started_at: null,
-      finished_at: null,
-    }
-    startJobPolling(receipt.job_id)
+    presentTriggeredJob(receipt)
     ElMessage.success(
       `已提交评测任务（任务号 ${receipt.job_id}，审计号 ${receipt.audit_id}），由 Worker 执行`,
     )
@@ -2226,6 +2471,77 @@ async function submitTrigger(): Promise<void> {
     writeError.value = cause instanceof Error ? cause.message : '发起评测失败'
   } finally {
     writeBusy.value = false
+  }
+}
+
+/**
+ * 把触发成功的任务挂到当前面板并开始轮询进度。
+ * @param receipt - 触发接口返回的任务号与审计号。
+ */
+function presentTriggeredJob(receipt: EvaluationTriggerReceipt): void {
+  activeJob.value = {
+    job_id: receipt.job_id,
+    state: receipt.status,
+    stage: '已提交，等待 Worker 执行',
+    progress: 0,
+    result: null,
+    error: '',
+    created_at: new Date().toISOString(),
+    started_at: null,
+    finished_at: null,
+  }
+  startJobPolling(receipt.job_id)
+}
+
+/**
+ * 打开复跑弹窗，沿用来源批次的数据集、口径、执行方式与算法版本。
+ * @param run - 要复跑的来源批次。
+ */
+function openRerunDialog(run: EvaluationRun): void {
+  if (!run.dataset_id) return
+  rerunRun.value = run
+  rerunNote.value = ''
+  rerunError.value = ''
+  rerunDialog.value = true
+}
+
+/**
+ * 以来源批次的配置发起复跑，并带上 parent_run_id 与运行备注。
+ */
+async function submitRerun(): Promise<void> {
+  const run = rerunRun.value
+  if (!run || !run.dataset_id) {
+    rerunError.value = '该批次没有关联数据集，无法复跑'
+    return
+  }
+  rerunBusy.value = true
+  rerunError.value = ''
+  try {
+    const payload: TriggerEvaluationPayload = {
+      eval_kind: run.eval_kind,
+      dataset_id: run.dataset_id,
+      profile_id: run.profile_id ?? '',
+      scope: run.scope,
+      mode: run.mode,
+      note: rerunNote.value.trim(),
+      parent_run_id: run.run_id,
+      mark_baseline: false,
+    }
+    const receipt = await props.api<EvaluationTriggerReceipt>(
+      '/evaluations/runs/trigger',
+      'POST',
+      payload,
+    )
+    rerunDialog.value = false
+    presentTriggeredJob(receipt)
+    ElMessage.success(
+      `已提交复跑任务（任务号 ${receipt.job_id}），完成后将记为第 ${rerunNextSeq.value} 次运行`,
+    )
+    await Promise.all([loadDatasets(), loadTrends(), refreshRuns()])
+  } catch (cause) {
+    rerunError.value = cause instanceof Error ? cause.message : '复跑评测失败'
+  } finally {
+    rerunBusy.value = false
   }
 }
 

@@ -12,6 +12,7 @@ from typing import Any
 from evals.center import backfill as backfill_module
 from evals.center import purge as purge_module
 from evals.center import baselines, datasets, publish, version_migration
+from taozhi.application.evaluation import dataset_snapshots as snapshots
 from taozhi.infrastructure.persistence.database import database_connection, fetch_all
 
 SCOPES = publish.SCOPE_VALUES
@@ -90,6 +91,9 @@ def _cmd_publish(args: argparse.Namespace) -> int:
                 profile_id=args.profile_id, mark_baseline=args.baseline,
                 dataset_id=args.dataset_id, dataset_version=args.dataset_version,
                 scope=args.scope, mode=args.mode, legacy=args.legacy, notes=args.notes,
+                snapshot_id=args.snapshot_id or None, run_seq=args.run_seq,
+                parent_run_id=args.parent_run_id or None,
+                trigger_note=args.trigger_note or None,
             )
         except (OSError, ValueError) as exc:
             failed += 1
@@ -244,6 +248,15 @@ def _cmd_purge(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_backfill_snapshots(args: argparse.Namespace) -> int:
+    tenant_id, actor_id = _identity(args)
+    with database_connection() as conn:
+        stats = snapshots.backfill_snapshots(
+            conn, tenant_id, actor_id, dry_run=not args.yes)
+    _print_json(stats)
+    return 0
+
+
 def _cmd_check(args: argparse.Namespace) -> int:
     try:
         failures, stats = _run_check(_tenant_code(args))
@@ -294,6 +307,10 @@ def build_parser() -> argparse.ArgumentParser:
     publish_cmd.add_argument("--scope", choices=SCOPES, help="评测口径")
     publish_cmd.add_argument("--mode", choices=MODES, help="执行方式")
     publish_cmd.add_argument("--notes", default="", help="入库与基线备注")
+    publish_cmd.add_argument("--snapshot-id", default="", help="触发阶段的数据集内容快照编号")
+    publish_cmd.add_argument("--run-seq", type=int, default=None, help="触发阶段分配的运行序号")
+    publish_cmd.add_argument("--parent-run-id", default="", help="重跑来源批次编号")
+    publish_cmd.add_argument("--trigger-note", default="", help="触发说明")
     publish_cmd.add_argument("--tenant-id")
     publish_cmd.add_argument("--owner-id")
     publish_cmd.add_argument("--tenant-code")
@@ -323,6 +340,12 @@ def build_parser() -> argparse.ArgumentParser:
     purge_cmd.add_argument("--yes", action="store_true", help="确认执行；缺省只预演")
     _add_identity(purge_cmd, actor_name="actor")
     purge_cmd.set_defaults(handler=_cmd_purge)
+
+    backfill_snapshots = sub.add_parser(
+        "backfill-snapshots", help="为存量批次补齐数据集内容快照与运行序号（默认预演）")
+    backfill_snapshots.add_argument("--yes", action="store_true", help="确认执行；缺省只预演")
+    _add_identity(backfill_snapshots, actor_name="actor")
+    backfill_snapshots.set_defaults(handler=_cmd_backfill_snapshots)
 
     check = sub.add_parser("check", help="校验数据集、基线与报告对象一致性")
     check.add_argument("--tenant-code")

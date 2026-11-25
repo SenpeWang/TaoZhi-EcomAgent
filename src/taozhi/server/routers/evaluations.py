@@ -7,7 +7,7 @@ from taozhi.application.services import evaluation_service
 from taozhi.schemas.evaluation import (
     CreateEvalProfileInput, EvaluationAuditPage, EvaluationBaselinePage, EvaluationCaseDetail,
     EvaluationCasePage, EvaluationComparison, EvaluationDatasetDetail, EvaluationDatasetPage,
-    EvaluationDatasetRaw, EvaluationMetricCatalog,
+    EvaluationDatasetRaw, EvaluationMetricCatalog, EvaluationRunSnapshotPage,
     EvaluationJob, EvaluationKind, EvaluationLayers, EvaluationMode, EvaluationProfile,
     EvaluationProfilePage, EvaluationRunDetail, EvaluationRunPage, EvaluationScope, EvaluationStatus,
     EvaluationTrends, SetBaselineInput, TriggerEvaluationInput, TriggerReceipt,
@@ -152,6 +152,12 @@ def run_report(run_id: Identifier, p=Depends(identity)):
 @router.get("/{run_id}/comparison", response_model=EvaluationComparison)
 def comparison(run_id: Identifier, baseline_id: Annotated[str, Query(pattern=Pattern)], p=Depends(identity)):
     return evaluation_service.compare(p, run_id, baseline_id)
+
+
+@router.get("/{run_id}/dataset-snapshot", response_model=EvaluationRunSnapshotPage)
+def run_dataset_snapshot(run_id: Identifier, cursor: str | None = Query(None, pattern=Pattern),
+                         limit: PageSize = 50, p=Depends(identity)):
+    return evaluation_service.get_run_snapshot(p, run_id, cursor=cursor, limit=limit)
 
 
 @router.get("/{run_id}/cases", response_model=EvaluationCasePage)

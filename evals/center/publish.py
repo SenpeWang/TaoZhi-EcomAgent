@@ -14,6 +14,7 @@ from typing import Any
 
 from evals import runtime_snapshot
 from evals.center import baselines, datasets, profiles
+from taozhi.application.evaluation import dataset_snapshots as snapshots
 from taozhi.infrastructure.persistence import evaluation_repo
 from taozhi.infrastructure.persistence.database import database_connection
 
@@ -491,7 +492,8 @@ def publish_report(path: Path, *, tenant_id: str, owner_id: str, kind: str = "au
                    profile_id: str | None = None, mark_baseline: bool = False,
                    dataset_id: str | None = None, dataset_version: str | None = None,
                    scope: str | None = None, mode: str | None = None, legacy: bool = False,
-                   notes: str = "") -> dict:
+                   notes: str = "", snapshot_id: str | None = None, run_seq: int | None = None,
+                   parent_run_id: str | None = None, trigger_note: str | None = None) -> dict:
     """校验报告并入库为评测批次，返回入库摘要。
 
     Args:
@@ -507,6 +509,10 @@ def publish_report(path: Path, *, tenant_id: str, owner_id: str, kind: str = "au
         mode: 显式执行方式。
         legacy: 是否按历史版本归档（内容摘要无法验证）。
         notes: 入库/基线备注。
+        snapshot_id: 触发阶段固化的数据集内容快照编号。
+        run_seq: 触发阶段分配的运行序号。
+        parent_run_id: 重跑来源批次编号。
+        trigger_note: 触发说明。
 
     Returns:
         含 run_id、created、gate_passed、eval_kind、dataset_id、dataset_version、scope、mode、
@@ -545,6 +551,47 @@ def publish_report(path: Path, *, tenant_id: str, owner_id: str, kind: str = "au
                                     mode=resolved_mode, path=path)
         if run.get("mode") not in REAL_EVAL_MODES:
             raise ValueError("评测中心只接收真实执行（live）报告，合成/回放结果不进入评测中心")
+        if not legacy:
+            snapshot = None
+            if snapshot_id:
+                snapshot = snapshots.snapshot_row(conn, tenant_id, snapshot_id)
+                if snapshot is None:
+                    raise ValueError(f"数据集内容快照不存在：{snapshot_id}")
+            else:
+                try:
+                    snapshot = snapshots.ensure_snapshot(
+                        conn, tenant_id, run["eval_kind"], run["dataset_version"],
+                        run["dataset_id"], owner_id)
+                except ValueError:
+                    snapshot = None
+            if snapshot is not None:
+                primary_meta = next(
+                    (item for item in (snapshot.get("metadata") or {}).get("suites", [])
+                     if item.get("dataset_id") == run["dataset_id"]), None)
+                expected_meta_sha = (primary_meta or {}).get("content_sha256")
+                if not expected_meta_sha:
+                    snapshot = None
+                elif run.get("dataset_sha256") and run["dataset_sha256"] != expected_meta_sha:
+                    raise ValueError("报告数据集摘要与快照不一致，可能使用了不同版本的数据集内容")
+            snapshot_cases = snapshots.snapshot_cases(
+                conn, tenant_id, snapshot["snapshot_id"]) if snapshot else []
+            if snapshot is None:
+                run["dataset_snapshot_id"] = None
+                run["run_seq"] = run_seq
+            else:
+                primary = next((item for item in (snapshot.get("metadata") or {}).get("suites", [])
+                                if item.get("dataset_id") == run["dataset_id"]), None)
+                expected_sha = (primary or {}).get("content_sha256")
+                if expected_sha and run.get("dataset_sha256") and run["dataset_sha256"] != expected_sha:
+                    raise ValueError("报告数据集摘要与快照不一致，可能使用了不同版本的数据集内容")
+                snapshots.validate_report_cases(rows, snapshot_cases, run["eval_kind"],
+                                                run["scope"], run["mode"])
+                run["dataset_snapshot_id"] = snapshot["snapshot_id"]
+                run["run_seq"] = run_seq or snapshots.next_run_seq(
+                    conn, tenant_id, run["dataset_id"], run["eval_kind"],
+                    run["scope"], run["mode"])
+            run["parent_run_id"] = parent_run_id or None
+            run["trigger_note"] = trigger_note or None
         if profile_id:
             run["profile_id"] = profiles.ensure_profile(
                 conn, tenant_id, owner_id, run["eval_kind"], run["dataset_version"],
@@ -581,6 +628,8 @@ def publish_report(path: Path, *, tenant_id: str, owner_id: str, kind: str = "au
         "eval_kind": run["eval_kind"],
         "dataset_id": run["dataset_id"],
         "dataset_version": run["dataset_version"],
+        "dataset_snapshot_id": run.get("dataset_snapshot_id"),
+        "run_seq": run.get("run_seq"),
         "scope": run["scope"],
         "mode": run["mode"],
         "report_sha256": run["report_sha256"],

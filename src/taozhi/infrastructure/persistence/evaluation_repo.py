@@ -20,6 +20,7 @@ _RUN = """
            r.metrics->'provenance'->>'comparable' AS comparable_raw,
            r.passed_cases+r.failed_cases+r.unassessable_cases AS total_cases, r.metrics, r.report_sha256, r.baseline_sha256,
            r.dataset_id, d.name AS dataset_name, d.version AS dataset_version, d.archived AS dataset_archived,
+           r.dataset_snapshot_id, r.run_seq, r.parent_run_id, r.trigger_note,
            r.eval_kind, r.profile_id, p.version_tag AS profile_version_tag, p.version_no AS profile_version_no,
            r.scope, r.pass_rate, r.mean_score, r.latency_p50_ms, r.latency_p95_ms,
            r.total_tokens, r.judges,
@@ -400,6 +401,22 @@ def run_by_id(conn: Any, tenant_id: str, run_id: str) -> dict | None:
     return fetch_one(conn, " ".join([_RUN, "AND r.run_id=%s"]), (tenant_id, run_id))
 
 
+def dataset_row_lock(conn: Any, dataset_id: str) -> None:
+    """锁定数据集登记行，串行化同一数据集的运行序号分配。"""
+    conn.execute("SELECT 1 FROM eval_datasets WHERE dataset_id=%s FOR UPDATE", (dataset_id,))
+
+
+def next_run_seq(conn: Any, tenant_id: str, dataset_id: str, eval_kind: str, scope: str,
+                 mode: str) -> int:
+    """分配同一分组内的下一个运行序号（调用方负责事务与并发锁）。"""
+    row = fetch_one(conn, """
+        SELECT COALESCE(MAX(run_seq), 0) + 1 AS next_seq
+        FROM eval_runs
+        WHERE tenant_id=%s AND dataset_id=%s AND eval_kind=%s AND scope=%s AND mode=%s
+    """, (tenant_id, dataset_id, eval_kind, scope, mode))
+    return int(row["next_seq"])
+
+
 def cases(conn: Any, tenant_id: str, run_id: str, *, status: str | None, suite: str | None,
           after: str | None, limit: int) -> list[dict]:
     """按状态与用例分组读取批次逐例判定，case_id 正序分页。"""
@@ -483,17 +500,23 @@ def insert_report(conn: Any, tenant_id: str, owner_id: str, report: dict, rows: 
         "dataset_version": dataset_version,
         "scope": report.get("scope") or "full",
         "profile_id": report.get("profile_id"),
+        "dataset_snapshot_id": report.get("dataset_snapshot_id"),
+        "run_seq": report.get("run_seq"),
+        "parent_run_id": report.get("parent_run_id"),
+        "trigger_note": report.get("trigger_note"),
         "metrics": Jsonb(report["metrics"]),
         "judges": Jsonb(report["judges"]),
     }
     inserted = conn.execute("""
         INSERT INTO eval_runs(tenant_id,run_id,owner_id,created_at,mode,eval_kind,profile_id,git_sha,dataset_sha256,judges_sha256,
                               report_sha256,baseline_sha256,metrics,gate_passed,passed_cases,failed_cases,unassessable_cases,
-                              dataset_id,dataset_version,scope,pass_rate,mean_score,latency_p50_ms,latency_p95_ms,total_tokens,judges)
+                              dataset_id,dataset_version,scope,pass_rate,mean_score,latency_p50_ms,latency_p95_ms,total_tokens,judges,
+                              dataset_snapshot_id,run_seq,parent_run_id,trigger_note)
         VALUES (%(tenant_id)s,%(run_id)s,%(owner_id)s,%(created_at)s,%(mode)s,%(eval_kind)s,%(profile_id)s,%(git_sha)s,%(dataset_sha256)s,
                 %(judges_sha256)s,%(report_sha256)s,%(baseline_sha256)s,%(metrics)s,%(gate_passed)s,%(passed_cases)s,
                 %(failed_cases)s,%(unassessable_cases)s,%(dataset_id)s,%(dataset_version)s,%(scope)s,%(pass_rate)s,%(mean_score)s,
-                %(latency_p50_ms)s,%(latency_p95_ms)s,%(total_tokens)s,%(judges)s)
+                %(latency_p50_ms)s,%(latency_p95_ms)s,%(total_tokens)s,%(judges)s,
+                %(dataset_snapshot_id)s,%(run_seq)s,%(parent_run_id)s,%(trigger_note)s)
         ON CONFLICT (tenant_id,run_id) DO NOTHING RETURNING run_id
     """, target).fetchone()
     if inserted is None:

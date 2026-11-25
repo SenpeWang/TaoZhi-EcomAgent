@@ -107,6 +107,14 @@ def _publish_command(job: dict, report_path: Path) -> list[str]:
         command.extend(["--profile-id", payload["profile_id"]])
     if payload.get("mark_baseline"):
         command.append("--baseline")
+    if payload.get("dataset_snapshot_id"):
+        command.extend(["--snapshot-id", payload["dataset_snapshot_id"]])
+    if payload.get("run_seq") is not None:
+        command.extend(["--run-seq", str(payload["run_seq"])])
+    if payload.get("parent_run_id"):
+        command.extend(["--parent-run-id", payload["parent_run_id"]])
+    if payload.get("trigger_note"):
+        command.extend(["--trigger-note", payload["trigger_note"]])
     return command
 
 

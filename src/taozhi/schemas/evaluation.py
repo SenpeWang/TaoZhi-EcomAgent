@@ -77,6 +77,10 @@ class EvaluationRun(BaseModel):
     dataset_id: str | None = None
     dataset_name: str | None = None
     dataset_version: str | None = None
+    dataset_snapshot_id: str | None = None
+    run_seq: int | None = None
+    parent_run_id: str | None = None
+    trigger_note: str | None = None
     eval_kind: EvaluationKind = "agent"
     profile_id: str | None = None
     profile_version_tag: str | None = None
@@ -206,6 +210,7 @@ class TriggerEvaluationInput(BaseModel):
     scope: EvaluationScope = "full"
     mode: EvaluationMode = "live"
     note: str = Field(default="", max_length=500)
+    parent_run_id: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_.-]*$")
     mark_baseline: bool = False
 
 
@@ -352,6 +357,8 @@ class EvaluationCaseDetail(BaseModel):
     steps_complete: bool | None
     verdicts: list[EvaluationVerdict]
     trace_link: EvaluationTraceLink | None
+    dataset_case: dict[str, Any] | None = None
+    dataset_case_sha256: str | None = None
 
 
 class EvaluationComparison(BaseModel):
@@ -375,3 +382,11 @@ class EvaluationRunDetail(BaseModel):
     comparison: EvaluationComparison | None
     metrics: dict[str, Any]
     metric_schema: EvaluationMetricSchema | None = None
+    dataset_snapshot: dict[str, Any] | None = None
+
+
+class EvaluationRunSnapshotPage(BaseModel):
+    snapshot: dict[str, Any]
+    items: list[dict[str, Any]]
+    next_cursor: str | None = None
+    total: int

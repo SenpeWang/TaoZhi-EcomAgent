@@ -124,7 +124,13 @@ function validEvaluationRun(item: unknown): item is JsonRecord & { run_id: strin
     typeof item.judges_sha256 === 'string' &&
     ['git_sha', 'transcript_sha256', 'counterexamples_sha256', 'model_config_sha256'].every(
       (key) => item[key] === null || typeof item[key] === 'string',
-    )
+    ) &&
+    ['dataset_snapshot_id', 'parent_run_id', 'trigger_note'].every(
+      (key) => item[key] === undefined || item[key] === null || typeof item[key] === 'string',
+    ) &&
+    (item.run_seq === undefined ||
+      item.run_seq === null ||
+      (typeof item.run_seq === 'number' && Number.isSafeInteger(item.run_seq)))
   )
 }
 
@@ -201,6 +207,45 @@ function validDataset(item: unknown): boolean {
 }
 
 /**
+ * 核对数据集内容快照的元信息，供批次详情与快照用例分页共用。
+ * @param value - 未验证的快照元信息。
+ * @returns 是否具备版本、摘要、用例数与文件清单。
+ */
+function validDatasetSnapshot(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.snapshot_id === 'string' &&
+    ['agent', 'rag'].includes(String(value.eval_kind)) &&
+    typeof value.dataset_version === 'string' &&
+    typeof value.primary_dataset_id === 'string' &&
+    typeof value.bundle_sha256 === 'string' &&
+    typeof value.case_count === 'number' &&
+    Number.isSafeInteger(value.case_count) &&
+    isRecord(value.files) &&
+    Object.values(value.files).every((entry) => typeof entry === 'string') &&
+    isRecord(value.metadata) &&
+    typeof value.created_at === 'string'
+  )
+}
+
+/**
+ * 核对快照中的单条原始用例记录。
+ * @param value - 未验证的快照用例。
+ * @returns 是否可展示套件、编号、摘要与完整原始用例。
+ */
+function validSnapshotCase(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.suite === 'string' &&
+    typeof value.case_id === 'string' &&
+    typeof value.case_sha256 === 'string' &&
+    typeof value.ordinal === 'number' &&
+    Number.isSafeInteger(value.ordinal) &&
+    isRecord(value.case_payload)
+  )
+}
+
+/**
  * 核对数据集分页详情：登记信息与原始用例数组。
  * @param data - 未验证的数据集详情。
  * @returns 是否可渲染用例列表。
@@ -259,6 +304,18 @@ export function validateEvaluationResponse(resource: string, data: JsonRecord): 
     return
   }
   const [, , , runId, child, caseId] = resource.split('/')
+  if (child === 'dataset-snapshot') {
+    if (
+      !runId ||
+      !validDatasetSnapshot(data.snapshot) ||
+      !Array.isArray(data.items) ||
+      !data.items.every(validSnapshotCase) ||
+      (data.next_cursor !== null && typeof data.next_cursor !== 'string') ||
+      typeof data.total !== 'number'
+    )
+      throw invalid
+    return
+  }
   if (!runId || (child === 'cases' && !caseId)) {
     if (
       !Array.isArray(data.items) ||
@@ -299,6 +356,16 @@ export function validateEvaluationResponse(resource: string, data: JsonRecord): 
           data.trace_link.task_id.length > 0 &&
           typeof data.trace_link.trace_id === 'string' &&
           /^[0-9a-f]{32}$/.test(data.trace_link.trace_id))
+      ) ||
+      !(
+        data.dataset_case === null ||
+        data.dataset_case === undefined ||
+        isRecord(data.dataset_case)
+      ) ||
+      !(
+        data.dataset_case_sha256 === null ||
+        data.dataset_case_sha256 === undefined ||
+        typeof data.dataset_case_sha256 === 'string'
       )
     )
       throw invalid
@@ -325,6 +392,13 @@ export function validateEvaluationResponse(resource: string, data: JsonRecord): 
   )
     throw invalid
   if (!child && (data.run as JsonRecord).eval_kind === 'rag' && !isRecord(data.metrics))
+    throw invalid
+  if (
+    !child &&
+    data.dataset_snapshot !== null &&
+    data.dataset_snapshot !== undefined &&
+    !validDatasetSnapshot(data.dataset_snapshot)
+  )
     throw invalid
   if (
     !child &&

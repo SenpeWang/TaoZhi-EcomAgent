@@ -69,6 +69,10 @@ export interface EvaluationRun {
   dataset_id: string | null
   dataset_name: string | null
   dataset_version: string | null
+  dataset_snapshot_id: string | null
+  run_seq: number | null
+  parent_run_id: string | null
+  trigger_note: string | null
   eval_kind: EvaluationKind
   profile_id: string | null
   profile_version_tag: string | null
@@ -119,6 +123,33 @@ export interface EvaluationDatasetRaw {
   cases: Record<string, unknown>[]
 }
 
+export interface EvaluationDatasetSnapshot {
+  snapshot_id: string
+  eval_kind: EvaluationKind
+  dataset_version: string
+  primary_dataset_id: string
+  bundle_sha256: string
+  case_count: number
+  files: Record<string, string>
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+export interface EvaluationRunSnapshotCase {
+  suite: string
+  case_id: string
+  case_sha256: string
+  ordinal: number
+  case_payload: Record<string, unknown>
+}
+
+export interface EvaluationRunSnapshotPage {
+  snapshot: EvaluationDatasetSnapshot
+  items: EvaluationRunSnapshotCase[]
+  next_cursor: string | null
+  total: number
+}
+
 export interface EvaluationProfile {
   profile_id: string
   eval_kind: EvaluationKind
@@ -160,6 +191,7 @@ export interface TriggerEvaluationPayload {
   scope: EvaluationScope
   mode: EvaluationMode
   note: string
+  parent_run_id?: string
   mark_baseline: boolean
 }
 
@@ -313,6 +345,8 @@ export interface EvaluationCaseDetail {
     }[]
   }[]
   trace_link: { task_id: string; trace_id: string } | null
+  dataset_case: Record<string, unknown> | null
+  dataset_case_sha256: string | null
 }
 
 interface EvaluationChanges {
@@ -362,6 +396,7 @@ export interface EvaluationRunDetail {
   run: EvaluationRun
   comparison: EvaluationComparison | null
   metric_schema: EvaluationMetricSchema | null
+  dataset_snapshot: EvaluationDatasetSnapshot | null
 }
 
 /**

@@ -491,3 +491,28 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.evaluation-run-seq {
+  display: inline-flex;
+  align-items: center;
+}
+
+.evaluation-snapshot-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0 8px;
+  padding: 12px 14px;
+  background: var(--tz-surface-muted);
+  border: 1px solid var(--tz-border);
+  border-radius: 8px;
+}
+
+.evaluation-snapshot-bar > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}

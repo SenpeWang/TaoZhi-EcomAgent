@@ -240,6 +240,11 @@ def test_trigger_creates_real_evaluation_job_and_cancel() -> None:
 
     status = admin.get(f"/api/evaluations/jobs/{receipt['job_id']}").json()
     assert status["state"] == "queued" and status["progress"] == 0
+    with database_connection() as conn:
+        job_payload = fetch_all(conn, "SELECT payload FROM jobs WHERE id=%s",
+                                (receipt["job_id"],))[0]["payload"]
+    assert str(job_payload["dataset_snapshot_id"]).startswith("snap_")
+    assert job_payload["run_seq"] == 1
 
     with database_connection() as conn:
         audits = fetch_all(conn, "SELECT action FROM eval_audit_logs WHERE action='trigger_run'")

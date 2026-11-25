@@ -17,6 +17,7 @@ from taozhi.domain.evaluation_comparison import pair_case_results
 from taozhi.domain.roles import ROLE_LEVEL_BOSS
 from taozhi.infrastructure.knowledge.storage import get_blob_store
 from taozhi.infrastructure.persistence import evaluation_repo, job_repo
+from taozhi.application.evaluation import dataset_snapshots as snapshots
 from taozhi.infrastructure.persistence.database import database_connection
 
 REPORT_MAX_BYTES = 20 * 1024 * 1024
@@ -158,11 +159,16 @@ def get_run(p: Principal, run_id: str) -> dict:
         digest = current["baseline_sha256"]
         baseline = evaluation_repo.run(conn, p.tenant_id, visible_owner_id(p), report_digest=digest) if digest else None
         comparison = _compare(conn, p.tenant_id, current, _decorate(baseline) if baseline else None)
+    snapshot = None
+    if current.get("dataset_snapshot_id"):
+        with database_connection() as conn:
+            snapshot = snapshots.snapshot_row(conn, p.tenant_id, current["dataset_snapshot_id"])
     return {
         "run": current,
         "comparison": comparison,
         "metrics": current["metrics"],
         "metric_schema": evaluation_metrics.schema(current["eval_kind"], current["scope"]),
+        "dataset_snapshot": snapshot,
     }
 
 
@@ -294,9 +300,19 @@ def get_case(p: Principal, run_id: str, case_id: str) -> dict:
         trace_id = row.pop("trace_id")
         link = (evaluation_repo.trace_link(conn, p.tenant_id, visible_owner_id(p), trace_id)
                 if trace_id and current["mode"] == "live" else None)
+        dataset_case = None
+        dataset_case_sha256 = None
+        if current.get("dataset_snapshot_id"):
+            snapshot_cases = snapshots.snapshot_cases(
+                conn, p.tenant_id, current["dataset_snapshot_id"])
+            matched = snapshots.lookup_case(snapshot_cases, row["case_id"])
+            if matched is not None:
+                dataset_case = matched["case_payload"]
+                dataset_case_sha256 = matched["case_sha256"]
     return {"expected": row.pop("expected"), "observed": row.pop("observed"),
             "verdicts": row.pop("verdicts"), "steps_complete": row.pop("steps_complete"),
-            "case": row, "trace_link": link}
+            "case": row, "trace_link": link, "dataset_case": dataset_case,
+            "dataset_case_sha256": dataset_case_sha256}
 
 
 def list_audit_logs(p: Principal, *, action: str | None, cursor: str | None, limit: int) -> dict:
@@ -333,18 +349,30 @@ def trigger(p: Principal, payload: dict) -> dict:
                 raise Denied("所选算法版本不存在或类型不匹配", "NOT_FOUND", 404)
         if job_repo.has_active_kind(conn, p.tenant_id, "evaluation"):
             raise Denied("已有评测任务在排队或执行，请稍后再发起", "CONFLICT", 409)
+        evaluation_repo.dataset_row_lock(conn, dataset["dataset_id"])
+        snapshot = snapshots.ensure_snapshot(
+            conn, p.tenant_id, payload["eval_kind"], dataset["version"],
+            dataset["dataset_id"], p.id)
+        run_seq = snapshots.next_run_seq(
+            conn, p.tenant_id, dataset["dataset_id"], payload["eval_kind"],
+            payload["scope"], payload["mode"])
         job_payload = {
             "eval_kind": payload["eval_kind"], "dataset_id": dataset["dataset_id"],
             "dataset_version": dataset["version"], "scope": payload["scope"], "mode": payload["mode"],
             "profile_id": payload.get("profile_id") or "", "note": payload.get("note") or "",
             "mark_baseline": bool(payload.get("mark_baseline")),
+            "dataset_snapshot_id": snapshot["snapshot_id"], "run_seq": run_seq,
+            "parent_run_id": payload.get("parent_run_id") or "",
+            "trigger_note": payload.get("note") or "",
         }
         job = job_repo.create_job(conn, p, "evaluation", p.root, job_payload, question="", level=1)
         audit_id = evaluation_repo.insert_audit_log(
             conn, p.tenant_id, p.id, "trigger_run", job["id"],
             {"eval_kind": payload["eval_kind"], "dataset_id": dataset["dataset_id"],
              "dataset_version": dataset["version"], "scope": payload["scope"], "mode": payload["mode"],
-             "profile_id": payload.get("profile_id") or "", "note": payload.get("note") or ""},
+             "profile_id": payload.get("profile_id") or "", "note": payload.get("note") or "",
+             "dataset_snapshot_id": snapshot["snapshot_id"], "run_seq": run_seq,
+             "parent_run_id": payload.get("parent_run_id") or ""},
         )
     return {"job_id": job["id"], "audit_id": audit_id, "status": job["state"]}
 
@@ -416,3 +444,18 @@ def get_dataset_file(p: Principal, dataset_id: str, relative: str) -> dict:
     if digest != expected:
         raise Denied("数据集文件摘要不一致，文件可能已被改动", "CORRUPT_DATASET", 409)
     return {"filename": path.name, "payload": payload, "sha256": digest}
+
+
+def get_run_snapshot(p: Principal, run_id: str, *, cursor: str | None, limit: int) -> dict:
+    """读取批次对应的数据集内容快照（元信息与原始用例分页）。"""
+    with database_connection() as conn:
+        current = _require_run(conn, p, run_id)
+        snapshot_id = current.get("dataset_snapshot_id")
+        if not snapshot_id:
+            raise Denied("该批次没有数据集内容快照", "NOT_FOUND", 404)
+        snapshot = snapshots.snapshot_row(conn, p.tenant_id, snapshot_id)
+        cases = snapshots.snapshot_cases(conn, p.tenant_id, snapshot_id)
+    offset = int(cursor) if cursor else 0
+    page = cases[offset:offset + limit]
+    following = str(offset + limit) if offset + limit < len(cases) else None
+    return {"snapshot": snapshot, "items": page, "next_cursor": following, "total": len(cases)}
