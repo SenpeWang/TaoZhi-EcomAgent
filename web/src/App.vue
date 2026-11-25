@@ -207,7 +207,10 @@
               :can-write-eval="isAdmin(user) || Boolean(user.is_boss)"
               :view="evaluationView"
               :kind="kind"
+              :collapsed="collapsedEvaluationKinds.includes(kind)"
               @inspect="openTrace"
+              @expand="expandEvaluationKind(kind)"
+              @launch="navigate('测评启动')"
             />
           </div>
         </template>
@@ -315,7 +318,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { requestApi } from './app/workspaceApi'
 import { useWorkspaceAction } from './shared/useWorkspaceAction'
@@ -357,7 +360,8 @@ const workspaceInfo = ref<WorkspaceInfo>({
 })
 const user = ref<User | null>(null)
 const currentPage = ref<WorkspacePage>('工作概览')
-const evaluationKinds = ref<EvaluationKind[]>(['agent', 'rag'])
+const evaluationKinds = ref<EvaluationKind[]>(['agent'])
+const collapsedEvaluationKinds = ref<EvaluationKind[]>([])
 const { busy, action } = useWorkspaceAction()
 const documentManager = ref<InstanceType<typeof DocumentManager> | null>(null)
 const organizations = ref<Organization[]>([])
@@ -437,6 +441,22 @@ const breadcrumbText = computed(() => {
   if (user.value?.must_change) return '账号安全'
   const group = currentPageDefinition.value.group
   return isEvaluationWorkspacePage.value ? `${group} / ${currentPage.value}` : group
+})
+
+/**
+ * 展开被折叠的评测体系面板，避免同时铺开两套完整评测页。
+ * @param kind - 要展开的评测体系。
+ */
+function expandEvaluationKind(kind: EvaluationKind): void {
+  collapsedEvaluationKinds.value = collapsedEvaluationKinds.value.filter((item) => item !== kind)
+}
+
+watch(evaluationKinds, (kinds, previous) => {
+  if (kinds.length < 2) {
+    collapsedEvaluationKinds.value = []
+    return
+  }
+  if ((previous?.length ?? 0) < 2) collapsedEvaluationKinds.value = [kinds[1]]
 })
 
 /**
@@ -549,7 +569,8 @@ function clearSession(): void {
   users.value = []
   dashboard.value = emptyDashboard
   currentPage.value = '工作概览'
-  evaluationKinds.value = ['agent', 'rag']
+  evaluationKinds.value = ['agent']
+  collapsedEvaluationKinds.value = []
   loginForm.password = ''
   clearTaskWorkspace()
 }
@@ -620,7 +641,8 @@ async function signIn(): Promise<void> {
     user.value = signedUser
     loginForm.password = ''
     currentPage.value = signedUser.must_change ? '个人中心' : '工作概览'
-    evaluationKinds.value = ['agent', 'rag']
+    evaluationKinds.value = ['agent']
+    collapsedEvaluationKinds.value = []
     await load()
   })
 }
