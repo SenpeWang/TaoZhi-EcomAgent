@@ -250,7 +250,7 @@ def test_search_documents_fast_path_runs_hyde_pg_ann_and_title_rerank(monkeypatc
 
 
 def test_ingest_split_preserves_markdown_table_blocks():
-    """结构化切片在预算内不得把 Markdown 表格从行中劈断。"""
+    """结构化切片在预算内不得把表格行从中间劈断。"""
     from taozhi.infrastructure.knowledge.ingest import split
 
     doc = (

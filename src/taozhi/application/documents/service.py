@@ -34,7 +34,6 @@ _LOG = logging.getLogger(__name__)
 _MIME_EXT_MAP = {
     "application/pdf": "pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-    "text/plain": "txt",
 }
 
 

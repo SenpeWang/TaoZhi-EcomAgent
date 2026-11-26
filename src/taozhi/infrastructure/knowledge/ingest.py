@@ -32,13 +32,7 @@ def validate_upload(name: str, data: bytes) -> str:
         except Exception:
             raise Denied("文档格式无效或解压内容过大", "UPLOAD_FORMAT", 400) from None
         return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    if suffix in ("txt", "md"):
-        try:
-            data.decode("utf-8-sig")
-        except UnicodeError:
-            raise Denied("文本附件须为 UTF-8 编码", "UPLOAD_ENCODING", 400) from None
-        return "text/plain"
-    raise Denied("支持 PDF、Word、文本和 Markdown 附件", "UPLOAD_FORMAT", 400)
+    raise Denied("支持 PDF 和 Word 文档", "UPLOAD_FORMAT", 400)
 
 
 OCR_PAGE_MIN_CHARS = 20
@@ -133,7 +127,7 @@ def parse(data: bytes, mime: str) -> Tuple[str, List[Tuple[int, str]]]:
     elif "wordprocessingml" in mime:
         pages = [(0, extract_docx_text_bytes(data, table_sep=" | "))]
     else:
-        pages = [(0, data.decode("utf-8-sig"))]
+        raise Denied("不支持的文档格式", "UPLOAD_FORMAT", 400)
     body = "\n\n".join(text for _, text in pages)
     if not body.strip() or len(body) > 200000:
         raise Denied("未提取到可读文本或内容超过限制", "PARSE_LIMIT", 400)

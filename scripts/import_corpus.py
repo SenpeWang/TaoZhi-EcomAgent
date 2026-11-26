@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -14,13 +15,13 @@ from taozhi.infrastructure.knowledge.embedding import (
     encode_passages,
     embedding_input,
 )
+from taozhi.infrastructure.knowledge.storage import get_blob_store
+from taozhi.infrastructure.persistence import job_repo
 from taozhi.infrastructure.persistence.database import database_connection, fetch_all, fetch_one
 
 ROOT = Path(__file__).resolve().parents[1]
 
 MIME_BY_SUFFIX = {
-    ".md": "text/markdown",
-    ".txt": "text/plain",
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
@@ -38,12 +39,12 @@ POLICY_RULES: dict[str, dict[str, Any]] = {
     "data/corpus/audio": {"scope": "company", "level": 1, "ai_allowed": True},
     "data/corpus/wearables": {"scope": "company", "level": 1, "ai_allowed": True},
     "data/corpus/notices": {"scope": "company", "level": 1, "ai_allowed": True},
+    "data/incoming/mofa/products_official": {"scope": "company", "level": 1, "ai_allowed": True},
     "data/corpus/manuals": {"scope": "company", "level": 2, "ai_allowed": True},
     "data/corpus/quality": {"scope": "company", "level": 2, "ai_allowed": True},
     "data/corpus/after_sales": {"scope": "company", "level": 2, "ai_allowed": True},
     "data/corpus/training": {"scope": "company", "level": 2, "ai_allowed": True},
     "data/corpus/sop_policies": {"scope": "company", "level": 2, "ai_allowed": True},
-    "data/corpus/documents": {"scope": "company", "level": 2, "ai_allowed": True},
     "data/corpus/policies": {"scope": "company", "level": 3, "ai_allowed": True},
     "data/corpus/sku": {"scope": "company", "level": 3, "ai_allowed": True},
     "data/incoming": {"scope": "company", "level": 2, "ai_allowed": True},
@@ -68,56 +69,53 @@ def policy_for(path: Path) -> dict[str, Any]:
     return policy
 
 
-def read_pages(path: Path) -> tuple[str, list[tuple[int, str]]]:
-    """读取单个文件的正文文本与分页内容。
+def read_pages(path: Path, data: bytes) -> tuple[str, list[tuple[int, str]]]:
+    """读取单个原件的正文文本与分页内容。
 
     Args:
-        path: 源文件路径。
+        path: 原件路径。
+        data: 原件字节流。
 
     Returns:
-        全文文本与分页列表；不支持的格式返回空内容。
+        全文文本与分页列表。
     """
-    suffix = path.suffix.lower()
-    data = path.read_bytes()
-    if suffix in (".md", ".txt"):
-        text = data.decode("utf-8", errors="ignore")
-        return text, [(0, text)]
-    if suffix == ".pdf":
-        from taozhi.infrastructure.knowledge.ingest import parse
+    from taozhi.infrastructure.knowledge.ingest import parse
 
-        return parse(data, "application/pdf")
-    if suffix == ".docx":
-        from taozhi.infrastructure.knowledge.ingest import parse
-
-        return parse(data, MIME_BY_SUFFIX[".docx"])
-    return "", []
+    mime = MIME_BY_SUFFIX[path.suffix.lower()]
+    return parse(data, mime)
 
 
-def title_of(path: Path, body: str) -> str:
-    """提取文档标题：优先一级标题，其次文件主名。
+def title_of(path: Path, data: bytes) -> str:
+    """读取原件内嵌标题，缺省时退回文件主名。
 
     Args:
-        path: 源文件路径。
-        body: 已解析正文。
+        path: 原件路径。
+        data: 原件字节流。
 
     Returns:
         不超过 120 字符的标题。
     """
-    for line in body.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("# "):
-            return stripped[2:].strip()[:120]
-    return path.stem.replace("_", " ")[:120]
+    title = ""
+    if path.suffix.lower() == ".pdf":
+        import fitz
+
+        with fitz.open(stream=data, filetype="pdf") as document:
+            title = (document.metadata or {}).get("title") or ""
+    elif path.suffix.lower() == ".docx":
+        from docx import Document
+
+        title = Document(io.BytesIO(data)).core_properties.title or ""
+    return (title.strip() or path.stem.replace("_", " "))[:120]
 
 
 def iter_sources(dirs: Iterable[Path]) -> Iterable[Path]:
-    """展开待导入文件，跳过清单与说明文件。
+    """展开待导入原件，跳过清单与说明文件。
 
     Args:
         dirs: 待扫描目录列表。
 
     Yields:
-        可解析的源文件路径。
+        可按页解析的原件路径。
     """
     for base in dirs:
         if not base.exists():
@@ -125,7 +123,7 @@ def iter_sources(dirs: Iterable[Path]) -> Iterable[Path]:
         for path in sorted(base.rglob("*")):
             if not path.is_file() or path.suffix.lower() not in MIME_BY_SUFFIX:
                 continue
-            if path.name.lower() in {"readme.md", "manifest.json"}:
+            if path.name.lower() in {"readme.md", "readme.pdf", "manifest.json"}:
                 continue
             yield path
 
@@ -149,6 +147,7 @@ def import_files(dirs: list[Path], tenant_id: str, dry_run: bool = False) -> dic
     if not dry_run and not embed_available():
         print("嵌入服务不可用，终止导入", file=sys.stderr)
         raise SystemExit(2)
+    store = get_blob_store() if not dry_run else None
 
     with database_connection() as conn:
         tenant_row = fetch_one(conn, "SELECT id FROM tenants WHERE code=%s", (tenant_id,))
@@ -172,7 +171,8 @@ def import_files(dirs: list[Path], tenant_id: str, dry_run: bool = False) -> dic
         for path in iter_sources(dirs):
             stats["scanned"] += 1
             try:
-                body, pages = read_pages(path)
+                data = path.read_bytes()
+                body, pages = read_pages(path, data)
                 body = strip_invalid_text(body)
                 pages = [(page, strip_invalid_text(text)) for page, text in pages]
                 if not body.strip():
@@ -189,10 +189,14 @@ def import_files(dirs: list[Path], tenant_id: str, dry_run: bool = False) -> dic
                     stats["skipped"] += 1
                     continue
                 policy = policy_for(path)
-                title = title_of(path, body)
+                title = title_of(path, data)
                 if dry_run:
                     stats["imported"] += 1
                     continue
+                suffix = path.suffix.lower()
+                mime = MIME_BY_SUFFIX[suffix]
+                blob_name = job_repo.generate_id("blob") + suffix
+                store.put_blob(tenant_id, blob_name, data)
                 conn.execute("DELETE FROM knowledge_mentions WHERE document_id=%s", (doc_id,))
                 conn.execute("DELETE FROM chunks WHERE document_id=%s", (doc_id,))
                 conn.execute("DELETE FROM document_versions WHERE document_id=%s", (doc_id,))
@@ -203,9 +207,9 @@ def import_files(dirs: list[Path], tenant_id: str, dry_run: bool = False) -> dic
                     (doc_id, tenant_id, node_id, creator_id, title, policy["scope"], policy["level"], policy["ai_allowed"]),
                 )
                 conn.execute(
-                    "INSERT INTO document_versions(tenant_id,document_id,version,title,body,content_hash,mime_type,created_by) "
-                    "VALUES(%s,%s,1,%s,%s,%s,%s,%s)",
-                    (tenant_id, doc_id, title, body, digest, MIME_BY_SUFFIX[path.suffix.lower()], creator_id),
+                    "INSERT INTO document_versions(tenant_id,document_id,version,title,body,content_hash,"
+                    "blob_name,mime_type,created_by) VALUES(%s,%s,1,%s,%s,%s,%s,%s,%s)",
+                    (tenant_id, doc_id, title, body, digest, blob_name, mime, creator_id),
                 )
                 chunks = split(pages or [(0, body)], doc_id, 1)
                 for chunk in chunks:
@@ -241,7 +245,7 @@ def main() -> int:
     Returns:
         进程退出码，全部成功为 0。
     """
-    parser = argparse.ArgumentParser(description="批量导入企业语料并建立向量索引")
+    parser = argparse.ArgumentParser(description="批量导入企业原件并建立向量索引")
     parser.add_argument("--dirs", nargs="*", default=["data/accessory_pdfs", "data/corpus", "data/incoming"])
     parser.add_argument("--tenant", default="")
     parser.add_argument("--dry-run", action="store_true")
