@@ -61,4 +61,5 @@
 - **局部与全量严格区分**：`--case` 单例复测仅作问题定位与修复确认；全量评估结论必须运行完整 `AGENT_BENCHMARK_CASES` 并通过 `pass_rate >= 0.75` 门禁。
 - **不混用两套体系**：多智能体与 RAG 评测完全独立，不共用基线批次或本机基线缓存，且仅修改本目录 `./测评记录.md`。
 - **数据集版本目录规范**：基准测试集按 `evals/datasets/agent_v3_20261124/`（历史 v1/v2 只读）分版本只读留存，每个目录须配备 `README.md` 说明用例分布与口径，严禁原地覆盖历史版本。
+- **V4 回归集**：`evals/datasets/agent_v4_20261125/` 为显式 `--suite v4` 小规模回归集，不接管 V3 默认目录；运行 `make evals-agent-v4`，V3 仍走 `make evals-agent-replay`。
 - **入库入口唯一**：报告入库统一走 `python -m evals.agent_eval.publish`（内部委托 `evals/center`），保留数据集版本与算法版本归属；不得另建写库入口。

@@ -1,0 +1,720 @@
+{
+  "schema_version": 1,
+  "source": "synthetic",
+  "observations": [
+    {
+      "case_id": "AGENT-V4-QUICK-001",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "这是一个简洁的速答结论。",
+      "tool_calls": [],
+      "evidence_ids": [],
+      "subagent_roles": [
+        "research.quick_answer"
+      ],
+      "evidence_roles": [
+        "research.quick_answer"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-COORD-001",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "当前时间已读取。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "get_current_time",
+          "parameters": {
+            "timezone": "Asia/Shanghai"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "current_time": "2026-11-25 23:00",
+              "timezone": "Asia/Shanghai"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-COORD-1"
+      ],
+      "subagent_roles": [],
+      "evidence_roles": [
+        "research.orchestrator"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-TOOL-001",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 1 的口碑来自公开网页。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 1"
+          },
+          "status": "ok",
+          "data_count": 2,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-WEB-1-1",
+              "text": "公开网页摘要",
+              "url": "https://research.invalid/1/a"
+            },
+            {
+              "evidence_id": "V4-WEB-1-2",
+              "text": "公开网页摘要二",
+              "url": "https://research.invalid/1/b"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-WEB-1-1",
+        "V4-WEB-1-2"
+      ],
+      "subagent_roles": [
+        "research.market_intelligence"
+      ],
+      "evidence_roles": [
+        "research.market_intelligence"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-AUDIT-001",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 1 的证据与缺口已记录。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 1"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-AUDIT-1",
+              "text": "公开摘要",
+              "url": "https://research.invalid/1/audit"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-AUDIT-1"
+      ],
+      "subagent_roles": [
+        "research.generalist"
+      ],
+      "evidence_roles": [
+        "research.generalist"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-QUICK-002",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "这是一个简洁的速答结论。",
+      "tool_calls": [],
+      "evidence_ids": [],
+      "subagent_roles": [
+        "research.quick_answer"
+      ],
+      "evidence_roles": [
+        "research.quick_answer"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-COORD-002",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "当前时间已读取。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "get_current_time",
+          "parameters": {
+            "timezone": "Asia/Shanghai"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "current_time": "2026-11-25 23:00",
+              "timezone": "Asia/Shanghai"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-COORD-2"
+      ],
+      "subagent_roles": [],
+      "evidence_roles": [
+        "research.orchestrator"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-TOOL-002",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 2 的口碑来自公开网页。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 2"
+          },
+          "status": "ok",
+          "data_count": 2,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-WEB-2-1",
+              "text": "公开网页摘要",
+              "url": "https://research.invalid/2/a"
+            },
+            {
+              "evidence_id": "V4-WEB-2-2",
+              "text": "公开网页摘要二",
+              "url": "https://research.invalid/2/b"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-WEB-2-1",
+        "V4-WEB-2-2"
+      ],
+      "subagent_roles": [
+        "research.market_intelligence"
+      ],
+      "evidence_roles": [
+        "research.market_intelligence"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-AUDIT-002",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 2 的证据与缺口已记录。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 2"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-AUDIT-2",
+              "text": "公开摘要",
+              "url": "https://research.invalid/2/audit"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-AUDIT-2"
+      ],
+      "subagent_roles": [
+        "research.generalist"
+      ],
+      "evidence_roles": [
+        "research.generalist"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-QUICK-003",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "这是一个简洁的速答结论。",
+      "tool_calls": [],
+      "evidence_ids": [],
+      "subagent_roles": [
+        "research.quick_answer"
+      ],
+      "evidence_roles": [
+        "research.quick_answer"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-COORD-003",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "当前时间已读取。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "get_current_time",
+          "parameters": {
+            "timezone": "Asia/Shanghai"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "current_time": "2026-11-25 23:00",
+              "timezone": "Asia/Shanghai"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-COORD-3"
+      ],
+      "subagent_roles": [],
+      "evidence_roles": [
+        "research.orchestrator"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-TOOL-003",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 3 的口碑来自公开网页。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 3"
+          },
+          "status": "ok",
+          "data_count": 2,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-WEB-3-1",
+              "text": "公开网页摘要",
+              "url": "https://research.invalid/3/a"
+            },
+            {
+              "evidence_id": "V4-WEB-3-2",
+              "text": "公开网页摘要二",
+              "url": "https://research.invalid/3/b"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-WEB-3-1",
+        "V4-WEB-3-2"
+      ],
+      "subagent_roles": [
+        "research.market_intelligence"
+      ],
+      "evidence_roles": [
+        "research.market_intelligence"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-AUDIT-003",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 3 的证据与缺口已记录。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 3"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-AUDIT-3",
+              "text": "公开摘要",
+              "url": "https://research.invalid/3/audit"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-AUDIT-3"
+      ],
+      "subagent_roles": [
+        "research.generalist"
+      ],
+      "evidence_roles": [
+        "research.generalist"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-QUICK-004",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "这是一个简洁的速答结论。",
+      "tool_calls": [],
+      "evidence_ids": [],
+      "subagent_roles": [
+        "research.quick_answer"
+      ],
+      "evidence_roles": [
+        "research.quick_answer"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-COORD-004",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "当前时间已读取。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "get_current_time",
+          "parameters": {
+            "timezone": "Asia/Shanghai"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "current_time": "2026-11-25 23:00",
+              "timezone": "Asia/Shanghai"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-COORD-4"
+      ],
+      "subagent_roles": [],
+      "evidence_roles": [
+        "research.orchestrator"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-TOOL-004",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 4 的口碑来自公开网页。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 4"
+          },
+          "status": "ok",
+          "data_count": 2,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-WEB-4-1",
+              "text": "公开网页摘要",
+              "url": "https://research.invalid/4/a"
+            },
+            {
+              "evidence_id": "V4-WEB-4-2",
+              "text": "公开网页摘要二",
+              "url": "https://research.invalid/4/b"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-WEB-4-1",
+        "V4-WEB-4-2"
+      ],
+      "subagent_roles": [
+        "research.market_intelligence"
+      ],
+      "evidence_roles": [
+        "research.market_intelligence"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-AUDIT-004",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 4 的证据与缺口已记录。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 4"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-AUDIT-4",
+              "text": "公开摘要",
+              "url": "https://research.invalid/4/audit"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-AUDIT-4"
+      ],
+      "subagent_roles": [
+        "research.generalist"
+      ],
+      "evidence_roles": [
+        "research.generalist"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-QUICK-005",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "这是一个简洁的速答结论。",
+      "tool_calls": [],
+      "evidence_ids": [],
+      "subagent_roles": [
+        "research.quick_answer"
+      ],
+      "evidence_roles": [
+        "research.quick_answer"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-COORD-005",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "当前时间已读取。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "get_current_time",
+          "parameters": {
+            "timezone": "Asia/Shanghai"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "current_time": "2026-11-25 23:00",
+              "timezone": "Asia/Shanghai"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-COORD-5"
+      ],
+      "subagent_roles": [],
+      "evidence_roles": [
+        "research.orchestrator"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-TOOL-005",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 5 的口碑来自公开网页。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 5"
+          },
+          "status": "ok",
+          "data_count": 2,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-WEB-5-1",
+              "text": "公开网页摘要",
+              "url": "https://research.invalid/5/a"
+            },
+            {
+              "evidence_id": "V4-WEB-5-2",
+              "text": "公开网页摘要二",
+              "url": "https://research.invalid/5/b"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-WEB-5-1",
+        "V4-WEB-5-2"
+      ],
+      "subagent_roles": [
+        "research.market_intelligence"
+      ],
+      "evidence_roles": [
+        "research.market_intelligence"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-AUDIT-005",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 5 的证据与缺口已记录。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 5"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-AUDIT-5",
+              "text": "公开摘要",
+              "url": "https://research.invalid/5/audit"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-AUDIT-5"
+      ],
+      "subagent_roles": [
+        "research.generalist"
+      ],
+      "evidence_roles": [
+        "research.generalist"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-QUICK-006",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "这是一个简洁的速答结论。",
+      "tool_calls": [],
+      "evidence_ids": [],
+      "subagent_roles": [
+        "research.quick_answer"
+      ],
+      "evidence_roles": [
+        "research.quick_answer"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-COORD-006",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "当前时间已读取。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "get_current_time",
+          "parameters": {
+            "timezone": "Asia/Shanghai"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "current_time": "2026-11-25 23:00",
+              "timezone": "Asia/Shanghai"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-COORD-6"
+      ],
+      "subagent_roles": [],
+      "evidence_roles": [
+        "research.orchestrator"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-TOOL-006",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 6 的口碑来自公开网页。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 6"
+          },
+          "status": "ok",
+          "data_count": 2,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-WEB-6-1",
+              "text": "公开网页摘要",
+              "url": "https://research.invalid/6/a"
+            },
+            {
+              "evidence_id": "V4-WEB-6-2",
+              "text": "公开网页摘要二",
+              "url": "https://research.invalid/6/b"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-WEB-6-1",
+        "V4-WEB-6-2"
+      ],
+      "subagent_roles": [
+        "research.market_intelligence"
+      ],
+      "evidence_roles": [
+        "research.market_intelligence"
+      ]
+    },
+    {
+      "case_id": "AGENT-V4-AUDIT-006",
+      "fixture_version": 1,
+      "system_status": "COMPLETED",
+      "report": "测试品类 6 的证据与缺口已记录。",
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "tool_name": "search_web",
+          "parameters": {
+            "query": "测试品类 6"
+          },
+          "status": "ok",
+          "data_count": 1,
+          "dispatched": true,
+          "items": [
+            {
+              "evidence_id": "V4-AUDIT-6",
+              "text": "公开摘要",
+              "url": "https://research.invalid/6/audit"
+            }
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "V4-AUDIT-6"
+      ],
+      "subagent_roles": [
+        "research.generalist"
+      ],
+      "evidence_roles": [
+        "research.generalist"
+      ]
+    }
+  ]
+}

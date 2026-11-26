@@ -8,12 +8,12 @@ from typing import Any
 
 def _collect_tech_stack() -> dict[str, str]:
     """从当前运行配置动态读取技术栈、实际主通道与故障转移顺序。"""
-    from taozhi.ai.router import build_sensenova_endpoints
+    from taozhi.ai.router import build_model_endpoints
     from taozhi.config import get_settings, load_config
 
     settings = get_settings()
     cfg = load_config()
-    endpoints = build_sensenova_endpoints(settings)
+    endpoints = build_model_endpoints(settings)
     primary = endpoints[0] if endpoints else None
     fallback = " -> ".join(f"{ep.endpoint_id}({ep.model})" for ep in endpoints[1:]) or "无"
     return {

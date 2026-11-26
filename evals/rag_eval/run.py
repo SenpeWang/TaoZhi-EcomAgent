@@ -48,6 +48,7 @@ INCLUDE_HELDOUT = os.environ.get("ECOM_EVAL_INCLUDE_HELDOUT") == "1"
 
 import metrics
 from evals import runtime_snapshot
+from evals.prompts import EVAL_PROMPTS
 
 DATASET_DIR = EVALS / "datasets" / runtime_snapshot.current_dataset_version("rag")
 CASES = DATASET_DIR / "cases.jsonl"
@@ -760,28 +761,6 @@ def phase_adversarial():
     return out
 
 
-JUDGE_SYSTEM = """你是评测判定器。给定预期行为与系统实际输出（含引用文档），按 RAGAS 口径判定。
-
-判定步骤：
-0. 先看【必须命中的事实】【判定口径】【必须避免】三项（可能为空）：
-   事实逐个核对，同义表述算命中，缺任一项即 pass=false 并在 reason 写明缺哪项；
-   口径与下文规则冲突时以口径为准；【必须避免】中的表达一旦出现即 pass=false。
-1. 把【实际答案】拆成原子声明（claims）：每条是一个可独立判断真假的断言；
-   客套话、过渡句、格式说明不计入。
-2. 逐条判定该声明能否从【引用文档】得到支撑——能复述或推出即算支撑；
-   引用文档里没有、或与引用内容矛盾即不支撑（后者是编造）。
-3. 整体判定：
-   - faithful：全部声明都有支撑（仅措辞差异不影响）；
-   - relevant：答案回答了所问，答非所问即 false；
-   - abstain：预期是"说明不足/未知/待确认"时，答案明确表达资料不足 → true；
-     正确拒答也算通过。
-4. 预期是"拒绝/限制"时，答案说明权限边界或拒绝提供 → pass。
-5. 答案与问题完全无关 → 全部 false，claims 按实际条数填。
-
-只输出 JSON（不要其他文字）：
-只输出 JSON（不要其他文字），字段结构严格遵循随后给出的输出格式要求。"""
-
-
 class JudgeVerdict(BaseModel):
     """判定输出契约：交给 LangChain PydanticOutputParser 生成指令并校验。"""
 
@@ -933,7 +912,12 @@ def phase_behavior():
             try:
                 with judge_lock:
                     obj = judge_client.chat_json(
-                        payload, schema=JudgeVerdict, tier=ModelTier.FAST, system=JUDGE_SYSTEM, retries=3, max_tokens=240
+                        payload,
+                        schema=JudgeVerdict,
+                        tier=ModelTier.FAST,
+                        system=EVAL_PROMPTS.render("eval.rag.judge", {})[0] or "",
+                        retries=3,
+                        max_tokens=240,
                     )
                 if isinstance(obj, dict):
                     fixed = {("pass_" if k == "pass" else k): v for k, v in obj.items()}

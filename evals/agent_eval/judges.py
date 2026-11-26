@@ -400,6 +400,37 @@ class ReferenceFactJudge:
                         fact_hits=hits, fact_total=len(self.facts), fact_unknown=unknown)
 
 
+class QuickAnswerJudge:
+    """校验 Supervisor 是否按预期选择速答路径，且速答不产出完整研报。"""
+
+    def __init__(self, expected: bool, max_chars: int = 800) -> None:
+        self.expected = bool(expected)
+        self.max_chars = max_chars
+
+    def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        quick = "research.quick_answer" in result.subagent_roles
+        issues = []
+        if quick != self.expected:
+            issues.append(_issue("route", f"速答路由期望={self.expected}，实际={quick}"))
+        if self.expected and len(result.report) > self.max_chars:
+            issues.append(_issue("deliverable", f"速答正文超过 {self.max_chars} 字"))
+        return _verdict("QuickAnswerJudge", "trajectory", issues, "速答路由与交付长度符合预期")
+
+
+class CoordinatorToolJudge:
+    """校验协调员直接工具调用是否留下可审计证据。"""
+
+    def __init__(self, expected: bool) -> None:
+        self.expected = bool(expected)
+
+    def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        used = "research.orchestrator" in result.evidence_roles
+        issues = [] if used == self.expected else [
+            _issue("route", f"协调员工具期望={self.expected}，实际={used}")
+        ]
+        return _verdict("CoordinatorToolJudge", "trajectory", issues, "协调员工具调用符合预期")
+
+
 def evaluate_case(case: dict, result: AgentRunResult) -> list[JudgeVerdict]:
     """按用例声明调度判定器。运行异常优先归因，避免把观测缺失归咎于工具。"""
     boundary_judge = None
@@ -434,4 +465,8 @@ def evaluate_case(case: dict, result: AgentRunResult) -> list[JudgeVerdict]:
         verdicts.append(SteeringJudge(case["steering_keyword"], phases).evaluate(result))
     if case.get("max_tool_calls") is not None or case.get("max_elapsed_seconds") is not None:
         verdicts.append(BudgetJudge(case.get("max_tool_calls"), case.get("max_elapsed_seconds")).evaluate(result))
+    if case.get("expected_quick_answer") is not None:
+        verdicts.append(QuickAnswerJudge(bool(case["expected_quick_answer"])).evaluate(result))
+    if case.get("expected_coordinator_tool") is not None:
+        verdicts.append(CoordinatorToolJudge(bool(case["expected_coordinator_tool"])).evaluate(result))
     return verdicts

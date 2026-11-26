@@ -32,7 +32,7 @@ class Issue(BaseModel):
 class Verdict(BaseModel):
     judge: Literal["Observation", "ExecutionStatusJudge", "ToolExecutionJudge", "ReferenceFactJudge",
                    "ToolBoundaryJudge", "DeliverableJudge", "SteeringJudge", "AntiHallucinationJudge",
-                   "BudgetJudge"]
+                   "BudgetJudge", "QuickAnswerJudge", "CoordinatorToolJudge"]
     dimension: Literal["outcome", "trajectory", "governance"]
     status: Status
     failure_type: str | None = None

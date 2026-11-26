@@ -1,0 +1,456 @@
+{
+  "schema_version": 1,
+  "source": "synthetic",
+  "cases": [
+    {
+      "id": "AGENT-V4-QUICK-001",
+      "capability": "task_completion",
+      "category": "task_completion",
+      "track": "capability",
+      "topic": "task_completion",
+      "name": "速答路由 1",
+      "prompt": "简单问题 1：解释一个术语。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_quick_answer": true
+    },
+    {
+      "id": "AGENT-V4-COORD-001",
+      "capability": "tool_use",
+      "category": "tool_correctness",
+      "track": "capability",
+      "topic": "tool_correctness",
+      "name": "协调员直接工具 1",
+      "prompt": "读取当前时间（时区 1）。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_coordinator_tool": true,
+      "required_tools": [
+        "get_current_time"
+      ]
+    },
+    {
+      "id": "AGENT-V4-TOOL-001",
+      "capability": "tool_use",
+      "category": "tool_call_accuracy",
+      "track": "capability",
+      "topic": "tool_call_accuracy",
+      "name": "工具自主选择 1",
+      "prompt": "检索全网关于测试品类 1 的口碑。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ],
+      "forbidden_tools": [
+        "search_1688_wholesale",
+        "search_amazon"
+      ]
+    },
+    {
+      "id": "AGENT-V4-AUDIT-001",
+      "capability": "planning_and_adaptation",
+      "category": "plan_adherence",
+      "track": "capability",
+      "topic": "plan_adherence",
+      "name": "审计角色 1",
+      "prompt": "调研测试品类 1 的来源与缺口。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ]
+    },
+    {
+      "id": "AGENT-V4-QUICK-002",
+      "capability": "task_completion",
+      "category": "task_completion",
+      "track": "capability",
+      "topic": "task_completion",
+      "name": "速答路由 2",
+      "prompt": "简单问题 2：解释一个术语。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_quick_answer": true
+    },
+    {
+      "id": "AGENT-V4-COORD-002",
+      "capability": "tool_use",
+      "category": "tool_correctness",
+      "track": "capability",
+      "topic": "tool_correctness",
+      "name": "协调员直接工具 2",
+      "prompt": "读取当前时间（时区 2）。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_coordinator_tool": true,
+      "required_tools": [
+        "get_current_time"
+      ]
+    },
+    {
+      "id": "AGENT-V4-TOOL-002",
+      "capability": "tool_use",
+      "category": "tool_call_accuracy",
+      "track": "capability",
+      "topic": "tool_call_accuracy",
+      "name": "工具自主选择 2",
+      "prompt": "检索全网关于测试品类 2 的口碑。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ],
+      "forbidden_tools": [
+        "search_1688_wholesale",
+        "search_amazon"
+      ]
+    },
+    {
+      "id": "AGENT-V4-AUDIT-002",
+      "capability": "planning_and_adaptation",
+      "category": "plan_adherence",
+      "track": "capability",
+      "topic": "plan_adherence",
+      "name": "审计角色 2",
+      "prompt": "调研测试品类 2 的来源与缺口。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ]
+    },
+    {
+      "id": "AGENT-V4-QUICK-003",
+      "capability": "task_completion",
+      "category": "task_completion",
+      "track": "capability",
+      "topic": "task_completion",
+      "name": "速答路由 3",
+      "prompt": "简单问题 3：解释一个术语。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_quick_answer": true
+    },
+    {
+      "id": "AGENT-V4-COORD-003",
+      "capability": "tool_use",
+      "category": "tool_correctness",
+      "track": "capability",
+      "topic": "tool_correctness",
+      "name": "协调员直接工具 3",
+      "prompt": "读取当前时间（时区 3）。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_coordinator_tool": true,
+      "required_tools": [
+        "get_current_time"
+      ]
+    },
+    {
+      "id": "AGENT-V4-TOOL-003",
+      "capability": "tool_use",
+      "category": "tool_call_accuracy",
+      "track": "capability",
+      "topic": "tool_call_accuracy",
+      "name": "工具自主选择 3",
+      "prompt": "检索全网关于测试品类 3 的口碑。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ],
+      "forbidden_tools": [
+        "search_1688_wholesale",
+        "search_amazon"
+      ]
+    },
+    {
+      "id": "AGENT-V4-AUDIT-003",
+      "capability": "planning_and_adaptation",
+      "category": "plan_adherence",
+      "track": "capability",
+      "topic": "plan_adherence",
+      "name": "审计角色 3",
+      "prompt": "调研测试品类 3 的来源与缺口。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ]
+    },
+    {
+      "id": "AGENT-V4-QUICK-004",
+      "capability": "task_completion",
+      "category": "task_completion",
+      "track": "capability",
+      "topic": "task_completion",
+      "name": "速答路由 4",
+      "prompt": "简单问题 4：解释一个术语。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_quick_answer": true
+    },
+    {
+      "id": "AGENT-V4-COORD-004",
+      "capability": "tool_use",
+      "category": "tool_correctness",
+      "track": "capability",
+      "topic": "tool_correctness",
+      "name": "协调员直接工具 4",
+      "prompt": "读取当前时间（时区 4）。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_coordinator_tool": true,
+      "required_tools": [
+        "get_current_time"
+      ]
+    },
+    {
+      "id": "AGENT-V4-TOOL-004",
+      "capability": "tool_use",
+      "category": "tool_call_accuracy",
+      "track": "capability",
+      "topic": "tool_call_accuracy",
+      "name": "工具自主选择 4",
+      "prompt": "检索全网关于测试品类 4 的口碑。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ],
+      "forbidden_tools": [
+        "search_1688_wholesale",
+        "search_amazon"
+      ]
+    },
+    {
+      "id": "AGENT-V4-AUDIT-004",
+      "capability": "planning_and_adaptation",
+      "category": "plan_adherence",
+      "track": "capability",
+      "topic": "plan_adherence",
+      "name": "审计角色 4",
+      "prompt": "调研测试品类 4 的来源与缺口。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ]
+    },
+    {
+      "id": "AGENT-V4-QUICK-005",
+      "capability": "task_completion",
+      "category": "task_completion",
+      "track": "capability",
+      "topic": "task_completion",
+      "name": "速答路由 5",
+      "prompt": "简单问题 5：解释一个术语。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_quick_answer": true
+    },
+    {
+      "id": "AGENT-V4-COORD-005",
+      "capability": "tool_use",
+      "category": "tool_correctness",
+      "track": "capability",
+      "topic": "tool_correctness",
+      "name": "协调员直接工具 5",
+      "prompt": "读取当前时间（时区 5）。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_coordinator_tool": true,
+      "required_tools": [
+        "get_current_time"
+      ]
+    },
+    {
+      "id": "AGENT-V4-TOOL-005",
+      "capability": "tool_use",
+      "category": "tool_call_accuracy",
+      "track": "capability",
+      "topic": "tool_call_accuracy",
+      "name": "工具自主选择 5",
+      "prompt": "检索全网关于测试品类 5 的口碑。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ],
+      "forbidden_tools": [
+        "search_1688_wholesale",
+        "search_amazon"
+      ]
+    },
+    {
+      "id": "AGENT-V4-AUDIT-005",
+      "capability": "planning_and_adaptation",
+      "category": "plan_adherence",
+      "track": "capability",
+      "topic": "plan_adherence",
+      "name": "审计角色 5",
+      "prompt": "调研测试品类 5 的来源与缺口。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ]
+    },
+    {
+      "id": "AGENT-V4-QUICK-006",
+      "capability": "task_completion",
+      "category": "task_completion",
+      "track": "capability",
+      "topic": "task_completion",
+      "name": "速答路由 6",
+      "prompt": "简单问题 6：解释一个术语。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_quick_answer": true
+    },
+    {
+      "id": "AGENT-V4-COORD-006",
+      "capability": "tool_use",
+      "category": "tool_correctness",
+      "track": "capability",
+      "topic": "tool_correctness",
+      "name": "协调员直接工具 6",
+      "prompt": "读取当前时间（时区 6）。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "expected_coordinator_tool": true,
+      "required_tools": [
+        "get_current_time"
+      ]
+    },
+    {
+      "id": "AGENT-V4-TOOL-006",
+      "capability": "tool_use",
+      "category": "tool_call_accuracy",
+      "track": "capability",
+      "topic": "tool_call_accuracy",
+      "name": "工具自主选择 6",
+      "prompt": "检索全网关于测试品类 6 的口碑。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ],
+      "forbidden_tools": [
+        "search_1688_wholesale",
+        "search_amazon"
+      ]
+    },
+    {
+      "id": "AGENT-V4-AUDIT-006",
+      "capability": "planning_and_adaptation",
+      "category": "plan_adherence",
+      "track": "capability",
+      "topic": "plan_adherence",
+      "name": "审计角色 6",
+      "prompt": "调研测试品类 6 的来源与缺口。",
+      "keyword": "测试品类",
+      "execution_mode": "synthetic_trace_regrade",
+      "fixture_version": 1,
+      "suite": "benchmark",
+      "required_sections": [],
+      "min_chars": 1,
+      "required_tools": [
+        "search_web"
+      ]
+    }
+  ]
+}

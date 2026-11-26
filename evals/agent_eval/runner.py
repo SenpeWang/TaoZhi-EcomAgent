@@ -16,7 +16,7 @@ from taozhi.domain.evaluation_comparison import pair_case_results
 
 from evals import runtime_snapshot
 
-from .cases import AGENT_BENCHMARK_CASES
+from .cases import AGENT_BENCHMARK_CASES, AGENT_V4_CASES
 from .contracts import REPORT_SCHEMA_VERSION, validate_cases
 from .harness import AgentEvalHarness, replay_transcript
 from .judges import evaluate_case
@@ -60,7 +60,8 @@ def run_agent_evaluations(cases: list[dict], *,
                           replay_file: Path | None = None, reports_dir: Path | None = None,
                           catalog: list[dict] | None = None, compare_file: Path | None = None,
                           counterexamples_file: Path | None = None, publish_to: tuple[str, str] | None = None,
-                          log_path: Path | None = None, trials: int = 1) -> dict:
+                          log_path: Path | None = None, trials: int = 1,
+                          dataset_version: str | None = None) -> dict:
     """通过同一组判定器评估实际运行或已有记录，将来源写入独立报告。"""
     dataset = cases if catalog is None else catalog
     validate_cases(dataset)
@@ -151,7 +152,7 @@ def run_agent_evaluations(cases: list[dict], *,
 
     metrics = group_metrics(records)
     scores = [r["score"] for r in records if r["score"] is not None]
-    dataset_meta = runtime_snapshot.dataset_meta("agent_research")
+    dataset_meta = runtime_snapshot.dataset_meta("agent_research", dataset_version)
     report = {
         "schema_version": REPORT_SCHEMA_VERSION, "git_sha": git_sha(), "timestamp": timestamp, "run_id": run_id,
         "mode": mode, "dataset_sha256": fingerprint(sorted(dataset, key=lambda c: c["id"])),
@@ -230,6 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="调研 Agent 评测与合成轨迹重评")
     parser.add_argument("--case", help="只评估指定用例，缺少其录制会记为未判定")
     parser.add_argument("--dataset", choices=["synthetic"], help="只运行固定合成证据用例，须同时提供 --replay")
+    parser.add_argument("--suite", choices=["v3", "v4"], default="v3", help="选择 V3 默认集或 V4 小规模回归集")
     parser.add_argument("--replay", type=Path, metavar="PATH", help="读取合成 JSON 执行记录进行重评")
     parser.add_argument("--compare", type=Path, metavar="REPORT", help="与同来源、同裁判的已有 Agent 报告逐例比较")
     parser.add_argument("--counterexamples", type=Path, metavar="PATH", help="在合成回放上重现指定反例，每次只改一项观测")
@@ -242,7 +244,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.dataset and args.replay is None:
         parser.error("合成数据集需要 --replay 执行记录")
-    selected = AGENT_BENCHMARK_CASES
+    catalog = AGENT_V4_CASES if args.suite == "v4" else AGENT_BENCHMARK_CASES
+    selected = list(catalog)
+    if args.suite == "v4" and args.replay is None:
+        parser.error("V4 合成集需要 --replay 执行记录")
     if args.case:
         selected = [case for case in selected if case["id"] == args.case]
     if args.dataset:
@@ -258,11 +263,14 @@ def main(argv: list[str] | None = None) -> int:
             args.progress_jsonl.parent.mkdir(parents=True, exist_ok=True)
             args.progress_jsonl.write_text("", encoding="utf-8")
             os.environ["ECOM_EVAL_PROGRESS_FILE"] = str(args.progress_jsonl)
-        report = run_agent_evaluations(selected, replay_file=args.replay,
-                                       reports_dir=args.output_dir, catalog=AGENT_BENCHMARK_CASES,
-                                       compare_file=args.compare, counterexamples_file=args.counterexamples,
-                                       publish_to=tuple(args.publish) if args.publish else None,
-                                       trials=args.trials)
+        report = run_agent_evaluations(
+            selected, replay_file=args.replay,
+            reports_dir=args.output_dir, catalog=catalog,
+            compare_file=args.compare, counterexamples_file=args.counterexamples,
+            publish_to=tuple(args.publish) if args.publish else None,
+            trials=args.trials,
+            dataset_version="agent_v4_20261125" if args.suite == "v4" else None,
+        )
     except (OSError, UnicodeError, json.JSONDecodeError):
         parser.error("无法读取评测文件或写入报告")
     except ValueError as exc:

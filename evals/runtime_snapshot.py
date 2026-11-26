@@ -15,12 +15,11 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 DATASETS = ROOT / "evals" / "datasets"
 PROMPT_MODULES = (
-    "src/taozhi/application/research/planner.py",
-    "src/taozhi/application/research/reporter.py",
-    "src/taozhi/application/research/subagents.py",
-    "src/taozhi/application/rag/specialists.py",
+    "src/taozhi/application/research/prompts.py",
+    "src/taozhi/application/rag/prompts.py",
+    "src/taozhi/orchestration/prompts.py",
+    "evals/prompts.py",
     "evals/agent_eval/judges.py",
-    "evals/rag_eval/run.py",
 )
 MODEL_ENV_KEYS = (
     "MODEL",
@@ -36,6 +35,7 @@ SUITE_EVAL_KIND: dict[str, str] = {
     "agent_research": "agent",
 }
 EVAL_KINDS: tuple[str, ...] = ("rag", "agent")
+DEFAULT_DATASET_VERSIONS: dict[str, str] = {"agent": "agent_v3_20261124"}
 
 
 def suite_eval_kind(suite: str) -> str:
@@ -57,7 +57,9 @@ def dataset_versions(eval_kind: str | None = None) -> list[str]:
 
 
 def current_dataset_version(eval_kind: str = "rag") -> str:
-    """返回指定体系当前使用的数据集版本（该体系目录名最大者）。"""
+    """返回默认数据集版本；V4 是显式回归集，不接管 V3 默认口径。"""
+    if eval_kind in DEFAULT_DATASET_VERSIONS:
+        return DEFAULT_DATASET_VERSIONS[eval_kind]
     versions = dataset_versions(eval_kind)
     if not versions:
         raise RuntimeError(f"仓库内没有可用的 {eval_kind} 数据集版本描述符 dataset.json")
@@ -146,12 +148,28 @@ def model_labels() -> dict[str, str]:
     return {key: value for key, value in ((key, os.environ.get(key, "")) for key in MODEL_ENV_KEYS) if value}
 
 
+def prompt_catalog_versions() -> dict[str, dict[str, str]]:
+    """返回运行期与评测期 Prompt 目录的版本与摘要。"""
+    from evals.prompts import EVAL_PROMPT_VERSION, EVAL_PROMPTS
+    from taozhi.application.rag.prompts import RAG_PROMPT_VERSION, RAG_PROMPTS
+    from taozhi.application.research.prompts import RESEARCH_PROMPT_VERSION, RESEARCH_PROMPTS
+    from taozhi.orchestration.prompts import ORCHESTRATION_PROMPT_VERSION, ORCHESTRATION_PROMPTS
+
+    return {
+        "research": {"version": RESEARCH_PROMPT_VERSION, "checksum": RESEARCH_PROMPTS.catalog_checksum()},
+        "rag": {"version": RAG_PROMPT_VERSION, "checksum": RAG_PROMPTS.catalog_checksum()},
+        "orchestration": {"version": ORCHESTRATION_PROMPT_VERSION, "checksum": ORCHESTRATION_PROMPTS.catalog_checksum()},
+        "eval": {"version": EVAL_PROMPT_VERSION, "checksum": EVAL_PROMPTS.catalog_checksum()},
+    }
+
+
 def algorithm_snapshot(*, judges_sha: str | None = None, model_config_sha: str | None = None) -> dict:
     """组装算法版本快照：代码、模型、Prompt 与判定器摘要。"""
     return {
         "git_sha": git_sha(),
         "models": model_labels(),
         "prompt_module_sha256": prompt_module_shas(),
+        "prompt_catalogs": prompt_catalog_versions(),
         "judges_sha256": judges_sha,
         "model_config_sha256": model_config_sha,
     }

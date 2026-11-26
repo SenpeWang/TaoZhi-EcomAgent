@@ -30,7 +30,7 @@ def test_live_observations_distinguish_tool_outcomes_and_missing_usage():
         emit("[steering] 已接收 1 条补充干预指令", 40)
         return {
             "report": "合成回答", "system_status": "COMPLETED", "model_calls": 3,
-            "subagents": [{"role": "sourcing", "type_name": "task1", "tools": [
+            "subagents": [{"role": "sourcing", "task_id": "task1", "agent_type": "subagent", "tools": [
                 {"name": "search_1688_wholesale", "status": "empty", "dispatched": True, "parameters": {"keyword": "新型号"}, "data_count": 0},
                 {"name": "search_amazon", "status": "error", "dispatched": False, "parameters": {"query_or_url": "新型号"}, "data_count": 0},
                 {"name": "unknown"},

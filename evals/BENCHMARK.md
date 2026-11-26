@@ -421,3 +421,8 @@ V3 数据集包含 Agent 600 例合成回放（含 60 红队）+ 10 例实测、
 - **门禁**：golden / regression / redteam 由确定性 grader 阻塞；capability 只观察；challenge 单列；heldout 仅在发布前单独运行。大类通过率 >85% 触发饱和告警。
 - **非确定性**：Agent live 支持 `--trials k`，报告 `pass@k` 与 `pass^k`；RAG 复用 `--repeat k` 的 `pass^k`。子类 n<30 不下结论，报告先按大类聚合并给 Wilson 95% CI。
 - **LLM judge**：本版本为全合成数据、无人工标注，LLM judge 只作旁路观察，不参与阻塞门禁；报告须标注"未经人工校准"。
+
+
+## V4 小规模回归集（2026-11-25）
+
+`agent_v4_20261125` 通过 `--suite v4` 显式运行，覆盖速答、协调员工具、工具自主与审计角色；V3 默认集保持只读。运行：`make evals-agent-v4`。

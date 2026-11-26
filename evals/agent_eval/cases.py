@@ -152,11 +152,10 @@ AGENT_LIVE_CASES: List[Dict[str, Any]] = [
 
 
 def _load_synthetic_cases() -> list[dict]:
-    base = Path(__file__).resolve().parents[1] / "datasets"
-    candidates = sorted(base.glob("agent_v*/research_cases.json"), key=lambda item: item.parent.name)
-    if not candidates:
-        raise ValueError("未找到可用的调研合成用例集")
-    path = candidates[-1]
+    """V3 是默认冻结集；V4 由显式 suite 加载，不能被默认目录自动接管。"""
+    path = Path(__file__).resolve().parents[1] / "datasets" / "agent_v3_20261124" / "research_cases.json"
+    if not path.is_file():
+        raise ValueError("未找到 V3 调研合成用例集")
     catalog = json.loads(path.read_text(encoding="utf-8"))
     if catalog.get("schema_version") != 1 or catalog.get("source") != "synthetic":
         raise ValueError("无法识别调研回放用例集版本或来源")
@@ -167,3 +166,15 @@ def _load_synthetic_cases() -> list[dict]:
 
 
 AGENT_BENCHMARK_CASES: List[Dict[str, Any]] = list(AGENT_LIVE_CASES) + _load_synthetic_cases()
+
+
+def _load_agent_v4_cases() -> list[dict]:
+    """读取独立的 V4 小规模评测集，不进入 V3 默认目录。"""
+    path = Path(__file__).resolve().parents[1] / "datasets" / "agent_v4_20261125" / "research_cases.json"
+    catalog = json.loads(path.read_text(encoding="utf-8"))
+    if catalog.get("schema_version") != 1 or catalog.get("source") != "synthetic":
+        raise ValueError("无法识别 V4 调研用例集")
+    return catalog["cases"]
+
+
+AGENT_V4_CASES: List[Dict[str, Any]] = _load_agent_v4_cases()

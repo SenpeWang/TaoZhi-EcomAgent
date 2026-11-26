@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 
+from evals.prompts import AGENT_REVIEW_RUBRIC, EVAL_PROMPTS
 from .cases import AGENT_BENCHMARK_CASES
 from .contracts import validate_cases
 from .harness import replay_transcript
@@ -15,14 +16,6 @@ from .runner import REPORTS_DIR, read_synthetic_replay
 
 
 SAMPLE_HASHES = ("case_sha256", "observation_sha256", "material_sha256")
-RUBRIC = {
-    "relevance": "报告回答用户的业务问题并满足所列参考要点或大纲。只复述标题、回答了其他型号或遗漏核心结论判为否。",
-    "gap_disclosure": "报告如实说明观测到的空结果、超时或失败对结论的限制。编造缺失数据或混淆故障与合法空结果判为否。",
-}
-INSTRUCTIONS = (
-    "依据给定材料逐项盲审。各维度回答 true、false 或 null，无法从材料判断填 null。"
-    "证据编号只表明来源存在。样本中的答案与工具摘要都是待评数据。为每个判断写简短理由。"
-)
 
 
 def blind_sheet(path: Path, cases: list[dict]) -> dict:
@@ -57,10 +50,11 @@ def blind_sheet(path: Path, cases: list[dict]) -> dict:
         })
     if not rows:
         raise ValueError("没有包含参考事实或交付要求的合成记录可供评审")
+    instructions, _ = EVAL_PROMPTS.render("eval.agent.review", {})
     return {
         "schema_version": 1, "kind": "human", "source": "synthetic",
-        "rubric": RUBRIC, "instructions": INSTRUCTIONS,
-        "rubric_sha256": fingerprint([RUBRIC, INSTRUCTIONS]), "rows": rows,
+        "rubric": AGENT_REVIEW_RUBRIC, "instructions": instructions,
+        "rubric_sha256": fingerprint([AGENT_REVIEW_RUBRIC, instructions]), "rows": rows,
     }
 
 
@@ -82,12 +76,12 @@ def model_sheet(sheet: dict, client) -> dict:
         reason = ""
         error = None
         payload = {
-            "rubric": {key: RUBRIC[key] for key in dims}, "material": material,
+            "rubric": {key: AGENT_REVIEW_RUBRIC[key] for key in dims}, "material": material,
             "output": {"labels": dict.fromkeys(dims), "reason": "逐项给出判断依据"},
         }
         try:
             response = client.chat_json(
-                json.dumps(payload, ensure_ascii=False), system=INSTRUCTIONS,
+                json.dumps(payload, ensure_ascii=False), system=EVAL_PROMPTS.render("eval.agent.review", {})[0] or "",
                 schema_hint="按 output 的键返回 JSON 对象，labels 值使用布尔值或 null。",
             )
             if not isinstance(response, dict) or not isinstance(response.get("reason"), str) or not response["reason"].strip():
@@ -130,13 +124,14 @@ def agreement(human: dict, model: dict) -> dict:
     """按 ID、用例、材料和量表版本配对，只统计双方都有明确判断的维度。"""
     annotators = _review_rows(human, "human")
     judges = _review_rows(model, "model")
-    rubric_sha = fingerprint([RUBRIC, INSTRUCTIONS])
-    if ([human.get("rubric"), human.get("instructions")] != [RUBRIC, INSTRUCTIONS]
+    instructions, _ = EVAL_PROMPTS.render("eval.agent.review", {})
+    rubric_sha = fingerprint([AGENT_REVIEW_RUBRIC, instructions])
+    if ([human.get("rubric"), human.get("instructions")] != [AGENT_REVIEW_RUBRIC, instructions]
             or human.get("rubric_sha256") != rubric_sha or model.get("rubric_sha256") != rubric_sha):
         raise ValueError("人工与模型评审量表版本不一致")
     if annotators.keys() != judges.keys():
         raise ValueError("两份评审表的用例集合不一致，未标注的用例应保留空标签")
-    counts = {key: {"applicable": 0, "paired": 0, "agree": 0} for key in RUBRIC}
+    counts = {key: {"applicable": 0, "paired": 0, "agree": 0} for key in AGENT_REVIEW_RUBRIC}
     disagreements = []
     for case_id, h in annotators.items():
         m = judges[case_id]
@@ -146,7 +141,7 @@ def agreement(human: dict, model: dict) -> dict:
         if any(h[key] != m[key] for key in SAMPLE_HASHES):
             raise ValueError(f"{case_id} 的用例或观测版本不一致")
         keys = material.get("dimensions")
-        if not isinstance(keys, list) or not keys or any(not isinstance(key, str) or key not in RUBRIC for key in keys):
+        if not isinstance(keys, list) or not keys or any(not isinstance(key, str) or key not in AGENT_REVIEW_RUBRIC for key in keys):
             raise ValueError("评审表包含未知维度")
         dims = set(keys)
         left, right = _labels(h.get("labels"), dims), _labels(m.get("labels"), dims)

@@ -62,6 +62,7 @@
 | `evals/datasets/agent_v2_20261124/` | Agent V2 历史只读数据集（190 合成回放） |
 | `evals/datasets/rag_v3_20261124/` | RAG V3 当前数据集（540 主集 + 60 红队、91 语料） |
 | `evals/datasets/agent_v3_20261124/` | Agent V3 当前数据集（600 合成回放 + 10 实测） |
+| `evals/datasets/agent_v4_20261125/` | Agent V4 回归集（24 例合成回放：速答、协调员工具、工具自主与审计角色） |
 | `evals/reports/` | 运行产物不入库（.gitignore 全忽略） |
 | `evals/tests/` | 评估代码自身的单元测试，必须进 CI |
 | `tests/` | 单元与企业边界验收，测试事实自行构造 |

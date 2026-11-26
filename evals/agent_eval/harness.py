@@ -34,6 +34,8 @@ class AgentRunResult:
     tool_trace_complete: bool = True
     model_names: list[str] = field(default_factory=list)
     steering_after_sequence: int | None = None
+    subagent_roles: list[str] = field(default_factory=list)
+    evidence_roles: list[str] = field(default_factory=list)
 
 
 def _run_research(*, observe_trace: Callable[[str], None], **kwargs: Any) -> dict:
@@ -165,7 +167,15 @@ class AgentEvalHarness:
             if isinstance(subagents, list):
                 result.subagents_count = len(subagents)
                 result.tool_calls = _tool_observations(subagents)
-            result.evidence_ids = _evidence_ids(raw.get("evidence_pool"))
+                result.subagent_roles = sorted(
+                    {str(agent.get("role")) for agent in subagents if isinstance(agent, dict) and agent.get("role")}
+                )
+            evidence_pool = raw.get("evidence_pool")
+            result.evidence_ids = _evidence_ids(evidence_pool)
+            if isinstance(evidence_pool, list):
+                result.evidence_roles = sorted(
+                    {str(item.get("role")) for item in evidence_pool if isinstance(item, dict) and item.get("role")}
+                )
             result.system_status = raw.get("system_status") or "UNKNOWN"
             result.stop_reason = raw.get("stop_reason")
             result.token_usage = observer.usage(raw.get("model_calls"))
@@ -255,6 +265,11 @@ def replay_transcript(case: dict, transcript: dict) -> AgentRunResult:
     ):
         raise ValueError("干预边界须关联到指令到达前的最后一次调用序号，启动前指令使用 0")
     trace_id = transcript.get("trace_id", "")
+    subagent_roles = transcript.get("subagent_roles", [])
+    evidence_roles = transcript.get("evidence_roles", [])
+    for label, values in (("subagent_roles", subagent_roles), ("evidence_roles", evidence_roles)):
+        if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
+            raise ValueError(f"{label} 必须是字符串数组")
     model_names = transcript.get("model_names", [])
     if not isinstance(model_names, list) or not all(isinstance(name, str) and name.strip() for name in model_names):
         raise ValueError("model_names 必须是已观察到的模型名称列表")
@@ -266,5 +281,5 @@ def replay_transcript(case: dict, transcript: dict) -> AgentRunResult:
         trace_id=trace_id, system_status=status, steering_applied=steering, error=error,
         evidence_ids=ids, token_usage=_transcript_usage(transcript.get("token_usage")),
         stop_reason=stop_reason, tool_trace_complete=complete, model_names=sorted(set(model_names)),
-        steering_after_sequence=boundary,
+        steering_after_sequence=boundary, subagent_roles=list(subagent_roles), evidence_roles=list(evidence_roles),
     )

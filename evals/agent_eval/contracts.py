@@ -39,7 +39,7 @@ CASE_FIELDS = {
     "reference_facts", "forbidden_claims", "required_sections", "min_chars", "min_data_count",
     "steering", "steering_keyword", "steering_boundary", "execution_mode", "fixture_version",
     "max_tool_calls", "max_elapsed_seconds", "turns",
-    "capability", "track", "topic",
+    "capability", "track", "topic", "expected_quick_answer", "expected_coordinator_tool",
 }
 
 
@@ -202,6 +202,9 @@ def validate_cases(cases: list[dict]) -> None:
                 raise ValueError("用例需要名称和用户输入")
             if "critical" in case and type(case["critical"]) is not bool:
                 raise ValueError("critical 需要布尔值")
+            for key in ("expected_quick_answer", "expected_coordinator_tool"):
+                if key in case and type(case[key]) is not bool:
+                    raise ValueError(f"{key} 需要布尔值")
             for key in ("min_chars", "min_data_count", "max_tool_calls"):
                 if key in case and (type(case[key]) is not int or case[key] < 0):
                     raise ValueError(f"{key} 需要非负整数")
