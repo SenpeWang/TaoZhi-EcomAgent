@@ -14,7 +14,7 @@ REGISTER_ARGS ?=
 TEST_ENV := ECOM_MODE=test PYTHONPATH=$(PROJECT_ROOT)/src
 COMPOSE := docker compose
 
-.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check evals-center-register evals-center-publish evals-center-backfill evals-center-check evals-center-purge evals-agent-heldout evals-center-migrate-versions
+.PHONY: help start rebuild stop status logs test migrate-test import-corpus check build-web clean install-hooks check-repository lint-web format-web check-format check-commits evals-tests evals-quick evals-full evals-baseline evals-agent evals-agent-replay evals-agent-publish evals-publish evals-sync evals-pipeline evals-follow evals-archive evals-archive-check evals-center-register evals-center-publish evals-center-backfill evals-center-check evals-center-purge evals-agent-heldout evals-agent-v4 evals-center-migrate-versions
 
 GIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null)
 COMMIT_BASE ?= origin/main
@@ -32,7 +32,7 @@ help:
 	@echo "make logs           实时跟踪容器日志"
 	@echo "make test           在共享测试环境运行离线回归（含 evals 单元测试）"
 	@echo "make migrate-test   把共享测试环境的数据库迁移到最新版本"
-	@echo "make import-corpus  按目录导入 data/ 语料并生成向量（IMPORT_ARGS 传参）"
+	@echo "make import-corpus  按目录导入 data/ 原件（PDF/Word）并生成向量（IMPORT_ARGS 传参）"
 	@echo "make evals-tests    只跑评估代码自身的单元测试（不需要在线服务）"
 	@echo "make evals-agent-replay  使用合成执行记录验证 Agent 判定与报告"
 	@echo "make evals-agent-publish 跑真实调研评测并把结果归档进评测中心"
@@ -131,6 +131,9 @@ evals-agent-publish:
 evals-agent-replay:
 	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --case AGENT-WEB-003 --replay evals/datasets/agent_v3_20261124/web_replay.json
 	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --replay evals/datasets/agent_v3_20261124/research_replay.json
+
+evals-agent-v4:
+	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --suite v4 --replay evals/datasets/agent_v4_20261125/research_replay.json
 
 evals-agent-heldout:
 	$(TEST_ENV) $(PYTHON) -m evals.agent_eval.runner --dataset synthetic --include-heldout --replay evals/datasets/agent_v3_20261124/research_replay.json

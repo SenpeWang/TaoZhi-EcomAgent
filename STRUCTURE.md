@@ -65,7 +65,7 @@
 | `evals/reports/` | 运行产物不入库（.gitignore 全忽略） |
 | `evals/tests/` | 评估代码自身的单元测试，必须进 CI |
 | `tests/` | 单元与企业边界验收，测试事实自行构造 |
-| `data/` | 公开配件 PDF、演示与评测资产，以及各环境的数据存放位置 |
+| `data/` | 公开配件 PDF、演示原件（PDF/Word）与评测资产，以及各环境的数据存放位置 |
 | `web/` | 前端依赖、锁与构建配置 |
 | `web/src/` | Vue 工作台入口与前端源码 |
 | `web/src/app/` | 工作台装配、会话、导航及全局样式 |
@@ -91,7 +91,7 @@ AGENTS.md 是维护者的协作约定，随仓库版本化；本机个人学习�
 | 公开配件 PDF 与许可清单 | data/accessory_pdfs/ |
 | 厂商配件参考原件与内部清单 | data/private/accessory_pdfs/ |
 | 待授权入库资料 | data/incoming/<tenant_id>/ |
-| 本机演示语料 | data/corpus/<category>/ |
+| 本机演示原件（PDF/Word） | data/corpus/<category>/ |
 | 已入库私有原件 | data/private/<mode>/ |
 | 日志、验证截图与任务证据 | data/runtime/ |
 | 授权业务导出 | data/reports/<tenant_id>/ |
