@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -19,15 +20,29 @@ class ToolCheckFailed(RuntimeError):
     """工具返回检查失败；环境缺失保留独立诊断。"""
 
 
+def _node_major(executable: str) -> int:
+    """返回可执行文件的 Node 主版本号；不可执行时返回 0。"""
+    try:
+        version = subprocess.run([executable, "--version"], capture_output=True, text=True, check=True)
+        return int(version.stdout.lstrip("v").split(".")[0])
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return 0
+
+
 def node_executable() -> str:
-    """从 PATH 定位 Node.js 24；依赖不足直接报错，绝不联网安装。"""
-    executable = shutil.which("node")
-    if not executable:
-        raise RuntimeError("缺少 Node.js，请先安装 Node 24 与前端锁定依赖")
-    version = subprocess.run([executable, "--version"], capture_output=True, text=True, check=True)
-    if int(version.stdout.lstrip("v").split(".")[0]) != 24:
+    """定位 Node.js 24；先查 PATH，再查用户 nvm 目录，绝不联网安装。"""
+    candidates = []
+    on_path = shutil.which("node")
+    if on_path:
+        candidates.append(on_path)
+    nvm_root = Path(os.environ.get("NVM_DIR") or (Path.home() / ".nvm"))
+    candidates.extend(sorted((nvm_root / "versions" / "node").glob("v24*/bin/node"), reverse=True))
+    for executable in candidates:
+        if _node_major(executable) == 24:
+            return executable
+    if on_path:
         raise RuntimeError("开发检查要求 Node.js 24，请调整 PATH 中的 Node 版本")
-    return executable
+    raise RuntimeError("缺少 Node.js，请先安装 Node 24 与前端锁定依赖")
 
 
 def run_tool(tool: str, args: list[str], workspace: Path, quiet: bool = False) -> None:
