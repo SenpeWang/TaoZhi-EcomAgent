@@ -219,21 +219,15 @@ class DecisionEngine:
         options_desc = "\n".join([f"- {k}: {v}" for k, v in options.items()])
         select_mode = f"选择 1 到 {top_k} 个最匹配的选项" if multi_select else "选择 1 个最匹配的选项"
 
-        system_prompt = f"""你是智能体意图与决策路由引擎（Decision Primitive: Choice）。
-请根据输入上下文，从候选项中做出强类型离散裁决。
+        from .prompts import ORCHESTRATION_PROMPTS
 
-【候选项集合】
-{options_desc}
-
-【决策要求】
-1. {select_mode}；
-2. 必须只输出严格的 JSON 对象，禁止输出任何代码块标记或额外字符；
-3. 输出格式：
-{{"selected": ["opt_key"], "confidence": 0.95, "rationale": "简明决策依据", "distribution": {{"opt_key": 0.85}}}}
-"""
+        system_prompt, user_prompt = ORCHESTRATION_PROMPTS.render(
+            "orchestration.choice",
+            {"options_desc": options_desc, "select_mode": select_mode, "context": context},
+        )
         try:
             client = LLMClient()
-            raw = client.chat(f"上下文：{context}", system=system_prompt, tier=ModelTier.FAST, max_tokens=250)
+            raw = client.chat(user_prompt or "", system=system_prompt or "", tier=ModelTier.FAST, max_tokens=250)
             try:
                 data = JsonOutputParser().parse(raw)
             except Exception:

@@ -15,10 +15,6 @@ if TYPE_CHECKING:
     import numpy as np
 
 
-_HYDE_SYSTEM = (
-    "你是商品资料检索助手。根据用户问题，写一段可能出现在商品资料库中的正文段落："
-    "陈述句、含型号、参数或步骤等具体细节。允许内容与事实不符，禁止任何解释、前言或标题，只输出段落正文。"
-)
 
 
 def build_hyde_vector(
@@ -66,7 +62,8 @@ def build_hyde_vector(
         with usage_scope() as hyde_usage:
             try:
                 with closing(LLMClient(allow_overseas=False)) as client:
-                    text = client.chat(redact(query), tier=ModelTier.FAST, system=_HYDE_SYSTEM, max_tokens=hyde_max_tok)
+                    system, _ = RAG_PROMPTS.render("rag.hyde", {})
+                    text = client.chat(redact(query), tier=ModelTier.FAST, system=system or "", max_tokens=hyde_max_tok)
             except Exception:
                 outcome = "failed"
                 raise

@@ -19,6 +19,7 @@ from taozhi.domain.question_context import recalls_previous_evidence, refers_to_
 from taozhi.domain.rag_verification import cited_paragraphs, document_addresses_question
 from taozhi.observability.tracing import record_diagnostic
 from .phases import RagPhase
+from .prompts import RAG_PROMPTS
 from .state import State
 
 _BUSINESS_FIELDS = {
@@ -49,10 +50,9 @@ def _answer_with_general_knowledge(question: str, state: State) -> tuple[str, di
     """在非企业专有事项且已授权外部模型时，使用通用模型能力补充回答。"""
     if not get_settings().has_llm:
         return None
-    system = (
-        f"你是通用知识助手。当前系统时间为 {current_shanghai_clock()}。\n"
-        "请基于通用常识客观、简洁地回答用户问题。\n"
-        "注意：你没有访问任何企业内部资料，严禁冒充企业官方政策、商品价格、售后承诺或经营数据。"
+    system, _ = RAG_PROMPTS.render(
+        "rag.general.fallback",
+        {"current_clock": current_shanghai_clock()},
     )
     with usage_scope() as usage:
         try:
@@ -60,7 +60,7 @@ def _answer_with_general_knowledge(question: str, state: State) -> tuple[str, di
                 reply = llm.chat(
                     redact(question),
                     tier=ModelTier.FAST,
-                    system=system,
+                    system=system or "",
                     max_tokens=1024,
                     allow_overseas=False,
                 ).strip()

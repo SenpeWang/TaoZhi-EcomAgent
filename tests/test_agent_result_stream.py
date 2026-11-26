@@ -5,7 +5,7 @@ import pytest
 from langchain_core.messages import AIMessageChunk
 
 from taozhi.ai.client import LLMClient
-from taozhi.ai.router import CircuitBreakerRegistry, SensenovaEndpoint
+from taozhi.ai.router import CircuitBreakerRegistry, ModelEndpoint
 from taozhi.ai.text_stream import OutputDeliveryError, stream_answer
 from taozhi.application.rag import specialists
 from taozhi.domain.rag_verification import cited_paragraphs
@@ -37,7 +37,7 @@ def test_report_failover_replaces_partial_output():
     """候选端点在交付部分正文后断开，下一次尝试必须从空草稿开始。"""
     client = LLMClient(registry=CircuitBreakerRegistry())
     endpoints = [
-        SensenovaEndpoint(endpoint_id=label, label=label, region="domestic", base_url="https://example.test", api_key="test", model="test")
+        ModelEndpoint(endpoint_id=label, label=label, region="domestic", base_url="https://example.test", api_key="test", model="test")
         for label in ("primary", "secondary")
     ]
     events = []
@@ -49,7 +49,7 @@ def test_report_failover_replaces_partial_output():
         yield AIMessageChunk(content="新报告")
         yield AIMessageChunk(content="<thinking>不完整的思考")
     try:
-        with (patch("taozhi.ai.client.build_sensenova_endpoints", return_value=endpoints),
+        with (patch("taozhi.ai.client.build_model_endpoints", return_value=endpoints),
               patch.object(client._registry, "select_candidates", return_value=endpoints),
               patch.object(client, "_client_for_endpoint") as provider):
             provider.return_value.bind.return_value.stream.side_effect = [first_stream(), second_stream()]

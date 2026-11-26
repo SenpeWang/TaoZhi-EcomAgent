@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from taozhi.ai.router import build_sensenova_endpoints
+from taozhi.ai.router import build_model_endpoints
 
 
 def _settings(**overrides):
@@ -32,7 +32,7 @@ def _settings(**overrides):
 
 def test_bailian_channel_appears_when_key_configured():
     """配置百炼密钥后，通道以国内区域、指定模型加入候选池。"""
-    eps = build_sensenova_endpoints(_settings(bailian_api_key="test-bailian"))
+    eps = build_model_endpoints(_settings(bailian_api_key="test-bailian"))
     ids = [e.endpoint_id for e in eps]
     assert "bailian" in ids
     channel = next(e for e in eps if e.endpoint_id == "bailian")
@@ -43,13 +43,13 @@ def test_bailian_channel_appears_when_key_configured():
 
 def test_bailian_channel_skipped_without_key():
     """未配置密钥时该通道不进入候选池，避免无效重试。"""
-    eps = build_sensenova_endpoints(_settings(bailian_api_key=""))
+    eps = build_model_endpoints(_settings(bailian_api_key=""))
     assert "bailian" not in [e.endpoint_id for e in eps]
 
 
 def test_bailian_is_first_candidate_channel():
     """配置齐备时百炼为首个调用通道，其余按故障转移顺序排列。"""
-    eps = build_sensenova_endpoints(_settings(
+    eps = build_model_endpoints(_settings(
         sensenova_overseas_api_key="test-overseas",
         sensenova_cn_secondary_api_key="test-secondary",
         dots_api_key="test-dots",

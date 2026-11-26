@@ -28,8 +28,8 @@ RegionType = Literal["domestic", "overseas"]
 
 
 @dataclass(frozen=True)
-class SensenovaEndpoint:
-    """单个商汤模型端点 Profile（含独立域名、密钥、模型与网络传输模式）。"""
+class ModelEndpoint:
+    """单个模型端点 Profile（含独立域名、密钥、模型与网络传输模式）。"""
 
     endpoint_id: str
     label: str
@@ -131,13 +131,13 @@ def get_active_route_recorder() -> Optional[_RouteAuditRecorder]:
 
 
 class CircuitBreakerRegistry:
-    """跨请求共享的商汤多通道熔断状态注册表。"""
+    """跨请求共享的多模型通道熔断状态注册表。"""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._records: Dict[str, _CircuitRecord] = {}
 
-    def _state_key(self, ep: SensenovaEndpoint) -> str:
+    def _state_key(self, ep: ModelEndpoint) -> str:
         return f"{ep.endpoint_id}:{ep.base_url}:{ep.fingerprint()}"
 
     def classify_error(self, exc: Exception, settings: Settings) -> Tuple[str, int]:
@@ -173,19 +173,19 @@ class CircuitBreakerRegistry:
 
     def select_candidates(
         self,
-        endpoints: List[SensenovaEndpoint],
+        endpoints: List[ModelEndpoint],
         *,
         allow_overseas: bool = True,
         preferred_endpoint_id: Optional[str] = None,
-    ) -> List[SensenovaEndpoint]:
+    ) -> List[ModelEndpoint]:
         """按实时健康状态、合规范围与优先级排序返回可用候选端点列表。"""
         eligible = [ep for ep in endpoints if allow_overseas or ep.region == "domestic"]
         if not eligible:
             return []
 
         now = time.monotonic()
-        healthy: List[SensenovaEndpoint] = []
-        cooling: List[Tuple[float, int, SensenovaEndpoint]] = []
+        healthy: List[ModelEndpoint] = []
+        cooling: List[Tuple[float, int, ModelEndpoint]] = []
 
         with self._lock:
             for ep in eligible:
@@ -203,12 +203,12 @@ class CircuitBreakerRegistry:
         cooling.sort(key=lambda item: (item[0], item[1]))
         return healthy + [item[2] for item in cooling]
 
-    def record_success(self, ep: SensenovaEndpoint) -> None:
+    def record_success(self, ep: ModelEndpoint) -> None:
         """记录成功调用并闭合（恢复）断路器。"""
         with self._lock:
             self._records.pop(self._state_key(ep), None)
 
-    def record_failure(self, ep: SensenovaEndpoint, reason: str, cooldown_seconds: int) -> None:
+    def record_failure(self, ep: ModelEndpoint, reason: str, cooldown_seconds: int) -> None:
         """记录失败并打开（或延长）断路器冷却窗口。"""
         now = time.monotonic()
         key = self._state_key(ep)
@@ -231,10 +231,10 @@ def _infer_region(base_url: str) -> RegionType:
     return "overseas" if "sensenova.ai" in (base_url or "").lower() else "domestic"
 
 
-def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
+def build_model_endpoints(settings: Settings) -> List[ModelEndpoint]:
     """根据运行配置构建候选通道池：百炼（首选）-> 商汤海外版 -> Dots -> 商汤国内主备。"""
     target_model = settings.model or "sensenova-6.8-flash"
-    endpoints: List[SensenovaEndpoint] = []
+    endpoints: List[ModelEndpoint] = []
     seen_pairs = set()
 
     def _add(
@@ -256,7 +256,7 @@ def build_sensenova_endpoints(settings: Settings) -> List[SensenovaEndpoint]:
             return
         seen_pairs.add(dedup_key)
         endpoints.append(
-            SensenovaEndpoint(
+            ModelEndpoint(
                 endpoint_id=endpoint_id,
                 label=label,
                 region=region,

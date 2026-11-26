@@ -26,8 +26,8 @@ from .parsers import _JSON_RULES, clean_model_output, get_pydantic_parser
 from .router import (
     _PREFERRED_ENDPOINT,
     CircuitBreakerRegistry,
-    SensenovaEndpoint,
-    build_sensenova_endpoints,
+    ModelEndpoint,
+    build_model_endpoints,
     get_active_route_recorder,
     get_circuit_registry,
 )
@@ -93,7 +93,7 @@ class LLMClient:
         }.get(tier, "")
         return mapped or cfg.model or "sensenova-6.8-flash"
 
-    def _client_for_endpoint(self, ep: SensenovaEndpoint) -> ChatOpenAI:
+    def _client_for_endpoint(self, ep: ModelEndpoint) -> ChatOpenAI:
         """为指定模型端点构建/复用绑定独立网络策略的 ChatOpenAI 客户端。"""
         cfg = self.settings
         direct = cfg.llm_direct_connection if ep.direct_connection is None else ep.direct_connection
@@ -151,7 +151,7 @@ class LLMClient:
 
     def _on_invoke_success(
         self,
-        ep: SensenovaEndpoint,
+        ep: ModelEndpoint,
         tier: ModelTier,
         usage: Dict[str, int],
         elapsed_s: float,
@@ -225,7 +225,7 @@ class LLMClient:
             output_token_limit = max(2048, min(self.settings.llm_max_tokens, self.settings.llm_output_cap))
         sampling_temperature = temperature if temperature is not None else self.settings.llm_temperature
 
-        endpoints = build_sensenova_endpoints(self.settings)
+        endpoints = build_model_endpoints(self.settings)
         preferred_endpoint_id = _PREFERRED_ENDPOINT.get()
         candidates = self._registry.select_candidates(
             endpoints,
@@ -234,8 +234,8 @@ class LLMClient:
         )
 
         if not candidates:
-            fallback_endpoint = SensenovaEndpoint(
-                endpoint_id="sensenova_default",
+            fallback_endpoint = ModelEndpoint(
+                endpoint_id="model_default",
                 label="商汤默认通道",
                 region="domestic",
                 base_url=self.settings.base_url,
