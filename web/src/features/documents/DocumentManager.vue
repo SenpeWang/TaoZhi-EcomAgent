@@ -92,12 +92,7 @@
       <el-alert v-if="detail.error" type="error" :title="detail.error" :closable="false" />
       <el-tabs v-model="detailTab" class="document-tabs">
         <el-tab-pane label="原始文档" name="original">
-          <article
-            v-if="detail.mime_type === 'text/markdown' && (originalText || detail.body)"
-            ref="markdownHost"
-            class="document-markdown"
-          />
-          <template v-else-if="detail.mime_type === 'application/pdf' && detail.has_original">
+          <template v-if="detail.mime_type === 'application/pdf' && detail.has_original">
             <div v-if="pdfTotal" class="pdf-viewer">
               <div class="pdf-toolbar">
                 <el-button size="small" :disabled="pdfPage <= 1" @click="pdfPage -= 1">
@@ -114,10 +109,8 @@
             <iframe v-else class="document-pdf" :src="originalUrl" title="PDF 原件" />
             <p class="chunk-note">当前按 PDF 原件版面展示，使用上一页 / 下一页浏览全部页面。</p>
           </template>
-          <article v-else-if="docxReady" ref="docxHost" class="document-markdown" />
-          <pre v-else-if="originalText || detail.body" class="document-body">{{
-            originalText || detail.body
-          }}</pre>
+          <article v-else-if="docxReady" ref="docxHost" class="document-render" />
+          <pre v-else-if="detail.body" class="document-body">{{ detail.body }}</pre>
           <el-empty v-else description="当前仅可查看文档基本信息，暂未获准阅读正文" />
         </el-tab-pane>
         <el-tab-pane label="切片与词嵌入" name="chunks">
@@ -231,7 +224,7 @@
             <el-option label="机密 (L3)" :value="3" />
           </el-select>
         </el-form-item>
-        <el-form-item label="上传本地文件（支持 Markdown / TXT / Word / PDF）">
+        <el-form-item label="上传本地文件（支持 PDF / Word 原件）">
           <input type="file" @change="picked" />
         </el-form-item>
       </div>
@@ -386,7 +379,6 @@ import { levelText, stateTag, stateText } from '../../shared/labels'
 import { useWorkspaceAction } from '../../shared/useWorkspaceAction'
 import { isAdmin } from '../administration/types'
 import type { ManagedUser, Organization, User } from '../administration/types'
-import { renderMarkdown } from './markdown'
 import type {
   DocumentChunkIndex,
   DocumentListItem,
@@ -448,18 +440,10 @@ const historyOpen = ref(false)
 const detailTab = ref<'original' | 'chunks'>('original')
 const chunkIndex = ref<DocumentChunkIndex | null>(null)
 const chunkError = ref('')
-const markdownHost = ref<HTMLElement | null>(null)
 const docxHost = ref<HTMLElement | null>(null)
 const docxHtml = ref('')
 const docxReady = ref(false)
-const originalText = ref('')
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-
-watchEffect(() => {
-  if (markdownHost.value) {
-    markdownHost.value.innerHTML = renderMarkdown(originalText.value || detail.value?.body || '')
-  }
-})
 
 watchEffect(() => {
   if (docxHost.value) {
@@ -516,7 +500,6 @@ function closeDocument(): void {
   pdfTotal.value = 0
   docxHtml.value = ''
   docxReady.value = false
-  originalText.value = ''
   selectedFile.value = null
   docForm.id = docForm.title = docForm.body = ''
   history.value = []
@@ -624,36 +607,12 @@ async function loadDocx(): Promise<void> {
   })
 }
 
-/** 读取 Markdown/TXT 归档原件，按原始权限展示未脱敏内容。 */
-async function loadOriginalText(): Promise<void> {
-  const document = detail.value
-  if (!document || !document.has_original) return
-  if (!['text/markdown', 'text/plain'].includes(document.mime_type || '')) return
-  if (originalText.value) return
-  const request = selection
-  await action(async () => {
-    try {
-      const response = await fetch(
-        '/api/documents/' + encodeURIComponent(document.id) + '/original',
-        { credentials: 'same-origin' },
-      )
-      if (!response.ok) return
-      const text = await response.text()
-      if (request !== selection || detail.value?.id !== document.id) return
-      originalText.value = text
-    } catch {
-      originalText.value = ''
-    }
-  })
-}
-
 watch(
   () => [detail.value?.id, detailTab.value] as const,
   ([id, tab]) => {
     if (id && tab === 'original') {
       void loadPdfMeta()
       void loadDocx()
-      void loadOriginalText()
     }
   },
 )
@@ -990,37 +949,37 @@ defineExpose({ openDocument })
   background: var(--el-fill-color-light);
 }
 
-.document-markdown {
+.document-render {
   max-height: 60vh;
   overflow: auto;
   font-size: 14px;
   line-height: 1.7;
 }
 
-.document-markdown :deep(h1) {
+.document-render :deep(h1) {
   margin: 0 0 12px;
   font-size: 20px;
 }
 
-.document-markdown :deep(h2) {
+.document-render :deep(h2) {
   margin: 18px 0 8px;
   font-size: 17px;
 }
 
-.document-markdown :deep(table) {
+.document-render :deep(table) {
   width: 100%;
   margin: 12px 0;
   border-collapse: collapse;
 }
 
-.document-markdown :deep(th),
-.document-markdown :deep(td) {
+.document-render :deep(th),
+.document-render :deep(td) {
   padding: 6px 8px;
   text-align: left;
   border: 1px solid var(--el-border-color);
 }
 
-.document-markdown :deep(blockquote) {
+.document-render :deep(blockquote) {
   margin: 12px 0;
   padding: 8px 12px;
   color: var(--el-text-color-secondary);
@@ -1028,14 +987,14 @@ defineExpose({ openDocument })
   border-left: 3px solid var(--el-border-color);
 }
 
-.document-markdown :deep(pre) {
+.document-render :deep(pre) {
   padding: 10px 12px;
   overflow: auto;
   background: var(--el-fill-color-light);
   border-radius: 6px;
 }
 
-.document-markdown :deep(code) {
+.document-render :deep(code) {
   font-family: var(--el-font-family-monospace, monospace);
 }
 
@@ -1048,7 +1007,7 @@ defineExpose({ openDocument })
   color: var(--el-text-color-secondary);
 }
 
-.document-markdown :deep(.docx-meta) {
+.document-render :deep(.docx-meta) {
   padding: 4px 0;
   margin-bottom: 8px;
   font-size: 12px;
