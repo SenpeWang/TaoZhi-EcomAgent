@@ -10,10 +10,12 @@ import atexit
 import inspect
 import json
 import logging
+import re
 import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Literal, Optional
 
@@ -25,6 +27,24 @@ from .truncate import truncate_text
 
 _LOG = logging.getLogger(__name__)
 ToolStatus = Literal["ok", "empty", "error", "timeout", "cancelled"]
+
+_CANCEL_EVENT: ContextVar[threading.Event | None] = ContextVar("taozhi_tool_cancel", default=None)
+
+
+class ToolCancelled(RuntimeError):
+    """工具执行收到任务取消信号时抛出的协作式中断。"""
+
+
+def current_cancel_event() -> threading.Event | None:
+    """返回当前工具执行上下文的取消事件，未设置时为 None。"""
+    return _CANCEL_EVENT.get()
+
+
+def raise_if_cancelled() -> None:
+    """在工具长循环中检查取消信号，命中时抛出 :class:`ToolCancelled`。"""
+    event = _CANCEL_EVENT.get()
+    if event is not None and event.is_set():
+        raise ToolCancelled("任务已取消")
 
 _POOL_LOCK = threading.Lock()
 _TOOL_POOL: Optional[ThreadPoolExecutor] = None
@@ -38,11 +58,47 @@ class ToolInvocationError(RuntimeError):
         super().__init__(CATALOG[code][1])
 
 
-def result_items(payload: object, field: str, limit: int) -> list:
-    """读取真实采集结果，区分有效的零条记录和格式异常。"""
+_HTTP_URL = re.compile(r"^https?://[^\s]+$", re.IGNORECASE)
+
+
+def is_http_url(value: object) -> bool:
+    """判断值是否为绝对 http/https URL。"""
+    return isinstance(value, str) and bool(_HTTP_URL.match(value.strip()))
+
+
+def dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """按 URL（无 URL 时按标题）去重并保持首次出现顺序。"""
+    seen: set[str] = set()
+    result: List[Dict[str, Any]] = []
+    for item in items:
+        key = str(item.get("url") or "").strip().lower()
+        if not key:
+            key = " ".join(str(item.get("title") or "").split()).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
+
+
+def result_items(
+    payload: object,
+    field: str,
+    limit: int,
+    *,
+    required: tuple[str, ...] = ("title",),
+    url_required: bool = False,
+) -> list:
+    """读取真实采集结果，校验必填字段与 URL 格式，区分空结果和格式异常。"""
     items = payload.get(field) if isinstance(payload, dict) else None
     if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
         raise ToolInvocationError("tool.invalid_response")
+    for item in items:
+        for key in required:
+            if not isinstance(item.get(key), str) or not item[key].strip():
+                raise ToolInvocationError("tool.invalid_response")
+        if url_required and not is_http_url(item.get("url")):
+            raise ToolInvocationError("tool.invalid_response")
     return items[:limit]
 
 
@@ -109,10 +165,12 @@ def clamp_timeout_args(
         裁剪后的参数副本字典。
     """
     call_args = dict(args)
-    if remaining_seconds is not None and inject_timeout:
-        bounded = max(0.5, float(remaining_seconds))
-        requested = call_args.get("timeout")
-        call_args["timeout"] = min(float(requested), bounded) if requested is not None else min(30.0, bounded)
+    if remaining_seconds is None or not inject_timeout:
+        return call_args
+    requested = call_args.get("timeout")
+    if requested is None:
+        return call_args
+    call_args["timeout"] = min(float(requested), max(0.5, float(remaining_seconds)))
     return call_args
 
 
@@ -217,11 +275,13 @@ def execute_tool_with_outcome(
             trace_context = otel_context.get_current()
 
             def invoke_in_trace():
-                token = otel_context.attach(trace_context)
+                otel_token = otel_context.attach(trace_context)
+                cancel_token = _CANCEL_EVENT.set(cancel_event)
                 try:
                     return fn(**call_kwargs)
                 finally:
-                    otel_context.detach(token)
+                    _CANCEL_EVENT.reset(cancel_token)
+                    otel_context.detach(otel_token)
 
             fut = _get_tool_pool().submit(invoke_in_trace)
             try:
@@ -232,7 +292,19 @@ def execute_tool_with_outcome(
                 dispatched = not fut.cancelled()
         else:
             dispatched = True
-            raw = fn(**call_kwargs)
+            cancel_token = _CANCEL_EVENT.set(cancel_event)
+            try:
+                raw = fn(**call_kwargs)
+            finally:
+                _CANCEL_EVENT.reset(cancel_token)
+    except ToolCancelled as exc:
+        return ToolOutcome(
+            tool_name=tool_name,
+            status="cancelled",
+            dispatched=dispatched,
+            elapsed=round(time.perf_counter() - t0, 2),
+            error_reason=str(exc) or "任务已取消",
+        )
     except (TimeoutError, FuturesTimeoutError, subprocess.TimeoutExpired, httpx.TimeoutException) as exc:
         return ToolOutcome(
             tool_name=tool_name,

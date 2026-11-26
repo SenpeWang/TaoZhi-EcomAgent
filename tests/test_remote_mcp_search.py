@@ -27,6 +27,7 @@ class _Resp:
 class _Client:
     def __init__(self, responses):
         self._responses = list(responses)
+        self.calls = []
 
     def __enter__(self):
         return self
@@ -35,6 +36,7 @@ class _Client:
         return False
 
     def post(self, url, json=None, headers=None):
+        self.calls.append((url, json, headers))
         return self._responses.pop(0)
 
 
@@ -75,6 +77,7 @@ def test_search_web_via_mcp_parses_session_and_content(monkeypatch):
     ) + "\n"
     responses = [
         _Resp(headers={"mcp-session-id": "sess-1"}),
+        _Resp(),
         _Resp(headers={"content-type": "text/event-stream"}, text=sse),
     ]
     monkeypatch.setattr(rs.httpx, "Client", lambda **_kw: _Client(responses))
@@ -89,7 +92,11 @@ def test_search_web_via_mcp_handles_error_result(monkeypatch):
     sse = "event: message\ndata: " + json.dumps(
         {"jsonrpc": "2.0", "id": 2, "result": {"isError": True, "content": []}}
     ) + "\n"
-    responses = [_Resp(headers={"mcp-session-id": "s1"}), _Resp(text=sse, headers={"content-type": "text/event-stream"})]
+    responses = [
+        _Resp(headers={"mcp-session-id": "s1"}),
+        _Resp(),
+        _Resp(text=sse, headers={"content-type": "text/event-stream"}),
+    ]
     monkeypatch.setattr(rs.httpx, "Client", lambda **_kw: _Client(responses))
     assert rs.search_web_via_mcp("手机支架") == []
 
@@ -113,3 +120,27 @@ def test_search_web_prefers_mcp_results(monkeypatch):
     monkeypatch.setattr(sw, "search_web_via_mcp", lambda *_a, **_k: [{"title": "t", "snippet": "s", "url": "https://x", "source": "exa-mcp"}])
     items = sw.search_web("手机支架", limit=3)
     assert items and items[0]["source"] == "exa-mcp"
+
+def test_search_web_via_mcp_sends_initialized_notification(monkeypatch):
+    """initialize 成功后必须按 MCP 规范发送 initialized 通知，再调用工具。"""
+    monkeypatch.setenv("ECOM_MCP_SEARCH_URL", "https://mcp.test/mcp")
+    sse = "event: message\ndata: " + json.dumps(
+        {"jsonrpc": "2.0", "id": 2, "result": {"content": [{"type": "text", "text": _SAMPLE}]}}
+    ) + "\n"
+    responses = [
+        _Resp(headers={"mcp-session-id": "sess-1"}),
+        _Resp(),
+        _Resp(headers={"content-type": "text/event-stream"}, text=sse),
+    ]
+    holder = {}
+
+    def factory(**_kwargs):
+        client = _Client(responses)
+        holder["client"] = client
+        return client
+
+    monkeypatch.setattr(rs.httpx, "Client", factory)
+    assert rs.search_web_via_mcp("手机支架", limit=5)
+    calls = holder["client"].calls
+    assert calls[1][1]["method"] == "notifications/initialized"
+    assert calls[1][2]["Mcp-Session-Id"] == "sess-1"

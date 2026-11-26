@@ -3,11 +3,9 @@
 支持多级降级链路：
 1. 若配置了外部亚马逊网关 (``ECOM_AMAZON_SEARCH_URL``)，优先走外部稳定 API；
 2. 否则直接通过无密 HTTP 抓包解析 Amazon.com 搜索页 DOM；
-3. 若被反爬拦截，降级复用 DuckDuckGo ``site:amazon.com`` 定向抓取；
+3. 若被反爬拦截，降级复用 DuckDuckGo ``site:amazon.com`` 定向抓取，来源标记为 ``amazon-ddg``；
 4. 若所有真实通道均无结果，诚实返回空列表 ``[]``（严禁捏造测试 ASIN 或假价格）。
-严格遵循 Google Python Style 规范。
 """
-
 from __future__ import annotations
 
 import html
@@ -19,9 +17,9 @@ from urllib.parse import quote_plus
 import httpx
 
 from .search_web import search_duckduckgo_html
-
 from taozhi.observability.tracing import record_diagnostic
-from .outcome import result_items
+from .outcome import dedupe_items, raise_if_cancelled, result_items
+
 AMAZON_BASE_URL = "https://www.amazon.com/"
 
 
@@ -43,6 +41,7 @@ def search_amazon(
     clean_query = query.strip()
     if not clean_query:
         return []
+    raise_if_cancelled()
 
     custom_url = os.environ.get("ECOM_AMAZON_SEARCH_URL", "").strip()
     if custom_url:
@@ -54,9 +53,9 @@ def search_amazon(
                     headers["X-API-Key"] = key
                 resp = client.post(custom_url, json={"query": clean_query, "limit": limit}, headers=headers)
                 resp.raise_for_status()
-                items = result_items(resp.json(), "items", limit)
+                items = result_items(resp.json(), "items", limit, required=("title",))
                 if items:
-                    return items
+                    return dedupe_items(items)[:limit]
         except Exception as exc:
             record_diagnostic("tool.gateway", "fallback", exc)
 
@@ -85,73 +84,83 @@ def search_amazon(
                     re.DOTALL,
                 )
                 for asin, card_html in cards:
-                    title_m = re.search(r'<span class="a-size-[^"]*a-text-normal"[^>]*>(.*?)</span>', card_html, re.DOTALL)
-                    if not title_m:
-                        title_m = re.search(r'<h2[^>]*>.*?<span[^>]*>(.*?)</span>', card_html, re.DOTALL)
-                    if not title_m:
+                    raise_if_cancelled()
+                    try:
+                        title_m = re.search(r'<span class="a-size-[^"]*a-text-normal"[^>]*>(.*?)</span>', card_html, re.DOTALL)
+                        if not title_m:
+                            title_m = re.search(r'<h2[^>]*>.*?<span[^>]*>(.*?)</span>', card_html, re.DOTALL)
+                        if not title_m:
+                            continue
+                        title = html.unescape(re.sub(r"<[^<]+?>", "", title_m.group(1)).strip())
+
+                        price_m = re.search(r'<span class="a-offscreen"[^>]*>(\$[0-9,.]+)</span>', card_html)
+                        if not price_m:
+                            price_m = re.search(r'<span class="a-price-whole">([0-9,]+)</span>.*?<span class="a-price-fraction">([0-9]+)</span>', card_html, re.DOTALL)
+                            price_str = f"${price_m.group(1)}.{price_m.group(2)}" if price_m else ""
+                        else:
+                            price_str = price_m.group(1)
+
+                        rating_m = re.search(r'<span class="a-icon-alt"[^>]*>([0-9.]+ out of 5 stars)</span>', card_html)
+                        rating = rating_m.group(1) if rating_m else ""
+
+                        reviews_m = re.search(r'<span class="a-size-base s-underline-text"[^>]*>([0-9,]+)</span>', card_html)
+                        reviews_cnt = int(reviews_m.group(1).replace(",", "")) if reviews_m else None
+
+                        price_val = None
+                        if price_str:
+                            try:
+                                price_val = float(price_str.replace("$", "").replace(",", ""))
+                            except ValueError:
+                                price_val = None
+
+                        results.append(
+                            {
+                                "title": title,
+                                "url": f"{AMAZON_BASE_URL}dp/{asin}",
+                                "asin": asin,
+                                "price_text": price_str or None,
+                                "price_value": price_val,
+                                "currency": "USD" if price_val is not None else None,
+                                "rating_value": float(rating.split(" ")[0]) if rating else None,
+                                "reviews_count": reviews_cnt,
+                                "is_prime": True if "a-icon-prime" in card_html else None,
+                                "price_source": "product_page",
+                                "source": "amazon",
+                            }
+                        )
+                    except (ValueError, AttributeError):
                         continue
-                    title = html.unescape(re.sub(r"<[^<]+?>", "", title_m.group(1)).strip())
-
-                    price_m = re.search(r'<span class="a-offscreen"[^>]*>(\$[0-9,.]+)</span>', card_html)
-                    if not price_m:
-                        price_m = re.search(r'<span class="a-price-whole">([0-9,]+)</span>.*?<span class="a-price-fraction">([0-9]+)</span>', card_html, re.DOTALL)
-                        price_str = f"${price_m.group(1)}.{price_m.group(2)}" if price_m else ""
-                    else:
-                        price_str = price_m.group(1)
-
-                    rating_m = re.search(r'<span class="a-icon-alt"[^>]*>([0-9.]+ out of 5 stars)</span>', card_html)
-                    rating = rating_m.group(1) if rating_m else ""
-
-                    reviews_m = re.search(r'<span class="a-size-base s-underline-text"[^>]*>([0-9,]+)</span>', card_html)
-                    reviews_cnt = int(reviews_m.group(1).replace(",", "")) if reviews_m else None
-
-                    price_val = None
-                    if price_str:
-                        try:
-                            price_val = float(price_str.replace("$", "").replace(",", ""))
-                        except ValueError:
-                            price_val = None
-
-                    results.append(
-                        {
-                            "title": title,
-                            "price": price_str,
-                            "price_value": price_val,
-                            "currency": "USD" if price_val is not None else "",
-                            "asin": asin,
-                            "rating": rating,
-                            "rating_score": float(rating.split(" ")[0]) if rating else None,
-                            "reviews_count": reviews_cnt,
-                            "url": f"{AMAZON_BASE_URL}dp/{asin}",
-                            "is_prime": "a-icon-prime" in card_html,
-                            "source": "amazon",
-                        }
-                    )
                     if len(results) >= limit:
-                        return results
+                        return dedupe_items(results)[:limit]
             else:
                 record_diagnostic("tool.scraper", "fallback", http_status=resp.status_code)
     except Exception as exc:
         record_diagnostic("tool.scraper", "fallback", exc)
 
     if not results:
-        results = _fallback_duckduckgo_amazon_search(clean_query, limit=limit, timeout=timeout)
+        try:
+            results = _fallback_duckduckgo_amazon_search(clean_query, limit=limit, timeout=timeout)
+        except Exception as exc:
+            record_diagnostic("tool.scraper", "fallback", exc)
+            results = []
 
-    return results[:limit]
+    return dedupe_items(results)[:limit]
 
 
 def _fallback_duckduckgo_amazon_search(
     query: str, limit: int = 10, timeout: float = 12.0
 ) -> List[Dict[str, Any]]:
-    """通过 DuckDuckGo ``site:amazon.com`` 提取真实 Amazon 页面，不做虚假数字填充。"""
+    """通过 DuckDuckGo ``site:amazon.com`` 提取真实 Amazon 页面，来源标记为二手检索。"""
+    raise_if_cancelled()
     ddg_items = search_duckduckgo_html(
         f"site:amazon.com {query}",
         limit=max(limit * 2, limit),
         timeout=timeout,
-        source="amazon",
+        source="amazon-ddg",
     )
     fallback_items: List[Dict[str, Any]] = []
     for row in ddg_items:
+        raise_if_cancelled()
         actual_url = row.get("url", "")
         if "amazon.com" not in actual_url:
             continue
@@ -166,22 +175,21 @@ def _fallback_duckduckgo_amazon_search(
         price_str = f"${price_match.group(1)}" if price_match else ""
         price_val = float(price_match.group(1)) if price_match else None
 
+        if not clean_title:
+            continue
         fallback_items.append(
             {
                 "title": clean_title,
-                "snippet": clean_snippet,
-                "price": price_str,
-                "price_value": price_val,
-                "currency": "USD" if price_val is not None else "",
-                "asin": asin,
-                "rating": "",
-                "rating_score": None,
-                "reviews_count": None,
                 "url": actual_url,
-                "is_prime": False,
-                "source": "amazon",
+                "asin": asin or None,
+                "price_text": price_str or None,
+                "price_value": price_val,
+                "currency": "USD" if price_val is not None else None,
+                "rating_value": None,
+                "reviews_count": None,
+                "is_prime": None,
+                "price_source": "search_snippet",
+                "source": "amazon-ddg",
             }
         )
-        if len(fallback_items) >= limit:
-            break
-    return fallback_items
+    return dedupe_items(fallback_items)[:limit]

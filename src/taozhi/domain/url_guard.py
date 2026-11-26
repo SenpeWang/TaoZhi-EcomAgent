@@ -25,8 +25,8 @@ def _is_public_ip(ip_str: str) -> bool:
     )
 
 
-def validate_public_http_url(url: str) -> str:
-    """校验目标 URL 是否允许由外部爬虫访问（防 SSRF 探测内网与云元数据）。
+def resolve_public_http_target(url: str) -> tuple[str, str]:
+    """校验目标 URL 并返回标准 URL 与用于固定连接的已校验 IP。
 
     仅放行 ``http://`` 与 ``https://`` 协议，并拦截回环地址、RFC1918 私网段、
     云主机元数据段（如 ``169.254.169.254``）以及解析到非公网 IP 的域名。
@@ -35,7 +35,8 @@ def validate_public_http_url(url: str) -> str:
         url: 待校验的目标网页链接。
 
     Returns:
-        校验通过并去除首尾空白后的标准 URL 字符串。
+        ``(标准 URL, 已校验 IP)`` 二元组；调用方应把 TCP 连接固定到该 IP，
+        但请求 URL 仍保留原主机名以维持 TLS SNI 与证书校验。
 
     Raises:
         Denied: 当协议非法、主机名为内网标识或解析 IP 非全局公网地址时抛出 ``SSRF_BLOCKED``。
@@ -57,7 +58,7 @@ def validate_public_http_url(url: str) -> str:
     if ip_literal is not None:
         if not _is_public_ip(str(ip_literal)):
             raise Denied("目标链接被安全策略拦截：禁止访问内网或保留 IP", "SSRF_BLOCKED", 403)
-        return raw
+        return raw, str(ip_literal)
 
     port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
     try:
@@ -65,7 +66,12 @@ def validate_public_http_url(url: str) -> str:
     except OSError as exc:
         raise Denied(f"目标域名解析失败：{exc}", "SSRF_DNS_FAILED", 400) from exc
 
-    resolved_ips = {item[4][0] for item in infos if item and item[4]}
+    resolved_ips = sorted({item[4][0] for item in infos if item and item[4]})
     if not resolved_ips or any(not _is_public_ip(ip_s) for ip_s in resolved_ips):
         raise Denied("目标链接被安全策略拦截：域名解析包含非公网地址", "SSRF_BLOCKED", 403)
-    return raw
+    return raw, resolved_ips[0]
+
+
+def validate_public_http_url(url: str) -> str:
+    """校验目标 URL 并返回标准 URL；需要固定连接时使用 :func:`resolve_public_http_target`。"""
+    return resolve_public_http_target(url)[0]

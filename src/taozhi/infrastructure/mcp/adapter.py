@@ -20,6 +20,7 @@ from taozhi.core.tools.outcome import (
 )
 from taozhi.observability.diagnostics import EVENT_NAME
 from taozhi.observability.tracing import node_span, record_diagnostic
+from .schema import apply_defaults
 from .server import EcommerceMcpServer, default_mcp_server
 
 
@@ -47,13 +48,14 @@ class McpClientAdapter:
         for tool_def in self.server.list_tools():
             if allow_set is not None and tool_def.name not in allow_set:
                 continue
-            specs.append(
-                {
-                    "name": tool_def.name,
-                    "description": tool_def.description,
-                    "inputSchema": tool_def.inputSchema,
-                }
-            )
+            spec = {
+                "name": tool_def.name,
+                "description": tool_def.description,
+                "inputSchema": tool_def.inputSchema,
+            }
+            if tool_def.outputSchema is not None:
+                spec["outputSchema"] = tool_def.outputSchema
+            specs.append(spec)
         return specs
 
     def call_tool(
@@ -77,11 +79,16 @@ class McpClientAdapter:
         Returns:
             经由共享超时执行器返回的归一化 ToolOutcome。
         """
-        accepts_timeout = any(
-            tool.name == tool_name and "timeout" in tool.inputSchema.get("properties", {})
-            for tool in self.server.list_tools()
+        schema = next(
+            (tool.inputSchema for tool in self.server.list_tools() if tool.name == tool_name),
+            {},
         )
-        call_args = clamp_timeout_args(arguments, remaining_seconds=remaining_seconds, inject_timeout=accepts_timeout)
+        call_args = apply_defaults(schema, arguments)
+        call_args = clamp_timeout_args(
+            call_args,
+            remaining_seconds=remaining_seconds,
+            inject_timeout="timeout" in (schema.get("properties") or {}),
+        )
 
         def _invoke_mcp() -> Any:
             mcp_res = self.server.call_tool(tool_name, call_args)

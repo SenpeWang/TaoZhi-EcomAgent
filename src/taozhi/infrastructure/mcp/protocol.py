@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -15,6 +15,10 @@ class McpToolDefinition(BaseModel):
     name: str = Field(..., description="工具唯一标识名称")
     description: str = Field(..., description="工具功能与用途语义说明")
     inputSchema: Dict[str, Any] = Field(..., description="符合 JSON Schema 规范的入参定义")
+    outputSchema: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="工具返回文本 JSON 的结构定义：搜索类为数组，抓取与时钟为对象",
+    )
 
 
 class McpContentItem(BaseModel):

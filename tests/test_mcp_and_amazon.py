@@ -69,7 +69,8 @@ def test_current_time_observes_the_requested_timezone(month, offset):
 @pytest.mark.parametrize("zone", ["Unknown/City", "", None])
 def test_current_time_rejects_invalid_timezones(zone):
     result = EcommerceMcpServer().call_tool("get_current_time", {"timezone": zone})
-    assert result.isError and "无法识别时区" in result.content[0].text
+    assert result.isError
+    assert "无法识别时区" in result.content[0].text or "参数不符合" in result.content[0].text
 
 
 def test_search_amazon_execution_and_data_structure():
@@ -92,9 +93,14 @@ def test_search_amazon_execution_and_data_structure():
 
     item = results[0]
     assert item["title"] == "iPhone 16 Magnetic Case"
-    assert item["price"] == "$15.99"
+    assert item["price_text"] == "$15.99"
+    assert item["price_value"] == 15.99
+    assert item["currency"] == "USD"
+    assert item["rating_value"] == 4.6
     assert item["asin"] == "B0REAL0001"
     assert item["reviews_count"] == 1240
+    assert item["is_prime"] is True
+    assert item["price_source"] == "product_page"
     assert item["source"] == "amazon"
     assert item["url"] == f"{AMAZON_BASE_URL}dp/B0REAL0001"
 
@@ -120,7 +126,7 @@ def test_mcp_server_enforces_canonical_tool_names_and_parameters():
 
     with patch(
         "taozhi.core.tools.search_1688.search_1688_wholesale",
-        return_value=[{"title": "东莞源头厂保温杯", "price": 18.5}],
+        return_value=[{"title": "东莞源头厂保温杯", "url": "https://detail.1688.com/offer/1.html", "price": 18.5}],
     ) as search:
         ws_res = server.call_tool("search_1688_wholesale", {"keyword": "保温杯", "limit": 2})
         for invalid_arguments in (
@@ -130,7 +136,7 @@ def test_mcp_server_enforces_canonical_tool_names_and_parameters():
         ):
             invalid = server.call_tool("search_1688_wholesale", invalid_arguments)
             assert invalid.isError and "参数不符合" in invalid.content[0].text
-        search.assert_called_once_with(keyword="保温杯", limit=2)
+        search.assert_called_once_with(keyword="保温杯", limit=2, timeout=90.0)
     assert not ws_res.isError
     ws_parsed = json.loads(ws_res.content[0].text)
     assert ws_parsed[0]["title"] == "东莞源头厂保温杯"
@@ -150,6 +156,7 @@ def test_mcp_client_adapter_integration():
     spec_names = [s["name"] for s in specs]
     assert spec_names == ["search_web", "fetch_web_page"]
     assert "inputSchema" in specs[0]
+    assert "outputSchema" in specs[0]
 
     with patch(
         "taozhi.core.tools.search_amazon.search_amazon",

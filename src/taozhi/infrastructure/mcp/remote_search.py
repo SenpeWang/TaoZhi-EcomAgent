@@ -5,6 +5,7 @@ import json
 import os
 import re
 from typing import Any, Dict, List
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -24,12 +25,12 @@ _MAX_SNIPPET = 600
 
 
 def endpoint() -> str:
-    """读取远端 MCP 检索服务地址（未配置时返回空串）。
-
-    Returns:
-        环境变量 ``ECOM_MCP_SEARCH_URL`` 的取值，空串表示未启用远端检索。
-    """
-    return os.environ.get("ECOM_MCP_SEARCH_URL", "").strip()
+    """读取远端 MCP 检索服务地址（未配置或协议非法时返回空串）。"""
+    raw = os.environ.get("ECOM_MCP_SEARCH_URL", "").strip()
+    parsed = urlsplit(raw)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return ""
+    return raw
 
 
 def _decode(resp: httpx.Response) -> Dict[str, Any]:
@@ -101,7 +102,17 @@ def _open(client: httpx.Client, url: str) -> str | None:
         headers=headers,
     )
     resp.raise_for_status()
-    return resp.headers.get("mcp-session-id")
+    session = resp.headers.get("mcp-session-id")
+    notify_headers = dict(_HEADERS)
+    if session:
+        notify_headers["Mcp-Session-Id"] = session
+    notification = client.post(
+        url,
+        json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+        headers=notify_headers,
+    )
+    notification.raise_for_status()
+    return session
 
 
 def _call_tool(url: str, tool: str, arguments: Dict[str, Any], timeout: float) -> List[Dict[str, Any]]:
@@ -150,7 +161,7 @@ def parse_items(text: str, limit: int, source: str) -> List[Dict[str, Any]]:
         title = match.group("title").strip()
         url = match.group("url").strip()
         body = re.sub(r"\s+", " ", match.group("body")).strip()
-        if not title or not url.startswith("http"):
+        if not title or not re.match(r"^https?://[^\s]+$", url, re.IGNORECASE):
             continue
         items.append(
             {

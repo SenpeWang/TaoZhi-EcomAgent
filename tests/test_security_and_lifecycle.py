@@ -52,20 +52,36 @@ def test_url_guard_and_web_scraper_block_ssrf_and_internal_redirects():
         res = web_scraper.fetch_web_page(bad_url)
         assert res["status"] == "error"
 
-    fake_resp = MagicMock()
-    fake_resp.status_code = 302
-    fake_resp.headers = {"location": "http://127.0.0.1:18080/api/health"}
+    class _FakeStream:
+        status_code = 302
+        headers = {"location": "http://127.0.0.1:18080/api/health"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+    class _FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def stream(self, *_args, **_kwargs):
+            return _FakeStream()
 
     with (
         patch("taozhi.domain.url_guard.socket.getaddrinfo", return_value=[(2, 1, 6, "", ("93.184.216.34", 443))]),
-        patch("taozhi.core.tools.web_scraper.httpx.Client") as mock_client_cls,
+        patch("taozhi.core.tools.web_scraper.httpx.Client", return_value=_FakeClient()),
     ):
-        mock_client = mock_client_cls.return_value.__enter__.return_value
-        mock_client.get.return_value = fake_resp
         out = web_scraper.fetch_web_page("https://example.com/article")
 
     assert out["status"] == "error"
-    assert out.get("error") == "SSRF_BLOCKED"
+    assert out["error_code"] == "SSRF_BLOCKED"
+    assert "安全策略" in out["error"]
+    assert out["text"] == ""
 
 
 def test_search_amazon_returns_empty_without_fabrication_when_blocked():
@@ -260,21 +276,21 @@ def test_prune_expired_runtime_records_cleans_dead_rows():
 def test_subagent_worker_cleans_sandbox_even_on_error(tmp_path):
     """子智能体执行过程中发生异常时，finally 仍应清理临时 scratch 与 workspace。"""
     from taozhi.application.research import subagents
-    from taozhi.core.agent.context import SubagentContext
+    from taozhi.core.agent.context import AgentContext
     from taozhi.core.agent.protocol import WorkspaceMode
 
-    sandbox = SubagentContext(conversation_id="sub_err_gc", role="专员", workspace_mode=WorkspaceMode.BRANCH, root_dir=tmp_path)
+    sandbox = AgentContext(conversation_id="sub_err_gc", role="专员", workspace_mode=WorkspaceMode.BRANCH, root_dir=tmp_path)
     sandbox.write_scratch("tmp.json", "{}")
     assert sandbox.scratch_dir.exists()
 
     with (
-        patch("taozhi.application.research.subagents.AgentSession.open_subagent_sandbox", return_value=sandbox),
+        patch("taozhi.application.research.subagents.AgentSession.open_agent_workspace", return_value=sandbox),
         patch("taozhi.application.research.subagents._plan_subagent_step", side_effect=RuntimeError("boom")),
         pytest.raises(RuntimeError, match="boom"),
     ):
         subagents.subagent_worker_node(
             {
-                "current_task": {"task_id": "t_err", "role": "专员", "goal": "测试", "allowed_tools": ["search_web"]},
+                "current_task": {"task_id": "t_err", "role": "专员", "goal": "测试", "suggested_tools": ["search_web"]},
                 "user_query": "test",
                 "keyword": "test",
             }
