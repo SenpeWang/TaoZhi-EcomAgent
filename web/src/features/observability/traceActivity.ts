@@ -161,7 +161,13 @@ export function activityResult(entry: TraceActivity): string {
       case 'synthesizer':
         details.push('转入报告撰写')
         break
-      case 'final_node':
+      case 'quick_answer':
+        details.push('转入一次问答')
+        break
+      case 'call_tool':
+        details.push('直接核验一次工具')
+        break
+      case 'archive_research':
         details.push('进入归档')
         break
     }

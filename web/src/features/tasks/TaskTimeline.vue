@@ -168,6 +168,42 @@ function onSteer() {
             </div>
           </div>
 
+          <div
+            v-if="result.research_tasks?.length"
+            class="research-task-board"
+            style="margin: 12px 0"
+          >
+            <h4 style="margin: 0 0 8px">调研任务板</h4>
+            <div
+              v-for="item in result.research_tasks"
+              :key="item.id"
+              class="research-task-row"
+              style="
+                display: flex;
+                gap: 8px;
+                align-items: flex-start;
+                padding: 6px 0;
+                border-top: 1px solid var(--el-border-color-lighter);
+              "
+            >
+              <el-tag size="small" effect="plain">{{ item.role }}</el-tag>
+              <div style="flex: 1; min-width: 0">
+                <div>{{ item.brief?.goal || item.task_key }}</div>
+                <small v-if="item.result?.summary" style="color: var(--el-text-color-secondary)">
+                  {{ item.result.summary }}
+                </small>
+              </div>
+              <el-tag
+                size="small"
+                :type="
+                  item.status === 'done' ? 'success' : item.status === 'failed' ? 'danger' : 'info'
+                "
+              >
+                {{ item.status }}
+              </el-tag>
+            </div>
+          </div>
+
           <div v-if="result.outline?.length" class="research-outline-bar">
             <span class="outline-label">报告大纲：</span>
             <el-tag

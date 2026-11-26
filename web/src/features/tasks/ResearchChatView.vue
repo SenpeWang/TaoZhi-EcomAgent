@@ -387,7 +387,7 @@ async function handleSend(): Promise<void> {
       kind: 'research',
       conversation_id: activeConvId.value,
       keyword: kw,
-      platforms: ['web', 'p1688'],
+      platforms: ['web', 'sourcing'],
       input_level: 1,
     })
     if (version !== conversationVersion) return

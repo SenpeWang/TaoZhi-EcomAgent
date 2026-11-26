@@ -64,7 +64,7 @@ for (const [reason, expected] of [
 }
 const coordinator = {...base, kind:'AGENT', name:'research.orchestrator', attributes:{}}
 assert.equal(activityResult(coordinator), '')
-for (const [action, expected] of [['dispatch_subagents','已派发 2 项子任务'], ['synthesizer','转入报告撰写'], ['final_node','进入归档']]) {
+for (const [action, expected] of [['dispatch_subagents','已派发 2 项子任务'], ['quick_answer','转入一次问答'], ['synthesizer','转入报告撰写'], ['archive_research','进入归档']]) {
   assert.equal(activityResult({...coordinator, attributes:{'research.next_action':action, 'research.dispatched_count':2}}), expected)
 }
 assert.equal(actorInstanceLabels([base, model, {...model, actor:null}]).size, 0)

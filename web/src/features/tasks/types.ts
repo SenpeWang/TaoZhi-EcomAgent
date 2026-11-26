@@ -33,10 +33,46 @@ export interface ResearchSubagent {
   id: string
   role: string
   display_name: string
+  task_id?: string
+  agent_type?: string
   model_tier?: string
   status: string
+  decision_reason?: string
+  summary?: string
   elapsed?: number
   artifacts?: string[]
+}
+
+export interface ResearchTaskComment {
+  id: number
+  author_agent: string
+  body: string
+  created_at?: string
+}
+
+export interface ResearchTaskBoardItem {
+  id: string
+  task_key: string
+  role: string
+  status: string
+  revision: number
+  owner_agent?: string | null
+  brief?: {
+    goal?: string
+    output_format?: string
+    source_guidance?: string
+    boundaries?: string
+    model_tier?: string
+  }
+  result?: {
+    summary?: string
+    status?: string
+    elapsed?: number
+    model_tier?: string
+    gaps?: string[]
+  } | null
+  error?: string
+  comments?: ResearchTaskComment[]
 }
 
 export interface TaskResult {
@@ -57,6 +93,7 @@ export interface TaskResult {
   outline?: string[]
   platforms?: ResearchPlatform[]
   subagents?: ResearchSubagent[]
+  research_tasks?: ResearchTaskBoardItem[]
   artifacts?: string[]
   elapsed?: number
   model_calls?: number
