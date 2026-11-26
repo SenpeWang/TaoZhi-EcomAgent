@@ -12,14 +12,15 @@ from opentelemetry.trace import StatusCode
 
 from taozhi.core.agent.session import AgentSession
 from taozhi.domain.agent_catalog import agent_display_name
-from taozhi.domain.research import StopReason
+from taozhi.domain.research import ResearchStatus, StopReason
 from taozhi.observability.tracing import current_trace_id, node_span, record_diagnostic
 from .hooks import RuntimeHooks, emit_progress, normalize_steering_item, register_hooks, unregister_hooks
 from .planner import lead_orchestrator_node, orchestrator_router
-from .reporter import final_persistence_node, synthesizer_node
+from .reporter import archive_research, synthesizer_node
+from .coordinator_tool import coordinator_tool_node
+from .quick_answer import quick_answer_worker_node
 from .schemas import AutonomousAgentState
 from .subagents import subagent_worker_node
-
 
 
 def _traced_research_node(name: str, func: Callable) -> Callable:
@@ -27,10 +28,17 @@ def _traced_research_node(name: str, func: Callable) -> Callable:
     @wraps(func)
     def run(state):
         operation = f"research.{name}"
-        if name == "final_node":
+        if name == "archive_research":
             with node_span(operation, "CHAIN"):
                 return func(state)
-        role = state["current_task"]["role"] if name == "subagent_worker" else operation
+        if name == "subagent_worker":
+            role = state["current_task"]["role"]
+        elif name == "quick_answer_worker":
+            role = "research.quick_answer"
+        elif name == "coordinator_tool":
+            role = "research.orchestrator"
+        else:
+            role = operation
         with node_span(operation, "AGENT", {SpanAttributes.AGENT_NAME: role}) as span:
             result = func(state)
             if span is not None and name == "orchestrator":
@@ -42,7 +50,7 @@ def _traced_research_node(name: str, func: Callable) -> Callable:
                     span.set_attribute("research.dispatched_count", len(tasks))
             transition = next(iter(result.get("audit_trail", [])), None)
             if span is not None and transition:
-                span.set_attribute("subagent_id", transition["agent_id"])
+                span.set_attribute("agent_id", transition["agent_id"])
                 if transition["state_to"] == "PARTIAL_OR_FAILED":
                     span.set_attribute("error.type", "ResearchAgentFailure")
                     span.set_status(StatusCode.ERROR)
@@ -67,8 +75,10 @@ def build_autonomous_agent_graph(checkpointer: Any = None, *, require_checkpoint
     for name, func in (
         ("orchestrator", lead_orchestrator_node),
         ("subagent_worker", subagent_worker_node),
+        ("quick_answer_worker", quick_answer_worker_node),
+        ("coordinator_tool", coordinator_tool_node),
         ("synthesizer", synthesizer_node),
-        ("final_node", final_persistence_node),
+        ("archive_research", archive_research),
     ):
         builder.add_node(name, _traced_research_node(name, func))
 
@@ -76,11 +86,13 @@ def build_autonomous_agent_graph(checkpointer: Any = None, *, require_checkpoint
     builder.add_conditional_edges(
         "orchestrator",
         orchestrator_router,
-        ["subagent_worker", "synthesizer", "final_node"],
+        ["subagent_worker", "quick_answer_worker", "coordinator_tool", "synthesizer", "archive_research"],
     )
     builder.add_edge("subagent_worker", "orchestrator")
-    builder.add_edge("synthesizer", "final_node")
-    builder.add_edge("final_node", END)
+    builder.add_edge("quick_answer_worker", "archive_research")
+    builder.add_edge("coordinator_tool", "orchestrator")
+    builder.add_edge("synthesizer", "archive_research")
+    builder.add_edge("archive_research", END)
 
     return builder.compile(checkpointer=checkpointer)
 
@@ -134,7 +146,7 @@ def _build_research_result_payload(
     session: AgentSession,
     hooks: RuntimeHooks,
 ) -> Dict[str, Any]:
-    """聚合并发子智能体证据池与审计轨迹，同时沉淀 Piagent 会话长效记忆。"""
+    """聚合并发子智能体证据池与审计轨迹，同时沉淀 AgentSession 长效记忆。"""
     subagents_trace: List[Dict[str, Any]] = []
     for tr in merged_state.get("audit_trail", []):
         tool_records = tr.get("tools", [])
@@ -142,9 +154,10 @@ def _build_research_result_payload(
             {
                 "id": tr["agent_id"],
                 "role": tr["role"],
-                "type_name": tr["type_name"],
+                "task_id": tr["task_id"],
+                "agent_type": tr["agent_type"],
                 "status": tr["state_to"].lower(),
-                "decision_rationale": tr["decision_rationale"],
+                "decision_reason": tr["decision_reason"],
                 "elapsed": tr["elapsed"],
                 "tools": [
                     {
@@ -158,23 +171,21 @@ def _build_research_result_payload(
                     for t in tool_records
                 ],
                 "scratch_files": tr["scratch_files"],
-                "brief": tool_records[0]["result_summary"] if tool_records else tr["decision_rationale"],
+                "summary": tool_records[0]["result_summary"] if tool_records else tr["decision_reason"],
             }
         )
 
     invalidated = set(merged_state.get("invalidated_evidence_ids") or [])
     active_ev = [ev for ev in (merged_state.get("evidence_pool") or []) if ev.get("evidence_id") not in invalidated]
     web_items: List[Dict[str, Any]] = []
-    p1688_items: List[Dict[str, Any]] = []
-    amz_items: List[Dict[str, Any]] = []
+    sourcing_items: List[Dict[str, Any]] = []
     web_briefs: List[str] = []
     sourcing_briefs: List[str] = []
 
     for ev in active_ev:
         p_items = ev.get("platform_items") or {}
         web_items.extend(p_items.get("web") or [])
-        p1688_items.extend(p_items.get("p1688") or [])
-        amz_items.extend(p_items.get("amazon") or [])
+        sourcing_items.extend(p_items.get("sourcing") or [])
         if ev.get("channel") == "web" and ev.get("summary"):
             web_briefs.append(str(ev["summary"]))
         elif ev.get("channel") == "sourcing" and ev.get("summary"):
@@ -193,16 +204,16 @@ def _build_research_result_payload(
                 "brief": ("；".join(web_briefs))[:180],
             }
         )
-    if p1688_items or amz_items or sourcing_briefs:
-        sourcing_count = len(p1688_items) + len(amz_items)
+    if sourcing_items or sourcing_briefs:
+        sourcing_count = len(sourcing_items)
         platforms_summary.append(
             {
-                "name": "p1688",
+                "name": "sourcing",
                 "label": "1688与亚马逊货源比价",
                 "state": "ok" if sourcing_count > 0 else "empty",
                 "state_label": "已完成" if sourcing_count > 0 else "无匹配条目",
                 "items_count": sourcing_count,
-                "items": (p1688_items + amz_items)[:20],
+                "items": sourcing_items[:20],
                 "brief": ("；".join(sourcing_briefs))[:180],
             }
         )
@@ -234,7 +245,7 @@ def _build_research_result_payload(
         "evidence_pool": active_ev,
         "conversation_id": conversation_id,
         "keyword": keyword,
-        "system_status": merged_state.get("system_status", "COMPLETED"),
+        "system_status": merged_state.get("system_status", ResearchStatus.COMPLETED.value),
         "stop_reason": merged_state.get("stop_reason", StopReason.COMPLETED.value),
         "cancelled": bool(merged_state.get("cancelled", False)),
     }
@@ -254,6 +265,7 @@ def execute_autonomous_agents(
     max_turns: int = 5,
     max_parallel_subagents: int = 4,
     max_subagent_steps: int = 3,
+    max_coordinator_tool_calls: int = 2,
     check_cancel_fn: Optional[Callable[[], bool]] = None,
     fetch_steering_fn: Optional[Callable[[], List[Any]]] = None,
     require_checkpointer: bool = False,
@@ -329,13 +341,15 @@ def execute_autonomous_agents(
         "max_turns": max_turns,
         "max_parallel_subagents": max_parallel_subagents,
         "max_subagent_steps": max_subagent_steps,
+        "max_coordinator_tool_calls": max_coordinator_tool_calls,
+        "coordinator_tool_calls": 0,
         "started_at": started_at,
         "timeout_seconds": timeout_seconds,
         "cancelled": False,
         "stop_reason": StopReason.CONTINUE.value,
         "outline": [],
         "pending_tasks": [],
-        "guard_notices": [],
+        "guard_rejections": [],
         "evidence_pool": [],
         "invalidated_evidence_ids": [],
         "audit_trail": [],

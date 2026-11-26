@@ -197,3 +197,31 @@
 | P0 | 本手册固化现状与门禁矩阵；百炼为首选通道并补齐就绪判定 | 已完成 |
 | P1 | 证据包导出、验收报告模板、缺陷登记、版本质量报告 | 需求（未实现） |
 | P2 | 在线效果采集与统计口径落地、记忆/经验治理状态机与回标晋级 | 需求（未实现） |
+
+
+## 12. Prompt 与调研任务板治理（本次更新）
+
+### Prompt 资产分域
+
+| 目录 | owner | 内容 |
+| --- | --- | --- |
+| `src/taozhi/application/research/prompts.py` | runtime | 协调员、研究 Worker、速答、研报合成 |
+| `src/taozhi/application/rag/prompts.py` | runtime | HyDE、RAG 专家、通用兜底 |
+| `src/taozhi/orchestration/prompts.py` | runtime | 约束型离散决策 |
+| `evals/prompts.py` | eval | RAG Judge、Agent 模型盲审 |
+
+规则：一个 Prompt 一个 ID；`PromptSpec` 携带 version、purpose、model_tier、output_schema 与 checksum；运行期与评测期物理隔离，`evals/prompts.py` 不导入 `taozhi.application.*`；禁止内联 Prompt、旧常量别名与双份模板。
+
+改运行期 Prompt 必须重跑对应评测；改评测 Prompt 必须重跑 `evals/calibrate.py --agreement`。仅搬移文本时以 `tests/test_prompt_catalog.py` 冻结 checksum，算法快照记录 `prompt_catalogs`。
+
+### 调研任务板
+
+- 表：`research_tasks`、`research_task_deps`、`research_task_comments`（迁移 `027_research_task_board`）。
+- 状态：`ready → running → done / failed / blocked / cancelled`；所有更新由仓储 CAS revision 保护。
+- 任务板是持久事实源；LangGraph state 只保存执行态。写库失败不派发。
+- Worker 回写 `summary / evidence_ids / tool_records / gaps / elapsed`；速答与协调员工具也建任务记录。
+- API：`GET /api/tasks/{task_id}/research-tasks`。
+
+### 验证
+
+`make check`、`make check-repository`、`make evals-tests`、`make evals-agent-replay`；任务板迁移由 `make migrate-test` 与 CI 覆盖。

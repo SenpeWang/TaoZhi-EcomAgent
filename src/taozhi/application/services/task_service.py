@@ -7,7 +7,7 @@ from typing import Any
 from taozhi.domain.access import can_review, can_task
 from taozhi.domain.entities import Principal
 from taozhi.domain.errors import Denied
-from taozhi.infrastructure.persistence import job_repo
+from taozhi.infrastructure.persistence import job_repo, research_task_repo
 from taozhi.infrastructure.persistence.access_repo import audit, batch_sources_validity, load_principal, sources_valid
 from taozhi.infrastructure.persistence.database import database_connection
 
@@ -59,7 +59,29 @@ def get_task(p: Principal, task_id: str) -> dict[str, Any]:
         r = job_repo.get_job(c, p.tenant_id, task_id)
         if not r:
             raise Denied("任务不存在或没有访问权限", "NOT_FOUND", 404)
-        return job_repo.present_job(c, p, r)
+        data = job_repo.present_job(c, p, r)
+        if r.get("kind") == "research" and isinstance(data.get("result"), dict):
+            rows = research_task_repo.list_tasks(
+                c, tenant_id=p.tenant_id, job_id=task_id, run_version=int(r["run_version"])
+            )
+            for row in rows:
+                row["comments"] = research_task_repo.list_comments(c, row["id"])
+            data["result"]["research_tasks"] = rows
+        return data
+
+
+def list_research_tasks(p: Principal, task_id: str) -> dict[str, Any]:
+    """读取某次调研执行的持久任务板与评论。"""
+    with database_connection() as c:
+        r = job_repo.get_job(c, p.tenant_id, task_id)
+        if not r or not can_task(p, r):
+            raise Denied("任务不存在或没有访问权限", "NOT_FOUND", 404)
+        rows = research_task_repo.list_tasks(
+            c, tenant_id=p.tenant_id, job_id=task_id, run_version=int(r["run_version"])
+        )
+        for row in rows:
+            row["comments"] = research_task_repo.list_comments(c, row["id"])
+        return {"items": rows}
 
 
 def cancel_task(p: Principal, task_id: str) -> dict[str, str]:

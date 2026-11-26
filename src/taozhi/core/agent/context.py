@@ -46,8 +46,8 @@ class ArtifactMetadata:
         }
 
 
-class SubagentContext:
-    """子智能体隔离执行上下文。
+class AgentContext:
+    """智能体隔离执行上下文。
 
     Attributes:
         conversation_id (str): 子会话全局唯一 ID。
@@ -55,7 +55,7 @@ class SubagentContext:
         role (str): 智能体所扮演的业务角色。
         depth (int): 智能体派生嵌套深度。
         workspace_mode (WorkspaceMode): 工作区隔离模式。
-        base_dir (Path): 该子智能体专用的存储根目录。
+        base_dir (Path): 该智能体专用的存储根目录。
         scratch_dir (Path): 暂存大容量原始抓取数据的 scratch 目录。
         artifacts_dir (Path): 存放最终交付工件的 artifacts 目录。
         workspace_dir (Optional[Path]): 分支隔离工作区（BRANCH 模式）。
@@ -101,7 +101,7 @@ class SubagentContext:
         self._ensure_dirs()
 
     def _ensure_dirs(self) -> None:
-        """确保子智能体所需的隔离工作区目录存在。"""
+        """确保智能体所需的隔离工作区目录存在。"""
         self.scratch_dir.mkdir(parents=True, exist_ok=True)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         if self.workspace_dir:

@@ -13,6 +13,7 @@ import pytest
 from taozhi.core.tools.outcome import execute_tool_with_outcome
 from taozhi.domain.errors import Denied
 from taozhi.domain.research import (
+    ToolCaller,
     ResearchBudget,
     StopReason,
     SubagentTaskSpec,
@@ -63,15 +64,15 @@ def test_research_scope_and_task_tool_guard():
     assert "search_1688_wholesale" in scope_web_only.forbidden_tools
     assert "search_amazon" in scope_web_only.forbidden_tools
 
-    enforce_tool_allowed("search_web", scope_web_only, task_tools=("search_web",))
+    enforce_tool_allowed("search_web", scope_web_only, caller=ToolCaller.RESEARCH_WORKER)
     with pytest.raises(Denied) as exc_scope:
-        enforce_tool_allowed("search_1688_wholesale", scope_web_only)
+        enforce_tool_allowed("search_1688_wholesale", scope_web_only, caller=ToolCaller.RESEARCH_WORKER)
     assert exc_scope.value.status == 403
     assert exc_scope.value.code == "TOOL_OUT_OF_SCOPE"
 
     scope_sourcing = classify_research_scope("对比【磁吸手机壳】1688 出厂底价与亚马逊售价")
     with pytest.raises(Denied) as exc_role:
-        enforce_tool_allowed("search_amazon", scope_sourcing, task_tools=("search_1688_wholesale",))
+        enforce_tool_allowed("search_amazon", scope_sourcing, caller=ToolCaller.SYNTHESIZER)
     assert exc_role.value.status == 403
     assert exc_role.value.code == "TOOL_NOT_GRANTED"
 
@@ -90,10 +91,11 @@ def test_authorize_subagent_tasks_prunes_and_caps():
 
     plan = authorize_subagent_tasks(proposed, scope=scope_web_only, budget=budget)
     assert len(plan.tasks) == 2
-    assert plan.tasks[0].allowed_tools == ("search_web", "get_current_time")
-    assert plan.tasks[1].task_id == "t3"
-    assert any("整单驳回" in msg for msg in plan.rejected_reasons)
-    assert any("超出单轮并发上限" in msg for msg in plan.rejected_reasons)
+    assert plan.tasks[0].suggested_tools == ("search_web", "get_current_time")
+    assert plan.tasks[1].task_id == "t2"
+    assert plan.tasks[1].suggested_tools == ("get_current_time",)
+    assert any("建议工具越界" in msg for msg in plan.guard_rejections)
+    assert any("超出单轮并发上限" in msg for msg in plan.guard_rejections)
 
 
 def test_hard_stop_priorities():
@@ -164,10 +166,10 @@ def test_tool_timeout_in_queue_is_not_dispatched():
 def test_steering_impact_classification():
     """验证运行期动态干预影响维度识别。"""
     imp_sourcing = classify_steering_impact("优先对比义乌 1688 源头工厂出厂报价")
-    assert imp_sourcing.invalidate_wholesale and imp_sourcing.invalidate_verification and not imp_sourcing.invalidate_web
+    assert imp_sourcing.invalidate_wholesale and not imp_sourcing.invalidate_web
 
     imp_web = classify_steering_impact("重点补充全网消费者差评和痛点评价")
-    assert imp_web.invalidate_web and imp_web.invalidate_verification
+    assert imp_web.invalidate_web
 
 
 def test_parallel_orchestrator_and_react_query_refinement():
@@ -202,14 +204,14 @@ def test_parallel_orchestrator_and_react_query_refinement():
                         _ProposedSubtaskSchema(
                             role="research.market_intelligence",
                             goal="查明便携充气泵消费者痛点与零售定价",
-                            allowed_tools=["search_web", "fetch_web_page"],
+                            suggested_tools=["search_web", "fetch_web_page"],
                             seed_queries=["便携充气泵 极致窄词 差评"],
                             channel_hint="web",
                         ),
                         _ProposedSubtaskSchema(
                             role="research.sourcing",
                             goal="核查1688便携充气泵出厂底价与MOQ",
-                            allowed_tools=["search_1688_wholesale"],
+                            suggested_tools=["search_1688_wholesale"],
                             seed_queries=["便携充气泵"],
                             channel_hint="sourcing",
                         ),
@@ -278,7 +280,7 @@ def test_clock_reading_reaches_report_without_creating_market_data(timezone, wit
     steps = [
         _OrchestratorDecisionSchema(
             action="spawn_subagents", thought=goal,
-            subtasks=[_ProposedSubtaskSchema(role="research.subagent_worker", goal=goal, allowed_tools=allowed_tools)],
+            subtasks=[_ProposedSubtaskSchema(role="research.generalist", goal=goal, suggested_tools=allowed_tools)],
         ),
         _SubagentStepSchema(action="call_tool", thought="读系统时钟", tool_name="get_current_time", timezone=timezone),
     ]
@@ -302,7 +304,7 @@ def test_clock_reading_reaches_report_without_creating_market_data(timezone, wit
     assert reading in llm.chat.call_args.args[0]
     assert reading in result["report"]
     assert evidence["platform_items"] == {}
-    worker, = [tr for tr in result["audit_trail"] if tr["role"] == "research.subagent_worker"]
+    worker, = [tr for tr in result["audit_trail"] if tr["role"] == "research.generalist"]
     first = worker["tools"][0]
     assert first["tool_name"] == "get_current_time"
     assert first["dispatched"] and first["status"] == "ok" and first["result_summary"] == reading
@@ -325,7 +327,7 @@ def test_live_cancel_and_mid_flight_steering():
         _OrchestratorDecisionSchema(
             action="spawn_subagents",
             thought="首轮调研",
-            subtasks=[_ProposedSubtaskSchema(role="research.market_intelligence", goal="查趋势", allowed_tools=["search_web"], seed_queries=["无线耳机"])],
+            subtasks=[_ProposedSubtaskSchema(role="research.market_intelligence", goal="查趋势", suggested_tools=["search_web"], seed_queries=["无线耳机"])],
         ),
         _SubagentStepSchema(action="call_tool", thought="搜全网", tool_name="search_web", query_or_url="无线耳机"),
         _SubagentStepSchema(action="finish", thought="完成", findings_summary="全网销量高。"),
@@ -356,13 +358,13 @@ def test_live_cancel_and_mid_flight_steering():
                 return _OrchestratorDecisionSchema(
                     action="spawn_subagents",
                     thought="先查全网口碑",
-                    subtasks=[_ProposedSubtaskSchema(role="research.market_intelligence", goal="查口碑", allowed_tools=["search_web"], seed_queries=["无线鼠标"])],
+                    subtasks=[_ProposedSubtaskSchema(role="research.market_intelligence", goal="查口碑", suggested_tools=["search_web"], seed_queries=["无线鼠标"])],
                 )
             if "1688 采购分析师" not in prompt:
                 return _OrchestratorDecisionSchema(
                     action="spawn_subagents",
                     thought="收到用户中途干预，增派1688采购专员核查出厂底价",
-                    subtasks=[_ProposedSubtaskSchema(role="research.sourcing", goal="查1688底价", allowed_tools=["search_1688_wholesale"], seed_queries=["无线鼠标"])],
+                    subtasks=[_ProposedSubtaskSchema(role="research.sourcing", goal="查1688底价", suggested_tools=["search_1688_wholesale"], seed_queries=["无线鼠标"])],
                 )
             return _OrchestratorDecisionSchema(action="finish", thought="证据与干预均已落地，合成研报")
 
@@ -435,7 +437,7 @@ def test_wall_clock_started_at_triggers_timeout_across_processes():
     }
     out = lead_orchestrator_node(state)
     assert out["stop_reason"] == StopReason.TIMEOUT.value
-    assert out["next_action"] == "final_node"
+    assert out["next_action"] == "archive_research"
 
 
 def test_expire_stale_reviews_cancels_expired_rows():
@@ -519,7 +521,7 @@ def test_sensenova_router_failover_circuit_and_compliance():
     from langchain_core.messages import AIMessage
     from taozhi.ai import observability as obs
     from taozhi.ai.client import LLMClient
-    from taozhi.ai.router import CircuitBreakerRegistry, build_sensenova_endpoints, route_audit_scope
+    from taozhi.ai.router import CircuitBreakerRegistry, build_model_endpoints, route_audit_scope
     from taozhi.observability.tracing import job_trace
     obs.reset()
 
@@ -552,7 +554,7 @@ def test_sensenova_router_failover_circuit_and_compliance():
         llm_circuit_cooldown_auth=600,
     )
 
-    eps = build_sensenova_endpoints(fake_settings)
+    eps = build_model_endpoints(fake_settings)
     assert [e.endpoint_id for e in eps] == [
         "sensenova_overseas",
         "dots",
@@ -654,7 +656,7 @@ def test_sensenova_router_failover_circuit_and_compliance():
 
     ledger.clear()
     with (
-        patch("taozhi.ai.client.build_sensenova_endpoints", return_value=[eps[-1]]),
+        patch("taozhi.ai.client.build_model_endpoints", return_value=[eps[-1]]),
         patch("taozhi.ai.client.time.sleep"),
         patch.object(client, "_client_for_endpoint", side_effect=_make_failing_domestic),
         pytest.raises(RuntimeError, match="429"),
@@ -679,7 +681,7 @@ def test_checkpoint_cross_version_resume_hydrates_evidence_and_route_history():
                 _ProposedSubtaskSchema(
                     role="research.market_intelligence",
                     goal="检索消费者核心评价",
-                    allowed_tools=["search_web"],
+                    suggested_tools=["search_web"],
                     seed_queries=["无线充电器"],
                 )
             ],

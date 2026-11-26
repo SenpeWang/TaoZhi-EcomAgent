@@ -18,7 +18,7 @@ _IDENTIFIER = re.compile(r"[\w.,/-]{1,120}")
 _TEXT = {
     SpanAttributes.LLM_MODEL_NAME, SpanAttributes.AGENT_NAME, SpanAttributes.TOOL_NAME,
     SpanAttributes.EMBEDDING_MODEL_NAME, RerankerAttributes.RERANKER_MODEL_NAME,
-    "llm.endpoint_id", "tool.status", "subagent_id", "state.selected_agents", "error.type", "rag.phase",
+    "llm.endpoint_id", "tool.status", "agent_id", "state.selected_agents", "error.type", "rag.phase",
 }
 _NUMERIC = {
     SpanAttributes.LLM_TOKEN_COUNT_PROMPT, SpanAttributes.LLM_TOKEN_COUNT_COMPLETION,
@@ -40,7 +40,7 @@ def safe_attributes(attrs: Mapping | None) -> dict:
             clean[key] = value
         elif key in {"state.hard_block", "tool.dispatched"} and isinstance(value, bool):
             clean[key] = value
-        elif key == "research.next_action" and value in ("dispatch_subagents", "synthesizer", "final_node"):
+        elif key == "research.next_action" and value in ("dispatch_subagents", "quick_answer", "call_tool", "synthesizer", "archive_research"):
             clean[key] = value
         elif key == "rag.retrieval_decision" and value in get_args(RetrievalDecision):
             clean[key] = value

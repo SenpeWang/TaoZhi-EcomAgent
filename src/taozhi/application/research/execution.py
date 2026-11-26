@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from taozhi.application.research.graph import execute_autonomous_agents
+from taozhi.application.research.task_board import TaskBoard, use_task_board
 from taozhi.application.services import task_output
 from taozhi.config import get_settings
 from taozhi.domain.errors import Denied
@@ -38,7 +39,7 @@ def process_research_job(job: dict[str, Any]) -> None:
     payload = job["payload"]
     keyword = payload.get("keyword") or job["question"]
 
-    with postgres_checkpointer() as saver:
+    with use_task_board(TaskBoard(tenant_id=job["tenant_id"], job_id=job["id"], run_version=job["run_version"])), postgres_checkpointer() as saver:
         result = execute_autonomous_agents(
             keyword=keyword,
             user_query=job["question"],

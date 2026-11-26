@@ -61,6 +61,12 @@ def delete_research_conversation(conversation_id: str, p=Depends(identity)):
     return conversations.delete_research_conversation(p, conversation_id)
 
 
+@router.get("/tasks/{task_id}/research-tasks")
+def research_tasks(task_id: str, p=Depends(identity)):
+    """读取调研任务板的任务、结果与评论。"""
+    return task_service.list_research_tasks(p, task_id)
+
+
 @router.get("/tasks/{task_id}")
 def task(task_id: str, p=Depends(identity)):
     """获取单个任务详情与完整阶段事件。"""

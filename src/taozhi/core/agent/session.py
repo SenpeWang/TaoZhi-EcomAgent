@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any, List, Optional, Tuple
 
-from taozhi.core.agent.context import SubagentContext
+from taozhi.core.agent.context import AgentContext
 from taozhi.core.agent.protocol import WorkspaceMode
 from taozhi.core.memory.service import get_memory_store
 from taozhi.core.memory.store import LongTermMemoryStore
@@ -40,22 +40,22 @@ class AgentSession:
             self._memory = get_memory_store(tenant_id=self.tenant_id)
         return self._memory
 
-    def open_subagent_sandbox(
+    def open_agent_workspace(
         self,
         *,
         role: str,
         workspace_mode: WorkspaceMode = WorkspaceMode.BRANCH,
-    ) -> SubagentContext:
-        """为子智能体创建相互隔离的 Scratch 与 Artifacts 工作区。
+    ) -> AgentContext:
+        """为智能体创建相互隔离的 Scratch 与 Artifacts 工作区。
 
         Args:
-            role: 子智能体扮演的角色名称。
+            role: 智能体扮演的角色名称。
             workspace_mode: 工作区隔离级别。
 
         Returns:
-            初始化完毕的 SubagentContext 对象。
+            初始化完毕的 AgentContext 对象。
         """
-        return SubagentContext(
+        return AgentContext(
             parent_id=self.conversation_id,
             role=role,
             workspace_mode=workspace_mode,

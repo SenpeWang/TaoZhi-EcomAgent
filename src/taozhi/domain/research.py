@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -16,6 +17,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from .agent_catalog import agent_display_name
 from .errors import Denied
+from .ranking import tokenize_zh
 
 WEB_TOOLS: Tuple[str, ...] = ("search_web", "fetch_web_page")
 SOURCING_TOOLS: Tuple[str, ...] = ("search_1688_wholesale", "search_amazon")
@@ -25,10 +27,6 @@ ALL_RESEARCH_TOOLS: Tuple[str, ...] = SOURCE_TOOLS + (CLOCK_TOOL,)
 
 _SOURCING_PATTERN = re.compile(
     r"工厂|出厂|批发|1688|货源|起订|供应商|供货|打样|工艺|亚马逊|amazon|跨境|比价|毛利|套利|全景|全面|底价",
-    re.IGNORECASE,
-)
-_EXPLICIT_SOURCING_PATTERN = re.compile(
-    r"工厂|出厂|批发|1688|货源|起订|供应商|供货|打样|工艺|亚马逊|amazon|跨境",
     re.IGNORECASE,
 )
 _WEB_PATTERN = re.compile(
@@ -46,14 +44,41 @@ class StopReason(str, Enum):
     MAX_TURNS = "max_turns"
 
 
+class ResearchStatus(str, Enum):
+    """调研任务的运行状态；只保留进行中、报告合成与三个终态。"""
+
+    RUNNING = "RUNNING"
+    REPORTING = "REPORTING"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+    TIMEOUT = "TIMEOUT"
+
+
+class AgentRunState(str, Enum):
+    """审计轨迹中单个智能体的生命周期状态。"""
+
+    SPAWNED = "SPAWNED"
+    ANSWERING = "ANSWERING"
+    COORDINATING = "COORDINATING"
+    SYNTHESIZING = "SYNTHESIZING"
+    COMPLETED = "COMPLETED"
+    PARTIAL_OR_FAILED = "PARTIAL_OR_FAILED"
+
+
+class ToolCaller(str, Enum):
+    """工具调用者身份；能力策略按调用者而不是按固定角色绑定工具。"""
+
+    ORCHESTRATOR = "orchestrator"
+    QUICK_ANSWER = "quick_answer"
+    RESEARCH_WORKER = "research_worker"
+    SYNTHESIZER = "synthesizer"
+
+
 @dataclass(frozen=True)
 class ResearchScope:
     """调研业务边界与合法工具集。"""
 
-    needs_web: bool
     needs_sourcing: bool
-    has_explicit_sourcing: bool
-    has_explicit_web: bool
     allowed_tools: Tuple[str, ...]
     forbidden_tools: Tuple[str, ...]
 
@@ -65,19 +90,30 @@ class ResearchBudget:
     max_turns: int = 5
     max_parallel_subagents: int = 4
     max_subagent_steps: int = 3
+    max_coordinator_tool_calls: int = 2
     timeout_seconds: float = 180.0
+
+
+DEFAULT_OUTPUT_FORMAT = "findings_summary + key_metrics + gaps_or_errors 三段式结论"
+DEFAULT_SOURCE_GUIDANCE = "优先官方/规格/平台原始页面，保留 URL 与数据时间"
+DEFAULT_TASK_BOUNDARIES = "只覆盖本目标，不重复其他子任务，不补充未授权渠道"
 
 
 @dataclass(frozen=True)
 class SubagentTaskSpec:
-    """主协调代理动态生成的单个子智能体派工契约。"""
+    """主协调代理动态生成的单个子智能体派工简报。"""
 
     task_id: str
     role: str
     goal: str
-    allowed_tools: Tuple[str, ...]
-    seed_queries: Tuple[str, ...]
-    channel_hint: str = "general"
+    suggested_tools: Tuple[str, ...] = ()
+    seed_queries: Tuple[str, ...] = ()
+    channel_hint: str = "auto"
+    output_format: str = DEFAULT_OUTPUT_FORMAT
+    source_guidance: str = DEFAULT_SOURCE_GUIDANCE
+    boundaries: str = DEFAULT_TASK_BOUNDARIES
+    expected_evidence: str = "可核对的来源、关键数字与缺口"
+    model_tier: str = "fast"
 
 
 @dataclass(frozen=True)
@@ -85,7 +121,7 @@ class AuthorizedPlan:
     """经过领域边界与并发预算校验后的合法派工方案。"""
 
     tasks: Tuple[SubagentTaskSpec, ...]
-    rejected_reasons: Tuple[str, ...]
+    guard_rejections: Tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -105,7 +141,6 @@ class SteeringImpact:
 
     invalidate_web: bool
     invalidate_wholesale: bool
-    invalidate_verification: bool
 
 
 def classify_research_scope(
@@ -114,10 +149,7 @@ def classify_research_scope(
 ) -> ResearchScope:
     """根据用户诉求与实时干预指令识别允许调用的工具白名单与禁用工具。"""
     combined = " ".join([user_query or "", *steering_notes]).strip()
-    has_explicit_sourcing = bool(_EXPLICIT_SOURCING_PATTERN.search(combined))
     needs_sourcing = bool(_SOURCING_PATTERN.search(combined))
-    has_explicit_web = bool(_WEB_PATTERN.search(combined))
-    needs_web = True
 
     if needs_sourcing:
         allowed = ALL_RESEARCH_TOOLS
@@ -127,92 +159,112 @@ def classify_research_scope(
         forbidden = SOURCING_TOOLS
 
     return ResearchScope(
-        needs_web=needs_web,
         needs_sourcing=needs_sourcing,
-        has_explicit_sourcing=has_explicit_sourcing,
-        has_explicit_web=has_explicit_web,
         allowed_tools=allowed,
         forbidden_tools=forbidden,
     )
 
 
-def enforce_tool_allowed(
-    tool_name: str,
-    scope: ResearchScope,
-    task_tools: Optional[Sequence[str]] = None,
-) -> None:
-    """领域硬守卫：拦截超出全局业务边界或未授予当前子智能体的工具调用。"""
+def tools_for_caller(caller: ToolCaller, scope: ResearchScope) -> Tuple[str, ...]:
+    """返回调用者能力范围内的 MCP 工具；分析师不持有工具。"""
+    if caller is ToolCaller.SYNTHESIZER:
+        return ()
+    return scope.allowed_tools
+
+
+def enforce_tool_allowed(tool_name: str, scope: ResearchScope, *, caller: ToolCaller) -> None:
+    """领域硬守卫：拦截未知工具、越界工具与不允许工具调用的角色。"""
     if tool_name not in ALL_RESEARCH_TOOLS:
         raise Denied(
             f"未知工具 {tool_name} 未在领域工具契约中登记，已被拒绝执行",
             "UNKNOWN_TOOL",
             403,
         )
+    if caller is ToolCaller.SYNTHESIZER:
+        raise Denied("研报分析师不允许调用工具，只能使用黑板证据", "TOOL_NOT_GRANTED", 403)
     if tool_name in scope.forbidden_tools or tool_name not in scope.allowed_tools:
         raise Denied(
             f"工具 {tool_name} 超出当前调研边界，已被领域守卫拦截",
             "TOOL_OUT_OF_SCOPE",
             403,
         )
-    if task_tools is not None and tool_name not in task_tools:
-        raise Denied(
-            f"工具 {tool_name} 未授权给当前子智能体角色，已被领域守卫拦截",
-            "TOOL_NOT_GRANTED",
-            403,
-        )
+
+
+def _task_overlap(
+    left_goal: str,
+    left_queries: Sequence[str],
+    right_goal: str,
+    right_queries: Sequence[str],
+) -> bool:
+    """判断两个子任务的目标与起步查询是否高度重叠。"""
+    left_text = " ".join([left_goal or "", *left_queries])
+    right_text = " ".join([right_goal or "", *right_queries])
+    left_tokens = set(tokenize_zh(left_text))
+    right_tokens = set(tokenize_zh(right_text))
+    if left_tokens and right_tokens:
+        jaccard = len(left_tokens & right_tokens) / max(1, len(left_tokens | right_tokens))
+        if jaccard >= 0.6:
+            return True
+    left_clean = re.sub(r"\s+", "", left_goal or "")
+    right_clean = re.sub(r"\s+", "", right_goal or "")
+    return bool(left_clean and right_clean) and difflib.SequenceMatcher(None, left_clean, right_clean).ratio() >= 0.85
 
 
 def authorize_subagent_tasks(
     proposed: Sequence[SubagentTaskSpec],
     scope: ResearchScope,
     budget: ResearchBudget,
+    history_goals: Sequence[str] = (),
 ) -> AuthorizedPlan:
-    """对主协调代理规划的并行子任务执行权限裁剪与并发上限收敛。"""
+    """对派工简报做去重、并发上限收敛；建议工具只保留 scope 内条目，不硬性限制。"""
     authorized: List[SubagentTaskSpec] = []
-    rejected: List[str] = []
+    rejections: List[str] = []
     seen_ids: set[str] = set()
     max_parallel = max(1, int(budget.max_parallel_subagents))
+    history = [goal.strip() for goal in history_goals if goal and goal.strip()]
 
     for idx, task in enumerate(proposed):
         tid = (task.task_id or f"sub_{idx + 1}").strip()
         if tid in seen_ids:
             tid = f"{tid}_{idx + 1}"
         seen_ids.add(tid)
+        goal = (task.goal or "收集与品类相关的客观市场事实").strip()
+        queries = tuple(q.strip() for q in task.seed_queries if q and q.strip())
 
-        legal_tools: List[str] = []
-        blocked_tools: List[str] = []
-        for tool in task.allowed_tools:
-            if tool in scope.allowed_tools and tool not in legal_tools:
-                legal_tools.append(tool)
-            elif tool not in legal_tools:
-                blocked_tools.append(tool)
-
-        if blocked_tools:
-            rejected.append(f"子任务 [{agent_display_name(task.role)}] 请求的越界工具 {','.join(blocked_tools)} 已被领域守卫移除")
-
-        if not legal_tools or (blocked_tools and not any(tool in SOURCE_TOOLS for tool in legal_tools)):
-            rejected.append(f"子任务 [{agent_display_name(task.role)}] 缺少完成目标所需的合法工具（当前允许: {','.join(scope.allowed_tools)}），整单驳回")
+        if any(_task_overlap(goal, queries, previous, ()) for previous in history) or any(
+            _task_overlap(goal, queries, item.goal, item.seed_queries) for item in authorized
+        ):
+            rejections.append(f"子任务 [{agent_display_name(task.role)}] 与已有任务目标重叠，已跳过")
             continue
 
         if len(authorized) >= max_parallel:
-            rejected.append(f"子任务 [{agent_display_name(task.role)}] 超出单轮并发上限 {max_parallel}，本轮暂不派发")
+            rejections.append(f"子任务 [{agent_display_name(task.role)}] 超出单轮并发上限 {max_parallel}，本轮暂不派发")
             continue
 
-        queries = tuple(q.strip() for q in task.seed_queries if q and q.strip())
+        suggested = tuple(tool for tool in task.suggested_tools if tool in scope.allowed_tools)
+        ignored = [tool for tool in task.suggested_tools if tool not in scope.allowed_tools]
+        if ignored:
+            rejections.append(f"子任务 [{agent_display_name(task.role)}] 的建议工具越界已忽略：{','.join(ignored)}")
+
+        channel = task.channel_hint if task.channel_hint in {"web", "sourcing"} else (
+            "sourcing" if scope.needs_sourcing else "web"
+        )
         authorized.append(
             SubagentTaskSpec(
                 task_id=tid,
                 role=task.role,
-                goal=(task.goal or "收集与品类相关的客观市场事实").strip(),
-                allowed_tools=tuple(legal_tools),
+                goal=goal,
+                suggested_tools=suggested,
                 seed_queries=queries,
-                channel_hint=task.channel_hint or (
-                    "sourcing" if any(t in SOURCING_TOOLS for t in legal_tools) else "web"
-                ),
+                channel_hint=channel,
+                output_format=task.output_format or DEFAULT_OUTPUT_FORMAT,
+                source_guidance=task.source_guidance or DEFAULT_SOURCE_GUIDANCE,
+                boundaries=task.boundaries or DEFAULT_TASK_BOUNDARIES,
+                expected_evidence=task.expected_evidence or "可核对的来源、关键数字与缺口",
             )
         )
 
-    return AuthorizedPlan(tasks=tuple(authorized), rejected_reasons=tuple(rejected))
+    return AuthorizedPlan(tasks=tuple(authorized), guard_rejections=tuple(rejections))
 
 
 def evaluate_hard_stop(
@@ -287,12 +339,11 @@ def classify_steering_impact(instruction: str) -> SteeringImpact:
     """判定中途干预指令可能影响的业务维度（供主脑参考失效清理）。"""
     text = (instruction or "").strip()
     if not text:
-        return SteeringImpact(False, False, False)
+        return SteeringImpact(False, False)
 
     hits_sourcing = bool(_SOURCING_PATTERN.search(text))
     hits_web = bool(_WEB_PATTERN.search(text))
     return SteeringImpact(
         invalidate_web=hits_web,
         invalidate_wholesale=hits_sourcing,
-        invalidate_verification=True,
     )

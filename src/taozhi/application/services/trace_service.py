@@ -37,7 +37,9 @@ _TRACE_OPERATIONS = {
     "bi.data_query": "查询经营数据",
     "bi.query_metric": "检索经营指标",
     "bi.bi_publish": "生成指标答复",
-    "research.final_node": "归档调研成果",
+    "research.archive_research": "归档调研成果",
+    "research.quick_answer_worker": "直接回答一次提问",
+    "research.coordinator_tool": "协调员直接核验工具",
     "llm.structured_output": "校验模型结构化响应",
     "embedding.query": "生成查询向量",
     "embedding.passages": "生成文档向量",
@@ -48,7 +50,7 @@ _TRACE_OPERATIONS = {
 _KEY_ACTIVITY_STEPS = (
     "worker.semantic_cache_hit", "pipeline.analyze_question", "pipeline.retrieve_documents", "pipeline.refine_query",
     "pipeline.extract_claims", "pipeline.compose_answer",
-    "bi.bi_intent", "bi.bi_publish", "research.final_node", *CHAIN_CATEGORY_BY_NAME,
+    "bi.bi_intent", "bi.bi_publish", "research.archive_research", "research.quick_answer_worker", "research.coordinator_tool", *CHAIN_CATEGORY_BY_NAME,
 )
 _TOOL_OUTCOMES = {
     "timeout": "工具调用超时",

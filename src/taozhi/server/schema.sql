@@ -104,6 +104,43 @@ CREATE TABLE task_events (
    OR (event_type='result_delta' AND output_text IS NOT NULL AND output_text<>'')
  )
 );
+CREATE TABLE research_tasks (
+ id text PRIMARY KEY,
+ tenant_id text NOT NULL,
+ job_id text NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+ run_version bigint NOT NULL,
+ parent_task_id text REFERENCES research_tasks(id) ON DELETE SET NULL,
+ task_key text NOT NULL,
+ role text NOT NULL,
+ status text NOT NULL DEFAULT 'ready',
+ revision integer NOT NULL DEFAULT 1,
+ owner_agent text,
+ brief jsonb NOT NULL DEFAULT '{}',
+ result jsonb,
+ error text NOT NULL DEFAULT '',
+ write_scopes jsonb NOT NULL DEFAULT '[]',
+ created_at timestamptz NOT NULL DEFAULT now(),
+ started_at timestamptz,
+ finished_at timestamptz,
+ UNIQUE(job_id, run_version, task_key),
+ CHECK(status IN ('ready','running','done','failed','blocked','cancelled'))
+);
+CREATE INDEX idx_research_tasks_job ON research_tasks (tenant_id, job_id, run_version);
+CREATE INDEX idx_research_tasks_status ON research_tasks (status);
+CREATE TABLE research_task_deps (
+ task_id text NOT NULL REFERENCES research_tasks(id) ON DELETE CASCADE,
+ depends_on_id text NOT NULL REFERENCES research_tasks(id) ON DELETE CASCADE,
+ PRIMARY KEY(task_id, depends_on_id),
+ CHECK(task_id <> depends_on_id)
+);
+CREATE TABLE research_task_comments (
+ id bigserial PRIMARY KEY,
+ task_id text NOT NULL REFERENCES research_tasks(id) ON DELETE CASCADE,
+ author_agent text NOT NULL,
+ body text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_research_task_comments_task ON research_task_comments (task_id, created_at);
 CREATE TABLE task_reviews (
  id bigserial PRIMARY KEY, tenant_id text NOT NULL, job_id text NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
  reviewer_id text NOT NULL, decision text NOT NULL, comment text NOT NULL DEFAULT '',

@@ -10,12 +10,14 @@ from typing import Any, Dict, List
 from taozhi.ai.client import LLMClient, ModelTier
 from taozhi.ai.router import route_audit_scope
 from taozhi.ai.text_stream import OutputDeliveryError
-from taozhi.core.agent.context import ArtifactMetadata, SubagentContext
+from taozhi.core.agent.context import AgentContext, ArtifactMetadata
 from taozhi.core.memory.service import get_memory_store
 from taozhi.domain.agent_catalog import agent_display_name
-from taozhi.domain.research import StopReason
+from taozhi.domain.research import AgentRunState, ResearchStatus, StopReason
 from taozhi.observability.tracing import node_span, record_diagnostic
 from .hooks import attach_route_delta, emit_progress, get_hooks, make_failover_emitter
+from .prompts import RESEARCH_PROMPTS
+from .task_board import current_task_board
 from .schemas import AuditableAgentTransition, AutonomousAgentState, EvidenceRecord, active_evidence
 
 
@@ -44,7 +46,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
     active_ev = active_evidence(state)
 
     emit_progress(hooks, "[agent_handoff] 整合已核验黑板证据，转入终审研报合成", 85)
-    ctx = SubagentContext(conversation_id=f"rep_{state.get('job_id', 'task')}_{int(time.time())}", role=agent_display_name("research.synthesizer"))
+    ctx = AgentContext(conversation_id=f"rep_{state.get('job_id', 'task')}_{int(time.time())}", role=agent_display_name("research.synthesizer"))
 
     with node_span("context.prepare_report", "CHAIN", {"context.evidence_count": len(active_ev)}) as span:
         evidence_payload = [
@@ -64,25 +66,17 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
         ]
 
         steer_block = f"\n【运行期动态干预要求（必须显式回应落地）】：{'；'.join(inbox)}\n" if inbox else ""
-        prompt = (
-            f"目标品类：【{keyword}】\n"
-            f"用户完整诉求：{user_query}\n"
-            f"规划大纲章节：{'；'.join(outline)}\n"
-            f"{steer_block}\n"
-            f"【黑板已回收有效证据包（共 {len(evidence_payload)} 份）】：\n"
-            f"{json.dumps(evidence_payload, ensure_ascii=False)}\n\n"
-            "请综合上述多智能体真实采回的证据撰写结构化、易读的 Markdown 市场调研报告。\n"
-            "【排版与可读性要求】：\n"
-            "1. 结论先行：开篇先给出「## 核心结论速览」，提炼关键价格带、核心需求点与首推策略，方便快速浏览；\n"
-            "2. 表格对比：涉及竞品、价格区间、1688 源头报价与 MOQ 等多维对比时，优先使用标准 Markdown 表格呈现；\n"
-            "3. 重点分明：用简短分点与加粗突出核心指标，数据缺口或渠道异常请用 `> ⚠️ 数据缺口与风险提示：` 引用块独立标出。\n"
-            "【严格准则】：\n"
-            "1. 一切价格、起订量、销量、差评与工厂/商品线索必须严格来自上述黑板证据，绝不允许编造未出现的数字；\n"
-            "2. 若某渠道 status 为 empty/error 或 gaps_or_errors 非空，必须在报告对应章节客观说明数据缺失原因与可替代方案，严禁粉饰或凭空补齐；\n"
-            "3. time_references 仅表示读取系统时间的时刻；用户只询问时间时，直接回答带时区的读数。\n"
-            "4. 结合用户诉求给出可落地的差异化与风险提示。"
+        system, prompt = RESEARCH_PROMPTS.render(
+            "research.synthesizer.report",
+            {
+                "keyword": keyword,
+                "user_query": user_query,
+                "outline_joined": "；".join(outline),
+                "steer_block": steer_block,
+                "evidence_count": len(evidence_payload),
+                "evidence_json": json.dumps(evidence_payload, ensure_ascii=False),
+            },
         )
-
         if span is not None:
             span.set_attribute("context.output_chars", len(prompt))
 
@@ -98,7 +92,7 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
             final_report = llm.chat(
                 prompt,
                 tier=ModelTier.STRONG,
-                system="你是资深电商操盘负责人。输出客观、可核验的高质量 Markdown 研报，绝对禁止虚构数据。",
+                system=system or "",
                 on_delta=hooks.result_delta_fn,
                 on_reset=hooks.result_reset_fn,
             )
@@ -127,10 +121,11 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
     transition: AuditableAgentTransition = {
         "agent_id": ctx.conversation_id,
         "role": "research.synthesizer",
-        "type_name": "synthesizer_agent",
-        "state_from": "SYNTHESIZING",
-        "state_to": "COMPLETED",
-        "decision_rationale": state.get("current_rationale", ""),
+        "task_id": "",
+        "agent_type": "synthesizer",
+        "state_from": AgentRunState.SYNTHESIZING.value,
+        "state_to": AgentRunState.COMPLETED.value,
+        "decision_reason": state.get("decision_reason", ""),
         "tools": [],
         "elapsed": elapsed,
         "scratch_files": [],
@@ -140,22 +135,25 @@ def synthesizer_node(state: AutonomousAgentState) -> Dict[str, Any]:
             "report": final_report,
             "artifacts": [str(art_file)],
             "audit_trail": [transition],
-            "system_status": "COMPLETED" if state.get("stop_reason") == StopReason.CONTINUE.value else state.get("system_status", "COMPLETED"),
+            "system_status": ResearchStatus.COMPLETED.value if state.get("stop_reason") == StopReason.CONTINUE.value else state.get("system_status", ResearchStatus.COMPLETED.value),
         },
         synth_route_events,
         synth_last_ep,
     )
 
 
-def final_persistence_node(state: AutonomousAgentState) -> Dict[str, Any]:
+def archive_research(state: AutonomousAgentState) -> Dict[str, Any]:
     """终态沉淀节点：仅在非取消状态下将大纲与实测摘要写入租户长效知识库。"""
+    board = current_task_board()
+    if board is not None:
+        board.cancel_incomplete()
     if bool(state.get("cancelled", False)):
-        return {"system_status": "CANCELLED"}
+        return {"system_status": ResearchStatus.CANCELLED.value}
 
     keyword = state.get("keyword") or ""
     tenant_id = state.get("tenant_id") or "default"
     report = state.get("report") or ""
-    final_status = "TIMEOUT" if state.get("stop_reason") == StopReason.TIMEOUT.value and not report else "COMPLETED"
+    final_status = ResearchStatus.TIMEOUT.value if state.get("stop_reason") == StopReason.TIMEOUT.value and not report else ResearchStatus.COMPLETED.value
     evidence = active_evidence(state)
     if evidence and all(ev.get("channel") == "clock" for ev in evidence):
         return {"system_status": final_status}

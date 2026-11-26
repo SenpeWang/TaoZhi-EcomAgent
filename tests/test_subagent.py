@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-from taozhi.core.agent.context import SubagentContext
+from taozhi.core.agent.context import AgentContext
 from taozhi.core.agent.protocol import WorkspaceMode
 from taozhi.core.tools.search_web import search_web
 from taozhi.application.research.graph import execute_autonomous_agents
@@ -23,7 +23,7 @@ def _patch_llm(mock_llm):
 
 def test_subagent_context_isolation(tmp_path):
     """测试智能体隔离目录、scratch 暂存与 artifacts 交付。"""
-    ctx = SubagentContext(
+    ctx = AgentContext(
         conversation_id="test_sub_001",
         role="测试专员",
         workspace_mode=WorkspaceMode.BRANCH,
@@ -92,7 +92,7 @@ def test_full_multi_agent_research_flow():
                         _ProposedSubtaskSchema(
                             role="research.market_intelligence",
                             goal="采集磁吸手机壳全网口碑与价位",
-                            allowed_tools=["search_web", "search_1688_wholesale"],
+                            suggested_tools=["search_web", "search_1688_wholesale"],
                             seed_queries=["磁吸手机壳"],
                             channel_hint="web",
                         )

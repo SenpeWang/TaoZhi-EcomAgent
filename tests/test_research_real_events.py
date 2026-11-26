@@ -78,7 +78,7 @@ def test_pipeline_a_events_emitted_during_research():
                         _ProposedSubtaskSchema(
                             role="research.market_intelligence",
                             goal="采集测试保温杯全网评价",
-                            allowed_tools=["search_web"],
+                            suggested_tools=["search_web"],
                             seed_queries=["测试保温杯"],
                             channel_hint="web",
                         )
@@ -149,7 +149,7 @@ def test_pipeline_a_events_emitted_during_research():
     assert branch["name"] == "research.subagent_worker"
     assert branch["attributes"]["agent.name"] == "research.market_intelligence"
     result_agents = {agent["role"]: agent for agent in result["subagents"]}
-    assert result_agents["research.market_intelligence"]["id"] == branch["attributes"]["subagent_id"]
+    assert result_agents["research.market_intelligence"]["id"] == branch["attributes"]["agent_id"]
     assert tool["attributes"]["tool.name"] == "search_web"
     assert tool["attributes"]["tool.dispatched"] is True
     assert result_agents["research.market_intelligence"]["tools"][0]["dispatched"] is True
@@ -158,7 +158,7 @@ def test_pipeline_a_events_emitted_during_research():
     report_agent = completed[model["parent_span_id"]]
     assert model["attributes"]["llm.token_count.total"] == 19
     assert report_agent["attributes"]["agent.name"] == "research.synthesizer"
-    assert report_agent["attributes"]["subagent_id"] == result_agents["research.synthesizer"]["id"]
+    assert report_agent["attributes"]["agent_id"] == result_agents["research.synthesizer"]["id"]
     by_name = {}
     for recorded in completed.values():
         by_name.setdefault(recorded["name"], []).append(recorded)
