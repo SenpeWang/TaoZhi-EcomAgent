@@ -27,7 +27,7 @@ def test_private_paths_are_blocked(path):
 def test_example_and_software_docs_are_allowed():
     assert guard.inspect_blob(".env.example", b'API_KEY=""\n') == []
     assert guard.blocked_path("docs/STRUCTURE.md") is None
-    assert guard.blocked_path("data/corpus/产品.md") is None
+    assert guard.blocked_path("data/corpus/产品.pdf") is None
     assert guard.blocked_path("data/README.md") is None
     assert guard.blocked_path("data/accessory_pdfs/manual.pdf") is None
     assert guard.blocked_path("data/runtime/accounts.json") is None
