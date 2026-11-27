@@ -12,7 +12,7 @@ import html
 import os
 import re
 from typing import Any, Dict, List
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 import httpx
 
@@ -147,6 +147,29 @@ def search_amazon(
     return dedupe_items(results)[:limit]
 
 
+def _amazon_product_url(value: object) -> str | None:
+    """只接受 amazon.com 商品详情页链接，拒绝广告跳转与其他站点。
+
+    Args:
+        value: 检索结果中的原始链接。
+
+    Returns:
+        可核对的目标地址；广告、非 amazon.com 或缺少 ASIN 的链接返回 None。
+    """
+    url = html.unescape(str(value or "")).strip()
+    if not url:
+        return None
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    if host != "amazon.com" and not host.endswith(".amazon.com"):
+        return None
+    if "ad_domain=" in url.lower():
+        return None
+    if not re.search(r"/(?:dp|gp/product)/[A-Z0-9]{10}", parsed.path):
+        return None
+    return url
+
+
 def _fallback_duckduckgo_amazon_search(
     query: str, limit: int = 10, timeout: float = 12.0
 ) -> List[Dict[str, Any]]:
@@ -161,8 +184,8 @@ def _fallback_duckduckgo_amazon_search(
     fallback_items: List[Dict[str, Any]] = []
     for row in ddg_items:
         raise_if_cancelled()
-        actual_url = row.get("url", "")
-        if "amazon.com" not in actual_url:
+        actual_url = _amazon_product_url(row.get("url"))
+        if actual_url is None:
             continue
         clean_title = re.sub(r":\s*Amazon\.com:.*$", "", row.get("title", "")).strip()
         clean_title = re.sub(r"\s*-\s*Amazon\.com.*$", "", clean_title).strip()

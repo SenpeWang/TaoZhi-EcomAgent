@@ -370,3 +370,70 @@ def test_web_scraper_marks_truncated_body(monkeypatch):
     assert result["status_code"] == 200
     assert result["error"] is None
     assert result["error_code"] is None
+
+
+def test_duckduckgo_parser_pairs_each_title_with_its_own_url(monkeypatch):
+    """真实 DDG 顺序为标题锚点在前、展示链在后，解析必须同块配对并过滤广告。"""
+    html_text = """
+    <div class="result results_links result--ad">
+      <a class="result__a" href="https://duckduckgo.com/y.js?ad_domain=amazon.com&amp;x=1">广告标题</a>
+      <a class="result__url" href="https://duckduckgo.com/y.js?ad_domain=amazon.com&amp;x=1">广告</a>
+      <a class="result__snippet">广告摘要</a>
+    </div>
+    <div class="result results_links">
+      <a class="result__a" href="https://example.com/a">标题 A</a>
+      <a class="result__url" href="https://example.com/a">a</a>
+      <a class="result__snippet">摘要 A</a>
+    </div>
+    <div class="result results_links">
+      <a class="result__a" href="https://example.com/b">标题 B</a>
+      <a class="result__url" href="https://example.com/b">b</a>
+      <a class="result__snippet">摘要 B</a>
+    </div>
+    """
+
+    class _Response:
+        status_code = 200
+        text = html_text
+
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def post(self, *_args, **_kwargs):
+            return _Response()
+
+    monkeypatch.setattr(search_web.httpx, "Client", lambda **_kw: _Client())
+    items = search_web.search_duckduckgo_html("x", limit=5)
+    assert [(item["title"], item["url"]) for item in items] == [
+        ("标题 A", "https://example.com/a"),
+        ("标题 B", "https://example.com/b"),
+    ]
+
+
+def test_amazon_fallback_rejects_ads_and_requires_product_page(monkeypatch):
+    """回退只接受 amazon.com 商品详情页，广告与搜索页不得伪装成商品。"""
+    rows = [
+        {
+            "title": "Ad - Amazon.com",
+            "snippet": "cover $9.99",
+            "url": "https://duckduckgo.com/y.js?ad_domain=amazon.com&amp;x=1",
+        },
+        {"title": "Search - Amazon.com", "snippet": "cover $8.88", "url": "https://www.amazon.com/s?k=case"},
+        {
+            "title": "Real - Amazon.com",
+            "snippet": "cover $7.77",
+            "url": "https://www.amazon.com/dp/B0REAL1234?th=1&amp;psc=1",
+        },
+    ]
+    monkeypatch.setattr(search_amazon, "search_duckduckgo_html", lambda *_args, **_kwargs: rows)
+    items = search_amazon._fallback_duckduckgo_amazon_search("case", limit=5)
+    assert len(items) == 1
+    assert items[0]["url"] == "https://www.amazon.com/dp/B0REAL1234?th=1&psc=1"
+    assert items[0]["asin"] == "B0REAL1234"

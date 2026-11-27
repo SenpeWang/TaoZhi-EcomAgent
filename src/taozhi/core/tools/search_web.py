@@ -17,16 +17,50 @@ from taozhi.observability.tracing import record_diagnostic
 from .outcome import dedupe_items, is_http_url, raise_if_cancelled, result_items
 from taozhi.infrastructure.mcp.remote_search import search_web_via_mcp
 
-_DDG_RESULT_PATTERN = re.compile(
-    r'<a class="result__url"[^>]*href="(?P<url>[^"]+)"[^>]*>.*?<h2[^>]*>.*?'
-    r'<a[^>]*>(?P<title>.*?)</a>.*?<a class="result__snippet"[^>]*>(?P<snippet>.*?)</a>',
-    re.DOTALL,
-)
+_DDG_RESULT_BLOCK = re.compile(r'<div[^>]+class="[^"]*\bresult\b[^"]*"[^>]*>', re.IGNORECASE)
+_DDG_ANCHOR = re.compile(r"<a\b[^>]*>", re.IGNORECASE)
 
 _ANTI_BOT_STATUS = frozenset({202, 403, 429})
 _BING_BLOCK_PATTERN = re.compile(r'<li class="b_algo".*?</li>', re.DOTALL)
 _BING_LINK_PATTERN = re.compile(r'<h2[^>]*>\s*<a[^>]*href="(?P<url>[^"]+)"[^>]*>(?P<title>.*?)</a>', re.DOTALL)
 _BING_SNIPPET_PATTERN = re.compile(r"<p[^>]*>(?P<snippet>.*?)</p>", re.DOTALL)
+
+
+def _clean_html(fragment: str) -> str:
+    """去掉标签并反转义，得到单行文本。"""
+    text = re.sub(r"<[^>]+>", " ", fragment or "")
+    return re.sub(r"\s+", " ", html.unescape(text)).strip()
+
+
+def _anchor(block: str, css_class: str) -> tuple[str, str]:
+    """返回结果块内指定 class 的第一个锚点的链接与内文。"""
+    for match in _DDG_ANCHOR.finditer(block):
+        tag = match.group(0)
+        if re.search(rf'class="[^"]*\b{re.escape(css_class)}\b[^"]*"', tag, re.IGNORECASE):
+            href = re.search(r'href="([^"]*)"', tag, re.IGNORECASE)
+            close = block.find("</a>", match.end())
+            inner = block[match.end():close] if close != -1 else ""
+            return (href.group(1) if href else ""), inner
+    return "", ""
+
+
+def _ddg_target(href: str) -> str:
+    """还原 DuckDuckGo 跳转壳中的真实目标地址。"""
+    url = html.unescape(href or "").strip()
+    if url.startswith("//"):
+        url = "https:" + url
+    elif url.startswith("/"):
+        url = "https://duckduckgo.com" + url
+    match = re.search(r"[?&]uddg=([^&]+)", url)
+    if match:
+        url = unquote(match.group(1))
+    return html.unescape(url).strip()
+
+
+def _is_ad_block(opening: str, url: str) -> bool:
+    """广告结果不进入证据池。"""
+    lowered = url.lower()
+    return "result--ad" in opening.lower() or "duckduckgo.com/y.js" in lowered or "ad_domain=" in lowered
 
 
 def _normalize_items(
@@ -53,6 +87,9 @@ def _normalize_items(
         title = str(item.get("title") or "").strip()
         url = str(item.get("url") or "").strip()
         if not title or not is_http_url(url):
+            continue
+        lowered = url.lower()
+        if "duckduckgo.com/y.js" in lowered or "ad_domain=" in lowered:
             continue
         snippet = str(item.get("snippet") or "").strip()
         cleaned.append(
@@ -98,24 +135,24 @@ def search_duckduckgo_html(
             record_diagnostic("tool.search_blocked", "fallback", None)
             return []
         resp.raise_for_status()
-        for match in _DDG_RESULT_PATTERN.finditer(resp.text):
-            clean_title = html.unescape(re.sub(r"<[^<]+?>", "", match.group("title")).strip())
-            clean_snippet = html.unescape(re.sub(r"<[^<]+?>", "", match.group("snippet")).strip())
-            raw_url = match.group("url")
-            actual_url = raw_url
-            if "uddg=" in raw_url:
-                url_match = re.search(r"uddg=([^&]+)", raw_url)
-                if url_match:
-                    actual_url = unquote(url_match.group(1))
-            if clean_title and clean_snippet:
-                results.append(
-                    {
-                        "title": clean_title,
-                        "snippet": clean_snippet,
-                        "url": actual_url,
-                        "source": source,
-                    }
-                )
+        openings = list(_DDG_RESULT_BLOCK.finditer(resp.text))
+        for index, opening in enumerate(openings):
+            end = openings[index + 1].start() if index + 1 < len(openings) else len(resp.text)
+            block = resp.text[opening.end():end]
+            href, title_html = _anchor(block, "result__a")
+            actual_url = _ddg_target(href)
+            clean_title = _clean_html(title_html)
+            if not clean_title or not actual_url or _is_ad_block(opening.group(0), actual_url):
+                continue
+            _, snippet_html = _anchor(block, "result__snippet")
+            results.append(
+                {
+                    "title": clean_title,
+                    "snippet": _clean_html(snippet_html),
+                    "url": actual_url,
+                    "source": source,
+                }
+            )
             if len(results) >= limit:
                 break
     return results

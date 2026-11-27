@@ -54,9 +54,11 @@ def test_subagent_context_isolation(tmp_path):
 def test_search_web_tool():
     """测试网络搜索工具具备优雅降级与数据解析。"""
     fake_html = """
-    <a class="result__url" href="https://example.com/item1"></a>
-    <h2><a href="https://example.com/item1">苹果16磁吸手机壳深度测评</a></h2>
-    <a class="result__snippet">2026年最新款式，超强吸力与磨砂质感防滑设计。</a>
+    <div class="result results_links results_links_deep web-result">
+      <a class="result__a" href="https://example.com/item1">苹果16磁吸手机壳深度测评</a>
+      <a class="result__url" href="https://example.com/item1">example.com/item1</a>
+      <a class="result__snippet">2026年最新款式，超强吸力与磨砂质感防滑设计。</a>
+    </div>
     """
     with patch("httpx.Client.post") as mock_post:
         mock_resp = MagicMock()
