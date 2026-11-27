@@ -30,12 +30,14 @@ def runs(owner_id: str | None = Query(None, min_length=1, max_length=128, patter
          eval_kind: EvaluationKind | None = None, mode: EvaluationMode | None = None,
          scope: EvaluationScope | None = None, gate_passed: bool | None = None,
          dataset_id: str | None = Query(None, pattern=Pattern),
+         dataset_version: str | None = Query(None, pattern=Pattern),
          profile_id: str | None = Query(None, pattern=Pattern),
          algorithm_version: str | None = Query(None, pattern=r"^[A-Za-z0-9_.-]{1,64}$"),
          baseline_only: bool = False,
          cursor: str | None = Query(None, max_length=256), limit: PageSize = 30, p=Depends(identity)):
     return evaluation_service.list_runs(p, owner_id=owner_id, eval_kind=eval_kind, mode=mode, scope=scope,
-                                        gate_passed=gate_passed, dataset_id=dataset_id, profile_id=profile_id,
+                                        gate_passed=gate_passed, dataset_id=dataset_id,
+                                        dataset_version=dataset_version, profile_id=profile_id,
                                         algorithm_version=algorithm_version, baseline_only=baseline_only,
                                         cursor=cursor, limit=limit)
 

@@ -336,6 +336,32 @@ def test_metric_catalog_summary_and_dataset_raw_transparency() -> None:
     assert admin.get("/api/evaluations/datasets/unknown-v9/raw").status_code == 404
 
 
+def test_runs_filter_by_dataset_version_and_dataset_id() -> None:
+    """批次接口可按数据集版本或版本+数据集套件过滤。"""
+    _setup()
+    _register_dataset()
+    admin = _login("admin")
+    owner = _owner("admin")
+    _insert_run(owner, "run_version_001", day=1, pass_rate=0.6, gate=False)
+    _insert_run(owner, "run_version_002", day=2, pass_rate=1.0, gate=True)
+
+    by_version = admin.get("/api/evaluations/runs", params={
+        "dataset_version": "agent_v1_20261123"}).json()["items"]
+    assert {item["run_id"] for item in by_version} == {"run_version_001", "run_version_002"}
+
+    other_version = admin.get("/api/evaluations/runs", params={
+        "dataset_version": "agent_v2_20261124"}).json()["items"]
+    assert other_version == []
+
+    by_both = admin.get("/api/evaluations/runs", params={
+        "dataset_id": DATASET_ID, "dataset_version": "agent_v1_20261123"}).json()["items"]
+    assert len(by_both) == 2
+
+    mismatch = admin.get("/api/evaluations/runs", params={
+        "dataset_id": DATASET_ID, "dataset_version": "agent_v2_20261124"}).json()["items"]
+    assert mismatch == []
+
+
 def test_rag_case_detail_accepts_colon_case_ids() -> None:
     """RAG 逐例编号含冒号（层前缀）时，用例详情与游标分页不得被路径校验拒绝。"""
     _setup()

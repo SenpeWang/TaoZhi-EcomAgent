@@ -64,15 +64,16 @@ def _compare(conn, tenant_id: str, current: dict, baseline: dict | None) -> dict
 
 
 def list_runs(p: Principal, *, owner_id: str | None, eval_kind: str | None, mode: str | None,
-              gate_passed: bool | None, dataset_id: str | None, profile_id: str | None,
-              scope: str | None, algorithm_version: str | None, baseline_only: bool,
-              cursor: str | None, limit: int) -> dict:
+              gate_passed: bool | None, dataset_id: str | None, dataset_version: str | None,
+              profile_id: str | None, scope: str | None, algorithm_version: str | None,
+              baseline_only: bool, cursor: str | None, limit: int) -> dict:
     """按可见范围筛选评测批次，返回游标分页。"""
     owner = visible_owner_id(p, owner_id)
     before = decode_time_cursor(cursor)
     with database_connection() as conn:
         rows = evaluation_repo.runs(conn, p.tenant_id, owner, eval_kind=eval_kind, mode=mode, gate=gate_passed,
-                                    dataset_id=dataset_id, profile_id=profile_id, scope=scope,
+                                    dataset_id=dataset_id, dataset_version=dataset_version,
+                                    profile_id=profile_id, scope=scope,
                                     algorithm_version=algorithm_version, baseline_only=baseline_only,
                                     before=before, limit=limit + 1)
     items = [_decorate(row) for row in rows[:limit]]

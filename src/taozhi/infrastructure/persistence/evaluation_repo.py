@@ -55,14 +55,16 @@ def _scope(tenant_id: str, owner_id: str | None) -> tuple[list[str], list]:
 
 def runs(conn: Any, tenant_id: str, owner_id: str | None, *, eval_kind: str | None = None,
          mode: str | None, gate: bool | None, dataset_id: str | None = None,
-         profile_id: str | None = None, scope: str | None = None, algorithm_version: str | None = None,
+         dataset_version: str | None = None, profile_id: str | None = None,
+         scope: str | None = None, algorithm_version: str | None = None,
          baseline_only: bool = False, before: tuple | None, limit: int) -> list[dict]:
     """按可见范围、评测类型、数据集、算法版本与口径筛选批次。"""
     clauses, params = _scope(tenant_id, owner_id)
     if eval_kind is not None:
         clauses.append("AND r.eval_kind=%s")
         params.append(eval_kind)
-    for column, value in (("r.mode", mode), ("r.dataset_id", dataset_id), ("r.profile_id", profile_id),
+    for column, value in (("r.mode", mode), ("r.dataset_id", dataset_id),
+                          ("r.dataset_version", dataset_version), ("r.profile_id", profile_id),
                           ("r.scope", scope), ("p.version_tag", algorithm_version)):
         if value is not None:
             clauses.append(f"AND {column}=%s")
