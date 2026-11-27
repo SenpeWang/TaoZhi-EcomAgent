@@ -10,12 +10,10 @@ FROM python:3.10-slim AS app
 ARG APP_UID=1000
 ARG APP_GID=1000
 ARG PIP_INDEX_URL=""
-ARG GIT_SHA=""
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/src \
-    ECOM_GIT_SHA=${GIT_SHA}
+    PYTHONPATH=/app/src
 
 WORKDIR /app
 
@@ -42,6 +40,9 @@ COPY evals ./evals
 COPY --from=frontend-builder /web/dist ./web/dist
 
 RUN mkdir -p /app/data/runtime && chown -R appuser:appuser /app/data
+ARG GIT_SHA=""
+ENV ECOM_GIT_SHA=${GIT_SHA}
+
 USER appuser
 
 EXPOSE 18080
