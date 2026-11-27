@@ -3,12 +3,18 @@
  */
 import type { EvaluationKind } from './evaluationTypes'
 
+/**
+ * 评测体系展示元数据：标题、短标题与说明。
+ */
 export interface EvaluationKindMeta {
   title: string
   shortTitle: string
   description: string
 }
 
+/**
+ * Agent / RAG 体系的统一展示文案，供切换器与页面标题复用。
+ */
 export const evaluationKindMeta: Record<EvaluationKind, EvaluationKindMeta> = {
   agent: {
     title: 'Agent 多智能体调研',
