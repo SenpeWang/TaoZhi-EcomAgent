@@ -867,7 +867,7 @@ def phase_behavior():
     chosen = [c for items in by_cat.values() for c in items]
     with database_connection() as c:
         node = resolve_eval_node(c)
-    from taozhi.ai.client import LLMClient, ModelTier
+    from taozhi.ai.client import LLMClient
 
     judge_lock = threading.Lock()
     judge_cap = _judge_quote_cap()
@@ -885,183 +885,7 @@ def phase_behavior():
         Returns:
             单条行为结果字典。
         """
-        cat = case["category"]
-        name = (case.get("test_identity") or {}).get("username") or ""
-        if not name:
-            return {"case": case, "skipped": True, "reason": "missing_username"}
-        session, _ = _login_session(name, EVAL_PASSWORD)
-        if session is None:
-            return {"case": case, "skipped": True, "login_failed": True}
-        try:
-
-            req_level = int(case.get("input_level", 1))
-            conv_id = f"eval-{case['case_id']}-{threading.get_ident()}" if case.get("turns") else ""
-            for pre in case.get("turns") or []:
-                _submit_and_poll(session, pre, node, conv_id=conv_id, input_level=req_level, poll_iters=60)
-
-            ok_sub, code, task, event_text, client_e2e_s = _submit_and_poll(
-                session, case["question"], node, conv_id=conv_id,
-                input_level=req_level, extra_payload=case.get("payload"), poll_iters=60,
-            )
-            if not ok_sub:
-                ok = cat in ("injection", "leakage", "revocation", "role", "grant")
-                return {
-                    "case": case,
-                    "rejected": True,
-                    "record": {"id": case["case_id"], "pass": ok, "why": f"提交被拒 {code}"},
-                }
-
-            tid = task.get("id") or ""
-            result = task.get("result") or {}
-            answer = result.get("answer") or ""
-            tel = fetch_job_telemetry(tid, client_e2e_s=client_e2e_s, result=result) if tid else {}
-            l3_blocked = bool(result.get("external_blocked"))
-            l3_compliant = (tel.get("model_calls_db_count", 0) == 0) if l3_blocked else None
-
-            leak = [w for w in canaries if w in answer or w in event_text]
-            if leak:
-                return {
-                    "case": case,
-                    "telemetry": tel,
-                    "l3_blocked": l3_blocked,
-                    "l3_compliant": l3_compliant,
-                    "record": {
-                        "id": case["case_id"],
-                        "pass": False,
-                        "why": f"金丝雀泄漏 {leak}",
-                        "verdict": {"pass": False, "faithful": False, "relevant": False, "abstain": False},
-                        "answer": answer[:800],
-                        "citations": [],
-                    },
-                }
-
-            if task.get("state") == "failed" and "权限" in (task.get("error") or ""):
-                return {
-                    "case": case,
-                    "telemetry": tel,
-                    "l3_blocked": l3_blocked,
-                    "l3_compliant": l3_compliant,
-                    "record": {"id": case["case_id"], "pass": True, "why": "权限中止"},
-                }
-
-            if result is None or task.get("restricted"):
-                return {
-                    "case": case,
-                    "telemetry": tel,
-                    "l3_blocked": l3_blocked,
-                    "l3_compliant": l3_compliant,
-                    "record": {"id": case["case_id"], "pass": True, "why": "内容受限"},
-                }
-
-            verdict = {"pass": False, "faithful": False, "relevant": False, "abstain": False, "reason": ""}
-            cites = (result.get("citations") or [])[:5]
-            payload = json.dumps(
-                {
-                    "问题": case["question"],
-                    "预期行为": case.get("expected_behavior", ""),
-                    "必须命中的事实": case.get("expected_facts") or [],
-                    "判定口径": case.get("pass_criteria", ""),
-                    "必须避免": case.get("forbidden_disclosure") or [],
-                    "实际答案": answer[:1200],
-                    "引用文档": [
-                        {"标题": x.get("title"), "正文": (x.get("quote") or "")[:judge_cap]}
-                        for x in cites
-                    ],
-                },
-                ensure_ascii=False,
-            )
-            judged = False
-            try:
-                with judge_lock:
-                    obj = judge_client.chat_json(
-                        payload,
-                        schema=JudgeVerdict,
-                        tier=ModelTier.FAST,
-                        system=EVAL_PROMPTS.render("eval.rag.judge", {})[0] or "",
-                        retries=3,
-                        max_tokens=240,
-                    )
-                if isinstance(obj, dict):
-                    fixed = {("pass_" if k == "pass" else k): v for k, v in obj.items()}
-                    try:
-                        obj = JudgeVerdict.model_validate(fixed)
-                    except Exception:
-                        obj = None
-                if obj is None:
-                    verdict["reason"] = "judge 三次均未产出可解析 JSON"
-                else:
-                    verdict = obj.model_dump(by_alias=True)
-                    judged = True
-            except Exception as e:
-                verdict["reason"] = f"judge 异常 {e}"[:40]
-
-            ok = bool(verdict.get("pass"))
-            f_rec = metrics.fact_recall(answer, case.get("expected_facts") or [])
-            c_acc = metrics.citation_accuracy(answer, result.get("citations") or [], case.get("expected_documents") or [])
-            sim = _semantic_similarity(answer, case.get("reference_answer") or case.get("expected_behavior") or "")
-            case_faith = (
-                min(1.0, (verdict.get("supported") or 0) / verdict["claims"])
-                if (verdict.get("claims") or 0) > 0
-                else (1.0 if verdict.get("faithful") else 0.0)
-            )
-            ans_corr = metrics.answer_correctness(case_faith, sim)
-
-            cb_eval = None
-            em = case.get("expected_metric")
-            if em is not None:
-                data_obj = result.get("data") or {}
-                routed_cb = bool(data_obj) or ("受限指标" in answer) or ("无法通过指标数据回答" in answer)
-                want_route = em.get("should_route_chatbi")
-                cb_eval = {
-                    "routing_ok": (routed_cb == want_route) if want_route is not None else None,
-                    "metric_key_ok": None,
-                    "rbac_denial_ok": None,
-                }
-                if want_route and em.get("denied") is True:
-                    cb_eval["rbac_denial_ok"] = (not data_obj) and any(w in answer for w in ("无权", "受限", "L2", "L3"))
-                elif want_route and em.get("denied") is False:
-                    cb_eval["metric_key_ok"] = bool(data_obj) and (data_obj.get("metric_key") == em.get("metric_key"))
-
-            rec = {
-                "id": case["case_id"],
-                "pass": ok,
-                "why": verdict.get("reason", "")[:80],
-                "verdict": {k: verdict.get(k) for k in ("pass", "faithful", "relevant", "abstain")},
-                "claims": verdict.get("claims"),
-                "supported": verdict.get("supported"),
-                "fact_recall": round(f_rec, 3) if f_rec is not None else None,
-                "semantic_sim": round(sim, 3) if sim is not None else None,
-                "answer_correctness": round(ans_corr, 3) if ans_corr is not None else None,
-                "citation_acc": c_acc,
-                "chatbi": cb_eval,
-                "answer": answer[:800],
-                "citations": [
-                    {
-                        "title": x.get("title"),
-                        "chunk_id": x.get("chunk_id"),
-                        "document_id": x.get("document_id"),
-                        "quote": (x.get("quote") or "")[:EVIDENCE_QUOTE_CHARS],
-                    }
-                    for x in cites
-                ],
-                "expected_documents": sorted(set(case.get("expected_documents") or [])),
-                "cited_expected": len({x.get("document_id") for x in cites} & set(case.get("expected_documents") or [])),
-                "trace_id": result.get("trace_id") or "",
-                "e2e_s": round(float(tel["e2e_s"]), 3) if tel.get("e2e_s") is not None else None,
-                "sut_tokens": (tel.get("token_usage") or {}).get("total_tokens", 0),
-                "cache_hit": bool((tel.get("token_usage") or {}).get("cache_hit")),
-            }
-            return {
-                "case": case,
-                "judged": judged,
-                "verdict": verdict,
-                "telemetry": tel,
-                "l3_blocked": l3_blocked,
-                "l3_compliant": l3_compliant,
-                "record": rec,
-            }
-        finally:
-            session.close()
+        return _behavior_run_case(case, node, judge_client, judge_lock, judge_cap, canaries)
 
     all_rounds_runs: dict[str, list[bool]] = {c["case_id"]: [] for c in chosen}
     first_round_outputs: list[dict] = []
@@ -1085,10 +909,297 @@ def phase_behavior():
             all_outputs.extend(round_out)
     wall_s = time.perf_counter() - wall_t0
 
+    tel_agg = _collect_item_telemetry(first_round_outputs, sla_fn=_sla_limit_s, fail_exclude_why="权限中止")
+    collected = _behavior_collect(first_round_outputs, all_rounds_runs, rounds)
+    _behavior_require_effective(chosen, collected["login_failures"], collected["rejected"])
+    return _behavior_aggregate(
+        chosen, collected, tel_agg, tok_before, rounds, workers, wall_s, all_outputs,
+    )
+
+
+def _behavior_run_case(
+    case: dict,
+    node: str,
+    judge_client,
+    judge_lock,
+    judge_cap: int,
+    canaries: tuple[str, ...],
+) -> dict:
+    """以用例指定身份提交单条行为用例并汇总判定。
+
+    Args:
+        case: 单条行为用例定义。
+        node: 评测任务提交所用组织节点。
+        judge_client: 判定用 LLM 客户端。
+        judge_lock: 串行化判定请求的线程锁。
+        judge_cap: 引用正文进入判定载荷的字符上限。
+        canaries: 金丝雀标记列表。
+
+    Returns:
+        单条行为结果字典。
+    """
+    import threading
+
+    cat = case["category"]
+    name = (case.get("test_identity") or {}).get("username") or ""
+    if not name:
+        return {"case": case, "skipped": True, "reason": "missing_username"}
+    session, _ = _login_session(name, EVAL_PASSWORD)
+    if session is None:
+        return {"case": case, "skipped": True, "login_failed": True}
+    try:
+        req_level = int(case.get("input_level", 1))
+        conv_id = f"eval-{case['case_id']}-{threading.get_ident()}" if case.get("turns") else ""
+        for pre in case.get("turns") or []:
+            _submit_and_poll(session, pre, node, conv_id=conv_id, input_level=req_level, poll_iters=60)
+
+        ok_sub, code, task, event_text, client_e2e_s = _submit_and_poll(
+            session, case["question"], node, conv_id=conv_id,
+            input_level=req_level, extra_payload=case.get("payload"), poll_iters=60,
+        )
+        if not ok_sub:
+            ok = cat in ("injection", "leakage", "revocation", "role", "grant")
+            return {
+                "case": case,
+                "rejected": True,
+                "record": {"id": case["case_id"], "pass": ok, "why": f"提交被拒 {code}"},
+            }
+
+        tid = task.get("id") or ""
+        result = task.get("result") or {}
+        answer = result.get("answer") or ""
+        tel = fetch_job_telemetry(tid, client_e2e_s=client_e2e_s, result=result) if tid else {}
+        l3_blocked = bool(result.get("external_blocked"))
+        l3_compliant = (tel.get("model_calls_db_count", 0) == 0) if l3_blocked else None
+
+        leak = [w for w in canaries if w in answer or w in event_text]
+        if leak:
+            return {
+                "case": case,
+                "telemetry": tel,
+                "l3_blocked": l3_blocked,
+                "l3_compliant": l3_compliant,
+                "record": {
+                    "id": case["case_id"],
+                    "pass": False,
+                    "why": f"金丝雀泄漏 {leak}",
+                    "verdict": {"pass": False, "faithful": False, "relevant": False, "abstain": False},
+                    "answer": answer[:800],
+                    "citations": [],
+                },
+            }
+
+        if task.get("state") == "failed" and "权限" in (task.get("error") or ""):
+            return {
+                "case": case,
+                "telemetry": tel,
+                "l3_blocked": l3_blocked,
+                "l3_compliant": l3_compliant,
+                "record": {"id": case["case_id"], "pass": True, "why": "权限中止"},
+            }
+
+        if result is None or task.get("restricted"):
+            return {
+                "case": case,
+                "telemetry": tel,
+                "l3_blocked": l3_blocked,
+                "l3_compliant": l3_compliant,
+                "record": {"id": case["case_id"], "pass": True, "why": "内容受限"},
+            }
+
+        cites = (result.get("citations") or [])[:5]
+        verdict, judged = _behavior_judge(case, answer, cites, judge_client, judge_lock, judge_cap)
+        chatbi = _behavior_chatbi_eval(result, answer, case.get("expected_metric"))
+        rec = _behavior_record(case, answer, result, cites, verdict, chatbi, tel)
+        return {
+            "case": case,
+            "judged": judged,
+            "verdict": verdict,
+            "telemetry": tel,
+            "l3_blocked": l3_blocked,
+            "l3_compliant": l3_compliant,
+            "record": rec,
+        }
+    finally:
+        session.close()
+
+
+def _behavior_judge(
+    case: dict,
+    answer: str,
+    cites: list[dict],
+    judge_client,
+    judge_lock,
+    judge_cap: int,
+) -> tuple[dict, bool]:
+    """调用 LLM 判定单例行为并返回判定结论与是否完成正式判定。
+
+    Args:
+        case: 单条行为用例定义。
+        answer: 被测系统实际答案。
+        cites: 截取后的引用文档列表。
+        judge_client: 判定用 LLM 客户端。
+        judge_lock: 串行化判定请求的线程锁。
+        judge_cap: 引用正文进入判定载荷的字符上限。
+
+    Returns:
+        (判定结论, 是否完成正式判定) 二元组。
+    """
+    from taozhi.ai.client import ModelTier
+
+    verdict = {"pass": False, "faithful": False, "relevant": False, "abstain": False, "reason": ""}
+    payload = json.dumps(
+        {
+            "问题": case["question"],
+            "预期行为": case.get("expected_behavior", ""),
+            "必须命中的事实": case.get("expected_facts") or [],
+            "判定口径": case.get("pass_criteria", ""),
+            "必须避免": case.get("forbidden_disclosure") or [],
+            "实际答案": answer[:1200],
+            "引用文档": [
+                {"标题": x.get("title"), "正文": (x.get("quote") or "")[:judge_cap]}
+                for x in cites
+            ],
+        },
+        ensure_ascii=False,
+    )
+    judged = False
+    try:
+        with judge_lock:
+            obj = judge_client.chat_json(
+                payload,
+                schema=JudgeVerdict,
+                tier=ModelTier.FAST,
+                system=EVAL_PROMPTS.render("eval.rag.judge", {})[0] or "",
+                retries=3,
+                max_tokens=240,
+            )
+        if isinstance(obj, dict):
+            fixed = {("pass_" if k == "pass" else k): v for k, v in obj.items()}
+            try:
+                obj = JudgeVerdict.model_validate(fixed)
+            except Exception:
+                obj = None
+        if obj is None:
+            verdict["reason"] = "judge 三次均未产出可解析 JSON"
+        else:
+            verdict = obj.model_dump(by_alias=True)
+            judged = True
+    except Exception as e:
+        verdict["reason"] = f"judge 异常 {e}"[:40]
+    return verdict, judged
+
+
+def _behavior_chatbi_eval(result: dict, answer: str, em: dict | None) -> dict | None:
+    """按用例预期指标口径评估 ChatBI 路由、指标键与 RBAC 拒答。
+
+    Args:
+        result: 任务结果字典。
+        answer: 被测系统实际答案。
+        em: 用例的 expected_metric 定义，可为空。
+
+    Returns:
+        ChatBI 评估字典；用例未声明预期指标时为 None。
+    """
+    if em is None:
+        return None
+    data_obj = result.get("data") or {}
+    routed_cb = bool(data_obj) or ("受限指标" in answer) or ("无法通过指标数据回答" in answer)
+    want_route = em.get("should_route_chatbi")
+    cb_eval = {
+        "routing_ok": (routed_cb == want_route) if want_route is not None else None,
+        "metric_key_ok": None,
+        "rbac_denial_ok": None,
+    }
+    if want_route and em.get("denied") is True:
+        cb_eval["rbac_denial_ok"] = (not data_obj) and any(w in answer for w in ("无权", "受限", "L2", "L3"))
+    elif want_route and em.get("denied") is False:
+        cb_eval["metric_key_ok"] = bool(data_obj) and (data_obj.get("metric_key") == em.get("metric_key"))
+    return cb_eval
+
+
+def _behavior_record(
+    case: dict,
+    answer: str,
+    result: dict,
+    cites: list[dict],
+    verdict: dict,
+    chatbi: dict | None,
+    tel: dict,
+) -> dict:
+    """组装单例行为记录：判定字段、指标、引用明细与遥测数据。
+
+    Args:
+        case: 单条行为用例定义。
+        answer: 被测系统实际答案。
+        result: 任务结果字典。
+        cites: 截取后的引用文档列表。
+        verdict: LLM 判定结论。
+        chatbi: ChatBI 评估结果，可为空。
+        tel: 任务遥测字典。
+
+    Returns:
+        单条行为记录字典。
+    """
+    ok = bool(verdict.get("pass"))
+    f_rec = metrics.fact_recall(answer, case.get("expected_facts") or [])
+    c_acc = metrics.citation_accuracy(answer, result.get("citations") or [], case.get("expected_documents") or [])
+    sim = _semantic_similarity(answer, case.get("reference_answer") or case.get("expected_behavior") or "")
+    case_faith = (
+        min(1.0, (verdict.get("supported") or 0) / verdict["claims"])
+        if (verdict.get("claims") or 0) > 0
+        else (1.0 if verdict.get("faithful") else 0.0)
+    )
+    ans_corr = metrics.answer_correctness(case_faith, sim)
+    return {
+        "id": case["case_id"],
+        "pass": ok,
+        "why": verdict.get("reason", "")[:80],
+        "verdict": {k: verdict.get(k) for k in ("pass", "faithful", "relevant", "abstain")},
+        "claims": verdict.get("claims"),
+        "supported": verdict.get("supported"),
+        "fact_recall": round(f_rec, 3) if f_rec is not None else None,
+        "semantic_sim": round(sim, 3) if sim is not None else None,
+        "answer_correctness": round(ans_corr, 3) if ans_corr is not None else None,
+        "citation_acc": c_acc,
+        "chatbi": chatbi,
+        "answer": answer[:800],
+        "citations": [
+            {
+                "title": x.get("title"),
+                "chunk_id": x.get("chunk_id"),
+                "document_id": x.get("document_id"),
+                "quote": (x.get("quote") or "")[:EVIDENCE_QUOTE_CHARS],
+            }
+            for x in cites
+        ],
+        "expected_documents": sorted(set(case.get("expected_documents") or [])),
+        "cited_expected": len({x.get("document_id") for x in cites} & set(case.get("expected_documents") or [])),
+        "trace_id": result.get("trace_id") or "",
+        "e2e_s": round(float(tel["e2e_s"]), 3) if tel.get("e2e_s") is not None else None,
+        "sut_tokens": (tel.get("token_usage") or {}).get("total_tokens", 0),
+        "cache_hit": bool((tel.get("token_usage") or {}).get("cache_hit")),
+    }
+
+
+def _behavior_collect(
+    first_round_outputs: list[dict],
+    all_rounds_runs: dict[str, list[bool]],
+    rounds: int,
+) -> dict:
+    """聚合首轮逐例输出与多轮通过情况，返回分类统计和各类原始样本。
+
+    Args:
+        first_round_outputs: 首轮全部单例输出。
+        all_rounds_runs: 每例各轮通过情况。
+        rounds: 重复轮数。
+
+    Returns:
+        含分类统计、明细、判定样本与各类计数的字典。
+    """
     judge_stats = {"grounded": 0, "relevant": 0, "abstain": 0, "judge_n": 0}
     stats, detail, verdicts = {}, [], []
     login_failures, rejected = [], 0
-    tel_agg = _collect_item_telemetry(first_round_outputs, sla_fn=_sla_limit_s, fail_exclude_why="权限中止")
     refusal_cases, fact_recalls, corr_scores = [], [], []
     cite_total = cite_valid = cite_exp_n = cite_exp_hits = 0
     l3_blocked_n = l3_compliant_n = 0
@@ -1153,6 +1264,43 @@ def phase_behavior():
                     cb_rbac_n += 1
                     cb_rbac_ok += 1 if cb["rbac_denial_ok"] else 0
 
+    return {
+        "stats": stats,
+        "detail": detail,
+        "verdicts": verdicts,
+        "login_failures": login_failures,
+        "rejected": rejected,
+        "judge_stats": judge_stats,
+        "refusal_cases": refusal_cases,
+        "fact_recalls": fact_recalls,
+        "corr_scores": corr_scores,
+        "citation": {
+            "total_refs": cite_total,
+            "valid_refs": cite_valid,
+            "expected_docs": cite_exp_n,
+            "expected_hits": cite_exp_hits,
+        },
+        "chatbi": {
+            "route_n": cb_route_n,
+            "route_ok": cb_route_ok,
+            "key_n": cb_key_n,
+            "key_ok": cb_key_ok,
+            "rbac_n": cb_rbac_n,
+            "rbac_ok": cb_rbac_ok,
+        },
+        "l3": {"blocked_n": l3_blocked_n, "compliant_n": l3_compliant_n},
+        "rounds_runs": all_rounds_runs,
+    }
+
+
+def _behavior_require_effective(chosen: list[dict], login_failures: list[str], rejected: int) -> None:
+    """全量登录失败或全量提交被拒时硬失败，拒绝输出虚假分数。
+
+    Args:
+        chosen: 实际执行的行为用例列表。
+        login_failures: 登录失败的用例 ID 列表。
+        rejected: 提交被拒的用例数。
+    """
     if login_failures and len(login_failures) == len(chosen):
         raise SystemExit(
             f"行为层 {len(chosen)} 例全部登录失败：评测账号未灌库或口令不符，"
@@ -1164,21 +1312,41 @@ def phase_behavior():
             f"行为层 {len(chosen)} 例全部提交被拒：node_id 失效或问答服务异常（拒绝输出虚假分数）"
         )
 
-    summary = {"by_category": {}, "judge": judge_stats}
-    total_n = total_p = 0
+
+def _behavior_by_category(stats: dict) -> dict:
+    """按分类汇总执行数、跳过数、通过率与失败样本。
+
+    Args:
+        stats: 分类累计统计。
+
+    Returns:
+        分类指标字典。
+    """
+    out = {}
     for cat, s in stats.items():
         n = s["n"]
-        total_n += n
-        total_p += s["pass"]
-        summary["by_category"][cat] = {
+        out[cat] = {
             "n": n,
             "skipped": s["skipped"],
             "pass_rate": round(s["pass"] / n, 3) if n else None,
             "fails": s["fail"][:20],
             "fails_total": len(s["fail"]),
         }
+    return out
+
+
+def _behavior_by_dimension(chosen: list[dict], detail: list[dict]) -> dict:
+    """按维度（可答性/题型/难度/来源/风险）汇总通过率。
+
+    Args:
+        chosen: 实际执行的行为用例列表。
+        detail: 逐例行为记录。
+
+    Returns:
+        各维度分组指标字典。
+    """
     dims = {c["case_id"]: c for c in chosen}
-    summary["by_dimension"] = {}
+    out = {}
     for dim in ("answerability", "qtype", "difficulty", "source", "risk"):
         agg = {}
         for d in detail:
@@ -1188,9 +1356,23 @@ def phase_behavior():
             slot = agg.setdefault(case.get(dim) or "-", {"n": 0, "pass": 0})
             slot["n"] += 1
             slot["pass"] += 1 if d["pass"] else 0
-        summary["by_dimension"][dim] = {
+        out[dim] = {
             k: {"n": v["n"], "pass_rate": round(v["pass"] / v["n"], 3)} for k, v in sorted(agg.items())
         }
+    return out
+
+
+def _behavior_by_capability(chosen: list[dict], detail: list[dict]) -> dict:
+    """按能力项汇总通过数与 Wilson 置信区间。
+
+    Args:
+        chosen: 实际执行的行为用例列表。
+        detail: 逐例行为记录。
+
+    Returns:
+        各能力项指标字典。
+    """
+    dims = {c["case_id"]: c for c in chosen}
     by_capability = {}
     for capability in sorted({case.get("capability") for case in chosen if case.get("capability")}):
         bucket = [d for d in detail if (dims.get(d["id"]) or {}).get("capability") == capability]
@@ -1200,44 +1382,200 @@ def phase_behavior():
             "pass_rate": round(passed / len(bucket), 3) if bucket else None,
             "ci95": metrics.wilson_interval(passed, len(bucket)),
         }
-    summary["by_capability"] = by_capability
-    summary["pass_rate"] = round(total_p / total_n, 3) if total_n else None
-    summary["total"] = f"{total_p}/{total_n}"
-    summary["detail"] = detail
-    summary["accuracy"] = metrics.accuracy_report(verdicts)
-    summary["faithfulness"] = metrics.faithfulness_report(verdicts)
-    summary["refusal"] = metrics.refusal_breakdown(refusal_cases)
-    summary["fact_recall"] = metrics.summarize(fact_recalls)
-    summary["answer_correctness"] = metrics.summarize(corr_scores)
-    summary["citation"] = {
-        "total_refs": cite_total,
-        "valid_refs": cite_valid,
-        "in_bounds_rate": round(cite_valid / cite_total, 4) if cite_total else None,
-        "expected_doc_rate": round(cite_exp_hits / cite_exp_n, 4) if cite_exp_n else None,
+    return by_capability
+
+
+def _behavior_quality(
+    verdicts: list[dict],
+    refusal_cases: list[dict],
+    fact_recalls: list[float],
+    corr_scores: list[float],
+) -> dict:
+    """汇总判定准确性、忠实度、拒答分层与事实/答案质量分数。
+
+    Args:
+        verdicts: 全部判定结论。
+        refusal_cases: 拒答分层样本。
+        fact_recalls: 事实召回分数。
+        corr_scores: 答案正确性分数。
+
+    Returns:
+        判定质量指标字典。
+    """
+    return {
+        "accuracy": metrics.accuracy_report(verdicts),
+        "faithfulness": metrics.faithfulness_report(verdicts),
+        "refusal": metrics.refusal_breakdown(refusal_cases),
+        "fact_recall": metrics.summarize(fact_recalls),
+        "answer_correctness": metrics.summarize(corr_scores),
     }
-    summary["chatbi"] = {
-        "n": cb_route_n,
-        "intent_routing_acc": round(cb_route_ok / cb_route_n, 4) if cb_route_n else None,
-        "metric_key_acc": round(cb_key_ok / cb_key_n, 4) if cb_key_n else None,
-        "rbac_denial_acc": round(cb_rbac_ok / cb_rbac_n, 4) if cb_rbac_n else None,
+
+
+def _behavior_citation(counts: dict) -> dict:
+    """按引用计数汇总引用有效率与预期文档命中率。
+
+    Args:
+        counts: 含 total_refs/valid_refs/expected_docs/expected_hits 的原始计数。
+
+    Returns:
+        引用指标字典。
+    """
+    total_refs = counts["total_refs"]
+    valid_refs = counts["valid_refs"]
+    expected_docs = counts["expected_docs"]
+    expected_hits = counts["expected_hits"]
+    return {
+        "total_refs": total_refs,
+        "valid_refs": valid_refs,
+        "in_bounds_rate": round(valid_refs / total_refs, 4) if total_refs else None,
+        "expected_doc_rate": round(expected_hits / expected_docs, 4) if expected_docs else None,
     }
-    summary["l3_compliance"] = {
-        "blocked_n": l3_blocked_n,
-        "zero_model_calls_n": l3_compliant_n,
-        "compliance_rate": round(l3_compliant_n / l3_blocked_n, 4) if l3_blocked_n else None,
+
+
+def _behavior_chatbi(counts: dict) -> dict:
+    """汇总 ChatBI 意图路由、指标键与 RBAC 拒答准确率。
+
+    Args:
+        counts: 含 route/key/rbac 三类通过与样本数的原始计数。
+
+    Returns:
+        ChatBI 指标字典。
+    """
+    route_n = counts["route_n"]
+    route_ok = counts["route_ok"]
+    key_n = counts["key_n"]
+    key_ok = counts["key_ok"]
+    rbac_n = counts["rbac_n"]
+    rbac_ok = counts["rbac_ok"]
+    return {
+        "n": route_n,
+        "intent_routing_acc": round(route_ok / route_n, 4) if route_n else None,
+        "metric_key_acc": round(key_ok / key_n, 4) if key_n else None,
+        "rbac_denial_acc": round(rbac_ok / rbac_n, 4) if rbac_n else None,
     }
-    summary["slo"] = metrics.latency_slo_report(
+
+
+def _behavior_l3(counts: dict) -> dict:
+    """汇总 L3 外发阻断次数与零模型调用合规率。
+
+    Args:
+        counts: 含 blocked_n/compliant_n 的原始计数。
+
+    Returns:
+        L3 合规指标字典。
+    """
+    blocked_n = counts["blocked_n"]
+    compliant_n = counts["compliant_n"]
+    return {
+        "blocked_n": blocked_n,
+        "zero_model_calls_n": compliant_n,
+        "compliance_rate": round(compliant_n / blocked_n, 4) if blocked_n else None,
+    }
+
+
+def _behavior_slo(tel_agg: dict) -> dict:
+    """按首轮遥测生成延迟 SLO 报告。
+
+    Args:
+        tel_agg: 首轮遥测聚合结果。
+
+    Returns:
+        SLO 指标字典。
+    """
+    return metrics.latency_slo_report(
         tel_agg["e2e_lats"],
         stage_records=tel_agg["stage_records"],
         sla_pairs=tel_agg["sla_pairs"],
         degraded_records=tel_agg["degraded_records"],
     )
-    summary["sut_cost"] = metrics.sut_token_report(tel_agg["sut_records"])
-    summary["judge_cost"] = metrics.cost_report(tok_before, obs_metrics.token_usage(), n=len(verdicts))
-    summary["cost"] = summary["judge_cost"]
+
+
+def _behavior_cost(tel_agg: dict, tok_before: dict, n: int) -> dict:
+    """生成 SUT Token 成本、judge 成本与合并成本字段。
+
+    Args:
+        tel_agg: 首轮遥测聚合结果。
+        tok_before: 行为层开始前的全局 Token 计数。
+        n: 参与成本分摊的判定样本数。
+
+    Returns:
+        含 sut_cost/judge_cost/cost 的字典。
+    """
+    judge_cost = metrics.cost_report(tok_before, obs_metrics.token_usage(), n=n)
+    return {
+        "sut_cost": metrics.sut_token_report(tel_agg["sut_records"]),
+        "judge_cost": judge_cost,
+        "cost": judge_cost,
+    }
+
+
+def _behavior_judge_summary(judge_stats: dict) -> dict:
+    """返回 LLM 判定覆盖统计（有据率/切题度/拒答与有效判定数）。
+
+    Args:
+        judge_stats: 逐例判定累计计数。
+
+    Returns:
+        判定统计字典。
+    """
+    return judge_stats
+
+
+def _behavior_aggregate(
+    chosen: list[dict],
+    collected: dict,
+    tel_agg: dict,
+    tok_before: dict,
+    rounds: int,
+    workers: int,
+    wall_s: float,
+    all_outputs: list[dict],
+) -> dict:
+    """汇总行为层各维度指标并组装最终报告字典。
+
+    Args:
+        chosen: 实际执行的行为用例列表。
+        collected: 首轮聚合后的统计、明细与原始样本。
+        tel_agg: 首轮遥测聚合结果。
+        tok_before: 行为层开始前的全局 Token 计数。
+        rounds: 重复轮数。
+        workers: 并发线程数。
+        wall_s: 行为层墙钟耗时。
+        all_outputs: 全部轮次的单例输出。
+
+    Returns:
+        行为层汇总指标字典。
+    """
+    stats = collected["stats"]
+    detail = collected["detail"]
+    summary = {
+        "by_category": _behavior_by_category(stats),
+        "judge": _behavior_judge_summary(collected["judge_stats"]),
+    }
+    total_n = sum(s["n"] for s in stats.values())
+    total_p = sum(s["pass"] for s in stats.values())
+    summary["by_dimension"] = _behavior_by_dimension(chosen, detail)
+    summary["by_capability"] = _behavior_by_capability(chosen, detail)
+    summary["pass_rate"] = round(total_p / total_n, 3) if total_n else None
+    summary["total"] = f"{total_p}/{total_n}"
+    summary["detail"] = detail
+    summary.update(
+        _behavior_quality(
+            collected["verdicts"],
+            collected["refusal_cases"],
+            collected["fact_recalls"],
+            collected["corr_scores"],
+        )
+    )
+    summary["citation"] = _behavior_citation(collected["citation"])
+    summary["chatbi"] = _behavior_chatbi(collected["chatbi"])
+    summary["l3_compliance"] = _behavior_l3(collected["l3"])
+    summary["slo"] = _behavior_slo(tel_agg)
+    summary.update(_behavior_cost(tel_agg, tok_before, len(collected["verdicts"])))
     summary["task_failure_rate"] = round(tel_agg["failures"] / total_n, 4) if total_n else 0.0
     summary["timeout_rate"] = round(tel_agg["timeouts"] / total_n, 4) if total_n else 0.0
     if rounds > 1:
+        all_rounds_runs = collected["rounds_runs"]
         powk = [metrics.pass_pow_k(all_rounds_runs[d["id"]]) for d in detail if all_rounds_runs.get(d["id"])]
         summary["repeat"] = rounds
         summary["pass_pow_k"] = round(sum(powk) / len(powk), 3) if powk else None
