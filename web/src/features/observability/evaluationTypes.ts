@@ -30,6 +30,7 @@ export type EvaluationAuditAction =
   | 'publish_run'
   | 'set_baseline'
   | 'purge_data'
+  | 'migrate_dataset_versions'
 /**
  * 评测分层名称：retrieval 检索层、adversarial 对抗层、behavior 行为层、six_metrics 六项指标层。
  */
@@ -716,6 +717,7 @@ export const evaluationAuditActions: Record<EvaluationAuditAction, string> = {
   publish_run: '入库批次',
   set_baseline: '设置基线',
   purge_data: '清理评测数据',
+  migrate_dataset_versions: '历史数据集版本迁移',
 }
 
 /**

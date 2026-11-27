@@ -111,6 +111,8 @@ from dataclasses import dataclass
 from dotenv import dotenv_values
 
 ROOT = PROJECT_ROOT
+DEFAULT_TENANT_CODE = "mofa"
+DEFAULT_OWNER_USERNAME = "owner"
 @dataclass(frozen=True)
 class Config:
     """企业服务端、知识检索、中间件与任务租约运行时配置快照。"""
@@ -261,7 +263,7 @@ def load_config() -> Config:
         dsn,
         mode,
         private,
-        values.get("ECOM_TENANT_CODE", "mofa"),
+        values.get("ECOM_TENANT_CODE", DEFAULT_TENANT_CODE),
         values.get("ECOM_COOKIE_SECURE", "false") == "true",
         review_timeout=int(values.get("ECOM_REVIEW_TIMEOUT", "86400")),
         embed_service_url=values.get("ECOM_EMBED_SERVICE_URL", "http://127.0.0.1:18555"),

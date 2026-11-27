@@ -1,6 +1,8 @@
 """评测中心历史数据回填：登记 V1 数据集、发布历史报告、锁定基线与合并旧数据集。"""
 from __future__ import annotations
 
+from taozhi.config import DEFAULT_OWNER_USERNAME, DEFAULT_TENANT_CODE
+
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -69,7 +71,7 @@ def _merge_legacy_agent_datasets(conn, tenant_id: str, actor_id: str, version: s
     return merged
 
 
-def backfill(tenant_code: str = "mofa", owner_username: str = "owner", reset: bool = False) -> dict:
+def backfill(tenant_code: str = DEFAULT_TENANT_CODE, owner_username: str = DEFAULT_OWNER_USERNAME, reset: bool = False) -> dict:
     """回填历史评测数据，可重复执行（幂等）。
 
     Args:

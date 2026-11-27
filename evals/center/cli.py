@@ -1,6 +1,8 @@
 """评测中心命令行：数据集登记、报告发布、基线设置、历史版本迁移、历史回填与入库自检。"""
 from __future__ import annotations
 
+from taozhi.config import DEFAULT_TENANT_CODE
+
 import argparse
 from hashlib import sha256
 import json
@@ -28,7 +30,7 @@ def _tenant_code(args: argparse.Namespace) -> str:
     Returns:
         租户编码。
     """
-    return getattr(args, "tenant_code", None) or os.environ.get("ECOM_TENANT_CODE") or "mofa"
+    return getattr(args, "tenant_code", None) or os.environ.get("ECOM_TENANT_CODE") or DEFAULT_TENANT_CODE
 
 
 def _identity(args: argparse.Namespace) -> tuple[str, str]:

@@ -1,6 +1,8 @@
 """将受信运行器的 Agent JSON 报告归档到评测中心，账号归属由执行导入的运维人员指定。"""
 from __future__ import annotations
 
+from taozhi.config import DEFAULT_TENANT_CODE
+
 import argparse
 from collections import Counter
 from datetime import datetime, timezone
@@ -376,7 +378,7 @@ def main() -> None:
             tenant_id, owner_id = args.tenant_id, args.owner_id
         else:
             tenant_id, owner_id = resolve_owner(
-                args.tenant_code or __import__("os").environ.get("ECOM_TENANT_CODE", "mofa"),
+                args.tenant_code or __import__("os").environ.get("ECOM_TENANT_CODE", DEFAULT_TENANT_CODE),
                 args.owner_username)
         paths = [args.report] if args.report is not None else pending_reports(args.reports_dir)
     except ValueError as exc:

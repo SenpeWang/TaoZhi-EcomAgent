@@ -5,6 +5,8 @@ Agent 报告沿用 `evals.agent_eval.publish` 的投影口径；RAG 报告按三
 """
 from __future__ import annotations
 
+from taozhi.config import DEFAULT_OWNER_USERNAME, DEFAULT_TENANT_CODE
+
 from collections import Counter
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -43,7 +45,8 @@ def case_sha256(value: Any) -> str:
     return sha256(canonical_json(value)).hexdigest()
 
 
-def resolve_owner(tenant_code: str = "mofa", owner_username: str = "owner") -> tuple[str, str]:
+def resolve_owner(tenant_code: str = DEFAULT_TENANT_CODE,
+                  owner_username: str = DEFAULT_OWNER_USERNAME) -> tuple[str, str]:
     """按租户编码与账号登录名解析入库归属。
 
     Args:

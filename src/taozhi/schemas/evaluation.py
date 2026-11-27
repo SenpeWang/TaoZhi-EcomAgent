@@ -9,7 +9,7 @@ EvaluationKind = Literal["agent", "rag"]
 EvaluationMode = Literal["live", "synthetic_trace_regrade"]
 EvaluationScope = Literal["full", "quick", "retrieval", "adversarial", "behavior"]
 EvaluationStatus = Literal["passed", "failed", "unassessable"]
-EvaluationAuditAction = Literal["register_dataset", "register_profile", "trigger_run", "publish_run", "set_baseline", "purge_data"]
+EvaluationAuditAction = Literal["register_dataset", "register_profile", "trigger_run", "publish_run", "set_baseline", "purge_data", "migrate_dataset_versions"]
 EvaluationJobState = Literal["queued", "running", "review", "completed", "cancelled", "failed", "rejected", "legacy"]
 
 

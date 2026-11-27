@@ -1,6 +1,8 @@
 """把 RAG 三层评测报告归档到评测中心。"""
 from __future__ import annotations
 
+from taozhi.config import DEFAULT_TENANT_CODE
+
 import argparse
 import json
 import os
@@ -29,7 +31,7 @@ def main() -> None:
             tenant_id, owner_id = args.tenant_id, args.owner_id
         else:
             tenant_id, owner_id = publish.resolve_owner(
-                args.tenant_code or os.environ.get("ECOM_TENANT_CODE", "mofa"), args.owner_username)
+                args.tenant_code or os.environ.get("ECOM_TENANT_CODE", DEFAULT_TENANT_CODE), args.owner_username)
     except ValueError as exc:
         parser.exit(2, f"归属解析失败（{exc}）\n")
     if args.report is not None:
