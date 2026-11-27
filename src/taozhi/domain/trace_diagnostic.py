@@ -19,6 +19,8 @@ CATALOG: dict[str, tuple[DiagnosticCategory, str]] = {
     "model.empty_output": ("model_api", "模型未返回可用正文"),
     "tool.scraper_missing": ("tool", "本地采集程序或解释器未就绪"),
     "tool.scraper_exit": ("tool", "本地采集程序异常退出"),
+    "tool.scraper_state": ("tool", "1688 本地采集返回失败状态"),
+    "tool.scraper_empty": ("tool", "1688 本地采集未解析到商品，可能页面改版或风控"),
     "tool.invalid_arguments": ("tool", "工具参数不符合声明格式"),
     "tool.invalid_response": ("tool", "采集通道未返回预期的数据格式"),
     "tool.invalid_timezone": ("tool", "无法识别时区，请使用 IANA 时区名称，如 Asia/Shanghai"),

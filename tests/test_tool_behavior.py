@@ -304,6 +304,18 @@ def test_1688_local_scraper_kills_process_on_cancel(monkeypatch):
     assert killed["count"] >= 1
 
 
+def test_1688_local_empty_state_returns_empty_list():
+    """本地采集明确无结果时返回空列表，而不是格式错误。"""
+    assert search_1688._parse_local_output('{"state":"empty","items":[],"note":"页面改版"}', 5) == []
+
+
+def test_1688_local_error_state_raises_stable_code():
+    """本地采集失败状态必须映射为稳定故障码，保留可诊断语义。"""
+    with pytest.raises(ToolInvocationError) as excinfo:
+        search_1688._parse_local_output('{"state":"error","items":[],"note":"ERR_NETWORK_CHANGED"}', 5)
+    assert excinfo.value.code == "tool.scraper_state"
+
+
 def test_1688_normalization_requires_verifiable_url_and_keeps_ranges_null():
     """1688 条目缺可核对链接时丢弃，报价区间不解析成假数值。"""
     items = search_1688._normalize_items(

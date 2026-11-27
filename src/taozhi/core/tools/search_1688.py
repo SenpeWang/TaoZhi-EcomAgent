@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -17,6 +18,8 @@ import httpx
 from taozhi.config import resolve_runtime_dir
 from taozhi.observability.tracing import record_diagnostic
 from .outcome import ToolCancelled, ToolInvocationError, is_http_url, raise_if_cancelled
+
+_LOG = logging.getLogger(__name__)
 
 
 def _run_local_scraper(python_path: str, script_path: str, keyword: str, limit: int, budget: float) -> str:
@@ -140,6 +143,39 @@ def _normalize_items(payload: object, limit: int, *, source: str) -> List[Dict[s
     return cleaned
 
 
+def _parse_local_output(output: str, limit: int) -> List[Dict[str, Any]]:
+    """解析本地采集脚本输出的最后一条 JSON 结果。
+
+    Args:
+        output: 采集子进程的标准输出文本。
+        limit: 返回条数上限。
+
+    Returns:
+        归一化后的货源条目；脚本明确返回无结果时为空列表。
+
+    Raises:
+        ToolInvocationError: 输出不是预期 JSON、缺少状态或采集失败时抛出稳定故障码。
+    """
+    for line in reversed(output.splitlines()):
+        if not line.lstrip().startswith("{"):
+            continue
+        try:
+            result = json.loads(line)
+        except ValueError as exc:
+            raise ToolInvocationError("tool.invalid_response") from exc
+        if not isinstance(result, dict):
+            raise ToolInvocationError("tool.invalid_response")
+        state = result.get("state")
+        if state == "ok":
+            return _normalize_items(result, limit, source="1688-local")
+        if state == "empty":
+            record_diagnostic("tool.scraper_empty", "fallback", None)
+            return []
+        _LOG.warning("1688 本地采集失败：%s", str(result.get("note") or "")[:200])
+        raise ToolInvocationError("tool.scraper_state")
+    raise ToolInvocationError("tool.invalid_response")
+
+
 def search_1688_wholesale(
     keyword: str,
     limit: int = 20,
@@ -182,13 +218,4 @@ def search_1688_wholesale(
 
     raise_if_cancelled()
     output = _run_local_scraper(str(python_path), str(script_path), keyword, limit, budget)
-    for line in reversed(output.splitlines()):
-        if line.lstrip().startswith("{"):
-            try:
-                result = json.loads(line)
-            except ValueError as exc:
-                raise ToolInvocationError("tool.invalid_response") from exc
-            if isinstance(result, dict) and result.get("state") == "ok":
-                return _normalize_items(result, limit, source="1688-local")
-            break
-    raise ToolInvocationError("tool.invalid_response")
+    return _parse_local_output(output, limit)

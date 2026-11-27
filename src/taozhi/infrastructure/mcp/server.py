@@ -149,21 +149,25 @@ class EcommerceMcpServer:
             "DuckDuckGo 定向检索；无真实结果时返回空列表，不编造数据。"
             "输出字段：title、url、asin、price_text、price_value、currency、rating_value、"
             "reviews_count、is_prime、price_source、source；未知值一律为 null，"
-            "price_source 区分商品页报价与搜索摘要报价。",
+            "price_source 区分商品页报价与搜索摘要报价；仅支持 amazon.com 与美元。",
             {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "英文或中文检索关键词（例如 iphone 16 case）"},
+                    "query": {
+                        "type": "string",
+                        "description": "英文或中文检索关键词（例如 iphone 16 case）",
+                        "minLength": 1,
+                    },
                     "limit": {
                         "type": "integer",
-                        "description": "返回商品条数上限",
+                        "description": "返回商品条数上限；商品页单页通常不超过 20 条",
                         "default": 10,
                         "minimum": 1,
-                        "maximum": 50,
+                        "maximum": 20,
                     },
                     "timeout": {
                         "type": "number",
-                        "description": "单次请求超时时间（秒）",
+                        "description": "单次请求超时时间（秒），通常无需设置",
                         "default": 12.0,
                         "minimum": 1,
                         "maximum": 120,
@@ -175,14 +179,18 @@ class EcommerceMcpServer:
         ),
         (
             "search_1688_wholesale",
-            "检索 1688 批发渠道的源头工厂报价、起订量（MOQ）与供应商分布；优先外部网关，"
-            "其次本地 Playwright 采集；无匹配时返回空列表。"
+            "检索 1688 批发渠道的源头工厂报价、销量与供应商线索；优先外部网关，其次本地 "
+            "Playwright 采集；无匹配时返回空列表。"
             "输出字段：title、url、price_text、price_value、currency、moq、shop、sales、source；"
-            "缺 url 的条目会被丢弃，未知值为 null。",
+            "moq 与 shop 只在通道返回时提供，缺 url 的条目会被丢弃，未知值为 null。",
             {
                 "type": "object",
                 "properties": {
-                    "keyword": {"type": "string", "description": "1688 检索关键词"},
+                    "keyword": {
+                        "type": "string",
+                        "description": "1688 检索关键词",
+                        "minLength": 1,
+                    },
                     "limit": {
                         "type": "integer",
                         "description": "返回条目上限",
@@ -192,7 +200,7 @@ class EcommerceMcpServer:
                     },
                     "timeout": {
                         "type": "number",
-                        "description": "单次请求超时时间（秒）",
+                        "description": "单次请求超时时间（秒），通常无需设置",
                         "default": 90.0,
                         "minimum": 1,
                         "maximum": 120,
@@ -206,21 +214,26 @@ class EcommerceMcpServer:
             "search_web",
             "检索公开网页的行业趋势、卖点与用户评价；依次尝试远端 MCP、外部检索网关、"
             "DuckDuckGo、Bing；无匹配时返回空列表。"
-            "输出字段：title、url、snippet、source；snippet 缺失为 null，source 标明实际通道。",
+            "输出字段：title、url、snippet、source；snippet 缺失为 null，source 标明实际通道；"
+            "实际返回条数受通道单页上限约束（通常不超过 10 条）。",
             {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "搜索关键词或调研主题"},
+                    "query": {
+                        "type": "string",
+                        "description": "搜索关键词或调研主题",
+                        "minLength": 1,
+                    },
                     "limit": {
                         "type": "integer",
-                        "description": "返回条数上限",
+                        "description": "返回条数上限；单通道单页通常不超过 10 条",
                         "default": 10,
                         "minimum": 1,
-                        "maximum": 50,
+                        "maximum": 20,
                     },
                     "timeout": {
                         "type": "number",
-                        "description": "单次请求超时时间（秒）",
+                        "description": "单次请求超时时间（秒），通常无需设置",
                         "default": 12.0,
                         "minimum": 1,
                         "maximum": 120,
@@ -235,11 +248,15 @@ class EcommerceMcpServer:
             "抓取公网 HTTP/HTTPS 网页并提取正文；逐跳校验并固定解析 IP，仅接受文本响应且"
             "响应体上限 2 MiB；返回 url、status、title、text、truncated、status_code、error、"
             "error_code；失败时 text 为空并在 error 给出中文原因，正文被 max_chars 截断时 "
-            "truncated 为 true。",
+            "truncated 为 true；解析到非公网地址的域名会被整体拒绝。",
             {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "目标网页 URL（仅公网 HTTP/HTTPS）"},
+                    "url": {
+                        "type": "string",
+                        "description": "目标网页 URL（仅公网 HTTP/HTTPS）",
+                        "minLength": 1,
+                    },
                     "max_chars": {
                         "type": "integer",
                         "description": "最多截取的纯文字数",
@@ -249,7 +266,7 @@ class EcommerceMcpServer:
                     },
                     "timeout": {
                         "type": "number",
-                        "description": "单跳请求超时时间（秒）",
+                        "description": "单跳请求超时时间（秒），通常无需设置",
                         "default": 10.0,
                         "minimum": 1,
                         "maximum": 60,

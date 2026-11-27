@@ -77,6 +77,18 @@ def test_schema_parameters_and_defaults_match_function_signature():
             assert signature.parameters[property_name].default == specification["default"], (name, property_name)
 
 
+def test_blank_required_strings_are_rejected():
+    """必填字符串必须有最小长度，空值在 schema 层直接拒绝。"""
+    server = EcommerceMcpServer()
+    for name, arguments in (
+        ("search_web", {"query": ""}),
+        ("search_amazon", {"query": ""}),
+        ("search_1688_wholesale", {"keyword": ""}),
+        ("fetch_web_page", {"url": ""}),
+    ):
+        assert server.call_tool(name, arguments).isError, (name, arguments)
+
+
 def test_numeric_parameters_reject_out_of_range_values():
     """limit/timeout/max_chars 的边界必须由服务端统一拦截。"""
     server = EcommerceMcpServer()
