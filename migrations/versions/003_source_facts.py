@@ -1,3 +1,5 @@
+"""知识来源事实与索引表迁移。"""
+
 from alembic import op
 revision="003_source_facts"
 down_revision="002_worker_health"

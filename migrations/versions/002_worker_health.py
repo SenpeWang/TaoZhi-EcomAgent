@@ -1,3 +1,5 @@
+"""Worker 心跳表迁移。"""
+
 from alembic import op
 revision="002_worker_health"
 down_revision="001_enterprise"

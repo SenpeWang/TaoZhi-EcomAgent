@@ -1,3 +1,5 @@
+"""任务 outbox 表与索引迁移。"""
+
 from alembic import op
 revision="005_task_outbox"
 down_revision="004_semantic_vector"

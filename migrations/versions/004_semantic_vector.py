@@ -1,3 +1,5 @@
+"""语义向量列迁移：chunks.embedding 的加入与回退。"""
+
 from alembic import op
 revision="004_semantic_vector"
 down_revision="003_source_facts"

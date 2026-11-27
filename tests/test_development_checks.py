@@ -1,6 +1,7 @@
 """开发门禁验收：真实 CLI、部分暂存、历史秘密和目录契约；不读取企业资料。"""
 from __future__ import annotations
 
+import ast
 import importlib.util
 import io
 import shutil
@@ -38,6 +39,93 @@ def test_source_comments_in_python_and_yaml():
                 if char == "#" and not any(token.start_mark.index <= offset < token.end_mark.index for token in scalars):
                     violations.append(f"{name}:{source.count(chr(10), 0, offset) + 1}")
     assert not violations, "源码说明请使用文档字符串：" + "、".join(violations)
+
+
+def _frontend_comment_violations(name: str, source: str) -> list[str]:
+    """扫描 TS/JS/Vue 中除 JSDoc 外的注释位置。"""
+    violations: list[str] = []
+    index = 0
+    line = 1
+    quote = ""
+    total = len(source)
+    while index < total:
+        char = source[index]
+        if char == "\n":
+            line += 1
+            index += 1
+            continue
+        if quote:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char in ("'", '"', "`"):
+            quote = char
+            index += 1
+            continue
+        if source.startswith("//", index):
+            end = source.find("\n", index)
+            end = total if end < 0 else end
+            violations.append(f"{name}:{line}")
+            index = end
+            continue
+        if source.startswith("/*", index):
+            end = source.find("*/", index + 2)
+            end = total if end < 0 else end + 2
+            block = source[index:end]
+            if not block.startswith("/**"):
+                violations.append(f"{name}:{line}")
+            line += block.count("\n")
+            index = end
+            continue
+        if name.endswith(".vue") and source.startswith("<!--", index):
+            end = source.find("-->", index + 4)
+            end = total if end < 0 else end + 3
+            block = source[index:end]
+            violations.append(f"{name}:{line}")
+            line += block.count("\n")
+            index = end
+            continue
+        index += 1
+    return violations
+
+
+def test_frontend_source_has_no_non_docstring_comments():
+    """前端 TS/JS/Vue 只允许 JSDoc，禁止行内注释、块注释与模板注释。"""
+    tracked = subprocess.check_output(
+        ["git", "ls-files", "-z", "--", "web/src", "web/*.ts", "web/*.js", "web/*.cjs"],
+        cwd=PROJECT,
+    ).decode().split("\0")
+    suffixes = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue")
+    violations = []
+    for name in tracked:
+        if not name or not name.endswith(suffixes):
+            continue
+        source = (PROJECT / name).read_text(encoding="utf-8")
+        violations.extend(_frontend_comment_violations(name, source))
+    assert not violations, "前端源码说明请使用 JSDoc：" + "、".join(violations)
+
+
+def test_python_modules_have_docstrings():
+    """所有 tracked Python 模块（除 data/）必须有模块级 docstring。"""
+    tracked = subprocess.check_output(
+        ["git", "ls-files", "-z", "*.py"], cwd=PROJECT,
+    ).decode().split("\0")
+    missing = []
+    for name in tracked:
+        if not name or name.startswith("data/"):
+            continue
+        try:
+            tree = ast.parse((PROJECT / name).read_text(encoding="utf-8"))
+        except SyntaxError:
+            missing.append(name)
+            continue
+        if not ast.get_docstring(tree):
+            missing.append(name)
+    assert not missing, "Python 模块缺少 docstring：" + "、".join(missing)
 
 
 @pytest.fixture

@@ -1,3 +1,5 @@
+"""初始企业版表结构迁移：租户、账号、组织与基础业务实体。"""
+
 from pathlib import Path
 from alembic import op
 revision="001_enterprise"
