@@ -180,39 +180,27 @@
         />
 
         <template v-else-if="isEvaluationWorkspacePage && !user.must_change">
-          <section class="evaluation-kind-switch" aria-label="选择评测体系">
-            <span class="evaluation-kind-switch-label">评测体系</span>
-            <el-checkbox-group v-model="evaluationKinds">
-              <el-checkbox
-                value="agent"
-                :disabled="evaluationKinds.length === 1 && evaluationKinds.includes('agent')"
-              >
-                Agent
-              </el-checkbox>
-              <el-checkbox
-                value="rag"
-                :disabled="evaluationKinds.length === 1 && evaluationKinds.includes('rag')"
-              >
-                RAG
-              </el-checkbox>
-            </el-checkbox-group>
-            <span class="evaluation-kind-switch-hint">至少保留一个评测体系</span>
-          </section>
-          <div class="evaluation-panel-stack">
-            <EvaluationCenter
-              v-for="kind in evaluationKinds"
-              :key="`${user.id}:${user.role_level}:${currentPage}:${kind}`"
-              :api="api"
-              :is-admin="isAdmin(user)"
-              :can-write-eval="isAdmin(user) || Boolean(user.is_boss)"
-              :view="evaluationView"
-              :kind="kind"
-              :collapsed="collapsedEvaluationKinds.includes(kind)"
-              @inspect="openTrace"
-              @expand="expandEvaluationKind(kind)"
-              @launch="navigate('测评启动')"
-            />
-          </div>
+          <EvaluationKindSwitch v-model="evaluationKind" />
+          <EvaluationDatasets
+            v-if="currentPage === '测评数据集'"
+            :key="`${user.id}:${user.role_level}:${evaluationKind}`"
+            :api="api"
+            :kind="evaluationKind"
+            @open-run="openEvaluationRun"
+          />
+          <EvaluationCenter
+            v-else
+            :key="`${user.id}:${user.role_level}:${currentPage}:${evaluationKind}`"
+            :api="api"
+            :is-admin="isAdmin(user)"
+            :can-write-eval="isAdmin(user) || Boolean(user.is_boss)"
+            :view="evaluationView"
+            :kind="evaluationKind"
+            :focus-run-id="evaluationFocusRunId"
+            @inspect="openTrace"
+            @launch="navigate('测评启动')"
+            @focus-consumed="evaluationFocusRunId = null"
+          />
         </template>
 
         <KnowledgeWorkspace
@@ -343,6 +331,9 @@ import ResearchChatView from './features/tasks/ResearchChatView.vue'
 import TaskCenter from './features/tasks/TaskCenter.vue'
 import TaskTimeline from './features/tasks/TaskTimeline.vue'
 import EvaluationCenter from './features/observability/EvaluationCenter.vue'
+import EvaluationDatasets from './features/observability/EvaluationDatasets.vue'
+import EvaluationKindSwitch from './features/observability/EvaluationKindSwitch.vue'
+import { evaluationKindMeta } from './features/observability/evaluationKindMeta'
 import TraceCenter from './features/observability/TraceCenter.vue'
 import TraceInspector from './features/observability/TraceInspector.vue'
 import type { Approval, Capabilities, Organization, User } from './features/administration/types'
@@ -360,8 +351,8 @@ const workspaceInfo = ref<WorkspaceInfo>({
 })
 const user = ref<User | null>(null)
 const currentPage = ref<WorkspacePage>('工作概览')
-const evaluationKinds = ref<EvaluationKind[]>(['agent'])
-const collapsedEvaluationKinds = ref<EvaluationKind[]>([])
+const evaluationKind = ref<EvaluationKind>('agent')
+const evaluationFocusRunId = ref<string | null>(null)
 const { busy, action } = useWorkspaceAction()
 const documentManager = ref<InstanceType<typeof DocumentManager> | null>(null)
 const organizations = ref<Organization[]>([])
@@ -437,26 +428,26 @@ const isEvaluationWorkspacePage = computed(() => isEvaluationPage(currentPage.va
 const evaluationView = computed<'launch' | 'results'>(() =>
   currentPage.value === '测评启动' ? 'launch' : 'results',
 )
+const evaluationKindLabel = computed(() => evaluationKindMeta[evaluationKind.value].shortTitle)
 const breadcrumbText = computed(() => {
   if (user.value?.must_change) return '账号安全'
   const group = currentPageDefinition.value.group
-  return isEvaluationWorkspacePage.value ? `${group} / ${currentPage.value}` : group
+  return isEvaluationWorkspacePage.value
+    ? `${group} / ${currentPage.value} / ${evaluationKindLabel.value}`
+    : group
 })
 
 /**
- * 展开被折叠的评测体系面板，避免同时铺开两套完整评测页。
- * @param kind - 要展开的评测体系。
+ * 从数据集页跳转到测评结果并打开指定批次。
+ * @param runId - 评测批次编号。
  */
-function expandEvaluationKind(kind: EvaluationKind): void {
-  collapsedEvaluationKinds.value = collapsedEvaluationKinds.value.filter((item) => item !== kind)
+function openEvaluationRun(runId: string): void {
+  evaluationFocusRunId.value = runId
+  currentPage.value = '测评结果'
 }
 
-watch(evaluationKinds, (kinds, previous) => {
-  if (kinds.length < 2) {
-    collapsedEvaluationKinds.value = []
-    return
-  }
-  if ((previous?.length ?? 0) < 2) collapsedEvaluationKinds.value = [kinds[1]]
+watch(evaluationKind, () => {
+  evaluationFocusRunId.value = null
 })
 
 /**
@@ -569,8 +560,8 @@ function clearSession(): void {
   users.value = []
   dashboard.value = emptyDashboard
   currentPage.value = '工作概览'
-  evaluationKinds.value = ['agent']
-  collapsedEvaluationKinds.value = []
+  evaluationKind.value = 'agent'
+  evaluationFocusRunId.value = null
   loginForm.password = ''
   clearTaskWorkspace()
 }
@@ -641,8 +632,8 @@ async function signIn(): Promise<void> {
     user.value = signedUser
     loginForm.password = ''
     currentPage.value = signedUser.must_change ? '个人中心' : '工作概览'
-    evaluationKinds.value = ['agent']
-    collapsedEvaluationKinds.value = []
+    evaluationKind.value = 'agent'
+    evaluationFocusRunId.value = null
     await load()
   })
 }
@@ -779,34 +770,5 @@ onMounted(async () => {
 
 .nav-item-btn.nav-item-child.active .nav-svg-icon {
   opacity: 1;
-}
-
-.evaluation-kind-switch {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-bottom: 16px;
-  padding: 10px 16px;
-  background: var(--tz-surface);
-  border: 1px solid var(--tz-border);
-  border-radius: 10px;
-}
-
-.evaluation-kind-switch-label {
-  color: var(--tz-ink-secondary);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.evaluation-kind-switch-hint {
-  color: var(--tz-ink-muted);
-  font-size: 12px;
-}
-
-.evaluation-panel-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
 }
 </style>

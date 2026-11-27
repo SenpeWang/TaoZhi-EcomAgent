@@ -78,6 +78,16 @@ const workspacePages = {
     iconPaths: ['M3 3v18h18', 'M7 15l3-3 3 2 4-5'],
     access: 'member',
   },
+  测评数据集: {
+    group: '测评中心',
+    description: '查询数据集的原始构成，以及每个批次实际使用的数据集版本与用例规模。',
+    iconPaths: [
+      'M12 3c4.42 0 8 1.34 8 3s-3.58 3-8 3-8-1.34-8-3 3.58-3 8-3z',
+      'M4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6',
+      'M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3',
+    ],
+    access: 'member',
+  },
   权限审批: {
     group: '组织与权限',
     description: '处理文档授权、密级调整及成员权限申请。',
@@ -122,7 +132,7 @@ const nestedNavigationGroups = new Set(['测评中心'])
 /**
  * 判断页面是否属于测评中心。
  * @param page - 工作台页面名称。
- * @returns 是否为测评启动或测评结果页面。
+ * @returns 是否为测评中心下的启动、结果或数据集页面。
  */
 export function isEvaluationPage(page: WorkspacePage): boolean {
   return workspacePages[page].group === '测评中心'

@@ -1,352 +1,135 @@
 ﻿<template>
-  <section class="panel evaluation-center" :class="{ 'evaluation-center-collapsed': collapsed }">
-    <div v-if="collapsed" class="evaluation-collapsed-row">
-      <div class="evaluation-collapsed-text">
-        <h3>{{ centerTitle }}</h3>
-        <small class="evaluation-meta">{{ collapsedSummary }}</small>
+  <section class="panel evaluation-center">
+    <div class="section-heading evaluation-section-head">
+      <h3>{{ centerTitle }}</h3>
+      <div class="evaluation-head-actions">
+        <el-button :loading="refreshing" @click="refreshAll">刷新</el-button>
       </div>
-      <el-button @click="emit('expand')">展开</el-button>
     </div>
-    <template v-else>
-      <div class="section-heading evaluation-section-head">
-        <h3>{{ centerTitle }}</h3>
-        <div class="evaluation-head-actions">
-          <el-button :loading="refreshing" @click="refreshAll">刷新</el-button>
-        </div>
-      </div>
 
-      <div class="evaluation-controls">
-        <label class="evaluation-control-item">
-          <span>数据集版本</span>
-          <el-select
-            v-model="datasetVersion"
-            placeholder="暂无可选版本"
-            :disabled="!datasetVersions.length"
-            aria-label="选择数据集版本"
-          >
-            <el-option
-              v-for="version in datasetVersions"
-              :key="version"
-              :value="version"
-              :label="version"
-            />
-          </el-select>
-        </label>
-        <label class="evaluation-control-item">
-          <span>评测口径</span>
-          <el-select v-model="scope" aria-label="选择评测口径">
-            <el-option
-              v-for="item in scopeOptions"
-              :key="item.value"
-              :value="item.value"
-              :label="item.label"
-            />
-          </el-select>
-        </label>
-        <label class="evaluation-control-item">
-          <span>执行方式</span>
-          <el-select v-model="mode" aria-label="选择执行方式">
-            <el-option
-              v-for="item in allowedModes"
-              :key="item"
-              :value="item"
-              :label="evaluationModeLabel(item)"
-            />
-          </el-select>
-        </label>
-      </div>
-      <el-alert
-        v-if="catalogError"
-        type="error"
-        show-icon
-        :title="catalogError"
-        :closable="false"
-        class="evaluation-catalog-alert"
-      />
+    <div class="evaluation-controls">
+      <label class="evaluation-control-item">
+        <span>数据集版本</span>
+        <el-select
+          v-model="datasetVersion"
+          placeholder="暂无可选版本"
+          :disabled="!datasetVersions.length"
+          aria-label="选择数据集版本"
+        >
+          <el-option
+            v-for="version in datasetVersions"
+            :key="version"
+            :value="version"
+            :label="version"
+          />
+        </el-select>
+      </label>
+      <label class="evaluation-control-item">
+        <span>评测口径</span>
+        <el-select v-model="scope" aria-label="选择评测口径">
+          <el-option
+            v-for="item in scopeOptions"
+            :key="item.value"
+            :value="item.value"
+            :label="item.label"
+          />
+        </el-select>
+      </label>
+      <label class="evaluation-control-item">
+        <span>执行方式</span>
+        <el-select v-model="mode" aria-label="选择执行方式">
+          <el-option
+            v-for="item in allowedModes"
+            :key="item"
+            :value="item"
+            :label="evaluationModeLabel(item)"
+          />
+        </el-select>
+      </label>
+    </div>
+    <el-alert
+      v-if="catalogError"
+      type="error"
+      show-icon
+      :title="catalogError"
+      :closable="false"
+      class="evaluation-catalog-alert"
+    />
 
-      <el-tabs v-model="activeTab" class="evaluation-tabs">
-        <el-tab-pane v-if="view === 'results'" label="概览" name="overview">
-          <div class="evaluation-tab evaluation-overview">
-            <el-alert
-              v-if="trendsError"
-              type="warning"
-              show-icon
-              :title="trendsError"
-              :closable="false"
-            />
-            <el-skeleton v-else-if="!trends" :rows="3" animated />
-            <template v-else-if="trendItems.length">
-              <div class="evaluation-overview-summary">
-                <span class="evaluation-overview-batches">批次 {{ trends.aggregate.batches }}</span>
-                <span v-if="aggregateMetric">
-                  {{ aggregateLabel }}：最新 {{ formatAggregateValue(aggregateStats.latest) }} ·
-                  平均 {{ formatAggregateValue(aggregateStats.average) }} · 最佳
-                  {{ formatAggregateValue(aggregateStats.best) }}
-                </span>
-              </div>
-              <div class="evaluation-metric-grid">
-                <el-tooltip
-                  v-for="card in overviewMetricCards"
-                  :key="card.spec.key"
-                  placement="top"
-                  :content="metricTooltip(card.spec)"
-                >
-                  <div class="evaluation-metric-card evaluation-metric-card-compact">
-                    <span class="evaluation-card-label">{{ shortMetricLabel(card.spec) }}</span>
-                    <strong class="evaluation-metric-value">{{
-                      formatMetricValue(card.spec, card.latest)
-                    }}</strong>
-                    <span
-                      v-if="card.delta !== null"
-                      class="evaluation-metric-delta"
-                      :class="metricDeltaTone(card.spec, card.delta)"
-                      >较基线 {{ formatMetricDelta(card.spec, card.delta) }}</span
-                    >
-                  </div>
-                </el-tooltip>
-              </div>
-              <el-button
-                v-if="metrics.length > coreMetrics.length"
-                link
-                type="primary"
-                class="evaluation-expand-metrics"
-                @click="showAllMetrics = !showAllMetrics"
-                >{{
-                  showAllMetrics ? '收起指标' : `展开全部指标（${metrics.length} 项）`
-                }}</el-button
-              >
-              <h4>批次趋势（最近 {{ trendItems.length }} 个批次）</h4>
-              <el-table
-                :data="trendItems"
-                row-key="run_id"
-                class="evaluation-datasets evaluation-trend-table"
-                size="small"
-              >
-                <el-table-column label="批次时间" width="155">
-                  <template #default="{ row }">
-                    <button
-                      class="evaluation-link"
-                      type="button"
-                      @click="openRunDetail(row.run_id)"
-                    >
-                      {{ traceTime(row.created_at) }}
-                    </button>
-                  </template>
-                </el-table-column>
-                <el-table-column label="算法版本" width="115">
-                  <template #default="{ row }">{{ row.algorithm_version || '未绑定' }}</template>
-                </el-table-column>
-                <el-table-column label="执行方式" width="100">
-                  <template #default="{ row }">{{ evaluationModeLabel(row.mode) }}</template>
-                </el-table-column>
-                <el-table-column
-                  v-for="spec in tableMetrics"
-                  :key="spec.key"
-                  :label="shortMetricLabel(spec)"
-                  width="100"
-                >
-                  <template #default="{ row }">
-                    <el-tooltip :content="metricTooltip(spec)" placement="top">
-                      <span>{{ formatMetricValue(spec, row.summary?.[spec.key] ?? null) }}</span>
-                    </el-tooltip>
-                  </template>
-                </el-table-column>
-                <el-table-column label="门禁" width="70">
-                  <template #default="{ row }">
-                    <el-tag :type="row.gate_passed ? 'success' : 'danger'" size="small">
-                      {{ row.gate_passed ? '通过' : '阻断' }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="基线" width="70">
-                  <template #default="{ row }">
-                    <el-tag v-if="row.is_baseline" type="warning" size="small">基线</el-tag>
-                    <el-tag v-else-if="!row.comparable" type="info" size="small">不可比</el-tag>
-                    <span v-else class="evaluation-meta">—</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" width="70" fixed="right">
-                  <template #default="{ row }">
-                    <el-button link type="primary" @click="openRunDetail(row.run_id)"
-                      >查看</el-button
-                    >
-                  </template>
-                </el-table-column>
-              </el-table>
-            </template>
-            <div v-else class="evaluation-empty-card">
-              <strong>该版本暂无 {{ evalKindLabel }} 批次</strong>
-              <p class="evaluation-meta">
-                数据集版本 {{ datasetVersion || '—' }} · 口径 {{ evaluationScopeLabel(scope) }} ·
-                执行方式 {{ evaluationModeLabel(mode) }}
-              </p>
-              <el-button type="primary" @click="emit('launch')">去测评启动</el-button>
+    <el-tabs v-model="activeTab" class="evaluation-tabs">
+      <el-tab-pane v-if="view === 'results'" label="概览" name="overview">
+        <div class="evaluation-tab evaluation-overview">
+          <el-alert
+            v-if="trendsError"
+            type="warning"
+            show-icon
+            :title="trendsError"
+            :closable="false"
+          />
+          <el-skeleton v-else-if="!trends" :rows="3" animated />
+          <template v-else-if="trendItems.length">
+            <div class="evaluation-overview-summary">
+              <span class="evaluation-overview-batches">批次 {{ trends.aggregate.batches }}</span>
+              <span v-if="aggregateMetric">
+                {{ aggregateLabel }}：最新 {{ formatAggregateValue(aggregateStats.latest) }} · 平均
+                {{ formatAggregateValue(aggregateStats.average) }} · 最佳
+                {{ formatAggregateValue(aggregateStats.best) }}
+              </span>
             </div>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane v-if="view === 'results'" label="数据集" name="datasets">
-          <div class="evaluation-tab">
-            <div class="evaluation-subsection-head">
-              <h4>
-                评测数据集
-                <el-tooltip
-                  content="数据集内容随 Git 版本化；下表仅显示版本与摘要，完整 sha256、文件清单与原始用例在「查看数据集」抽屉中。"
-                  placement="top"
-                >
-                  <span class="evaluation-help">?</span>
-                </el-tooltip>
-              </h4>
-              <div class="evaluation-filters evaluation-filters-inline">
-                <el-switch v-model="showArchived" active-text="显示归档版本" />
-                <el-button :loading="datasetsBusy" @click="loadDatasets">刷新</el-button>
-              </div>
-            </div>
-            <el-alert
-              v-if="datasetsError"
-              type="warning"
-              show-icon
-              :title="datasetsError"
-              :closable="false"
-            />
-            <el-table
-              v-else
-              v-loading="datasetsBusy"
-              :data="visibleDatasets"
-              row-key="dataset_id"
-              class="evaluation-datasets"
-              size="small"
-              empty-text="当前评测体系还没有登记数据集"
-            >
-              <el-table-column label="数据集 / 版本" min-width="190">
-                <template #default="{ row }">
-                  <span class="evaluation-cell-main">{{ row.name }}</span>
-                  <small class="evaluation-meta">{{ row.version }}</small>
-                </template>
-              </el-table-column>
-              <el-table-column label="用例数" width="80" prop="case_count" />
-              <el-table-column label="运行次数" width="85">
-                <template #default="{ row }">{{ row.batch_count }} 次</template>
-              </el-table-column>
-              <el-table-column label="最近运行" min-width="145">
-                <template #default="{ row }">{{ traceTime(row.last_run_at) }}</template>
-              </el-table-column>
-              <el-table-column label="内容摘要" width="115">
-                <template #default="{ row }">
-                  <span class="evaluation-code" :title="row.content_sha256 || '未登记内容摘要'">{{
-                    shortSha(row.content_sha256)
-                  }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="175" fixed="right">
-                <template #default="{ row }">
-                  <el-button link type="primary" @click="inspectDataset(row)">查看数据集</el-button>
-                  <el-button link type="primary" @click="filterRunsByDataset(row)"
-                    >筛选批次</el-button
+            <div class="evaluation-metric-grid">
+              <el-tooltip
+                v-for="card in overviewMetricCards"
+                :key="card.spec.key"
+                placement="top"
+                :content="metricTooltip(card.spec)"
+              >
+                <div class="evaluation-metric-card evaluation-metric-card-compact">
+                  <span class="evaluation-card-label">{{ shortMetricLabel(card.spec) }}</span>
+                  <strong class="evaluation-metric-value">{{
+                    formatMetricValue(card.spec, card.latest)
+                  }}</strong>
+                  <span
+                    v-if="card.delta !== null"
+                    class="evaluation-metric-delta"
+                    :class="metricDeltaTone(card.spec, card.delta)"
+                    >较基线 {{ formatMetricDelta(card.spec, card.delta) }}</span
                   >
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane v-if="view === 'results'" label="批次" name="runs">
-          <div class="evaluation-tab">
-            <div class="evaluation-subsection-head">
-              <h4>
-                评测批次
-                <el-tooltip
-                  content="指标列来自指标目录；同一数据集、口径与执行方式再次运行会保留原批次并递增运行次数。默认只显示核心指标，可切换到全部指标。"
-                  placement="top"
-                >
-                  <span class="evaluation-help">?</span>
-                </el-tooltip>
-              </h4>
-              <div class="evaluation-filters evaluation-filters-inline">
-                <TenantOwnerSelect v-if="isAdmin" v-model="owner" :api="api" />
-                <el-select
-                  v-model="runDatasetId"
-                  clearable
-                  placeholder="全部数据集"
-                  aria-label="按数据集筛选批次"
-                >
-                  <el-option value="" label="全部数据集" />
-                  <el-option
-                    v-for="dataset in kindDatasets"
-                    :key="dataset.dataset_id"
-                    :value="dataset.dataset_id"
-                    :label="`${dataset.name}（${dataset.version}）`"
-                  />
-                </el-select>
-                <el-switch v-model="showAllRunMetrics" active-text="显示全部指标" />
-                <el-button :loading="runsBusy" @click="refreshRuns">刷新</el-button>
-              </div>
+                </div>
+              </el-tooltip>
             </div>
-            <el-alert
-              v-if="runsError"
-              type="warning"
-              show-icon
-              :title="runsError"
-              :closable="false"
-            />
-            <div v-else-if="!kindDatasets.length" class="evaluation-hint-card">
-              当前评测体系尚未登记数据集，请先到「测评启动」登记算法版本并发起评测。
-            </div>
-            <div v-else-if="!metrics.length" class="evaluation-hint-card">
-              当前口径尚未登记指标，暂无可展示的批次指标列。
-            </div>
+            <el-button
+              v-if="metrics.length > coreMetrics.length"
+              link
+              type="primary"
+              class="evaluation-expand-metrics"
+              @click="showAllMetrics = !showAllMetrics"
+              >{{ showAllMetrics ? '收起指标' : `展开全部指标（${metrics.length} 项）` }}</el-button
+            >
+            <h4>批次趋势（最近 {{ trendItems.length }} 个批次）</h4>
             <el-table
-              v-else
-              v-loading="runsBusy"
-              :data="runs"
+              :data="trendItems"
               row-key="run_id"
-              class="evaluation-datasets evaluation-runs-table"
+              class="evaluation-datasets evaluation-trend-table"
               size="small"
-              empty-text="当前范围内没有评测批次"
             >
-              <el-table-column label="批次时间" width="130">
+              <el-table-column label="批次时间" width="155">
                 <template #default="{ row }">
-                  <button
-                    class="evaluation-link"
-                    type="button"
-                    :title="row.run_id"
-                    @click="openRunDetail(row.run_id)"
-                  >
+                  <button class="evaluation-link" type="button" @click="openRunDetail(row.run_id)">
                     {{ traceTime(row.created_at) }}
                   </button>
                 </template>
               </el-table-column>
-              <el-table-column label="运行次数" width="86">
-                <template #default="{ row }">
-                  <el-tooltip placement="top">
-                    <template #content>
-                      <div>批次：{{ row.run_id }}</div>
-                      <div>运行备注：{{ row.trigger_note || '—' }}</div>
-                      <div>重跑来源：{{ row.parent_run_id || '—' }}</div>
-                    </template>
-                    <span class="evaluation-run-seq">
-                      <el-tag v-if="row.run_seq" effect="plain" size="small"
-                        >第 {{ row.run_seq }} 次</el-tag
-                      >
-                      <span v-else class="evaluation-meta">—</span>
-                    </span>
-                  </el-tooltip>
-                </template>
+              <el-table-column label="算法版本" width="115">
+                <template #default="{ row }">{{ row.algorithm_version || '未绑定' }}</template>
               </el-table-column>
-              <el-table-column label="数据集版本" width="110">
-                <template #default="{ row }">{{ row.dataset_version || '—' }}</template>
-              </el-table-column>
-              <el-table-column label="算法版本" width="90">
-                <template #default="{ row }">{{ row.profile_version_tag || '未绑定' }}</template>
-              </el-table-column>
-              <el-table-column label="执行方式" width="90">
+              <el-table-column label="执行方式" width="100">
                 <template #default="{ row }">{{ evaluationModeLabel(row.mode) }}</template>
               </el-table-column>
               <el-table-column
                 v-for="spec in tableMetrics"
                 :key="spec.key"
                 :label="shortMetricLabel(spec)"
-                width="90"
+                width="100"
               >
                 <template #default="{ row }">
                   <el-tooltip :content="metricTooltip(spec)" placement="top">
@@ -354,925 +137,914 @@
                   </el-tooltip>
                 </template>
               </el-table-column>
-              <el-table-column label="门禁" width="60">
+              <el-table-column label="门禁" width="70">
                 <template #default="{ row }">
                   <el-tag :type="row.gate_passed ? 'success' : 'danger'" size="small">
                     {{ row.gate_passed ? '通过' : '阻断' }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="基线" width="60">
+              <el-table-column label="基线" width="70">
                 <template #default="{ row }">
                   <el-tag v-if="row.is_baseline" type="warning" size="small">基线</el-tag>
                   <el-tag v-else-if="!row.comparable" type="info" size="small">不可比</el-tag>
                   <span v-else class="evaluation-meta">—</span>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="152" fixed="right">
+              <el-table-column label="操作" width="70" fixed="right">
                 <template #default="{ row }">
                   <el-button link type="primary" @click="openRunDetail(row.run_id)">查看</el-button>
-                  <el-button link type="primary" @click="downloadRunReport(row.run_id)"
-                    >原始报告</el-button
-                  >
-                  <el-button
-                    v-if="canWriteEval && row.dataset_id && row.mode === 'live'"
-                    link
-                    type="primary"
-                    @click="openRerunDialog(row)"
-                    >复跑</el-button
-                  >
                 </template>
               </el-table-column>
             </el-table>
-            <nav class="evaluation-pager" aria-label="评测批次分页">
-              <span>第 {{ runsPageNo }} 页</span>
-              <el-button :disabled="runsBusy || runsPageNo === 1" @click="turnRuns(false)"
-                >上一页</el-button
-              >
-              <el-button :disabled="runsBusy || !runsNext" @click="turnRuns(true)"
-                >下一页</el-button
-              >
-            </nav>
+          </template>
+          <div v-else class="evaluation-empty-card">
+            <strong>该版本暂无 {{ evalKindLabel }} 批次</strong>
+            <p class="evaluation-meta">
+              数据集版本 {{ datasetVersion || '—' }} · 口径 {{ evaluationScopeLabel(scope) }} ·
+              执行方式 {{ evaluationModeLabel(mode) }}
+            </p>
+            <el-button type="primary" @click="emit('launch')">去测评启动</el-button>
           </div>
-        </el-tab-pane>
+        </div>
+      </el-tab-pane>
 
-        <el-tab-pane v-if="view === 'results'" label="基线" name="baselines">
-          <div class="evaluation-tab">
-            <div class="evaluation-subsection-head">
-              <h4>
-                评测基线
-                <el-tooltip
-                  content="基线按「数据集版本 + 口径 + 执行方式」唯一：同一组合只保留一个 active 基线，概览的环比使用 active 基线。"
-                  placement="top"
-                >
-                  <span class="evaluation-help">?</span>
-                </el-tooltip>
-              </h4>
-              <div class="evaluation-filters evaluation-filters-inline">
-                <el-switch v-model="baselineActiveOnly" active-text="只看 active" />
-                <el-button :loading="baselinesBusy" @click="loadBaselines">刷新</el-button>
-              </div>
-            </div>
-            <el-alert
-              v-if="baselinesError"
-              type="warning"
-              show-icon
-              :title="baselinesError"
-              :closable="false"
-            />
-            <el-table
-              v-else
-              v-loading="baselinesBusy"
-              :data="baselines"
-              row-key="baseline_id"
-              class="evaluation-datasets"
-              empty-text="当前范围还没有基线，可在批次页把批次设为基线"
-            >
-              <el-table-column label="状态" width="85">
-                <template #default="{ row }">
-                  <el-tag :type="row.active ? 'success' : 'info'" size="small">{{
-                    row.active ? 'active' : '历史'
-                  }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="数据集版本" width="120">
-                <template #default="{ row }">{{ row.dataset_version }}</template>
-              </el-table-column>
-              <el-table-column label="口径" width="95">
-                <template #default="{ row }">{{ evaluationScopeLabel(row.scope) }}</template>
-              </el-table-column>
-              <el-table-column label="执行方式" min-width="125">
-                <template #default="{ row }">{{ evaluationModeLabel(row.mode) }}</template>
-              </el-table-column>
-              <el-table-column label="批次" min-width="190">
-                <template #default="{ row }">
-                  <button class="evaluation-link" type="button" @click="openRunDetail(row.run_id)">
-                    {{ traceTime(row.run_created_at) }}
-                  </button>
-                  <small class="evaluation-meta">{{ row.run_id }}</small>
-                </template>
-              </el-table-column>
-              <el-table-column :label="baselineMetricLabel" width="125">
-                <template #default="{ row }">{{
-                  formatEvaluationPercent(row.run_pass_rate)
-                }}</template>
-              </el-table-column>
-              <el-table-column label="门禁" width="90">
-                <template #default="{ row }">
-                  <el-tag :type="row.run_gate_passed ? 'success' : 'danger'" size="small">
-                    {{ row.run_gate_passed ? '通过' : '阻断' }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="算法版本" min-width="120">
-                <template #default="{ row }">{{ row.algorithm_version || '—' }}</template>
-              </el-table-column>
-              <el-table-column label="设置人" min-width="110">
-                <template #default="{ row }">{{ row.created_by }}</template>
-              </el-table-column>
-              <el-table-column label="设置时间" min-width="150">
-                <template #default="{ row }">{{ traceTime(row.created_at) }}</template>
-              </el-table-column>
-              <el-table-column label="备注" min-width="160">
-                <template #default="{ row }">{{ row.note || '—' }}</template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane v-if="view === 'launch'" label="发起评测" name="launch">
-          <div class="evaluation-tab">
-            <div class="evaluation-subsection-head">
-              <h4>
-                发起真实评测
-                <el-tooltip
-                  content="评测由 Worker 真实执行；登记算法版本并选择数据集、口径与执行方式后触发，页面只展示任务号与当前进度，结果请到「测评结果」查看。"
-                  placement="top"
-                >
-                  <span class="evaluation-help">?</span>
-                </el-tooltip>
-              </h4>
-            </div>
-            <el-alert
-              v-if="!canWriteEval"
-              type="info"
-              show-icon
-              :closable="false"
-              title="当前账号可查看评测任务进度，触发/取消评测与登记算法版本需要企业负责人或系统管理员权限。"
-            />
-            <el-alert v-if="jobError" type="error" show-icon :title="jobError" :closable="false" />
-            <p v-if="profilesError" class="evaluation-meta">{{ profilesError }}</p>
-            <div v-if="!activeJob" class="evaluation-launch-card">
-              <div class="evaluation-launch-copy">
-                <strong>{{ evalKindLabel }} 评测</strong>
-                <p class="evaluation-meta">
-                  登记不可变算法版本，选择数据集、口径与真实执行方式后由 Worker 执行。
-                </p>
-              </div>
-              <div v-if="canWriteEval" class="evaluation-launch-actions">
-                <el-button @click="openProfileDialog">登记算法版本</el-button>
-                <el-button type="primary" @click="openTriggerDialog()">发起评测</el-button>
-              </div>
-            </div>
-            <template v-else>
-              <div class="evaluation-job-head">
-                <strong>{{ activeJob.job_id }}</strong>
-                <el-tag :type="stateTag(activeJob.state)" size="small">{{
-                  stateText(activeJob.state)
-                }}</el-tag>
-                <span class="evaluation-meta">{{ activeJob.stage || '等待 Worker 调度' }}</span>
-                <el-button v-if="canWriteEval && !jobTerminal" :loading="jobBusy" @click="cancelJob"
-                  >取消任务</el-button
-                >
-              </div>
-              <el-progress :percentage="activeJob.progress" :status="jobProgressStatus" />
-              <p class="evaluation-meta">
-                创建 {{ traceTime(activeJob.created_at)
-                }}<template v-if="activeJob.started_at">
-                  · 开始 {{ traceTime(activeJob.started_at) }}</template
-                >
-                <template v-if="activeJob.finished_at">
-                  · 结束 {{ traceTime(activeJob.finished_at) }}</template
-                >
-              </p>
-              <el-alert
-                v-if="activeJob.error"
-                type="error"
-                :title="activeJob.error"
-                :closable="false"
-              />
-              <p v-if="jobRunId" class="evaluation-meta">
-                评测批次已入库：
-                <button class="evaluation-link" type="button" @click="openRunDetail(jobRunId)">
-                  {{ jobRunId }}
-                </button>
-              </p>
-            </template>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane v-if="view === 'results' && canWriteEval" label="审计" name="audit">
-          <div class="evaluation-tab">
-            <div class="evaluation-subsection-head">
-              <h4>评测审计留痕</h4>
-              <div class="evaluation-filters evaluation-filters-inline">
-                <el-select v-model="auditAction" placeholder="全部动作" aria-label="按审计动作筛选">
-                  <el-option value="" label="全部动作" />
-                  <el-option
-                    v-for="(label, code) in evaluationAuditActions"
-                    :key="code"
-                    :value="code"
-                    :label="label"
-                  />
-                </el-select>
-                <el-button :loading="auditBusy" @click="loadAuditLogs">刷新</el-button>
-              </div>
-            </div>
-            <el-alert
-              v-if="auditError"
-              type="error"
-              show-icon
-              :title="auditError"
-              :closable="false"
-            />
-            <el-table
-              v-else
-              v-loading="auditBusy"
-              :data="auditLogs"
-              row-key="audit_id"
-              empty-text="当前筛选范围没有审计记录"
-            >
-              <el-table-column type="expand">
-                <template #default="{ row }">
-                  <pre class="evaluation-json">{{ JSON.stringify(row.summary, null, 2) }}</pre>
-                </template>
-              </el-table-column>
-              <el-table-column label="动作" width="120">
-                <template #default="{ row }">
-                  <el-tag size="small">{{ auditActionLabel(row.action) }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="对象" min-width="190">
-                <template #default="{ row }">{{ row.target_id }}</template>
-              </el-table-column>
-              <el-table-column label="操作人" min-width="130">
-                <template #default="{ row }">{{ row.actor_id }}</template>
-              </el-table-column>
-              <el-table-column label="时间" min-width="150">
-                <template #default="{ row }">{{ traceTime(row.created_at) }}</template>
-              </el-table-column>
-              <el-table-column label="摘要" min-width="240">
-                <template #default="{ row }">{{ summarizeJson(row.summary) }}</template>
-              </el-table-column>
-            </el-table>
-            <nav class="evaluation-pager" aria-label="审计留痕分页">
-              <span>第 {{ auditCursors.length }} 页</span>
-              <el-button
-                :disabled="auditBusy || auditCursors.length === 1"
-                @click="turnAudit(false)"
-                >上一页</el-button
+      <el-tab-pane v-if="view === 'results'" label="批次" name="runs">
+        <div class="evaluation-tab">
+          <div class="evaluation-subsection-head">
+            <h4>
+              评测批次
+              <el-tooltip
+                content="指标列来自指标目录；同一数据集、口径与执行方式再次运行会保留原批次并递增运行次数。默认只显示核心指标，可切换到全部指标。"
+                placement="top"
               >
-              <el-button :disabled="auditBusy || !auditNext" @click="turnAudit(true)"
-                >下一页</el-button
+                <span class="evaluation-help">?</span>
+              </el-tooltip>
+            </h4>
+            <div class="evaluation-filters evaluation-filters-inline">
+              <TenantOwnerSelect v-if="isAdmin" v-model="owner" :api="api" />
+              <el-select
+                v-model="runDatasetId"
+                clearable
+                placeholder="全部数据集"
+                aria-label="按数据集筛选批次"
               >
-            </nav>
-          </div>
-        </el-tab-pane>
-      </el-tabs>
-
-      <el-drawer
-        v-model="datasetDrawer"
-        :title="
-          inspectedDataset
-            ? `数据集：${inspectedDataset.name}（${inspectedDataset.version}）`
-            : '数据集'
-        "
-        size="72%"
-      >
-        <template v-if="inspectedDataset">
-          <el-alert type="info" :closable="false" show-icon>
-            <template #title>
-              原始文件与用例按 Git 版本化展示，sha256 与登记一致，字段未裁剪。
-            </template>
-          </el-alert>
-          <div class="evaluation-filters">
-            <el-tag effect="plain" size="small">版本 {{ inspectedDataset.version }}</el-tag>
-            <el-tag type="info" effect="plain" size="small">{{
-              evaluationSuites[inspectedDataset.suite] || inspectedDataset.suite || '未登记类型'
-            }}</el-tag>
-            <el-tag v-if="inspectedDataset.archived" type="info" size="small">归档版本</el-tag>
-            <span class="evaluation-meta" :title="inspectedDataset.content_sha256">
-              内容 sha256
-              {{ inspectedDataset.content_sha256 || '—' }}
-            </span>
-            <span class="evaluation-meta"
-              >登记用例数 {{ inspectedDataset.case_count }} · 文件数
-              {{ datasetFileList.length }}</span
-            >
-            <el-button type="primary" :loading="dsRawBusy" @click="downloadDatasetRaw"
-              >下载全部原始用例</el-button
-            >
-            <el-button :loading="datasetCaseBusy" @click="loadDatasetCases">刷新用例</el-button>
+                <el-option value="" label="全部数据集" />
+                <el-option
+                  v-for="dataset in kindDatasets"
+                  :key="dataset.dataset_id"
+                  :value="dataset.dataset_id"
+                  :label="`${dataset.name}（${dataset.version}）`"
+                />
+              </el-select>
+              <el-switch v-model="showAllRunMetrics" active-text="显示全部指标" />
+              <el-button :loading="runsBusy" @click="refreshRuns">刷新</el-button>
+            </div>
           </div>
           <el-alert
-            v-if="dsRawError"
-            type="error"
+            v-if="runsError"
+            type="warning"
             show-icon
-            :title="dsRawError"
+            :title="runsError"
             :closable="false"
           />
-          <el-alert
-            v-if="rawExport"
-            type="success"
-            show-icon
-            :closable="false"
-            :title="`已导出 ${rawExport.cases} 条原始用例 / ${rawExport.files} 个文件摘要，SHA-256 ${rawExport.sha256}（${rawExport.bytes} 字节）`"
-          />
-          <h4>文件清单（{{ datasetFileList.length }}）</h4>
-          <el-table
-            v-if="datasetFileList.length"
-            :data="datasetFileList"
-            size="small"
-            row-key="path"
-            max-height="240"
-          >
-            <el-table-column label="仓库相对路径" min-width="260">
-              <template #default="{ row }">
-                <code>{{ row.path }}</code>
-              </template>
-            </el-table-column>
-            <el-table-column label="sha256" width="200">
-              <template #default="{ row }">
-                <span :title="row.sha256">{{ shortSha(row.sha256) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="140">
-              <template #default="{ row }">
-                <el-button link type="primary" @click="viewDatasetFile(row.path)">查看</el-button>
-                <el-button link type="primary" @click="downloadDatasetFile(row.path)"
-                  >下载</el-button
-                >
-              </template>
-            </el-table-column>
-          </el-table>
-          <p v-else class="evaluation-muted">该数据集版本没有登记文件清单（历史版本或旧登记）。</p>
-
-          <h4>原始用例（{{ datasetCaseTotal }}）</h4>
-          <el-alert
-            v-if="datasetCaseError"
-            type="error"
-            show-icon
-            :title="datasetCaseError"
-            :closable="false"
-          />
+          <div v-else-if="!kindDatasets.length" class="evaluation-hint-card">
+            当前评测体系尚未登记数据集，请先到「测评启动」登记算法版本并发起评测。
+          </div>
+          <div v-else-if="!metrics.length" class="evaluation-hint-card">
+            当前口径尚未登记指标，暂无可展示的批次指标列。
+          </div>
           <el-table
             v-else
-            v-loading="datasetCaseBusy"
-            :data="datasetCases"
-            max-height="460"
-            empty-text="该数据集版本没有登记用例内容"
+            v-loading="runsBusy"
+            :data="runs"
+            row-key="run_id"
+            class="evaluation-datasets evaluation-runs-table"
+            size="small"
+            empty-text="当前范围内没有评测批次"
           >
+            <el-table-column label="批次时间" width="130">
+              <template #default="{ row }">
+                <button
+                  class="evaluation-link"
+                  type="button"
+                  :title="row.run_id"
+                  @click="openRunDetail(row.run_id)"
+                >
+                  {{ traceTime(row.created_at) }}
+                </button>
+              </template>
+            </el-table-column>
+            <el-table-column label="运行次数" width="86">
+              <template #default="{ row }">
+                <el-tooltip placement="top">
+                  <template #content>
+                    <div>批次：{{ row.run_id }}</div>
+                    <div>运行备注：{{ row.trigger_note || '—' }}</div>
+                    <div>重跑来源：{{ row.parent_run_id || '—' }}</div>
+                  </template>
+                  <span class="evaluation-run-seq">
+                    <el-tag v-if="row.run_seq" effect="plain" size="small"
+                      >第 {{ row.run_seq }} 次</el-tag
+                    >
+                    <span v-else class="evaluation-meta">—</span>
+                  </span>
+                </el-tooltip>
+              </template>
+            </el-table-column>
+            <el-table-column label="数据集版本" width="110">
+              <template #default="{ row }">{{ row.dataset_version || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="算法版本" width="90">
+              <template #default="{ row }">{{ row.profile_version_tag || '未绑定' }}</template>
+            </el-table-column>
+            <el-table-column label="执行方式" width="90">
+              <template #default="{ row }">{{ evaluationModeLabel(row.mode) }}</template>
+            </el-table-column>
             <el-table-column
-              v-for="column in datasetCaseColumns"
-              :key="column.key"
-              :label="column.label"
-              :min-width="column.width"
+              v-for="spec in tableMetrics"
+              :key="spec.key"
+              :label="shortMetricLabel(spec)"
+              width="90"
             >
               <template #default="{ row }">
-                <span v-if="column.preview">{{ datasetCasePreview(row, column.keys) }}</span>
-                <span v-else>{{ datasetCaseText(row, column.keys) }}</span>
+                <el-tooltip :content="metricTooltip(spec)" placement="top">
+                  <span>{{ formatMetricValue(spec, row.summary?.[spec.key] ?? null) }}</span>
+                </el-tooltip>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="86" fixed="right">
+            <el-table-column label="门禁" width="60">
               <template #default="{ row }">
+                <el-tag :type="row.gate_passed ? 'success' : 'danger'" size="small">
+                  {{ row.gate_passed ? '通过' : '阻断' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="基线" width="60">
+              <template #default="{ row }">
+                <el-tag v-if="row.is_baseline" type="warning" size="small">基线</el-tag>
+                <el-tag v-else-if="!row.comparable" type="info" size="small">不可比</el-tag>
+                <span v-else class="evaluation-meta">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="152" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openRunDetail(row.run_id)">查看</el-button>
+                <el-button link type="primary" @click="downloadRunReport(row.run_id)"
+                  >原始报告</el-button
+                >
                 <el-button
+                  v-if="canWriteEval && row.dataset_id && row.mode === 'live'"
                   link
                   type="primary"
-                  class="evaluation-json-btn"
-                  @click="openRawCase(row)"
+                  @click="openRerunDialog(row)"
+                  >复跑</el-button
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <path d="M14 2v6h6" />
-                  </svg>
-                  JSON
-                </el-button>
               </template>
             </el-table-column>
           </el-table>
-          <nav class="evaluation-pager" aria-label="数据集用例分页">
-            <span>第 {{ datasetCaseCursors.length }} 页 / 共 {{ datasetCaseTotal }} 条</span>
-            <el-button
-              :disabled="datasetCaseBusy || datasetCaseCursors.length === 1"
-              @click="turnDatasetCase(false)"
+          <nav class="evaluation-pager" aria-label="评测批次分页">
+            <span>第 {{ runsPageNo }} 页</span>
+            <el-button :disabled="runsBusy || runsPageNo === 1" @click="turnRuns(false)"
               >上一页</el-button
             >
-            <el-button
-              :disabled="datasetCaseBusy || !datasetCaseNext"
-              @click="turnDatasetCase(true)"
-              >下一页</el-button
-            >
+            <el-button :disabled="runsBusy || !runsNext" @click="turnRuns(true)">下一页</el-button>
           </nav>
-        </template>
-      </el-drawer>
+        </div>
+      </el-tab-pane>
 
-      <el-dialog
-        v-model="rawCaseDialog"
-        :title="rawCaseTitle ? `原始用例 JSON：${rawCaseTitle}` : '原始用例 JSON'"
-        width="min(880px, 94vw)"
-        :z-index="3000"
-      >
-        <p class="evaluation-meta">以下为该用例登记在数据集中的完整原始字段，未裁剪、未改名。</p>
-        <pre class="evaluation-json">{{ rawCaseJson }}</pre>
-      </el-dialog>
-
-      <el-drawer
-        v-model="runDetailOpen"
-        :title="runDetail ? `批次详情 · ${traceTime(runDetail.run.created_at)}` : '批次详情'"
-        size="76%"
-      >
-        <el-alert
-          v-if="runDetailError"
-          type="error"
-          show-icon
-          :title="runDetailError"
-          :closable="false"
-        />
-        <el-skeleton v-else-if="runDetailBusy && !runDetail" :rows="5" animated />
-        <template v-else-if="runDetail">
-          <dl class="evaluation-facts">
-            <div>
-              <dt>数据集版本</dt>
-              <dd>{{ runDetail.run.dataset_version || '—' }}</dd>
-            </div>
-            <div>
-              <dt>算法版本</dt>
-              <dd>{{ runDetail.run.profile_version_tag || '未绑定' }}</dd>
-            </div>
-            <div>
-              <dt>运行次数</dt>
-              <dd>{{ runDetail.run.run_seq ? `第 ${runDetail.run.run_seq} 次` : '—' }}</dd>
-            </div>
-            <div>
-              <dt>执行方式与口径</dt>
-              <dd>
-                {{ evaluationModeLabel(runDetail.run.mode) }} ·
-                {{ evaluationScopeLabel(runDetail.run.scope) }}
-              </dd>
-            </div>
-            <div>
-              <dt>门禁</dt>
-              <dd>
-                <el-tag :type="runDetail.run.gate_passed ? 'success' : 'danger'" size="small">
-                  {{ runDetail.run.gate_passed ? '通过' : '阻断' }}
-                </el-tag>
-              </dd>
-            </div>
-            <div>
-              <dt>基线</dt>
-              <dd>
-                <el-tag v-if="runDetail.run.is_baseline" type="warning" size="small"
-                  >当前基线</el-tag
-                >
-                <span v-else class="evaluation-meta">—</span>
-              </dd>
-            </div>
-            <div>
-              <dt>发起人</dt>
-              <dd>{{ runDetail.run.owner_name || runDetail.run.owner_id }}</dd>
-            </div>
-            <div v-if="runDetail.run.trigger_note">
-              <dt>运行备注</dt>
-              <dd>{{ runDetail.run.trigger_note }}</dd>
-            </div>
-            <div v-if="runDetail.run.parent_run_id">
-              <dt>重跑来源</dt>
-              <dd class="evaluation-code">{{ runDetail.run.parent_run_id }}</dd>
-            </div>
-          </dl>
-          <div class="evaluation-detail-actions">
-            <span class="evaluation-meta"
-              >用例 {{ runDetail.run.passed_cases }} / {{ runDetail.run.total_cases }} 通过 · 失败
-              {{ runDetail.run.failed_cases }} · 不可判定
-              {{ runDetail.run.unassessable_cases }}</span
-            >
-            <div class="evaluation-detail-action-buttons">
-              <el-button
-                :disabled="!runDetail.run.report_available"
-                :title="
-                  runDetail.run.report_available ? '下载原始报告 JSON' : '该批次未保存原始报告'
-                "
-                @click="downloadRunReport(runDetail.run.run_id)"
-                >下载原始报告</el-button
+      <el-tab-pane v-if="view === 'results'" label="基线" name="baselines">
+        <div class="evaluation-tab">
+          <div class="evaluation-subsection-head">
+            <h4>
+              评测基线
+              <el-tooltip
+                content="基线按「数据集版本 + 口径 + 执行方式」唯一：同一组合只保留一个 active 基线，概览的环比使用 active 基线。"
+                placement="top"
               >
-              <el-button
-                v-if="view === 'results' && canWriteEval && runDetail.run.dataset_id"
-                @click="openBaselineDialog(runDetail.run)"
-                >设为基线</el-button
-              >
-              <el-button
-                v-if="
-                  view === 'results' &&
-                  canWriteEval &&
-                  runDetail.run.dataset_id &&
-                  runDetail.run.mode === 'live'
-                "
-                @click="openRerunDialog(runDetail.run)"
-                >复跑</el-button
-              >
+                <span class="evaluation-help">?</span>
+              </el-tooltip>
+            </h4>
+            <div class="evaluation-filters evaluation-filters-inline">
+              <el-switch v-model="baselineActiveOnly" active-text="只看 active" />
+              <el-button :loading="baselinesBusy" @click="loadBaselines">刷新</el-button>
             </div>
           </div>
-          <div v-if="runDetail.dataset_snapshot" class="evaluation-snapshot-line">
-            <span>
-              数据集快照 {{ runDetail.dataset_snapshot.dataset_version }} · 用例
-              {{ runDetail.dataset_snapshot.case_count }}
-            </span>
-            <el-button link type="primary" @click="openSnapshotCases(runDetail.run.run_id)"
-              >查看原始用例</el-button
-            >
-          </div>
-          <p v-else class="evaluation-meta">
-            该批次没有数据集内容快照（历史批次未登记快照），无法查看本次运行使用的原始用例。
-          </p>
-          <div class="evaluation-detail-metrics-head">
-            <h4>核心指标</h4>
-            <el-button
-              v-if="runMetricCards.length > detailMetricCards.length || showAllDetailMetrics"
-              link
-              type="primary"
-              @click="showAllDetailMetrics = !showAllDetailMetrics"
-              >{{
-                showAllDetailMetrics ? '收起指标' : `展开全部指标（${runMetricCards.length} 项）`
-              }}</el-button
-            >
-          </div>
-          <div class="evaluation-metric-grid evaluation-metric-grid-detail">
-            <el-tooltip
-              v-for="card in detailMetricCards"
-              :key="card.spec.key"
-              placement="top"
-              :content="metricTooltip(card.spec)"
-            >
-              <div class="evaluation-metric-card evaluation-metric-card-compact">
-                <span class="evaluation-card-label">{{ shortMetricLabel(card.spec) }}</span>
-                <strong class="evaluation-metric-value">{{
-                  formatMetricValue(card.spec, card.value)
-                }}</strong>
-              </div>
-            </el-tooltip>
-          </div>
-          <el-collapse v-model="detailTechOpen" class="evaluation-tech-collapse">
-            <el-collapse-item title="技术信息" name="tech">
-              <dl class="evaluation-facts evaluation-facts-tech">
-                <div>
-                  <dt>批次编号</dt>
-                  <dd class="evaluation-code">{{ runDetail.run.run_id }}</dd>
-                </div>
-                <div>
-                  <dt>快照编号</dt>
-                  <dd class="evaluation-code">{{ runDetail.run.dataset_snapshot_id || '—' }}</dd>
-                </div>
-                <div>
-                  <dt>快照 bundle sha256</dt>
-                  <dd class="evaluation-code">
-                    {{ runDetail.dataset_snapshot?.bundle_sha256 || '—' }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>数据集摘要</dt>
-                  <dd class="evaluation-code">{{ runDetail.run.dataset_sha256 }}</dd>
-                </div>
-                <div>
-                  <dt>判定器摘要</dt>
-                  <dd class="evaluation-code">{{ runDetail.run.judges_sha256 }}</dd>
-                </div>
-                <div>
-                  <dt>发起人账号</dt>
-                  <dd class="evaluation-code">{{ runDetail.run.owner_id }}</dd>
-                </div>
-              </dl>
-            </el-collapse-item>
-          </el-collapse>
-          <h4>逐例结果</h4>
           <el-alert
-            v-if="runCaseError"
-            type="error"
+            v-if="baselinesError"
+            type="warning"
             show-icon
-            :title="runCaseError"
+            :title="baselinesError"
             :closable="false"
           />
           <el-table
             v-else
-            v-loading="runCaseBusy"
-            :data="runCaseRows"
-            row-key="case_id"
-            size="small"
-            empty-text="该批次没有用例结果"
+            v-loading="baselinesBusy"
+            :data="baselines"
+            row-key="baseline_id"
+            class="evaluation-datasets"
+            empty-text="当前范围还没有基线，可在批次页把批次设为基线"
           >
-            <el-table-column label="用例" min-width="230">
+            <el-table-column label="状态" width="85">
               <template #default="{ row }">
-                <button class="evaluation-link" type="button" @click="openCaseJson(row.case_id)">
-                  {{ row.name }}
-                </button>
-                <small class="evaluation-meta evaluation-case-id" :title="row.case_id">{{
-                  row.case_id
-                }}</small>
-              </template>
-            </el-table-column>
-            <el-table-column label="分组" width="100">
-              <template #default="{ row }">{{
-                evaluationSuites[row.suite] || row.suite || '—'
-              }}</template>
-            </el-table-column>
-            <el-table-column label="得分" width="70">
-              <template #default="{ row }">{{
-                typeof row.score === 'number' ? row.score.toFixed(2) : '—'
-              }}</template>
-            </el-table-column>
-            <el-table-column label="判定" width="110">
-              <template #default="{ row }">
-                <el-tag :type="evaluationTags[row.status as EvaluationStatus]" size="small">{{
-                  evaluationStatuses[row.status as EvaluationStatus]
+                <el-tag :type="row.active ? 'success' : 'info'" size="small">{{
+                  row.active ? 'active' : '历史'
                 }}</el-tag>
-                <small v-if="row.hard_failure" class="evaluation-meta">硬性违规</small>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="86" fixed="right">
+            <el-table-column label="数据集版本" width="120">
+              <template #default="{ row }">{{ row.dataset_version }}</template>
+            </el-table-column>
+            <el-table-column label="口径" width="95">
+              <template #default="{ row }">{{ evaluationScopeLabel(row.scope) }}</template>
+            </el-table-column>
+            <el-table-column label="执行方式" min-width="125">
+              <template #default="{ row }">{{ evaluationModeLabel(row.mode) }}</template>
+            </el-table-column>
+            <el-table-column label="批次" min-width="190">
               <template #default="{ row }">
-                <el-button
-                  link
-                  type="primary"
-                  class="evaluation-json-btn"
-                  @click="openCaseJson(row.case_id)"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <path d="M14 2v6h6" />
-                  </svg>
-                  JSON
-                </el-button>
+                <button class="evaluation-link" type="button" @click="openRunDetail(row.run_id)">
+                  {{ traceTime(row.run_created_at) }}
+                </button>
+                <small class="evaluation-meta">{{ row.run_id }}</small>
               </template>
             </el-table-column>
-          </el-table>
-          <nav class="evaluation-pager" aria-label="批次用例分页">
-            <span>第 {{ runCaseCursors.length }} 页</span>
-            <el-button
-              :disabled="runCaseBusy || runCaseCursors.length === 1"
-              @click="turnRunCase(false)"
-              >上一页</el-button
-            >
-            <el-button :disabled="runCaseBusy || !runCaseNext" @click="turnRunCase(true)"
-              >下一页</el-button
-            >
-          </nav>
-        </template>
-      </el-drawer>
-
-      <el-dialog
-        v-model="caseJsonDialog"
-        title="用例原始判定 JSON"
-        width="min(900px, 94vw)"
-        :z-index="3000"
-      >
-        <p class="evaluation-meta">
-          用例 {{ caseJsonCaseId }} · 以下为服务端返回的 expected / observed / verdicts
-          原始字段，未裁剪； 末尾附该批次运行时固化的数据集原始用例。
-        </p>
-        <el-button
-          v-if="caseJsonTrace"
-          type="primary"
-          plain
-          class="evaluation-case-trace"
-          @click="inspectCaseTrace"
-          >查看关联执行轨迹</el-button
-        >
-        <pre class="evaluation-json">{{ caseJsonText }}</pre>
-        <h4>数据集原始用例</h4>
-        <p class="evaluation-meta">
-          用例摘要 sha256 {{ caseJsonDatasetSha256 || '—' }} ·
-          以下为该次运行数据集快照中保存的完整原始用例，未裁剪、未改名。
-        </p>
-        <pre class="evaluation-json">{{ caseJsonDatasetText }}</pre>
-      </el-dialog>
-
-      <el-drawer v-model="snapshotDrawer" title="数据集快照原始用例" size="72%">
-        <el-alert
-          v-if="snapshotError"
-          type="error"
-          show-icon
-          :title="snapshotError"
-          :closable="false"
-        />
-        <template v-else>
-          <div v-if="snapshotMeta" class="evaluation-filters">
-            <el-tag effect="plain" size="small">版本 {{ snapshotMeta.dataset_version }}</el-tag>
-            <el-tag type="info" effect="plain" size="small"
-              >bundle {{ shortSha(snapshotMeta.bundle_sha256) }}</el-tag
-            >
-            <el-tag type="success" effect="plain" size="small"
-              >用例 {{ snapshotMeta.case_count }}</el-tag
-            >
-            <span class="evaluation-meta">快照 {{ snapshotMeta.snapshot_id }}</span>
-            <el-button :loading="snapshotBusy" @click="loadSnapshotCases">刷新</el-button>
-          </div>
-          <p class="evaluation-meta">
-            以下为批次 <code>{{ snapshotRunId }}</code>
-            运行时固化的数据集原始用例（按套件与序号排序）；每条可查看完整 case_payload
-            JSON，不读取当前数据集。
-          </p>
-          <el-table
-            v-loading="snapshotBusy"
-            :data="snapshotCases"
-            row-key="case_id"
-            max-height="520"
-            empty-text="该快照没有登记原始用例"
-          >
-            <el-table-column label="套件" width="150">
+            <el-table-column :label="baselineMetricLabel" width="125">
               <template #default="{ row }">{{
-                evaluationSuites[row.suite] || row.suite || '—'
+                formatEvaluationPercent(row.run_pass_rate)
               }}</template>
             </el-table-column>
-            <el-table-column label="用例 ID" width="170" prop="case_id" />
-            <el-table-column label="序号" width="80" prop="ordinal" />
-            <el-table-column label="用例摘要" width="150">
-              <template #default="{ row }">{{ shortSha(row.case_sha256) }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="86" fixed="right">
+            <el-table-column label="门禁" width="90">
               <template #default="{ row }">
-                <el-button
-                  link
-                  type="primary"
-                  class="evaluation-json-btn"
-                  @click="openSnapshotCaseJson(row)"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <path d="M14 2v6h6" />
-                  </svg>
-                  JSON
-                </el-button>
+                <el-tag :type="row.run_gate_passed ? 'success' : 'danger'" size="small">
+                  {{ row.run_gate_passed ? '通过' : '阻断' }}
+                </el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="算法版本" min-width="120">
+              <template #default="{ row }">{{ row.algorithm_version || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="设置人" min-width="110">
+              <template #default="{ row }">{{ row.created_by }}</template>
+            </el-table-column>
+            <el-table-column label="设置时间" min-width="150">
+              <template #default="{ row }">{{ traceTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column label="备注" min-width="160">
+              <template #default="{ row }">{{ row.note || '—' }}</template>
+            </el-table-column>
           </el-table>
-          <nav class="evaluation-pager" aria-label="数据集快照用例分页">
-            <span>第 {{ snapshotCursors.length }} 页 / 共 {{ snapshotTotal }} 条</span>
-            <el-button
-              :disabled="snapshotBusy || snapshotCursors.length === 1"
-              @click="turnSnapshotCase(false)"
-              >上一页</el-button
-            >
-            <el-button :disabled="snapshotBusy || !snapshotNext" @click="turnSnapshotCase(true)"
-              >下一页</el-button
-            >
-          </nav>
-        </template>
-      </el-drawer>
+        </div>
+      </el-tab-pane>
 
-      <el-dialog v-model="rerunDialog" title="复跑评测批次" width="560px">
-        <el-form label-position="top">
-          <el-form-item label="复跑来源批次">
-            <span>{{ rerunRun ? rerunRun.run_id : '—' }}</span>
-            <small class="evaluation-meta">
-              数据集版本 {{ rerunRun ? rerunRun.dataset_version || '—' : '—' }} · 算法版本
-              {{ rerunRun ? rerunRun.profile_version_tag || '未绑定' : '—' }} · 口径
-              {{ rerunRun ? evaluationScopeLabel(rerunRun.scope) : '—' }} · 执行方式
-              {{ rerunRun ? evaluationModeLabel(rerunRun.mode) : '—' }}
-            </small>
-          </el-form-item>
-          <p class="evaluation-meta">
-            复跑沿用该批次的数据集、口径、执行方式与算法版本，并带上重跑来源；提交后同一数据集、口径与执行方式下将记为第
-            {{ rerunNextSeq }} 次运行。
-          </p>
-          <el-form-item label="运行备注（写入新批次 trigger_note）">
-            <el-input
-              v-model="rerunNote"
-              maxlength="500"
-              show-word-limit
-              placeholder="说明本次复跑目的，例如：同数据集第二次运行"
-            />
-          </el-form-item>
-          <el-alert v-if="rerunError" type="error" :title="rerunError" :closable="false" />
-        </el-form>
-        <template #footer>
-          <el-button @click="rerunDialog = false">取消</el-button>
-          <el-button type="primary" :loading="rerunBusy" @click="submitRerun">确认复跑</el-button>
-        </template>
-      </el-dialog>
-
-      <el-dialog
-        v-model="profileDialog"
-        title="登记不可变技术栈 / Prompt 版本"
-        width="560px"
-        :z-index="3000"
-      >
-        <el-form label-position="top">
-          <el-form-item label="版本标签（唯一；留空按序号自动编号）">
-            <el-input v-model="profileForm.version_tag" placeholder="留空自动编号，如 algo-v3" />
-          </el-form-item>
-          <el-form-item label="技术栈 JSON（模型、编排、检索组件）">
-            <el-input v-model="profileForm.tech_stack_text" type="textarea" :rows="3" />
-          </el-form-item>
-          <el-form-item label="检索与超参数 JSON">
-            <el-input v-model="profileForm.retrieval_params_text" type="textarea" :rows="2" />
-          </el-form-item>
-          <el-form-item label="Prompt 调优快照 JSON">
-            <el-input v-model="profileForm.prompt_snapshots_text" type="textarea" :rows="4" />
-          </el-form-item>
-          <el-form-item label="调优说明">
-            <el-input v-model="profileForm.notes" placeholder="记录本次技术栈与 Prompt 改动目的" />
-          </el-form-item>
-          <el-alert v-if="writeError" type="error" :title="writeError" :closable="false" />
-        </el-form>
-        <template #footer>
-          <el-button @click="profileDialog = false">取消</el-button>
-          <el-button type="primary" :loading="writeBusy" @click="submitProfile">确认登记</el-button>
-        </template>
-      </el-dialog>
-
-      <el-dialog v-model="triggerDialog" title="选择数据集与算法版本发起评测" width="560px">
-        <el-form label-position="top">
-          <el-form-item label="评测数据集版本">
-            <el-select v-model="triggerForm.dataset_id" style="width: 100%">
-              <el-option
-                v-for="dataset in triggerDatasets"
-                :key="dataset.dataset_id"
-                :label="`${dataset.name}（${dataset.version}）`"
-                :value="dataset.dataset_id"
-              />
-            </el-select>
-            <small class="evaluation-meta"
-              >支持口径：{{ triggerScopeLabels }} · 执行方式：{{ triggerModeLabels }}</small
-            >
-          </el-form-item>
-          <el-form-item label="算法版本（可留空自动快照）">
-            <el-select
-              v-model="triggerForm.profile_id"
-              clearable
-              value-on-clear=""
-              placeholder="留空：自动生成算法版本快照"
-              style="width: 100%"
-            >
-              <el-option label="自动生成算法版本快照" value="" />
-              <el-option
-                v-for="profile in profiles"
-                :key="profile.profile_id"
-                :label="`V${profile.version_no} · ${profile.version_tag}`"
-                :value="profile.profile_id"
-              />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="评测口径（选项来自指标目录）">
-            <el-select v-model="triggerForm.scope" style="width: 100%">
-              <el-option
-                v-for="item in triggerScopeOptions"
-                :key="item"
-                :value="item"
-                :label="evaluationScopes[item]"
-              />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="执行方式（按数据集登记能力过滤）">
-            <el-select v-model="triggerForm.mode" style="width: 100%">
-              <el-option
-                v-for="item in triggerModeOptions"
-                :key="item"
-                :value="item"
-                :label="evaluationModes[item]"
-              />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="本次运行备注（写入批次 trigger_note）">
-            <el-input
-              v-model="triggerForm.note"
-              maxlength="500"
-              show-word-limit
-              placeholder="说明本次运行目的，可用于区分同一数据集多次运行"
-            />
-          </el-form-item>
-          <el-form-item>
-            <el-checkbox v-model="triggerForm.mark_baseline">评测完成后同时设为基线</el-checkbox>
-          </el-form-item>
-          <el-alert v-if="writeError" type="error" :title="writeError" :closable="false" />
-        </el-form>
-        <template #footer>
-          <el-button @click="triggerDialog = false">取消</el-button>
-          <el-button type="primary" :loading="writeBusy" @click="submitTrigger">确认发起</el-button>
-        </template>
-      </el-dialog>
-
-      <el-dialog v-model="baselineDialog" title="设为评测基线" width="500px" :z-index="3000">
-        <el-form label-position="top">
-          <el-form-item label="基线批次">
-            <span>{{ baselineRun ? baselineRun.run_id : '—' }}</span>
-            <small class="evaluation-meta">
-              数据集版本 {{ baselineRun ? baselineRun.dataset_version || '—' : '—' }} · 口径
-              {{ baselineRun ? evaluationScopeLabel(baselineRun.scope) : '—' }} · 执行方式
-              {{ baselineRun ? evaluationModeLabel(baselineRun.mode) : '—' }}
-            </small>
-          </el-form-item>
-          <el-form-item label="基线备注（必填）">
-            <el-input
-              v-model="baselineNote"
-              maxlength="500"
-              show-word-limit
-              placeholder="说明为什么将该批次作为该数据集版本 + 口径 + 执行方式的当前基线"
-            />
-          </el-form-item>
+      <el-tab-pane v-if="view === 'launch'" label="发起评测" name="launch">
+        <div class="evaluation-tab">
+          <div class="evaluation-subsection-head">
+            <h4>
+              发起真实评测
+              <el-tooltip
+                content="评测由 Worker 真实执行；登记算法版本并选择数据集、口径与执行方式后触发，页面只展示任务号与当前进度，结果请到「测评结果」查看。"
+                placement="top"
+              >
+                <span class="evaluation-help">?</span>
+              </el-tooltip>
+            </h4>
+          </div>
           <el-alert
-            v-if="baselineWriteError"
+            v-if="!canWriteEval"
+            type="info"
+            show-icon
+            :closable="false"
+            title="当前账号可查看评测任务进度，触发/取消评测与登记算法版本需要企业负责人或系统管理员权限。"
+          />
+          <el-alert v-if="jobError" type="error" show-icon :title="jobError" :closable="false" />
+          <p v-if="profilesError" class="evaluation-meta">{{ profilesError }}</p>
+          <div v-if="!activeJob" class="evaluation-launch-card">
+            <div class="evaluation-launch-copy">
+              <strong>{{ evalKindLabel }} 评测</strong>
+              <p class="evaluation-meta">
+                登记不可变算法版本，选择数据集、口径与真实执行方式后由 Worker 执行。
+              </p>
+            </div>
+            <div v-if="canWriteEval" class="evaluation-launch-actions">
+              <el-button @click="openProfileDialog">登记算法版本</el-button>
+              <el-button type="primary" @click="openTriggerDialog()">发起评测</el-button>
+            </div>
+          </div>
+          <template v-else>
+            <div class="evaluation-job-head">
+              <strong>{{ activeJob.job_id }}</strong>
+              <el-tag :type="stateTag(activeJob.state)" size="small">{{
+                stateText(activeJob.state)
+              }}</el-tag>
+              <span class="evaluation-meta">{{ activeJob.stage || '等待 Worker 调度' }}</span>
+              <el-button v-if="canWriteEval && !jobTerminal" :loading="jobBusy" @click="cancelJob"
+                >取消任务</el-button
+              >
+            </div>
+            <el-progress :percentage="activeJob.progress" :status="jobProgressStatus" />
+            <p class="evaluation-meta">
+              创建 {{ traceTime(activeJob.created_at)
+              }}<template v-if="activeJob.started_at">
+                · 开始 {{ traceTime(activeJob.started_at) }}</template
+              >
+              <template v-if="activeJob.finished_at">
+                · 结束 {{ traceTime(activeJob.finished_at) }}</template
+              >
+            </p>
+            <el-alert
+              v-if="activeJob.error"
+              type="error"
+              :title="activeJob.error"
+              :closable="false"
+            />
+            <p v-if="jobRunId" class="evaluation-meta">
+              评测批次已入库：
+              <button class="evaluation-link" type="button" @click="openRunDetail(jobRunId)">
+                {{ jobRunId }}
+              </button>
+            </p>
+          </template>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane v-if="view === 'results' && canWriteEval" label="审计" name="audit">
+        <div class="evaluation-tab">
+          <div class="evaluation-subsection-head">
+            <h4>评测审计留痕</h4>
+            <div class="evaluation-filters evaluation-filters-inline">
+              <el-select v-model="auditAction" placeholder="全部动作" aria-label="按审计动作筛选">
+                <el-option value="" label="全部动作" />
+                <el-option
+                  v-for="(label, code) in evaluationAuditActions"
+                  :key="code"
+                  :value="code"
+                  :label="label"
+                />
+              </el-select>
+              <el-button :loading="auditBusy" @click="loadAuditLogs">刷新</el-button>
+            </div>
+          </div>
+          <el-alert
+            v-if="auditError"
             type="error"
-            :title="baselineWriteError"
+            show-icon
+            :title="auditError"
             :closable="false"
           />
-        </el-form>
-        <template #footer>
-          <el-button @click="baselineDialog = false">取消</el-button>
-          <el-button type="primary" :loading="writeBusy" @click="submitBaseline"
-            >确认设为基线</el-button
+          <el-table
+            v-else
+            v-loading="auditBusy"
+            :data="auditLogs"
+            row-key="audit_id"
+            empty-text="当前筛选范围没有审计记录"
           >
-        </template>
-      </el-dialog>
-    </template>
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <pre class="evaluation-json">{{ JSON.stringify(row.summary, null, 2) }}</pre>
+              </template>
+            </el-table-column>
+            <el-table-column label="动作" width="120">
+              <template #default="{ row }">
+                <el-tag size="small">{{ auditActionLabel(row.action) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="对象" min-width="190">
+              <template #default="{ row }">{{ row.target_id }}</template>
+            </el-table-column>
+            <el-table-column label="操作人" min-width="130">
+              <template #default="{ row }">{{ row.actor_id }}</template>
+            </el-table-column>
+            <el-table-column label="时间" min-width="150">
+              <template #default="{ row }">{{ traceTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column label="摘要" min-width="240">
+              <template #default="{ row }">{{ summarizeJson(row.summary) }}</template>
+            </el-table-column>
+          </el-table>
+          <nav class="evaluation-pager" aria-label="审计留痕分页">
+            <span>第 {{ auditCursors.length }} 页</span>
+            <el-button :disabled="auditBusy || auditCursors.length === 1" @click="turnAudit(false)"
+              >上一页</el-button
+            >
+            <el-button :disabled="auditBusy || !auditNext" @click="turnAudit(true)"
+              >下一页</el-button
+            >
+          </nav>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
+
+    <el-drawer
+      v-model="runDetailOpen"
+      :title="runDetail ? `批次详情 · ${traceTime(runDetail.run.created_at)}` : '批次详情'"
+      size="76%"
+    >
+      <el-alert
+        v-if="runDetailError"
+        type="error"
+        show-icon
+        :title="runDetailError"
+        :closable="false"
+      />
+      <el-skeleton v-else-if="runDetailBusy && !runDetail" :rows="5" animated />
+      <template v-else-if="runDetail">
+        <dl class="evaluation-facts">
+          <div>
+            <dt>数据集版本</dt>
+            <dd>{{ runDetail.run.dataset_version || '—' }}</dd>
+          </div>
+          <div>
+            <dt>算法版本</dt>
+            <dd>{{ runDetail.run.profile_version_tag || '未绑定' }}</dd>
+          </div>
+          <div>
+            <dt>运行次数</dt>
+            <dd>{{ runDetail.run.run_seq ? `第 ${runDetail.run.run_seq} 次` : '—' }}</dd>
+          </div>
+          <div>
+            <dt>执行方式与口径</dt>
+            <dd>
+              {{ evaluationModeLabel(runDetail.run.mode) }} ·
+              {{ evaluationScopeLabel(runDetail.run.scope) }}
+            </dd>
+          </div>
+          <div>
+            <dt>门禁</dt>
+            <dd>
+              <el-tag :type="runDetail.run.gate_passed ? 'success' : 'danger'" size="small">
+                {{ runDetail.run.gate_passed ? '通过' : '阻断' }}
+              </el-tag>
+            </dd>
+          </div>
+          <div>
+            <dt>基线</dt>
+            <dd>
+              <el-tag v-if="runDetail.run.is_baseline" type="warning" size="small">当前基线</el-tag>
+              <span v-else class="evaluation-meta">—</span>
+            </dd>
+          </div>
+          <div>
+            <dt>发起人</dt>
+            <dd>{{ runDetail.run.owner_name || runDetail.run.owner_id }}</dd>
+          </div>
+          <div v-if="runDetail.run.trigger_note">
+            <dt>运行备注</dt>
+            <dd>{{ runDetail.run.trigger_note }}</dd>
+          </div>
+          <div v-if="runDetail.run.parent_run_id">
+            <dt>重跑来源</dt>
+            <dd class="evaluation-code">{{ runDetail.run.parent_run_id }}</dd>
+          </div>
+        </dl>
+        <div class="evaluation-detail-actions">
+          <span class="evaluation-meta"
+            >用例 {{ runDetail.run.passed_cases }} / {{ runDetail.run.total_cases }} 通过 · 失败
+            {{ runDetail.run.failed_cases }} · 不可判定 {{ runDetail.run.unassessable_cases }}</span
+          >
+          <div class="evaluation-detail-action-buttons">
+            <el-button
+              :disabled="!runDetail.run.report_available"
+              :title="runDetail.run.report_available ? '下载原始报告 JSON' : '该批次未保存原始报告'"
+              @click="downloadRunReport(runDetail.run.run_id)"
+              >下载原始报告</el-button
+            >
+            <el-button
+              v-if="view === 'results' && canWriteEval && runDetail.run.dataset_id"
+              @click="openBaselineDialog(runDetail.run)"
+              >设为基线</el-button
+            >
+            <el-button
+              v-if="
+                view === 'results' &&
+                canWriteEval &&
+                runDetail.run.dataset_id &&
+                runDetail.run.mode === 'live'
+              "
+              @click="openRerunDialog(runDetail.run)"
+              >复跑</el-button
+            >
+          </div>
+        </div>
+        <div v-if="runDetail.dataset_snapshot" class="evaluation-snapshot-line">
+          <span>
+            数据集快照 {{ runDetail.dataset_snapshot.dataset_version }} · 用例
+            {{ runDetail.dataset_snapshot.case_count }}
+          </span>
+          <el-button link type="primary" @click="openSnapshotCases(runDetail.run.run_id)"
+            >查看原始用例</el-button
+          >
+        </div>
+        <p v-else class="evaluation-meta">
+          该批次没有数据集内容快照（历史批次未登记快照），无法查看本次运行使用的原始用例。
+        </p>
+        <div class="evaluation-detail-metrics-head">
+          <h4>核心指标</h4>
+          <el-button
+            v-if="runMetricCards.length > detailMetricCards.length || showAllDetailMetrics"
+            link
+            type="primary"
+            @click="showAllDetailMetrics = !showAllDetailMetrics"
+            >{{
+              showAllDetailMetrics ? '收起指标' : `展开全部指标（${runMetricCards.length} 项）`
+            }}</el-button
+          >
+        </div>
+        <div class="evaluation-metric-grid evaluation-metric-grid-detail">
+          <el-tooltip
+            v-for="card in detailMetricCards"
+            :key="card.spec.key"
+            placement="top"
+            :content="metricTooltip(card.spec)"
+          >
+            <div class="evaluation-metric-card evaluation-metric-card-compact">
+              <span class="evaluation-card-label">{{ shortMetricLabel(card.spec) }}</span>
+              <strong class="evaluation-metric-value">{{
+                formatMetricValue(card.spec, card.value)
+              }}</strong>
+            </div>
+          </el-tooltip>
+        </div>
+        <el-collapse v-model="detailTechOpen" class="evaluation-tech-collapse">
+          <el-collapse-item title="技术信息" name="tech">
+            <dl class="evaluation-facts evaluation-facts-tech">
+              <div>
+                <dt>批次编号</dt>
+                <dd class="evaluation-code">{{ runDetail.run.run_id }}</dd>
+              </div>
+              <div>
+                <dt>快照编号</dt>
+                <dd class="evaluation-code">{{ runDetail.run.dataset_snapshot_id || '—' }}</dd>
+              </div>
+              <div>
+                <dt>快照 bundle sha256</dt>
+                <dd class="evaluation-code">
+                  {{ runDetail.dataset_snapshot?.bundle_sha256 || '—' }}
+                </dd>
+              </div>
+              <div>
+                <dt>数据集摘要</dt>
+                <dd class="evaluation-code">{{ runDetail.run.dataset_sha256 }}</dd>
+              </div>
+              <div>
+                <dt>判定器摘要</dt>
+                <dd class="evaluation-code">{{ runDetail.run.judges_sha256 }}</dd>
+              </div>
+              <div>
+                <dt>发起人账号</dt>
+                <dd class="evaluation-code">{{ runDetail.run.owner_id }}</dd>
+              </div>
+            </dl>
+          </el-collapse-item>
+        </el-collapse>
+        <h4>逐例结果</h4>
+        <el-alert
+          v-if="runCaseError"
+          type="error"
+          show-icon
+          :title="runCaseError"
+          :closable="false"
+        />
+        <el-table
+          v-else
+          v-loading="runCaseBusy"
+          :data="runCaseRows"
+          row-key="case_id"
+          size="small"
+          empty-text="该批次没有用例结果"
+        >
+          <el-table-column label="用例" min-width="230">
+            <template #default="{ row }">
+              <button class="evaluation-link" type="button" @click="openCaseJson(row.case_id)">
+                {{ row.name }}
+              </button>
+              <small class="evaluation-meta evaluation-case-id" :title="row.case_id">{{
+                row.case_id
+              }}</small>
+            </template>
+          </el-table-column>
+          <el-table-column label="分组" width="100">
+            <template #default="{ row }">{{
+              evaluationSuites[row.suite] || row.suite || '—'
+            }}</template>
+          </el-table-column>
+          <el-table-column label="得分" width="70">
+            <template #default="{ row }">{{
+              typeof row.score === 'number' ? row.score.toFixed(2) : '—'
+            }}</template>
+          </el-table-column>
+          <el-table-column label="判定" width="110">
+            <template #default="{ row }">
+              <el-tag :type="evaluationTags[row.status as EvaluationStatus]" size="small">{{
+                evaluationStatuses[row.status as EvaluationStatus]
+              }}</el-tag>
+              <small v-if="row.hard_failure" class="evaluation-meta">硬性违规</small>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="86" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                link
+                type="primary"
+                class="evaluation-json-btn"
+                @click="openCaseJson(row.case_id)"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" />
+                </svg>
+                JSON
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <nav class="evaluation-pager" aria-label="批次用例分页">
+          <span>第 {{ runCaseCursors.length }} 页</span>
+          <el-button
+            :disabled="runCaseBusy || runCaseCursors.length === 1"
+            @click="turnRunCase(false)"
+            >上一页</el-button
+          >
+          <el-button :disabled="runCaseBusy || !runCaseNext" @click="turnRunCase(true)"
+            >下一页</el-button
+          >
+        </nav>
+      </template>
+    </el-drawer>
+
+    <el-dialog
+      v-model="caseJsonDialog"
+      title="用例原始判定 JSON"
+      width="min(900px, 94vw)"
+      :z-index="3000"
+    >
+      <p class="evaluation-meta">
+        用例 {{ caseJsonCaseId }} · 以下为服务端返回的 expected / observed / verdicts
+        原始字段，未裁剪； 末尾附该批次运行时固化的数据集原始用例。
+      </p>
+      <el-button
+        v-if="caseJsonTrace"
+        type="primary"
+        plain
+        class="evaluation-case-trace"
+        @click="inspectCaseTrace"
+        >查看关联执行轨迹</el-button
+      >
+      <pre class="evaluation-json">{{ caseJsonText }}</pre>
+      <h4>数据集原始用例</h4>
+      <p class="evaluation-meta">
+        用例摘要 sha256 {{ caseJsonDatasetSha256 || '—' }} ·
+        以下为该次运行数据集快照中保存的完整原始用例，未裁剪、未改名。
+      </p>
+      <pre class="evaluation-json">{{ caseJsonDatasetText }}</pre>
+    </el-dialog>
+
+    <el-drawer v-model="snapshotDrawer" title="数据集快照原始用例" size="72%">
+      <el-alert
+        v-if="snapshotError"
+        type="error"
+        show-icon
+        :title="snapshotError"
+        :closable="false"
+      />
+      <template v-else>
+        <div v-if="snapshotMeta" class="evaluation-filters">
+          <el-tag effect="plain" size="small">版本 {{ snapshotMeta.dataset_version }}</el-tag>
+          <el-tag type="info" effect="plain" size="small"
+            >bundle {{ shortSha(snapshotMeta.bundle_sha256) }}</el-tag
+          >
+          <el-tag type="success" effect="plain" size="small"
+            >用例 {{ snapshotMeta.case_count }}</el-tag
+          >
+          <span class="evaluation-meta">快照 {{ snapshotMeta.snapshot_id }}</span>
+          <el-button :loading="snapshotBusy" @click="loadSnapshotCases">刷新</el-button>
+        </div>
+        <p class="evaluation-meta">
+          以下为批次 <code>{{ snapshotRunId }}</code>
+          运行时固化的数据集原始用例（按套件与序号排序）；每条可查看完整 case_payload
+          JSON，不读取当前数据集。
+        </p>
+        <el-table
+          v-loading="snapshotBusy"
+          :data="snapshotCases"
+          row-key="case_id"
+          max-height="520"
+          empty-text="该快照没有登记原始用例"
+        >
+          <el-table-column label="套件" width="150">
+            <template #default="{ row }">{{
+              evaluationSuites[row.suite] || row.suite || '—'
+            }}</template>
+          </el-table-column>
+          <el-table-column label="用例 ID" width="170" prop="case_id" />
+          <el-table-column label="序号" width="80" prop="ordinal" />
+          <el-table-column label="用例摘要" width="150">
+            <template #default="{ row }">{{ shortSha(row.case_sha256) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="86" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                link
+                type="primary"
+                class="evaluation-json-btn"
+                @click="openSnapshotCaseJson(row)"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" />
+                </svg>
+                JSON
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <nav class="evaluation-pager" aria-label="数据集快照用例分页">
+          <span>第 {{ snapshotCursors.length }} 页 / 共 {{ snapshotTotal }} 条</span>
+          <el-button
+            :disabled="snapshotBusy || snapshotCursors.length === 1"
+            @click="turnSnapshotCase(false)"
+            >上一页</el-button
+          >
+          <el-button :disabled="snapshotBusy || !snapshotNext" @click="turnSnapshotCase(true)"
+            >下一页</el-button
+          >
+        </nav>
+      </template>
+    </el-drawer>
+
+    <el-dialog v-model="rerunDialog" title="复跑评测批次" width="560px">
+      <el-form label-position="top">
+        <el-form-item label="复跑来源批次">
+          <span>{{ rerunRun ? rerunRun.run_id : '—' }}</span>
+          <small class="evaluation-meta">
+            数据集版本 {{ rerunRun ? rerunRun.dataset_version || '—' : '—' }} · 算法版本
+            {{ rerunRun ? rerunRun.profile_version_tag || '未绑定' : '—' }} · 口径
+            {{ rerunRun ? evaluationScopeLabel(rerunRun.scope) : '—' }} · 执行方式
+            {{ rerunRun ? evaluationModeLabel(rerunRun.mode) : '—' }}
+          </small>
+        </el-form-item>
+        <p class="evaluation-meta">
+          复跑沿用该批次的数据集、口径、执行方式与算法版本，并带上重跑来源；提交后同一数据集、口径与执行方式下将记为第
+          {{ rerunNextSeq }} 次运行。
+        </p>
+        <el-form-item label="运行备注（写入新批次 trigger_note）">
+          <el-input
+            v-model="rerunNote"
+            maxlength="500"
+            show-word-limit
+            placeholder="说明本次复跑目的，例如：同数据集第二次运行"
+          />
+        </el-form-item>
+        <el-alert v-if="rerunError" type="error" :title="rerunError" :closable="false" />
+      </el-form>
+      <template #footer>
+        <el-button @click="rerunDialog = false">取消</el-button>
+        <el-button type="primary" :loading="rerunBusy" @click="submitRerun">确认复跑</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="profileDialog"
+      title="登记不可变技术栈 / Prompt 版本"
+      width="560px"
+      :z-index="3000"
+    >
+      <el-form label-position="top">
+        <el-form-item label="版本标签（唯一；留空按序号自动编号）">
+          <el-input v-model="profileForm.version_tag" placeholder="留空自动编号，如 algo-v3" />
+        </el-form-item>
+        <el-form-item label="技术栈 JSON（模型、编排、检索组件）">
+          <el-input v-model="profileForm.tech_stack_text" type="textarea" :rows="3" />
+        </el-form-item>
+        <el-form-item label="检索与超参数 JSON">
+          <el-input v-model="profileForm.retrieval_params_text" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="Prompt 调优快照 JSON">
+          <el-input v-model="profileForm.prompt_snapshots_text" type="textarea" :rows="4" />
+        </el-form-item>
+        <el-form-item label="调优说明">
+          <el-input v-model="profileForm.notes" placeholder="记录本次技术栈与 Prompt 改动目的" />
+        </el-form-item>
+        <el-alert v-if="writeError" type="error" :title="writeError" :closable="false" />
+      </el-form>
+      <template #footer>
+        <el-button @click="profileDialog = false">取消</el-button>
+        <el-button type="primary" :loading="writeBusy" @click="submitProfile">确认登记</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="triggerDialog" title="选择数据集与算法版本发起评测" width="560px">
+      <el-form label-position="top">
+        <el-form-item label="评测数据集版本">
+          <el-select v-model="triggerForm.dataset_id" style="width: 100%">
+            <el-option
+              v-for="dataset in triggerDatasets"
+              :key="dataset.dataset_id"
+              :label="`${dataset.name}（${dataset.version}）`"
+              :value="dataset.dataset_id"
+            />
+          </el-select>
+          <small class="evaluation-meta"
+            >支持口径：{{ triggerScopeLabels }} · 执行方式：{{ triggerModeLabels }}</small
+          >
+        </el-form-item>
+        <el-form-item label="算法版本（可留空自动快照）">
+          <el-select
+            v-model="triggerForm.profile_id"
+            clearable
+            value-on-clear=""
+            placeholder="留空：自动生成算法版本快照"
+            style="width: 100%"
+          >
+            <el-option label="自动生成算法版本快照" value="" />
+            <el-option
+              v-for="profile in profiles"
+              :key="profile.profile_id"
+              :label="`V${profile.version_no} · ${profile.version_tag}`"
+              :value="profile.profile_id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="评测口径（选项来自指标目录）">
+          <el-select v-model="triggerForm.scope" style="width: 100%">
+            <el-option
+              v-for="item in triggerScopeOptions"
+              :key="item"
+              :value="item"
+              :label="evaluationScopes[item]"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="执行方式（按数据集登记能力过滤）">
+          <el-select v-model="triggerForm.mode" style="width: 100%">
+            <el-option
+              v-for="item in triggerModeOptions"
+              :key="item"
+              :value="item"
+              :label="evaluationModes[item]"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="本次运行备注（写入批次 trigger_note）">
+          <el-input
+            v-model="triggerForm.note"
+            maxlength="500"
+            show-word-limit
+            placeholder="说明本次运行目的，可用于区分同一数据集多次运行"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-checkbox v-model="triggerForm.mark_baseline">评测完成后同时设为基线</el-checkbox>
+        </el-form-item>
+        <el-alert v-if="writeError" type="error" :title="writeError" :closable="false" />
+      </el-form>
+      <template #footer>
+        <el-button @click="triggerDialog = false">取消</el-button>
+        <el-button type="primary" :loading="writeBusy" @click="submitTrigger">确认发起</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="baselineDialog" title="设为评测基线" width="500px" :z-index="3000">
+      <el-form label-position="top">
+        <el-form-item label="基线批次">
+          <span>{{ baselineRun ? baselineRun.run_id : '—' }}</span>
+          <small class="evaluation-meta">
+            数据集版本 {{ baselineRun ? baselineRun.dataset_version || '—' : '—' }} · 口径
+            {{ baselineRun ? evaluationScopeLabel(baselineRun.scope) : '—' }} · 执行方式
+            {{ baselineRun ? evaluationModeLabel(baselineRun.mode) : '—' }}
+          </small>
+        </el-form-item>
+        <el-form-item label="基线备注（必填）">
+          <el-input
+            v-model="baselineNote"
+            maxlength="500"
+            show-word-limit
+            placeholder="说明为什么将该批次作为该数据集版本 + 口径 + 执行方式的当前基线"
+          />
+        </el-form-item>
+        <el-alert
+          v-if="baselineWriteError"
+          type="error"
+          :title="baselineWriteError"
+          :closable="false"
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="baselineDialog = false">取消</el-button>
+        <el-button type="primary" :loading="writeBusy" @click="submitBaseline"
+          >确认设为基线</el-button
+        >
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="rawCaseDialog"
+      :title="rawCaseTitle ? `原始用例 JSON：${rawCaseTitle}` : '原始用例 JSON'"
+      width="min(880px, 94vw)"
+    >
+      <p class="evaluation-meta">以下为该批次快照中保存的完整原始用例字段，未裁剪、未改名。</p>
+      <pre class="evaluation-json">{{ rawCaseJson }}</pre>
+    </el-dialog>
   </section>
 </template>
 
@@ -1301,8 +1073,6 @@ import {
   type EvaluationCase,
   type EvaluationCaseDetail,
   type EvaluationDataset,
-  type EvaluationDatasetDetail,
-  type EvaluationDatasetRaw,
   type EvaluationDatasetSnapshot,
   type EvaluationJob,
   type EvaluationJobState,
@@ -1327,7 +1097,6 @@ import './evaluations.css'
 
 const TREND_LIMIT = 30
 const RUN_PAGE_SIZE = 25
-const DATASET_CASE_PAGE_SIZE = 20
 const RUN_CASE_PAGE_SIZE = 30
 const SNAPSHOT_CASE_PAGE_SIZE = 20
 const AUDIT_PAGE_SIZE = 30
@@ -1352,38 +1121,18 @@ interface RunMetricCard {
   value: number | null
 }
 
-interface DatasetFileEntry {
-  path: string
-  sha256: string
-}
-
-interface DatasetCaseColumn {
-  key: string
-  label: string
-  keys: string[]
-  preview: boolean
-  width: number
-}
-
-interface RawExportSummary {
-  sha256: string
-  bytes: number
-  cases: number
-  files: number
-}
-
 const props = defineProps<{
   isAdmin: boolean
   canWriteEval: boolean
   api: ApiClient
   view: 'launch' | 'results'
   kind: EvaluationKind
-  collapsed?: boolean
+  focusRunId?: string | null
 }>()
 const emit = defineEmits<{
   (e: 'inspect', taskId: string, traceId: string): void
-  (e: 'expand'): void
   (e: 'launch'): void
+  (e: 'focus-consumed'): void
 }>()
 
 const CORE_METRIC_COUNT = 5
@@ -1391,13 +1140,6 @@ const CORE_METRIC_COUNT = 5
 const evalKind = computed<EvaluationKind>(() => props.kind)
 const evalKindLabel = computed(() => (props.kind === 'agent' ? 'Agent' : 'RAG'))
 const centerTitle = computed(() => `${evalKindLabel.value} 评测`)
-const collapsedSummary = computed(() => {
-  if (props.view === 'launch') return '点击展开登记算法版本并发起评测'
-  if (!trends.value) return '点击展开查看评测概览'
-  if (!trendItems.value.length) return '该版本暂无批次 · 点击展开查看'
-  const latest = latestTrend.value
-  return `最新批次 ${traceTime(latest?.created_at)} · ${aggregateLabel.value} ${formatAggregateValue(aggregateStats.value.latest)}`
-})
 const activeTab = ref(props.view === 'launch' ? 'launch' : 'overview')
 const owner = ref('all')
 const scope = ref<EvaluationScope>('full')
@@ -1415,8 +1157,6 @@ const catalogError = ref('')
 const datasets = ref<EvaluationDataset[]>([])
 const datasetsBusy = ref(false)
 const datasetsError = ref('')
-const showArchived = ref(false)
-
 const trends = ref<EvaluationTrends | null>(null)
 const trendsBusy = ref(false)
 const trendsError = ref('')
@@ -1438,21 +1178,9 @@ const auditNext = ref<string | null>(null)
 const auditBusy = ref(false)
 const auditError = ref('')
 
-const datasetDrawer = ref(false)
-const inspectedDataset = ref<EvaluationDataset | null>(null)
-const datasetCases = ref<Record<string, unknown>[]>([])
-const datasetCaseCursors = ref<string[]>([''])
-const datasetCaseNext = ref<string | null>(null)
-const datasetCaseTotal = ref(0)
-const datasetCaseBusy = ref(false)
-const datasetCaseError = ref('')
 const rawCaseDialog = ref(false)
 const rawCaseJson = ref('')
 const rawCaseTitle = ref('')
-const dsRawBusy = ref(false)
-const dsRawError = ref('')
-const rawExport = ref<RawExportSummary | null>(null)
-
 const runDetailOpen = ref(false)
 const runDetailId = ref('')
 const runDetail = ref<EvaluationRunDetail | null>(null)
@@ -1527,9 +1255,6 @@ const kindDatasets = computed(() =>
   datasets.value.filter((item) => item.eval_kind === evalKind.value),
 )
 const activeDatasets = computed(() => kindDatasets.value.filter((item) => !item.archived))
-const visibleDatasets = computed(() =>
-  showArchived.value ? kindDatasets.value : activeDatasets.value,
-)
 const datasetVersions = computed(() => {
   const versions = new Set(activeDatasets.value.map((item) => item.version))
   return [...versions].sort((a, b) => b.localeCompare(a))
@@ -1722,50 +1447,6 @@ const jobRunId = computed(() => {
   return result && typeof result.run_id === 'string' ? result.run_id : ''
 })
 const rerunNextSeq = computed(() => (rerunRun.value?.run_seq ?? 0) + 1)
-const datasetFileList = computed<DatasetFileEntry[]>(() =>
-  datasetFileEntries(inspectedDataset.value),
-)
-const datasetCaseColumns = computed<DatasetCaseColumn[]>(() => {
-  if (inspectedDataset.value?.eval_kind === 'rag') {
-    return [
-      { key: 'case_id', label: '用例 ID', keys: ['case_id', 'id'], preview: false, width: 150 },
-      { key: 'category', label: '分类', keys: ['category'], preview: false, width: 110 },
-      {
-        key: 'question',
-        label: '问题',
-        keys: ['question', 'query', 'prompt'],
-        preview: true,
-        width: 260,
-      },
-      {
-        key: 'expected_documents',
-        label: '预期文档 / 依据',
-        keys: ['expected_documents', 'expected', 'reference_answer', 'expected_facts'],
-        preview: true,
-        width: 300,
-      },
-    ]
-  }
-  return [
-    { key: 'id', label: '用例 ID', keys: ['id', 'case_id'], preview: false, width: 150 },
-    { key: 'name', label: '名称', keys: ['name', 'title'], preview: false, width: 140 },
-    { key: 'category', label: '分类', keys: ['category'], preview: false, width: 110 },
-    {
-      key: 'prompt',
-      label: 'Prompt / 输入',
-      keys: ['prompt', 'input', 'question'],
-      preview: true,
-      width: 320,
-    },
-    {
-      key: 'required_tools',
-      label: '必调工具',
-      keys: ['required_tools', 'expected_tools', 'expected'],
-      preview: true,
-      width: 200,
-    },
-  ]
-})
 const runMetricCards = computed<RunMetricCard[]>(() => {
   const detailMetrics = runDetail.value?.metric_schema?.metrics ?? schema.value?.metrics ?? []
   return detailMetrics.map((spec) => ({
@@ -2021,113 +1702,12 @@ function formatAggregateValue(value: number | null): string {
 }
 
 /**
- * 把数据集 metadata.files 归一为路径与 sha256 列表。
- * @param dataset - 数据集条目。
- * @returns 文件清单。
- */
-function datasetFileEntries(dataset: EvaluationDataset | null): DatasetFileEntry[] {
-  const files = dataset?.metadata?.files
-  if (!files || typeof files !== 'object' || Array.isArray(files)) return []
-  const entries: DatasetFileEntry[] = []
-  for (const [path, sha] of Object.entries(files as Record<string, unknown>)) {
-    if (typeof sha === 'string') entries.push({ path, sha256: sha })
-  }
-  return entries.sort((a, b) => a.path.localeCompare(b.path))
-}
-
-/**
  * 截取 sha256 摘要前 12 位用于表格展示，完整值放在 title 提示中。
  * @param value - 摘要文本。
  * @returns 前 12 位摘要或缺失占位。
  */
 function shortSha(value: string | null | undefined): string {
   return value ? value.slice(0, 12) : '—'
-}
-
-/**
- * 构造数据集原始文件下载地址（二进制附件，不经过 JSON API 客户端）。
- * @param datasetId - 数据集编号。
- * @param path - 仓库相对路径。
- * @returns 同源下载地址。
- */
-function datasetFileUrl(datasetId: string, path: string): string {
-  return (
-    '/api/evaluations/datasets/' +
-    encodeURIComponent(datasetId) +
-    '/files?path=' +
-    encodeURIComponent(path)
-  )
-}
-
-/**
- * 在新窗口打开数据集原始文件（服务端以附件响应，浏览器按文件类型处理）。
- * @param path - 仓库相对路径。
- */
-function viewDatasetFile(path: string): void {
-  const dataset = inspectedDataset.value
-  if (!dataset) return
-  window.open(datasetFileUrl(dataset.dataset_id, path), '_blank', 'noopener')
-}
-
-/**
- * 以 Blob 方式下载数据集原始文件，失败时给出可见提示。
- * @param path - 仓库相对路径。
- */
-async function downloadDatasetFile(path: string): Promise<void> {
-  const dataset = inspectedDataset.value
-  if (!dataset) return
-  try {
-    const response = await fetch(datasetFileUrl(dataset.dataset_id, path))
-    if (!response.ok) throw new Error('读取数据集文件失败：文件未登记或内容摘要不一致')
-    saveBlob(await response.blob(), path.split('/').at(-1) || 'dataset-file')
-  } catch (cause) {
-    ElMessage.error(cause instanceof Error ? cause.message : '下载数据集文件失败')
-  }
-}
-
-/**
- * 导出数据集全部原始用例与文件摘要为 JSON 文件，并展示其 SHA-256 便于核对。
- */
-async function downloadDatasetRaw(): Promise<void> {
-  const dataset = inspectedDataset.value
-  if (!dataset) return
-  dsRawBusy.value = true
-  dsRawError.value = ''
-  try {
-    const raw = await props.api<EvaluationDatasetRaw>(
-      '/evaluations/datasets/' + encodeURIComponent(dataset.dataset_id) + '/raw',
-    )
-    const payload = JSON.stringify(raw, null, 2)
-    const blob = new Blob([payload], { type: 'application/json' })
-    const bytes = new TextEncoder().encode(payload)
-    rawExport.value = {
-      sha256: await sha256Hex(bytes),
-      bytes: bytes.byteLength,
-      cases: raw.cases.length,
-      files: Object.keys(raw.files).length,
-    }
-    saveBlob(blob, dataset.dataset_id + '-raw.json')
-  } catch (cause) {
-    dsRawError.value = cause instanceof Error ? cause.message : '导出原始用例失败'
-  } finally {
-    dsRawBusy.value = false
-  }
-}
-
-/**
- * 计算字节的 SHA-256 十六进制摘要。
- * @param payload - 待计算字节。
- * @returns 十六进制摘要；运行环境不支持时返回空串。
- */
-async function sha256Hex(payload: Uint8Array): Promise<string> {
-  const cryptoApi = globalThis.crypto
-  if (!cryptoApi?.subtle) return ''
-  const buffer = new ArrayBuffer(payload.byteLength)
-  new Uint8Array(buffer).set(payload)
-  const digest = await cryptoApi.subtle.digest('SHA-256', buffer)
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
 }
 
 /**
@@ -2144,112 +1724,6 @@ function saveBlob(blob: Blob, filename: string): void {
   link.click()
   link.remove()
   URL.revokeObjectURL(url)
-}
-
-/**
- * 查看数据集版本的文件清单、原始用例与逐步分页内容。
- * @param dataset - 数据集条目。
- */
-async function inspectDataset(dataset: EvaluationDataset): Promise<void> {
-  inspectedDataset.value = dataset
-  datasetCases.value = []
-  datasetCaseCursors.value = ['']
-  datasetCaseNext.value = null
-  datasetCaseTotal.value = 0
-  datasetCaseError.value = ''
-  rawExport.value = null
-  dsRawError.value = ''
-  datasetDrawer.value = true
-  await loadDatasetCases()
-}
-
-/**
- * 按游标读取数据集原始用例页。
- */
-async function loadDatasetCases(): Promise<void> {
-  const dataset = inspectedDataset.value
-  if (!dataset) return
-  datasetCaseBusy.value = true
-  datasetCaseError.value = ''
-  try {
-    const query = new URLSearchParams({ limit: String(DATASET_CASE_PAGE_SIZE) })
-    const cursor = datasetCaseCursors.value.at(-1)
-    if (cursor) query.set('cursor', cursor)
-    const detail = await props.api<EvaluationDatasetDetail>(
-      '/evaluations/datasets/' + encodeURIComponent(dataset.dataset_id) + '?' + query,
-    )
-    datasetCases.value = detail.cases
-    datasetCaseNext.value = detail.next_cursor
-    datasetCaseTotal.value = detail.total_cases
-  } catch (cause) {
-    datasetCaseError.value = cause instanceof Error ? cause.message : '读取数据集用例失败'
-  } finally {
-    datasetCaseBusy.value = false
-  }
-}
-
-/**
- * 按游标前后翻动数据集用例页。
- * @param forward - 是否读取下一页。
- */
-function turnDatasetCase(forward: boolean): void {
-  if (datasetCaseBusy.value) return
-  if (forward && datasetCaseNext.value) datasetCaseCursors.value.push(datasetCaseNext.value)
-  else if (!forward && datasetCaseCursors.value.length > 1) datasetCaseCursors.value.pop()
-  else return
-  void loadDatasetCases()
-}
-
-/**
- * 从用例对象读取首个可用字段并压缩为单行文本。
- * @param item - 数据集中登记的用例对象。
- * @param keys - 候选字段名。
- * @returns 可读文本或缺失占位。
- */
-function datasetCaseText(item: Record<string, unknown>, keys: string[]): string {
-  for (const key of keys) {
-    const value = item[key]
-    if (value === null || value === undefined || value === '') continue
-    if (typeof value === 'string') return value
-    if (Array.isArray(value)) {
-      return value
-        .map((entry) => (typeof entry === 'string' ? entry : JSON.stringify(entry)))
-        .join('、')
-    }
-    if (typeof value === 'object') return JSON.stringify(value)
-    return String(value)
-  }
-  return '—'
-}
-
-/**
- * 从用例对象读取文本并截断为单行摘要。
- * @param item - 数据集中登记的用例对象。
- * @param keys - 候选字段名。
- * @returns 截断后的摘要文本。
- */
-function datasetCasePreview(item: Record<string, unknown>, keys: string[]): string {
-  const text = datasetCaseText(item, keys)
-  return text.length > 160 ? text.slice(0, 160) + '…' : text
-}
-
-/**
- * 打开当前用例的完整原始 JSON（不裁剪、不改名）。
- * @param item - 数据集中登记的原始用例对象。
- */
-function openRawCase(item: Record<string, unknown>): void {
-  rawCaseJson.value = JSON.stringify(item, null, 2)
-  rawCaseTitle.value = datasetCaseText(item, ['id', 'case_id'])
-  rawCaseDialog.value = true
-}
-
-/**
- * 从数据集页跳转到批次页并按该数据集筛选。
- * @param dataset - 数据集条目。
- */
-function filterRunsByDataset(dataset: EvaluationDataset): void {
-  runDatasetId.value = dataset.dataset_id
-  activeTab.value = 'runs'
 }
 
 /**
@@ -2823,6 +2297,16 @@ watch(
     if (modes.length && !modes.includes(triggerForm.mode)) triggerForm.mode = modes[0]
   },
 )
+watch(
+  () => props.focusRunId,
+  (runId) => {
+    if (!runId) return
+    void openRunDetail(runId)
+    emit('focus-consumed')
+  },
+  { immediate: true, flush: 'post' },
+)
+
 onMounted(async () => {
   await loadCatalog()
   await loadDatasets()
