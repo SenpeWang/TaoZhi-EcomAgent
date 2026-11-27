@@ -393,13 +393,18 @@ def test_duckduckgo_parser_pairs_each_title_with_its_own_url(monkeypatch):
     """
 
     class _Response:
+        """模拟 DuckDuckGo HTML 响应。"""
+
         status_code = 200
         text = html_text
 
         def raise_for_status(self):
+            """模拟成功响应，不抛异常。"""
             return None
 
     class _Client:
+        """模拟 httpx.Client 的上下文管理与 POST。"""
+
         def __enter__(self):
             return self
 
@@ -407,6 +412,7 @@ def test_duckduckgo_parser_pairs_each_title_with_its_own_url(monkeypatch):
             return False
 
         def post(self, *_args, **_kwargs):
+            """返回固定的 HTML 响应。"""
             return _Response()
 
     monkeypatch.setattr(search_web.httpx, "Client", lambda **_kw: _Client())
