@@ -7,7 +7,7 @@
 口径约定：
 - 相关性是二值的（relevance ∈ {0,1}）：候选是否命中预期标题集合。
 - 六项核心指标：Recall@K、MRR、NDCG@K（本模块）；答案准确率、Token 成本、
-  延迟（run_evals.py 汇总，成本口径统一取自 observability.metrics.token_usage）。
+  延迟（当前实现由 evals/rag_eval/run.py 汇总，成本口径统一取自 observability.metrics.token_usage）。
 - 命中判定用集合包含，不做模糊匹配——宁可低估召回，也不要虚高。
 - 平均指标一律给出自举置信区间；样本量小的时候点估计没有决策价值。
 - 两次运行的比较用配对 bootstrap（同一批用例先做差再重采样），不用"固定阈值差"：
@@ -546,6 +546,14 @@ def cohen_kappa(human: Sequence, judge: Sequence,
     ji = np.array([ix[x] for x in j])
 
     def _kappa(sel) -> tuple:
+        """按样本掩码计算 Cohen's kappa 与观察一致率。
+
+        Args:
+            sel: 参与计算的样本掩码。
+
+        Returns:
+            (kappa 值, 观察一致率)。
+        """
         m = np.zeros((k, k), dtype="float64")
         np.add.at(m, (hi[sel], ji[sel]), 1.0)
         tot = float(len(sel))

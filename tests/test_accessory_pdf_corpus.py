@@ -13,6 +13,7 @@ PDF_FILES = MANIFEST["files"]
 
 
 def test_corpus_indexes_only_local_pdf_files():
+    """验证语料清单结构版本、文件名与哈希唯一性及元数据完整性。"""
     assert set(MANIFEST) == {"schema_version", "accessed_on", "files"}
     assert MANIFEST["schema_version"] == 2
     assert PDF_FILES
@@ -33,6 +34,11 @@ def test_corpus_indexes_only_local_pdf_files():
 
 @pytest.mark.parametrize("item", PDF_FILES, ids=[item["file"] for item in PDF_FILES])
 def test_original_pdf_bytes_and_permission(item):
+    """验证 PDF 原始字节与清单摘要一致、非符号链接且具备来源授权信息。
+
+    Args:
+        item: ``item`` 参数化取值。
+    """
     path = CORPUS / item["file"]
     content = path.read_bytes()
     assert not path.is_symlink()
@@ -51,6 +57,11 @@ def test_original_pdf_bytes_and_permission(item):
 
 @pytest.mark.parametrize("item", PDF_FILES, ids=[item["file"] for item in PDF_FILES])
 def test_original_pdf_declares_its_text_extraction_requirements(item):
+    """验证 PDF 未加密、页数与清单一致且文本抽取方式符合声明需求。
+
+    Args:
+        item: ``item`` 参数化取值。
+    """
     import fitz
 
     with fitz.open(CORPUS / item["file"]) as pdf:

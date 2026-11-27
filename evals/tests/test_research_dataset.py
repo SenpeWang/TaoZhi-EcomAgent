@@ -23,11 +23,18 @@ VARIANTS = {row["case_id"]: row for row in COUNTEREXAMPLES["counterexamples"]}
 
 
 def issues(case: dict, observation: dict) -> set[str]:
+    """返回用例与观测之间的失败类型集合。
+
+    Args:
+        case: 评测用例定义。
+        observation: 回放观测记录。
+    """
     checks = evaluate_case(case, replay_transcript(case, observation))
     return {issue["failure_type"] for check in checks for issue in check.details["issues"]}
 
 
 def test_research_dataset_catalog_and_coverage():
+    """验证调研数据集目录、类别、能力与反例覆盖一致。"""
     validate_cases(AGENT_BENCHMARK_CASES)
     assert CASES.keys() == OBSERVATIONS.keys() == VARIANTS.keys()
     assert len(VARIANTS) == len(COUNTEREXAMPLES["counterexamples"])
@@ -48,6 +55,11 @@ def test_research_dataset_catalog_and_coverage():
 
 @pytest.mark.parametrize("case_id", sorted(CASES))
 def test_synthetic_sources_and_both_verdicts(case_id):
+    """验证合成来源证据链自洽且正反判定均可产生。
+
+    Args:
+        case_id: ``case_id`` 参数化取值。
+    """
     case, observation, variant = CASES[case_id], OBSERVATIONS[case_id], VARIANTS[case_id]
     returned_ids = set()
     search_urls = set()
@@ -74,6 +86,7 @@ def test_synthetic_sources_and_both_verdicts(case_id):
 
 
 def test_fixture_revision_is_checked_at_every_replay_entry():
+    """验证回放每个入口都校验夹具版本。"""
     case = next(iter(CASES.values()))
     original = OBSERVATIONS[case["id"]]
     with pytest.raises(ValueError, match="版本"):
@@ -85,6 +98,7 @@ def test_fixture_revision_is_checked_at_every_replay_entry():
 
 
 def test_additional_source_is_optional_but_checked_when_used():
+    """验证附加来源可缺省，但使用时仍校验。"""
     case = CASES["AGENT-MODEL-016"]
     observation = copy.deepcopy(OBSERVATIONS[case["id"]])
     optional = observation["tool_calls"].pop()
@@ -102,6 +116,7 @@ def test_additional_source_is_optional_but_checked_when_used():
 
 
 def test_separate_optional_tool_is_excluded_from_required_coverage():
+    """验证独立可选工具不计入必需工具覆盖。"""
     case = CASES["AGENT-MODEL-016"]
     rule = case["tool_expectations"][-1]
     standalone = {**case, "tool_expectations": [rule], "tool_order": [], "reference_facts": []}
@@ -113,6 +128,7 @@ def test_separate_optional_tool_is_excluded_from_required_coverage():
 
 
 def test_missing_steering_event_cannot_prove_a_model_change():
+    """验证缺少干预事件时不能证明模型行为改变。"""
     case = CASES["AGENT-SWITCH-017"]
     observation = dict(OBSERVATIONS[case["id"]])
     del observation["steering_after_sequence"]
@@ -124,11 +140,18 @@ def test_missing_steering_event_cannot_prove_a_model_change():
     ("AGENT-FX-012", "由于成本未知，无法认定每件净赚 28 元。"),
 ])
 def test_cautious_explanation_is_accepted(case_id, explanation):
+    """验证补充谨慎说明后不再判失败。
+
+    Args:
+        case_id: ``case_id`` 参数化取值。
+        explanation: ``explanation`` 参数化取值。
+    """
     original = OBSERVATIONS[case_id]
     assert not issues(CASES[case_id], {**original, "report": original["report"] + "\n\n" + explanation})
 
 
 def test_counterexample_can_only_replace_an_existing_observation_value():
+    """验证反例只能替换已存在的观测值。"""
     case_id = "AGENT-STOCK-023"
     variant = VARIANTS[case_id]
     for path in (["case_id"], ["tool_calls", -1], ["tool_calls", 5], ["missing"]):

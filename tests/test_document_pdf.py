@@ -18,6 +18,11 @@ class _Connection:
 
 
 def _principal(boss: bool) -> Principal:
+    """构造老板或普通员工的访问主体。
+
+    Args:
+        boss: 是否为老板身份。
+    """
     memberships = [{"node_id": "org_root", "role": "boss"}] if boss else [{"node_id": "team", "role": "staff"}]
     return Principal(
         "user_1",
@@ -36,6 +41,7 @@ def _principal(boss: bool) -> Principal:
 
 
 def _pdf_bytes() -> bytes:
+    """构造单页 PDF 字节，供文档解析测试使用。"""
     document = pymupdf.open()
     document.new_page().insert_text((72, 72), "PDF page")
     return document.tobytes()
@@ -69,6 +75,11 @@ def test_pdf_page_requires_read_permission(monkeypatch):
     monkeypatch.setattr(service, "get_document", lambda _c, _p, _doc_id: {"id": "doc_1"})
 
     def _denied(*_args):
+        """模拟权限拒绝的服务桩，统一抛出 404 拒绝异常。
+
+        Args:
+            _args: 被忽略的位置参数。
+        """
         raise Denied("没有阅读权限", "NOT_FOUND", 404)
 
     monkeypatch.setattr(service, "require_document_read", _denied)
@@ -94,7 +105,15 @@ def test_pdf_page_available_to_reader(monkeypatch):
     )
 
     class _Store:
+        """PDF 服务测试用的对象存储桩，返回预置字节。"""
+
         def open_blob(self, _tenant_id, _name):
+            """返回预置的 PDF 字节以替代真实对象存储。
+
+            Args:
+                _tenant_id: 被忽略的租户标识。
+                _name: 被忽略的对象名。
+            """
             return data
 
     monkeypatch.setattr(service, "get_blob_store", lambda: _Store())

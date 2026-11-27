@@ -138,6 +138,14 @@ class CircuitBreakerRegistry:
         self._records: Dict[str, _CircuitRecord] = {}
 
     def _state_key(self, ep: ModelEndpoint) -> str:
+        """生成熔断状态键：端点编号、基础地址与密钥指纹共同隔离状态。
+
+        Args:
+            ep: 模型端点。
+
+        Returns:
+            该端点的熔断状态键。
+        """
         return f"{ep.endpoint_id}:{ep.base_url}:{ep.fingerprint()}"
 
     def classify_error(self, exc: Exception, settings: Settings) -> Tuple[str, int]:
@@ -228,6 +236,14 @@ def get_circuit_registry() -> CircuitBreakerRegistry:
 
 
 def _infer_region(base_url: str) -> RegionType:
+    """依据基础地址推断模型通道所在区域。
+
+    Args:
+        base_url: 端点基础地址。
+
+    Returns:
+        含 sensenova.ai 时归为 overseas，其余归为 domestic。
+    """
     return "overseas" if "sensenova.ai" in (base_url or "").lower() else "domestic"
 
 
@@ -246,6 +262,17 @@ def build_model_endpoints(settings: Settings) -> List[ModelEndpoint]:
         model: str,
         direct_connection: Optional[bool],
     ) -> None:
+        """去重后追加一个候选端点并记录其优先级。
+
+        Args:
+            endpoint_id: 端点编号。
+            label: 展示名称。
+            region: 部署区域。
+            base_url: 基础地址。
+            api_key: 访问密钥。
+            model: 模型名；为空时使用全局目标模型。
+            direct_connection: 是否直连，None 表示沿用配置。
+        """
         clean_url = (base_url or "").strip().rstrip("/")
         clean_key = (api_key or "").strip()
         if not clean_url or not clean_key:

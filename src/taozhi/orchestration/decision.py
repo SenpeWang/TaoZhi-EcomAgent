@@ -230,7 +230,8 @@ class DecisionEngine:
             raw = client.chat(user_prompt or "", system=system_prompt or "", tier=ModelTier.FAST, max_tokens=250)
             try:
                 data = JsonOutputParser().parse(raw)
-            except Exception:
+            except Exception as exc:
+                logger.warning("结构化决策输出解析失败，回退关键词候选（%s）", type(exc).__name__)
                 data = None
             if isinstance(data, dict):
                 candidates = data.get("selected", [])

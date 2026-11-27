@@ -141,6 +141,14 @@ class ToolOutcome:
 
 
 def _accepts_timeout(fn: Callable[..., Any]) -> bool:
+    """判断可调用对象是否声明了 timeout 参数。
+
+    Args:
+        fn: 待检查的可调用对象。
+
+    Returns:
+        签名中显式包含 timeout 时返回 True。
+    """
     try:
         sig = inspect.signature(fn)
         return "timeout" in sig.parameters
@@ -275,6 +283,11 @@ def execute_tool_with_outcome(
             trace_context = otel_context.get_current()
 
             def invoke_in_trace():
+                """在工具线程内继承追踪上下文与取消事件后调用工具。
+
+                Returns:
+                    工具函数的原始返回值。
+                """
                 otel_token = otel_context.attach(trace_context)
                 cancel_token = _CANCEL_EVENT.set(cancel_event)
                 try:

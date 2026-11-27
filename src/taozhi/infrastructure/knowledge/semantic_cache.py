@@ -73,7 +73,8 @@ class SemanticCache:
     ) -> None:
         try:
             cfg = load_config()
-        except Exception:
+        except Exception as exc:
+            logger.warning("语义缓存读取配置失败，改用内置默认值（%s）", type(exc).__name__)
             cfg = None
         self.similarity_threshold = float(
             similarity_threshold

@@ -11,6 +11,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, StrictBool, StrictInt, ValidationError
 
 from taozhi.domain.research import ALL_RESEARCH_TOOLS
+from evals.center.publish import apply_dataset_fields
 from .cases import AGENT_BENCHMARK_CASES
 from .contracts import REPORT_SCHEMA_VERSION, expectation_notes
 from .reporting import FAILURE_LABELS, TOOL_OUTCOMES, TOOL_PARAMETERS, fingerprint
@@ -24,12 +25,14 @@ Status = Literal["passed", "failed", "unassessable"]
 
 
 class Issue(BaseModel):
+    """报告中的一条判定问题明细。"""
     failure_type: str
     tool_name: str | None = None
     step: Count | None = None
 
 
 class Verdict(BaseModel):
+    """单条判定结论：判定器、维度、状态与问题清单。"""
     judge: Literal["Observation", "ExecutionStatusJudge", "ToolExecutionJudge", "ReferenceFactJudge",
                    "ToolBoundaryJudge", "DeliverableJudge", "SteeringJudge", "AntiHallucinationJudge",
                    "BudgetJudge", "QuickAnswerJudge", "CoordinatorToolJudge"]
@@ -40,11 +43,13 @@ class Verdict(BaseModel):
 
 
 class Annotation(BaseModel):
+    """工具参数核对标注。"""
     tool_name: str
     keys: list[str]
 
 
 class Step(BaseModel):
+    """工具轨迹中的单步调用记录。"""
     tool_name: str
     status: str | None = None
     step: Count | None = None
@@ -55,6 +60,7 @@ class Step(BaseModel):
 
 
 class CaseRecord(BaseModel):
+    """报告中的单条用例结果。"""
     case_id: Identifier
     case_sha256: Digest
     suite: Literal["benchmark", "golden", "regression", "challenge"]
@@ -72,25 +78,30 @@ class CaseRecord(BaseModel):
 
 
 class Gate(BaseModel):
+    """报告的门禁结论。"""
     passed: StrictBool
 
 
 class Baseline(BaseModel):
+    """报告引用的基线摘要。"""
     baseline_sha256: Digest
 
 
 class Ratio(BaseModel):
+    """分子与分母型比率指标。"""
     numerator: Count
     denominator: Count
 
 
 class Tokens(BaseModel):
+    """Token 使用与调用覆盖率统计。"""
     call_coverage_among_known: Ratio
     measured_prompt_tokens: Count | None
     measured_completion_tokens: Count | None
 
 
 class Metrics(BaseModel):
+    """报告的汇总指标。"""
     selected: Count
     passed: Count
     failed: Count
@@ -104,6 +115,7 @@ class Metrics(BaseModel):
 
 
 class AgentReport(BaseModel):
+    """受信运行器产出的 Agent 评测报告结构。"""
     schema_version: StrictInt
     run_id: Identifier
     timestamp: str
@@ -121,10 +133,27 @@ class AgentReport(BaseModel):
 
 
 def _tool(name: str) -> str:
+    """把未登记的工具名归一为 unknown。
+
+    Args:
+        name: 原始工具名。
+
+    Returns:
+        登记过的工具名，或 unknown。
+    """
     return name if name in ALL_RESEARCH_TOOLS else "unknown"
 
 
 def _expected(row: CaseRecord, definition: dict) -> list[str]:
+    """把用例期望展开为可展示的预期说明列表。
+
+    Args:
+        row: 报告的逐例记录。
+        definition: 仓库中的用例定义。
+
+    Returns:
+        预期说明列表。
+    """
     expected = [f"必须调用 {_tool(tool)}" for tool in row.expected_tools]
     expected.extend(f"禁止派发 {_tool(tool)}" for tool in row.forbidden_tools)
     for rule in row.expected_parameters:
@@ -139,6 +168,14 @@ def _expected(row: CaseRecord, definition: dict) -> list[str]:
 
 
 def _verdict(check: Verdict) -> dict:
+    """把报告判定投影为入库逐例结论字典。
+
+    Args:
+        check: 报告中的单条判定。
+
+    Returns:
+        入库用判定字典。
+    """
     issues = [{
         "failure_type": issue.failure_type if issue.failure_type in FAILURE_LABELS else "unclassified",
         "reason": FAILURE_LABELS.get(issue.failure_type, "未分类故障"),
@@ -175,22 +212,6 @@ def judge_summary(case_results: list) -> list[dict]:
 def _milliseconds(seconds: float | None) -> int | None:
     """把报告中的秒级时延换算成毫秒整数。"""
     return None if seconds is None else int(round(float(seconds) * 1000))
-
-
-def _apply_dataset(run: dict, fields: dict) -> None:
-    """把数据集登记字段写入待入库批次。"""
-    run.update({
-        "dataset_id": fields["dataset_id"],
-        "dataset_name": fields["name"],
-        "dataset_version": fields["version"],
-        "dataset_description": fields.get("description") or "",
-        "dataset_suite": fields.get("suite") or "",
-        "dataset_archived": bool(fields.get("archived")),
-        "dataset_content_sha256": fields.get("content_sha256") or "",
-        "dataset_case_count": int(fields.get("case_count") or 0),
-        "cases_payload": fields.get("cases_payload") or [],
-        "dataset_metadata": fields.get("metadata") or {},
-    })
 
 
 def _dataset_projection(raw: dict) -> tuple[dict, bool]:
@@ -272,7 +293,7 @@ def project_report(raw: dict) -> tuple[dict, list[dict]]:
         "total_tokens": total_tokens, "judges": judge_summary(report.case_results),
         "scope": scope,
     }
-    _apply_dataset(run, dataset)
+    apply_dataset_fields(run, dataset)
     catalog = {(case["id"], fingerprint(case)): case for case in AGENT_BENCHMARK_CASES}
     rows = []
     for row in report.case_results:
@@ -337,6 +358,7 @@ def pending_reports(reports_dir: Path) -> list[Path]:
 
 
 def main() -> None:
+    """命令行入口：把 Agent 报告归档进评测中心。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("report", type=Path, nargs="?")
     parser.add_argument("--reports-dir", type=Path, help="批量导入目录，默认 evals/reports/agent_eval")

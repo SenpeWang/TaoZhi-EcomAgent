@@ -18,6 +18,11 @@ class _Connection:
 
 
 def _principal(boss: bool) -> Principal:
+    """构造老板或普通员工的访问主体。
+
+    Args:
+        boss: 是否为老板身份。
+    """
     memberships = [{"node_id": "org_root", "role": "boss"}] if boss else [{"node_id": "team", "role": "staff"}]
     return Principal(
         "user_1",
@@ -36,6 +41,7 @@ def _principal(boss: bool) -> Principal:
 
 
 def _document() -> dict:
+    """返回用于切片测试的已发布文档字典。"""
     return {"id": "doc_1", "title": "doc_1", "node_id": "team", "level": 1,
             "current_version": 2, "state": "published"}
 
@@ -112,6 +118,11 @@ def test_chunks_require_read_permission(monkeypatch):
     monkeypatch.setattr(service, "get_document", lambda _c, _p, _doc_id: _document())
 
     def _denied(*_args):
+        """模拟权限拒绝的服务桩，统一抛出 404 拒绝异常。
+
+        Args:
+            _args: 被忽略的位置参数。
+        """
         raise Denied("没有阅读权限", "NOT_FOUND", 404)
 
     monkeypatch.setattr(service, "require_document_read", _denied)
@@ -126,6 +137,11 @@ def test_original_preview_requires_read_permission(monkeypatch):
     monkeypatch.setattr(service, "get_document", lambda _c, _p, _doc_id: _document())
 
     def _denied(*_args):
+        """模拟下载阶段的权限拒绝服务桩。
+
+        Args:
+            _args: 被忽略的位置参数。
+        """
         raise Denied("没有阅读权限", "NOT_FOUND", 404)
 
     monkeypatch.setattr(service, "require_document_read", _denied)
@@ -139,7 +155,15 @@ def test_original_preview_requires_read_permission(monkeypatch):
 def test_original_preview_streams_blob_for_reader(monkeypatch):
     """具备阅读权限的非老板成员可读取归档原件，并保留原始 MIME 与扩展名。"""
     class _Store:
+        """文档服务测试用的对象存储桩，返回固定 PDF 字节。"""
+
         def open_blob(self, _tenant_id, _blob_name):
+            """返回固定的 PDF 字节以替代真实对象存储。
+
+            Args:
+                _tenant_id: 被忽略的租户标识。
+                _blob_name: 被忽略的对象名。
+            """
             return b"%PDF-1.4 demo"
 
     monkeypatch.setattr(service, "database_connection", lambda: _Connection())

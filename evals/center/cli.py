@@ -20,6 +20,14 @@ MODES = publish.MODE_VALUES
 
 
 def _tenant_code(args: argparse.Namespace) -> str:
+    """解析租户编码：命令行参数优先，其次环境变量，最后 mofa。
+
+    Args:
+        args: 命令行参数。
+
+    Returns:
+        租户编码。
+    """
     return getattr(args, "tenant_code", None) or os.environ.get("ECOM_TENANT_CODE") or "mofa"
 
 
@@ -37,6 +45,11 @@ def _identity(args: argparse.Namespace) -> tuple[str, str]:
 
 
 def _print_json(payload: dict) -> None:
+    """把结果以单行 JSON 打印到标准输出。
+
+    Args:
+        payload: 待输出的结果字典。
+    """
     print(json.dumps(payload, ensure_ascii=False, default=str))
 
 
@@ -59,6 +72,14 @@ def _collect_reports(directory: Path, kind: str) -> list[Path]:
 
 
 def _cmd_register(args: argparse.Namespace) -> int:
+    """执行数据集登记子命令，输出登记版本与数据集编号。
+
+    Args:
+        args: 命令行参数。
+
+    Returns:
+        进程退出码 0。
+    """
     versions: dict[str, str] = {}
     if args.version:
         versions["rag"] = args.version
@@ -76,6 +97,14 @@ def _cmd_register(args: argparse.Namespace) -> int:
 
 
 def _cmd_publish(args: argparse.Namespace) -> int:
+    """执行报告发布子命令，逐份入库并汇总失败数。
+
+    Args:
+        args: 命令行参数。
+
+    Returns:
+        有失败返回 2，否则返回 0。
+    """
     tenant_id, owner_id = _identity(args)
     if args.report is None and args.reports_dir is None:
         raise ValueError("请指定 --report 或 --reports-dir")
@@ -115,6 +144,14 @@ def _cmd_publish(args: argparse.Namespace) -> int:
 
 
 def _cmd_baseline(args: argparse.Namespace) -> int:
+    """执行基线锁定子命令并输出基线摘要。
+
+    Args:
+        args: 命令行参数。
+
+    Returns:
+        进程退出码 0。
+    """
     tenant_id, actor_id = _identity(args)
     with database_connection() as conn:
         row = baselines.set_baseline(conn, tenant_id, actor_id, args.run_id, args.note)
@@ -133,6 +170,14 @@ def _cmd_migrate_versions(args: argparse.Namespace) -> int:
 
 
 def _cmd_backfill(args: argparse.Namespace) -> int:
+    """执行历史评测数据回填子命令。
+
+    Args:
+        args: 命令行参数。
+
+    Returns:
+        进程退出码 0。
+    """
     stats = backfill_module.backfill(tenant_code=_tenant_code(args),
                                      owner_username=args.owner_username or "owner",
                                      reset=args.reset)
@@ -141,6 +186,14 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
 
 
 def _check_datasets(failures: list[str]) -> dict:
+    """校验最新版本各套件的描述符摘要与用例数。
+
+    Args:
+        failures: 失败信息收集列表。
+
+    Returns:
+        含版本与通过套件数的统计字典。
+    """
     versions = {suite: datasets.current_version(suite) for suite in datasets.SUITES}
     checked = 0
     for suite in datasets.SUITES:
@@ -158,8 +211,88 @@ def _check_datasets(failures: list[str]) -> dict:
     return {"version": versions["rag_core"], "versions": versions, "checked_suites": checked}
 
 
+def _check_run_snapshots(conn: Any, tenant_id: str, failures: list[str]) -> dict:
+    """校验批次与数据集内容快照的关联、用例数、运行序号与 legacy 豁免。
+
+    非 legacy 批次必须绑定存在的快照且快照用例数大于零；绑定快照的批次必须有
+    运行序号，且同一（数据集、类型、口径、方式）分组内序号唯一。
+
+    Args:
+        conn: 数据库连接。
+        tenant_id: 租户编号。
+        failures: 失败信息收集列表，原地追加。
+
+    Returns:
+        统计：{"runs_checked": n, "runs_with_snapshot": n, "snapshots_checked": n,
+        "snapshot_missing": n, "runs_without_snapshot": n, "legacy_runs": n,
+        "run_seq_duplicates": n}。
+    """
+    rows = fetch_all(conn, """
+        SELECT r.run_id, r.dataset_id, r.dataset_version, r.eval_kind, r.scope, r.mode,
+               r.dataset_snapshot_id, r.run_seq,
+               s.snapshot_id AS joined_snapshot_id, s.case_count AS snapshot_case_count,
+               COALESCE(d.archived, false) AS dataset_archived
+        FROM eval_runs r
+        LEFT JOIN eval_dataset_snapshots s ON s.snapshot_id = r.dataset_snapshot_id
+        LEFT JOIN eval_datasets d ON d.dataset_id = r.dataset_id
+        WHERE r.tenant_id=%s
+        ORDER BY r.run_id
+    """, (tenant_id,))
+    stats = {
+        "runs_checked": len(rows),
+        "runs_with_snapshot": 0,
+        "snapshots_checked": 0,
+        "snapshot_missing": 0,
+        "runs_without_snapshot": 0,
+        "legacy_runs": 0,
+        "run_seq_duplicates": 0,
+    }
+    groups: dict[tuple, list[dict]] = {}
+    for row in rows:
+        legacy = (bool(row.get("dataset_archived"))
+                  or row.get("dataset_version") == datasets.LEGACY_VERSION)
+        snapshot_id = row.get("dataset_snapshot_id")
+        if legacy:
+            stats["legacy_runs"] += 1
+            if not snapshot_id:
+                continue
+        if not snapshot_id:
+            stats["runs_without_snapshot"] += 1
+            failures.append(f"批次 {row['run_id']} 未关联数据集内容快照（非 legacy 批次必须绑定快照）")
+            continue
+        stats["runs_with_snapshot"] += 1
+        if row.get("joined_snapshot_id") is None:
+            stats["snapshot_missing"] += 1
+            failures.append(f"批次 {row['run_id']} 的数据集内容快照不存在：{snapshot_id}")
+            continue
+        stats["snapshots_checked"] += 1
+        if int(row.get("snapshot_case_count") or 0) <= 0:
+            failures.append(f"批次 {row['run_id']} 的数据集内容快照 {snapshot_id} 用例数为 0")
+        if row.get("run_seq") is None:
+            failures.append(f"批次 {row['run_id']} 已绑定快照但缺少运行序号 run_seq")
+            continue
+        key = (row.get("dataset_id"), row.get("eval_kind"), row.get("scope"), row.get("mode"))
+        groups.setdefault(key, []).append(row)
+    for key, group in groups.items():
+        seqs: dict[int, list[str]] = {}
+        for row in group:
+            seqs.setdefault(int(row["run_seq"]), []).append(row["run_id"])
+        for seq in sorted(seqs):
+            if len(seqs[seq]) > 1:
+                stats["run_seq_duplicates"] += 1
+                failures.append(f"分组 {key} 运行序号 {seq} 重复：{'、'.join(seqs[seq])}")
+    return stats
+
+
 def _run_check(tenant_code: str) -> tuple[list[str], dict]:
-    """执行入库自检：描述符摘要、基线唯一性、报告对象与用例数一致性。"""
+    """执行入库自检：描述符摘要、快照一致性、基线唯一性、报告对象与用例数一致性。
+
+    Args:
+        tenant_code: 租户编码，用于解析租户与账号编号。
+
+    Returns:
+        (失败信息列表, 统计字典)；无失败信息表示自检通过。
+    """
     failures: list[str] = []
     stats = _check_datasets(failures)
     from taozhi.infrastructure.knowledge.storage import get_blob_store
@@ -224,6 +357,7 @@ def _run_check(tenant_code: str) -> tuple[list[str], dict]:
         for row in orphan_runs:
             failures.append(f"批次缺少原始报告：{row['run_id']}")
 
+        snapshot_stats = _check_run_snapshots(conn, tenant_id, failures)
         stats.update({
             "datasets": len(registered),
             "runs": fetch_all(conn, "SELECT count(*) AS n FROM eval_runs WHERE tenant_id=%s",
@@ -235,6 +369,7 @@ def _run_check(tenant_code: str) -> tuple[list[str], dict]:
                 (tenant_id,))[0]["n"],
             "reports_checked": len(reports),
             "orphan_runs": len(orphan_runs),
+            **snapshot_stats,
         })
     return failures, stats
 
@@ -249,6 +384,14 @@ def _cmd_purge(args: argparse.Namespace) -> int:
 
 
 def _cmd_backfill_snapshots(args: argparse.Namespace) -> int:
+    """执行数据集快照回填子命令（默认只预演）。
+
+    Args:
+        args: 命令行参数。
+
+    Returns:
+        进程退出码 0。
+    """
     tenant_id, actor_id = _identity(args)
     with database_connection() as conn:
         stats = snapshots.backfill_snapshots(
@@ -258,6 +401,14 @@ def _cmd_backfill_snapshots(args: argparse.Namespace) -> int:
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
+    """执行入库自检子命令，打印失败项与统计并输出 JSON 结论。
+
+    Args:
+        args: 命令行参数。
+
+    Returns:
+        自检未通过返回 1，否则返回 0。
+    """
     try:
         failures, stats = _run_check(_tenant_code(args))
     except (OSError, ValueError) as exc:
@@ -268,12 +419,20 @@ def _cmd_check(args: argparse.Namespace) -> int:
         print(f"FAIL {failure}")
     print(f"自检{'通过' if not failures else '未通过'}：数据集 {stats['checked_suites']} 个套件、"
           f"批次 {stats['runs']}、用例 {stats['cases']}、active 基线 {stats['baselines_active']}、"
-          f"报告 {stats['reports_checked']}")
+          f"报告 {stats['reports_checked']}、快照 {stats['runs_with_snapshot']} 个批次"
+          f"（缺失 {stats['snapshot_missing']}、未绑定 {stats['runs_without_snapshot']}、"
+          f"legacy {stats['legacy_runs']}、序号重复 {stats['run_seq_duplicates']}）")
     _print_json({"ok": not failures, "failures": len(failures), **stats})
     return 1 if failures else 0
 
 
 def _add_identity(parser: argparse.ArgumentParser, *, actor_name: str = "owner") -> None:
+    """向子命令参数解析器追加租户与账号身份参数。
+
+    Args:
+        parser: 子命令参数解析器。
+        actor_name: 操作账号参数名。
+    """
     parser.add_argument("--tenant-id", help="直接指定租户编号")
     parser.add_argument(f"--{actor_name}-id", help="直接指定操作账号编号")
     parser.add_argument("--tenant-code", help="按租户编码解析（默认 mofa）")

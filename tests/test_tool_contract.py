@@ -36,6 +36,7 @@ DESCRIPTION_KEYWORDS = {
 
 
 def _tools():
+    """返回 MCP 服务器暴露的工具映射。"""
     return {tool.name: tool for tool in EcommerceMcpServer().list_tools()}
 
 
@@ -96,6 +97,11 @@ def test_adapter_and_server_apply_schema_defaults_before_handler():
     captured: dict = {}
 
     def handler(arguments):
+        """记录参数并返回空结果的工具处理器桩。
+
+        Args:
+            arguments: 工具调用参数。
+        """
         captured.clear()
         captured.update(arguments)
         return []

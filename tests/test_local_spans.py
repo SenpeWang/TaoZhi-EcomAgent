@@ -13,11 +13,21 @@ from taozhi.observability import span_writer, tracing
 
 
 def test_attempt_context_crosses_selected_threads_without_crossing_jobs(monkeypatch):
+    """验证追踪上下文可跨指定线程传播，且不同任务与重试之间互不串线。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     rows = []
     monkeypatch.setattr(tracing, "submit_span", rows.append)
     monkeypatch.setenv("TAOZHI_TRACING", "1")
 
     def tool(parent_context):
+        """在给定父上下文中开启工具 span 并返回当前追踪 ID。
+
+        Args:
+            parent_context: 父级追踪上下文。
+        """
         with tracing.node_span("tool.search", "TOOL", context=parent_context):
             return tracing.current_trace_id()
 
@@ -45,6 +55,11 @@ def test_attempt_context_crosses_selected_threads_without_crossing_jobs(monkeypa
 
 
 def test_tool_pool_propagates_only_the_trace_and_cleans_it_on_error(monkeypatch):
+    """验证工具线程池只传播追踪上下文，并在工具异常后清理。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     from taozhi.core.tools import outcome
 
     transaction = ContextVar("test.transaction", default=None)
@@ -54,6 +69,7 @@ def test_tool_pool_propagates_only_the_trace_and_cleans_it_on_error(monkeypatch)
     monkeypatch.setattr(tracing, "submit_span", rows.append)
 
     def failed_tool():
+        """记录工具线程上下文后抛出含私密正文的异常。"""
         observed.append((tracing.current_trace_id(), transaction.get()))
         raise ValueError("private-content")
 
@@ -72,6 +88,11 @@ def test_tool_pool_propagates_only_the_trace_and_cleans_it_on_error(monkeypatch)
 
 
 def test_retrieval_routes_export_only_declared_decisions_and_counts(monkeypatch):
+    """验证检索路由只导出已声明的决策与计数属性，不泄漏查询原文。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     from taozhi.application.common.task_guard import traced_node
     from taozhi.application.services.trace_service import _KEY_ACTIVITY_STEPS, _span_display_name
     from taozhi.domain.trace_activity import activity_category
@@ -103,6 +124,11 @@ def test_retrieval_routes_export_only_declared_decisions_and_counts(monkeypatch)
 
 
 def test_running_and_failed_snapshots_only_store_operational_attributes(monkeypatch):
+    """验证运行中与失败快照只保存运维属性，失败时记录异常类型。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     rows = []
     monkeypatch.setattr(tracing, "submit_span", rows.append)
     monkeypatch.setenv("TAOZHI_TRACING", "1")
@@ -136,6 +162,11 @@ def test_running_and_failed_snapshots_only_store_operational_attributes(monkeypa
 
 
 def test_workflow_agent_and_tool_names_use_inference_semantics(monkeypatch):
+    """验证工作流、智能体与工具 span 使用推理语义命名并保持父子关系。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     snapshots = []
     monkeypatch.setenv("TAOZHI_TRACING", "1")
     monkeypatch.setattr(tracing, "submit_span", snapshots.append)
@@ -168,6 +199,11 @@ def test_live_event_requires_the_scope_bound_to_its_span(monkeypatch):
 
 
 def test_retrieval_model_spans_only_measure_real_requests(monkeypatch):
+    """验证检索与模型 span 只统计真实请求，缓存命中或超时不伪造时延。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     from types import SimpleNamespace
 
     from taozhi.infrastructure.knowledge import embedding
@@ -202,6 +238,11 @@ def test_retrieval_model_spans_only_measure_real_requests(monkeypatch):
 
 
 def test_disabled_tracing_and_telemetry_failure_preserve_job_behavior(monkeypatch):
+    """验证关闭追踪或上报失败时任务行为不变，且不吞掉业务异常。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     submit = Mock(side_effect=RuntimeError("sink unavailable"))
     monkeypatch.setattr(tracing, "submit_span", submit)
     monkeypatch.setenv("TAOZHI_TRACING", "0")
@@ -216,6 +257,11 @@ def test_disabled_tracing_and_telemetry_failure_preserve_job_behavior(monkeypatc
 
 
 def test_writer_reserves_high_water_capacity_for_roots(monkeypatch):
+    """验证写入器为根 span 预留高水位容量，避免根事件被丢弃。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     events = queue.Queue(66)
     monkeypatch.setattr(span_writer, "_CAPACITY", 66)
     monkeypatch.setattr(span_writer, "_QUEUE", events)
@@ -227,6 +273,11 @@ def test_writer_reserves_high_water_capacity_for_roots(monkeypatch):
 
 
 def test_batch_retry_and_graceful_flush(monkeypatch):
+    """验证批量写入失败后重试，并能在退出前优雅刷盘。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     from taozhi.infrastructure.persistence import span_repo
 
     write = Mock(side_effect=[OSError("temporary"), None])
@@ -302,6 +353,12 @@ def test_failed_scraper_is_not_reported_as_an_empty_search(monkeypatch, tmp_path
     monkeypatch.setenv("ECOM_RESEARCH_P1688_URL", "https://example.test/gateway")
     responses = iter([httpx.Response(502), httpx.Response(200, json={"items": []})])
     def respond(transport, request):
+        """按预设响应序列返回 httpx 响应并绑定请求对象。
+
+        Args:
+            transport: 被忽略的传输层对象。
+            request: httpx 请求对象。
+        """
         response = next(responses)
         response.request = request
         return response

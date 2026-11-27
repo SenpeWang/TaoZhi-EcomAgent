@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 def test_readable_trace_actions():
+    """验证前端追踪活动可读文案、结果摘要与字段展示逻辑。"""
     root = Path(__file__).resolve().parents[1]
     script = """
 import assert from 'node:assert/strict'

@@ -7,6 +7,11 @@ from taozhi.ai.router import build_model_endpoints
 
 
 def _settings(**overrides):
+    """构造带默认通道配置的设置对象，可覆盖指定字段。
+
+    Args:
+        overrides: 需要覆盖的设置字段。
+    """
     base = dict(
         base_url="https://token.sensenova.cn/v1",
         api_key="test-primary",

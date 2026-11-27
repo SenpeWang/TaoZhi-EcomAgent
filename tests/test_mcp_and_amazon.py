@@ -40,6 +40,7 @@ def test_mcp_protocol_and_server_registration():
 
 
 def test_current_time_through_mcp_uses_the_system_clock_and_default_timezone():
+    """验证 MCP 当前时间工具使用系统时钟与默认上海时区。"""
     adapter = McpClientAdapter()
     before = datetime.now(timezone.utc).replace(microsecond=0)
     outcome = adapter.call_tool("get_current_time", {}, remaining_seconds=2)
@@ -55,6 +56,12 @@ def test_current_time_through_mcp_uses_the_system_clock_and_default_timezone():
 
 @pytest.mark.parametrize(("month", "offset"), [(1, "-05:00"), (7, "-04:00")])
 def test_current_time_observes_the_requested_timezone(month, offset):
+    """验证当前时间工具按请求时区返回偏移正确的时间。
+
+    Args:
+        month: ``month`` 参数化取值。
+        offset: ``offset`` 参数化取值。
+    """
     instant = datetime(2026, month, 1, 12, tzinfo=timezone.utc)
     with patch("taozhi.core.tools.current_time.datetime") as clock:
         clock.now.side_effect = instant.astimezone
@@ -68,6 +75,11 @@ def test_current_time_observes_the_requested_timezone(month, offset):
 
 @pytest.mark.parametrize("zone", ["Unknown/City", "", None])
 def test_current_time_rejects_invalid_timezones(zone):
+    """验证非法或空时区被拒绝并返回错误。
+
+    Args:
+        zone: ``zone`` 参数化取值。
+    """
     result = EcommerceMcpServer().call_tool("get_current_time", {"timezone": zone})
     assert result.isError
     assert "无法识别时区" in result.content[0].text or "参数不符合" in result.content[0].text

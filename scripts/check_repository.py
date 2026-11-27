@@ -29,6 +29,17 @@ SECRET_PATTERNS = [
 
 
 def git(*args: str) -> bytes:
+    """执行 Git 命令并返回原始输出。
+
+    Args:
+        args: Git 子命令及其参数。
+
+    Returns:
+        命令的标准输出字节。
+
+    Raises:
+        RuntimeError: Git 命令返回非零状态时抛出。
+    """
     result = subprocess.run(["git", *args], cwd=ROOT, capture_output=True)
     if result.returncode:
         raise RuntimeError("Git 读取失败，请检查仓库与提交引用")
@@ -36,6 +47,14 @@ def git(*args: str) -> bytes:
 
 
 def blocked_path(path: str) -> str | None:
+    """判断路径是否属于禁止提交的私有数据、构建产物或凭据。
+
+    Args:
+        path: 相对仓库根目录的 POSIX 路径。
+
+    Returns:
+        禁止原因；路径允许提交时返回 None。
+    """
     item = PurePosixPath(path)
     if any(part in FORBIDDEN_DIRECTORIES for part in item.parts):
         return "私有数据、依赖或缓存目录"
@@ -59,6 +78,15 @@ def blocked_path(path: str) -> str | None:
 
 
 def inspect_blob(path: str, content: bytes) -> list[str]:
+    """检查单个文件的路径边界、体积、二进制属性与敏感信息。
+
+    Args:
+        path: 文件在仓库中的路径。
+        content: 文件原始字节内容。
+
+    Returns:
+        问题描述列表，空列表表示通过。
+    """
     problems = []
     category = blocked_path(path)
     if category:
@@ -80,6 +108,17 @@ def inspect_blob(path: str, content: bytes) -> list[str]:
 
 
 def read_entries(revision: str | None) -> list[tuple[str, str, str]]:
+    """读取索引或指定提交树中的文件条目（路径、模式与对象摘要）。
+
+    Args:
+        revision: 提交引用；None 表示读取当前索引。
+
+    Returns:
+        文件条目三元组列表。
+
+    Raises:
+        RuntimeError: 存在未解决的 Git 合并冲突时抛出。
+    """
     if revision is None:
         records = git("ls-files", "--stage", "-z").split(b"\0")
         result = []
@@ -96,6 +135,14 @@ def read_entries(revision: str | None) -> list[tuple[str, str, str]]:
 
 
 def inspect_tree(revision: str | None) -> list[str]:
+    """检查索引或提交树：文件边界、敏感信息与 STRUCTURE.md 目录登记一致性。
+
+    Args:
+        revision: 提交引用；None 表示检查当前索引。
+
+    Returns:
+        问题描述列表，空列表表示通过。
+    """
     entries = read_entries(revision)
     if not entries:
         return ["没有可检查的已跟踪文件"]
@@ -124,6 +171,14 @@ def inspect_tree(revision: str | None) -> list[str]:
 
 
 def pre_push_revisions() -> list[str]:
+    """从标准输入读取 pre-push 推送范围并解析需要检查的提交。
+
+    Returns:
+        待检查的提交 SHA 列表。
+
+    Raises:
+        RuntimeError: 推送试图删除远端分支时抛出。
+    """
     revisions = set()
     for line in sys.stdin:
         _, local_sha, _, remote_sha = line.split()
@@ -138,6 +193,11 @@ def pre_push_revisions() -> list[str]:
 
 
 def main() -> int:
+    """命令行入口：按模式检查索引、提交树或推送范围并输出结论。
+
+    Returns:
+        0 表示检查通过，1 表示发现问题。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--staged", action="store_true", help="检查完整 Git 索引")

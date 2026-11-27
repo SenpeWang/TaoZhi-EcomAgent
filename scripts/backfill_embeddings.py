@@ -31,6 +31,11 @@ DIM = 512
 
 
 def main() -> int:
+    """按“文档标题+正文”口径全量重算切片向量，支持预演与分批写入。
+
+    Returns:
+        0 表示成功；2/3 表示嵌入服务不可用或维度不一致。
+    """
     ap = argparse.ArgumentParser(description="按'文档标题+正文'口径全量重算 chunks.embedding")
     ap.add_argument("--batch", type=int, default=64, help="每批送嵌入服务的切片数（服务端内部再按 32 条分批）")
     ap.add_argument("--dry-run", action="store_true", help="只统计规模，不写库")

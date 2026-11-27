@@ -7,11 +7,23 @@ from taozhi.application.evaluation import dataset_snapshots as snapshots
 
 
 def _case(suite: str, case_id: str, payload: dict) -> dict:
+    """构造带内容摘要的评测用例快照字典。
+
+    Args:
+        suite: 所属套件。
+        case_id: 用例标识。
+        payload: 用例正文载荷。
+    """
     return {"suite": suite, "case_id": case_id,
             "case_sha256": snapshots.case_sha256(payload), "case_payload": payload}
 
 
 def _row(case: dict) -> dict:
+    """把用例字典投影为快照关联行。
+
+    Args:
+        case: 用例快照字典。
+    """
     return {"case_id": case["case_id"], "case_sha256": case["case_sha256"],
             "suite": case["suite"]}
 

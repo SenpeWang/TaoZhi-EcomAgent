@@ -83,6 +83,11 @@ def stream_answer(
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     def text_chunks() -> Iterator[str]:
+        """迭代模型消息流，累加真实 token 用量并按顺序产出文本片段。
+
+        Returns:
+            模型输出文本片段的迭代器。
+        """
         for message in messages:
             for key, count in extract_usage(message).items():
                 usage[key] += count
@@ -101,6 +106,14 @@ def stream_answer(
     trailing_space = ""
 
     def publish(delta: str) -> None:
+        """把一段可见文本增量交付给调用方。
+
+        Args:
+            delta: 本次要交付的文本片段。
+
+        Raises:
+            OutputDeliveryError: 下游提交失败时抛出。
+        """
         try:
             on_delta(delta)
         except Exception as exc:

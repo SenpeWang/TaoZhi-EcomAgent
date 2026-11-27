@@ -79,7 +79,7 @@ curl -fsS http://127.0.0.1:18555/health
 
 | 条件 | 核对方式 |
 | --- | --- |
-| 数据库已迁移到 `023_eval_center_v3` | `migrate` 容器退出码为 `0`，`eval_run_reports`、`eval_baselines` 表存在 |
+| 数据库已迁移到 `026_eval_dataset_snapshots` | `migrate` 容器退出码为 `0`，`eval_run_reports`、`eval_baselines`、`eval_dataset_snapshots` 表存在 |
 | API 与 Worker 在线 | `curl -fsS http://127.0.0.1:18080/api/health`；Worker 日志有任务认领与租约心跳 |
 | RAG 夹具已灌库 | `PYTHONPATH=src .venv/bin/python -m evals.dataset.seed`（`--verify` 只校验），语料、身份、权限与向量需与生产库一致 |
 | 检索与向量服务可用 | `curl -fsS http://127.0.0.1:18555/health`；启用 Elasticsearch 时对应实例健康 |

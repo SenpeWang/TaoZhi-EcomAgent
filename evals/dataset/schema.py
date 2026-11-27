@@ -58,6 +58,11 @@ IDENTITY_FIELDS = ("logical_id", "username")
 
 
 def load_spec():
+    """读取数据集 spec 的四份 YAML。
+
+    Returns:
+        (org, fixtures, corpus, templates) 四元组。
+    """
     import yaml
     org = yaml.safe_load((SPEC / "org.yaml").read_text(encoding="utf-8"))
     fixtures = yaml.safe_load((SPEC / "fixtures.yaml").read_text(encoding="utf-8"))
@@ -83,16 +88,31 @@ def known_doc_ids() -> set:
 
 
 def known_identities() -> set:
+    """返回 spec 中登记的逻辑身份集合。
+
+    Returns:
+        逻辑身份编号集合。
+    """
     org, _, _, _ = load_spec()
     return {i["logical_id"] for i in org.get("identities", [])}
 
 
 def known_identity_roles() -> dict[str, str]:
+    """返回逻辑身份到角色的映射。
+
+    Returns:
+        身份编号到角色名的映射。
+    """
     org, _, _, _ = load_spec()
     return {i["logical_id"]: str(i.get("role") or "employee") for i in org.get("identities", [])}
 
 
 def known_canaries() -> set:
+    """返回 spec 中登记的金丝雀标记集合。
+
+    Returns:
+        金丝雀标记集合。
+    """
     _, fixtures, _, _ = load_spec()
     return set(fixtures.get("canaries", []))
 
@@ -240,6 +260,15 @@ def validate_v3_coverage(cases: list, redteam_count: int = 0) -> list:
 
 
 def validate_cases(cases: list, *, redteam_count: int = 0) -> list:
+    """执行用例契约与覆盖度校验。
+
+    Args:
+        cases: 用例定义列表。
+        redteam_count: 对抗用例数量。
+
+    Returns:
+        错误信息列表；为空表示校验通过。
+    """
     doc_ids, identities, canaries = known_doc_ids(), known_identities(), known_canaries()
     seen_ids, seen_questions = set(), set()
     errs = []
@@ -253,6 +282,11 @@ def validate_cases(cases: list, *, redteam_count: int = 0) -> list:
 
 
 def main() -> int:
+    """命令行入口：校验指定数据集文件。
+
+    Returns:
+        进程退出码。
+    """
     import json
     target = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).resolve().parents[1] / "datasets" / "v3_20261124" / "rag" / "cases.jsonl")
     path = Path(target)

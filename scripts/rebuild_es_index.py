@@ -18,6 +18,11 @@ from taozhi.infrastructure.knowledge import es_index
 
 
 def main() -> int:
+    """把当前版本文档切片重建进 Elasticsearch，可选先删除整个索引。
+
+    Returns:
+        0 表示成功，1 表示 ES 未启用或无法连接。
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--drop", action="store_true", help="重建前删除整个索引")
     args = parser.parse_args()

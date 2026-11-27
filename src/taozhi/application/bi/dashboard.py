@@ -39,6 +39,15 @@ def get_bi_dashboard(p: Principal, days: int) -> dict[str, Any]:
     """执行指标语义层受控查询，构造数据中台经营看板视图。"""
 
     def run(key: str, intent: dict | None = None) -> dict[str, Any] | None:
+        """执行单个指标的受控查询并组装看板卡片数据。
+
+        Args:
+            key: 指标键。
+            intent: 指标查询意图，缺省为空。
+
+        Returns:
+            含列、行、指标元信息与展示字段的卡片数据；无权限或查询失败时返回 None。
+        """
         with database_connection() as c:
             m = bi_repo.get_published_metric_by_key(c, p.tenant_id, key)
             if not m or not can_read_metric(c, p, m):
@@ -58,6 +67,14 @@ def get_bi_dashboard(p: Principal, days: int) -> dict[str, Any]:
                 return None
 
     def total(block: dict[str, Any] | None) -> float | None:
+        """汇总看板卡片最后一列的数值合计。
+
+        Args:
+            block: 指标卡片数据。
+
+        Returns:
+            保留两位小数的合计值；无数据或无法求和时返回 None。
+        """
         if not block or not block["rows"]:
             return None
         try:

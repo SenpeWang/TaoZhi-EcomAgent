@@ -11,6 +11,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """创建调研任务板的任务、依赖与评论三张表及其查询索引。"""
     op.execute("""
         CREATE TABLE IF NOT EXISTS research_tasks (
             id text PRIMARY KEY,
@@ -62,6 +63,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """按依赖倒序删除任务评论、依赖与任务表。"""
     op.execute("DROP TABLE IF EXISTS research_task_comments")
     op.execute("DROP TABLE IF EXISTS research_task_deps")
     op.execute("DROP TABLE IF EXISTS research_tasks")

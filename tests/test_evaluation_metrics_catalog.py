@@ -20,6 +20,11 @@ RAG_FULL_KEYS = [
 
 
 def _labels(schema: dict) -> dict[str, str]:
+    """把指标目录投影为指标键到中文标签的映射。
+
+    Args:
+        schema: 指标目录结构。
+    """
     return {metric["key"]: metric["label"] for metric in schema["metrics"]}
 
 

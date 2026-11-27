@@ -64,6 +64,15 @@ _EVAL_KINDS = ("agent", "rag")
 
 
 def _selected(source: Any, names: tuple[str, ...]) -> dict:
+    """从配置对象中挑选描述符已声明的字段。
+
+    Args:
+        source: 配置对象或字典。
+        names: 候选字段名元组。
+
+    Returns:
+        已存在字段的映射。
+    """
     return {name: getattr(source, name) for name in names if hasattr(source, name)}
 
 
@@ -84,6 +93,11 @@ def tech_stack(config: Any | None = None) -> dict:
 
 
 def _load_config():
+    """加载项目运行配置。
+
+    Returns:
+        配置对象。
+    """
     from taozhi.config import load_config
 
     return load_config()

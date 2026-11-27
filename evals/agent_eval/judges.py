@@ -27,20 +27,53 @@ class JudgeVerdict:
 
     @property
     def status(self) -> str:
+        """把判定结果映射为 passed/failed/unassessable。
+
+        Returns:
+            状态字符串。
+        """
         if self.passed:
             return "passed"
         return "unassessable" if self.failure_type == "missing_observation" else "failed"
 
     @property
     def hard_failure(self) -> bool:
+        """判断是否为工具越权或禁止结论等硬失败。
+
+        Returns:
+            是否硬失败。
+        """
         return self.failure_type in {"tool_forbidden", "forbidden_claim"}
 
 
 def _issue(kind: str, reason: str, name: str | None = None, call: dict | None = None) -> dict:
+    """构造一条判定问题明细。
+
+    Args:
+        kind: 失败类型。
+        reason: 问题说明。
+        name: 相关工具名。
+        call: 相关工具调用记录。
+
+    Returns:
+        问题明细字典。
+    """
     return {"failure_type": kind, "reason": reason, "tool_name": name, "step": (call or {}).get("sequence")}
 
 
 def _verdict(name: str, dimension: str, issues: list[dict], success: str, **counts: Any) -> JudgeVerdict:
+    """把问题清单汇总为带主因与计数的判定结果。
+
+    Args:
+        name: 判定器名称。
+        dimension: 判定维度。
+        issues: 问题明细列表。
+        success: 通过时的说明。
+        **counts: 额外的判定计数。
+
+    Returns:
+        判定结果对象。
+    """
     kinds = [issue["failure_type"] for issue in issues]
     primary = next((kind for kind in kinds if kind in {"tool_forbidden", "forbidden_claim"}), None)
     if primary is None:
@@ -52,6 +85,15 @@ def _verdict(name: str, dimension: str, issues: list[dict], success: str, **coun
 
 
 def _arguments_match(parameters: dict | None, constraints: dict) -> bool | None:
+    """核对工具调用参数是否满足期望约束。
+
+    Args:
+        parameters: 工具调用参数。
+        constraints: 参数期望约束。
+
+    Returns:
+        满足为 True，不满足为 False，无法判定为 None。
+    """
     if parameters is None:
         return None
     for key, expected in constraints.items():
@@ -110,10 +152,24 @@ class ToolBoundaryJudge:
     """核对任务的工具范围，分别记录已拦截和已实际派发的调用。"""
 
     def __init__(self, allowed_tools: list[str] | None, forbidden_tools: list[str] | None) -> None:
+        """初始化工具越界判定器。
+
+        Args:
+            allowed_tools: 允许派发的工具列表。
+            forbidden_tools: 禁止派发的工具列表。
+        """
         self.allowed = None if allowed_tools is None else set(allowed_tools)
         self.forbidden = set(forbidden_tools or ())
 
     def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        """判定实际派发与执行的工具是否越界。
+
+        Args:
+            result: 运行结果对象。
+
+        Returns:
+            工具越界判定结果。
+        """
         hits = total = unknown = attempts = executions = 0
         issues = []
         if not result.tool_trace_complete:
@@ -146,6 +202,14 @@ class ToolExecutionJudge:
         self, required_tools: list[str] | None = None, *, min_data_count: int = 1,
         tool_expectations: list[dict] | None = None, tool_order: list[list[str]] | None = None,
     ) -> None:
+        """初始化工具执行判定器。
+
+        Args:
+            required_tools: 必需工具列表。
+            min_data_count: 最少数据条数。
+            tool_expectations: 工具期望规则列表。
+            tool_order: 工具依赖顺序约束。
+        """
         self.rules: dict[str, list[dict]] = {}
         for rule in tool_expectations or ():
             self.rules.setdefault(rule["tool_name"], []).append(rule)
@@ -154,6 +218,14 @@ class ToolExecutionJudge:
         self.min_data_count = min_data_count
 
     def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        """判定必需工具、参数、数据量与依赖顺序是否满足。
+
+        Args:
+            result: 运行结果对象。
+
+        Returns:
+            工具执行判定结果。
+        """
         issues = []
         complete = result.tool_trace_complete
         if not complete:
@@ -248,10 +320,24 @@ class DeliverableJudge:
     """按标注检查交付物长度与报告章节。"""
 
     def __init__(self, required_sections: list[str] | None = None, min_chars: int = 80) -> None:
+        """初始化交付物判定器。
+
+        Args:
+            required_sections: 报告必须包含的小节列表。
+            min_chars: 最少字符数。
+        """
         self.required_sections = ["概况", "供应链", "建议"] if required_sections is None else required_sections
         self.min_chars = min_chars
 
     def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        """判定研报长度与关键小节是否达标。
+
+        Args:
+            result: 运行结果对象。
+
+        Returns:
+            交付物判定结果。
+        """
         report = result.report or ""
         issues = []
         if len(report) < self.min_chars:
@@ -270,6 +356,14 @@ class AntiHallucinationJudge:
     """匹配已知的伪造轨迹文案，事实依据另按参考标注核对。"""
 
     def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        """判定研报是否包含已知的伪造轨迹文案。
+
+        Args:
+            result: 运行结果对象。
+
+        Returns:
+            反幻觉判定结果。
+        """
         markers = ("思考\n总指挥", "运行工具\n规划电商调研大纲", "思考\n全景调研报告编制完成")
         issues = []
         if any(marker in (result.report or "") for marker in markers):
@@ -282,10 +376,24 @@ class BudgetJudge:
 
     def __init__(self, max_tool_calls: int | None = None,
                  max_elapsed_seconds: float | None = None) -> None:
+        """初始化预算判定器。
+
+        Args:
+            max_tool_calls: 允许的最大工具调用次数。
+            max_elapsed_seconds: 允许的最大耗时（秒）。
+        """
         self.max_tool_calls = max_tool_calls
         self.max_elapsed_seconds = max_elapsed_seconds
 
     def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        """判定工具调用次数与耗时是否超出预算。
+
+        Args:
+            result: 运行结果对象。
+
+        Returns:
+            预算判定结果。
+        """
         issues = []
         calls = [call for call in result.tool_calls if call.get("dispatched") is not False]
         if self.max_tool_calls is not None and len(calls) > self.max_tool_calls:
@@ -310,10 +418,24 @@ class SteeringJudge:
     """检查干预指令的交付结果，以及有序观测中工具调用是否随指令切换。"""
 
     def __init__(self, steering_keyword: str, phases: dict[str, dict] | None = None) -> None:
+        """初始化动态干预判定器。
+
+        Args:
+            steering_keyword: 干预要求关键词。
+            phases: 干预前后各阶段的工具契约。
+        """
         self.steering_keyword = steering_keyword
         self.phases = phases or {}
 
     def _boundary_issues(self, result: AgentRunResult) -> list[dict]:
+        """校验干预时点前后各阶段工具调用是否符合契约。
+
+        Args:
+            result: 运行结果对象。
+
+        Returns:
+            问题明细列表。
+        """
         boundary = result.steering_after_sequence
         if boundary is None or not result.tool_trace_complete:
             return [_issue("missing_observation", "缺少干预时点或完整的工具轨迹")]
@@ -341,6 +463,14 @@ class SteeringJudge:
         return issues
 
     def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        """判定干预要求是否落实到研报与工具轨迹。
+
+        Args:
+            result: 运行结果对象。
+
+        Returns:
+            动态干预判定结果。
+        """
         issues = []
         if not self.steering_keyword or not result.steering_applied:
             issues.append(_issue("missing_observation", "缺少干预关键词或指令注入记录"))
@@ -365,10 +495,24 @@ class ReferenceFactJudge:
     """逐条核对人工标注的事实表述及其实际可用的同段引用。"""
 
     def __init__(self, reference_facts: list[dict], forbidden_claims: list[str]) -> None:
+        """初始化参考事实判定器。
+
+        Args:
+            reference_facts: 参考事实列表。
+            forbidden_claims: 禁止结论表达式列表。
+        """
         self.facts = reference_facts
         self.forbidden = forbidden_claims
 
     def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        """判定研报事实与引用是否满足契约。
+
+        Args:
+            result: 运行结果对象。
+
+        Returns:
+            参考事实判定结果。
+        """
         report = result.report or ""
         paragraphs = []
         for paragraph in re.split(r"\n\s*(?:\n|(?=[*+-] |\d+[.)] |\|))", report):
@@ -404,10 +548,24 @@ class QuickAnswerJudge:
     """校验 Supervisor 是否按预期选择速答路径，且速答不产出完整研报。"""
 
     def __init__(self, expected: bool, max_chars: int = 800) -> None:
+        """初始化速答路由判定器。
+
+        Args:
+            expected: 是否期望走速答路由。
+            max_chars: 最大字符数。
+        """
         self.expected = bool(expected)
         self.max_chars = max_chars
 
     def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        """判定速答路由与正文长度是否符合预期。
+
+        Args:
+            result: 运行结果对象。
+
+        Returns:
+            速答路由判定结果。
+        """
         quick = "research.quick_answer" in result.subagent_roles
         issues = []
         if quick != self.expected:
@@ -421,9 +579,22 @@ class CoordinatorToolJudge:
     """校验协调员直接工具调用是否留下可审计证据。"""
 
     def __init__(self, expected: bool) -> None:
+        """初始化协调员工具判定器。
+
+        Args:
+            expected: 是否期望调用协调员工具。
+        """
         self.expected = bool(expected)
 
     def evaluate(self, result: AgentRunResult) -> JudgeVerdict:
+        """判定协调员工具是否按预期调用。
+
+        Args:
+            result: 运行结果对象。
+
+        Returns:
+            协调员工具判定结果。
+        """
         used = "research.orchestrator" in result.evidence_roles
         issues = [] if used == self.expected else [
             _issue("route", f"协调员工具期望={self.expected}，实际={used}")

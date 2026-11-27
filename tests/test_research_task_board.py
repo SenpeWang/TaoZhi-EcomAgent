@@ -9,6 +9,7 @@ from taozhi.domain.research import SubagentTaskSpec
 
 
 def _spec() -> SubagentTaskSpec:
+    """构造子智能体任务规格。"""
     return SubagentTaskSpec(
         task_id="t1",
         role="research.market_intelligence",
@@ -27,6 +28,12 @@ def test_task_board_create_tasks_persists_brief(monkeypatch):
     captured = {}
 
     def fake_create(conn, **kwargs):
+        """替身任务创建入口，记录参数并返回任务行。
+
+        Args:
+            conn: 数据库连接。
+            kwargs: 关键字参数。
+        """
         captured.update(kwargs)
         return [{"id": "rt_1", "task_key": "t1"}]
 
@@ -51,13 +58,35 @@ def test_task_board_start_and_complete_use_latest_revision(monkeypatch):
     calls = []
 
     def fake_find(conn, **kwargs):
+        """替身任务查询入口，返回就绪任务。
+
+        Args:
+            conn: 数据库连接。
+            kwargs: 关键字参数。
+        """
         return {"id": "rt_1", "status": "ready"}
 
     def fake_claim(conn, task_id, owner):
+        """替身任务认领入口，记录调用并返回运行中任务。
+
+        Args:
+            conn: 数据库连接。
+            task_id: 任务标识。
+            owner: 任务所有者标识。
+        """
         calls.append(("claim", task_id, owner))
         return {"id": task_id, "status": "running"}
 
     def fake_finish(conn, task_id, *, status, result=None, error=""):
+        """替身任务完成入口，记录状态与结果。
+
+        Args:
+            conn: 数据库连接。
+            task_id: 任务标识。
+            status: 任务状态。
+            result: 任务结果。
+            error: 错误信息。
+        """
         calls.append(("finish", task_id, status, result, error))
         return {"id": task_id, "status": status}
 

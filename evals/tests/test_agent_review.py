@@ -19,6 +19,13 @@ OBS = {
 
 
 def write_replay(tmp_path, source="synthetic", observations=None):
+    """写入一份合成回放记录文件。
+
+    Args:
+        tmp_path: pytest 提供的临时目录路径夹具。
+        source: 回放来源标识。
+        observations: 回放观测记录列表。
+    """
     path = tmp_path / "replay.json"
     path.write_text(json.dumps({
         "source": source, "schema_version": 1, "observations": [OBS] if observations is None else observations,
@@ -27,6 +34,11 @@ def write_replay(tmp_path, source="synthetic", observations=None):
 
 
 def test_blind_review_and_model_are_independent(tmp_path):
+    """验证盲评表不泄漏判定理由，模型复核不影响人工标签。
+
+    Args:
+        tmp_path: pytest 提供的临时目录路径夹具。
+    """
     sheet = review.blind_sheet(write_replay(tmp_path), [CASE])
     row = sheet["rows"][0]
     assert "reason" not in row and "judge" not in row
@@ -50,6 +62,11 @@ def test_blind_review_and_model_are_independent(tmp_path):
 
 
 def test_missing_or_invalid_model_review_keeps_labels_unknown(tmp_path):
+    """验证模型复核缺失或结果非法时标签保持未知。
+
+    Args:
+        tmp_path: pytest 提供的临时目录路径夹具。
+    """
     sheet = review.blind_sheet(write_replay(tmp_path), [CASE])
     client = Mock()
     client.chat_json.return_value = {"labels": {"relevance": "yes"}, "reason": "无效结果"}
@@ -60,6 +77,11 @@ def test_missing_or_invalid_model_review_keeps_labels_unknown(tmp_path):
 
 
 def test_version_or_material_drift_fails_pairing(tmp_path):
+    """验证版本或材料变更时配对失败。
+
+    Args:
+        tmp_path: pytest 提供的临时目录路径夹具。
+    """
     sheet = review.blind_sheet(write_replay(tmp_path), [CASE])
     client = Mock()
     client.chat_json.return_value = {}
@@ -75,6 +97,11 @@ def test_version_or_material_drift_fails_pairing(tmp_path):
 
 
 def test_only_review_applicable_dimensions_and_reject_non_synthetic(tmp_path):
+    """验证只评适用维度且拒绝非合成来源。
+
+    Args:
+        tmp_path: pytest 提供的临时目录路径夹具。
+    """
     with pytest.raises(ValueError):
         review.blind_sheet(write_replay(tmp_path, source="live"), [CASE])
     sheet = review.blind_sheet(write_replay(tmp_path, observations=[{**OBS, "tool_calls": []}]), [CASE])
@@ -84,6 +111,12 @@ def test_only_review_applicable_dimensions_and_reject_non_synthetic(tmp_path):
 
 
 def test_default_cli_generates_only_private_human_sheet(tmp_path, monkeypatch):
+    """验证默认命令行只生成权限受限的人工盲评表。
+
+    Args:
+        tmp_path: pytest 提供的临时目录路径夹具。
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     monkeypatch.setattr(review, "AGENT_BENCHMARK_CASES", [CASE])
     assert review.main(["--replay", str(write_replay(tmp_path)), "--output-dir", str(tmp_path)]) == 0
     human = next(tmp_path.glob("review-*/human.json"))

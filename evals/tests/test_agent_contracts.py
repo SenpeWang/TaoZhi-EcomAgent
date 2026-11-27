@@ -11,6 +11,7 @@ CASE = {"id": "TEST", "name": "合成调研用例", "prompt": "调研合成商�
 
 
 def test_catalog_is_valid():
+    """验证内置 Agent 评测用例目录全部通过契约校验。"""
     validate_cases(AGENT_BENCHMARK_CASES)
 
 
@@ -24,16 +25,23 @@ def test_catalog_is_valid():
     {"forbidden_claims": [".*"]},
 ])
 def test_invalid_contract_is_rejected_before_running(extra):
+    """验证工具期望、必需与禁用工具矛盾等非法契约在执行前被拒绝。
+
+    Args:
+        extra: ``extra`` 参数化取值。
+    """
     with pytest.raises(ValueError, match="TEST 的评测契约无效"):
         validate_cases([{**CASE, **extra}])
 
 
 def test_duplicate_case_id_is_rejected():
+    """验证重复的用例 ID 会被拒绝。"""
     with pytest.raises(ValueError, match="重复"):
         validate_cases([CASE, CASE])
 
 
 def test_feedback_counts_unique_spans_excludes_raw_text_and_distinguishes_outcomes():
+    """验证反馈统计按唯一 span 计数、剔除原始正文并区分执行结果。"""
     activity = {
         "trace_id": "private-trace", "span_id": "private-span", "attributes": {"prompt": "private-content"},
         "diagnostics": [
@@ -53,5 +61,6 @@ def test_feedback_counts_unique_spans_excludes_raw_text_and_distinguishes_outcom
 
 
 def test_feedback_rejects_incomplete_activity_export():
+    """验证缺少追踪字段的活动导出被拒绝。"""
     with pytest.raises(ValueError):
         collect_candidates([{"items": [{"span_id": "missing-trace"}]}])

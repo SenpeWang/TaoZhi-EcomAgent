@@ -79,6 +79,14 @@ def version_for_content_sha(suite: str, digest: str) -> str | None:
 
 
 def _payload_size(cases: Iterable[dict]) -> int:
+    """估算用例集合的紧凑 JSON 字节数。
+
+    Args:
+        cases: 用例定义列表。
+
+    Returns:
+        UTF-8 字节数。
+    """
     return len(json.dumps(list(cases), ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
@@ -114,12 +122,29 @@ def _agent_cases(version: str, definition: dict) -> list[dict]:
 
 
 def _read_jsonl(path: Path) -> list[dict]:
+    """读取 JSONL 文件为对象列表，文件缺失时抛出 ValueError。
+
+    Args:
+        path: JSONL 文件路径。
+
+    Returns:
+        对象列表。
+    """
     if not path.is_file():
         raise ValueError(f"数据集文件缺失：{path}")
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def _rag_core_cases(version: str, definition: dict) -> list[dict]:
+    """装载 RAG 核心套件用例并校验用例数。
+
+    Args:
+        version: 数据集版本。
+        definition: 描述符中的套件定义。
+
+    Returns:
+        用例定义列表。
+    """
     rows = _read_jsonl(runtime_snapshot.DATASETS / version / "cases.jsonl")
     count = int(definition.get("case_count") or 0)
     if count and len(rows) != count:
@@ -128,6 +153,15 @@ def _rag_core_cases(version: str, definition: dict) -> list[dict]:
 
 
 def _rag_adversarial_cases(version: str, definition: dict) -> list[dict]:
+    """装载 RAG 对抗套件用例并校验用例数。
+
+    Args:
+        version: 数据集版本。
+        definition: 描述符中的套件定义。
+
+    Returns:
+        对抗用例定义列表。
+    """
     base = runtime_snapshot.DATASETS / version
     path = base / "redteam.json"
     if not path.is_file():
@@ -145,6 +179,15 @@ def _rag_adversarial_cases(version: str, definition: dict) -> list[dict]:
 
 
 def _raw_cases(version: str, suite: str) -> list[dict]:
+    """按套件分派装载原始用例定义。
+
+    Args:
+        version: 数据集版本。
+        suite: 数据集套件名（agent_research/rag_core/rag_adversarial）。
+
+    Returns:
+        与仓库数据集文件逐字段一致的用例列表。
+    """
     definition = suite_definition(version, suite)
     if suite == "agent_research":
         return _agent_cases(version, definition)
@@ -269,6 +312,32 @@ def ensure_legacy_dataset(conn: Any, eval_kind: str, suite: str, report_git: str
     return evaluation_repo.upsert_dataset(conn, legacy_dataset_fields(eval_kind, suite, report_git, source=source))
 
 
+def _assert_refresh_without_runs(conn: Any, fields: dict) -> None:
+    """拒绝覆盖已被批次引用的数据集版本内容。
+
+    已入库批次按数据集编号与版本绑定当时的用例内容，覆盖已登记 payload 会让历史批次
+    与当前内容错配，因此该版本一旦存在 eval_runs 引用就只能登记新版本。
+
+    Args:
+        conn: 数据库连接（调用方事务内）。
+        fields: 待覆盖的数据集登记字段，需含 dataset_id、version、eval_kind。
+
+    Raises:
+        ValueError: 该数据集或版本已被批次引用时抛出，提示内容变更需新版本。
+    """
+    from taozhi.infrastructure.persistence.database import fetch_one
+
+    row = fetch_one(conn, """
+        SELECT count(*) AS n FROM eval_runs
+        WHERE dataset_id=%s OR (eval_kind=%s AND dataset_version=%s)
+    """, (fields["dataset_id"], fields["eval_kind"], fields["version"]))
+    count = int((row or {}).get("n") or 0)
+    if count:
+        raise ValueError(
+            f"数据集 {fields['dataset_id']}（{fields['version']}）已有 {count} 个批次，"
+            "内容变更需新版本：请登记新版本后重新执行，禁止刷新已入库版本")
+
+
 def register(conn: Any, versions: dict[str, str] | None, tenant_id: str, actor_id: str,
              *, refresh: bool = False) -> list[dict]:
     """幂等登记当前版本的全部套件数据集，并为首次登记或刷新写审计。
@@ -279,10 +348,13 @@ def register(conn: Any, versions: dict[str, str] | None, tenant_id: str, actor_i
         tenant_id: 租户编号，写入审计。
         actor_id: 操作账号编号，写入审计。
         refresh: 为 True 时用仓库原始用例覆盖已登记的 cases_payload/用例数/元数据，
-            用于数据集透明化改造后的存量刷新。
+            用于数据集透明化改造后的存量刷新；该版本已有批次引用时拒绝刷新。
 
     Returns:
         三个套件数据集的登记行。
+
+    Raises:
+        ValueError: refresh 命中已被批次引用的数据集版本时抛出。
     """
     from taozhi.infrastructure.persistence import evaluation_repo
 
@@ -294,6 +366,7 @@ def register(conn: Any, versions: dict[str, str] | None, tenant_id: str, actor_i
         fields = dataset_fields(version, suite)
         existing = evaluation_repo.dataset_row(conn, fields["dataset_id"])
         if existing is not None and refresh:
+            _assert_refresh_without_runs(conn, fields)
             conn.execute(
                 "UPDATE eval_datasets SET cases_payload=%s, case_count=%s, metadata=%s, "
                 "content_sha256=%s, suite=%s, updated_at=now() WHERE dataset_id=%s",

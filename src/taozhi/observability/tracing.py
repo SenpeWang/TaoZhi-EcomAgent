@@ -34,6 +34,11 @@ _provider: TracerProvider | None = None
 
 
 def _enabled() -> bool:
+    """判断执行链路采集是否启用（TAOZHI_TRACING 未关闭）。
+
+    Returns:
+        True 表示已启用。
+    """
     return os.environ.get("TAOZHI_TRACING", "1").strip().lower() not in {"", "0", "false"}
 
 
@@ -45,6 +50,12 @@ class _TaskSpanProcessor(SpanProcessor):
         self._active = OrderedDict()
 
     def on_start(self, span, parent_context=None):
+        """按任务上下文登记运行中的 span，并立即投递首份快照。
+
+        Args:
+            span: 新建的 span。
+            parent_context: 父上下文，用于继承所属任务。
+        """
         job = otel_context.get_value(_JOB, parent_context)
         if not _enabled() or (job is None and span.parent is None):
             return
@@ -63,6 +74,11 @@ class _TaskSpanProcessor(SpanProcessor):
         self._snapshot(span, job)
 
     def on_end(self, span: ReadableSpan):
+        """移除已结束 span 的任务绑定并投递终态快照。
+
+        Args:
+            span: 已结束的 span。
+        """
         with self._lock:
             job = self._active.pop((span.context.trace_id, span.context.span_id), None)
         if job is not None:
@@ -81,6 +97,12 @@ class _TaskSpanProcessor(SpanProcessor):
 
     @staticmethod
     def _snapshot(span: ReadableSpan, job: tuple) -> None:
+        """把 span 与任务标识组装为可入库快照并投递后台写入。
+
+        Args:
+            span: 待快照的 span。
+            job: 所属任务的三元组 (tenant_id, job_id, run_version)。
+        """
         try:
             tenant_id, job_id, run_version = job
             attributes = safe_attributes(span.attributes)
@@ -123,6 +145,14 @@ _PROCESSOR = _TaskSpanProcessor()
 
 
 def _local_provider(service_name: str = "taozhi-worker") -> TracerProvider:
+    """返回进程内单例 TracerProvider 并挂载任务 Span 处理器。
+
+    Args:
+        service_name: 资源服务名。
+
+    Returns:
+        进程共享的 TracerProvider。
+    """
     global _provider
     if _provider is None:
         with _PROVIDER_LOCK:

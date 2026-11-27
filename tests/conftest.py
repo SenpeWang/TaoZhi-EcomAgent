@@ -25,4 +25,9 @@ os.environ.setdefault("AUDIT_DIR", str(Path(_TMP) / "audit"))
 
 
 def pytest_configure(config):
+    """注册 slow 标记，声明需要调用 LLM 的端到端测试。
+
+    Args:
+        config: pytest 配置对象。
+    """
     config.addinivalue_line("markers", "slow: 需要调用 LLM 的端到端测试")

@@ -23,12 +23,24 @@ from taozhi.orchestration.decision import DecisionPath
     ("这是什么？", ["product"]),
 ])
 def test_question_routes_to_explicit_roles_without_embeddings(monkeypatch, question, expected):
+    """验证关闭向量检索后按问题关键词路由到对应专家。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+        question: ``question`` 参数化取值。
+        expected: ``expected`` 参数化取值。
+    """
     monkeypatch.setattr(intent, "validate_task_execution", lambda *_: (None, {"question": question, "input_level": 1}))
     monkeypatch.setattr("taozhi.orchestration.decision.embedding_available", lambda: False)
     assert intent.analyze_question({})["selected_agents"] == expected
 
 
 def test_experts_respect_specification_priority_semantic_choice_and_limit(monkeypatch):
+    """验证专家选择遵循优先顺序、语义选择与数量上限。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     question = "给新人说明尺寸、保修政策、发货时间"
     monkeypatch.setattr(intent, "validate_task_execution", lambda *_: (None, {"question": question, "input_level": 1}))
     engine = Mock()
@@ -39,6 +51,11 @@ def test_experts_respect_specification_priority_semantic_choice_and_limit(monkey
 
 
 def test_waiting_expert_rechecks_external_permission_before_reserving_model_call(monkeypatch):
+    """验证等待中的专家在占用模型调用前重新校验外部处理权限。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     now = datetime.now(timezone.utc)
     state = {
         "job_id": "task", "run_version": 1, "question": "规格和售后", "selected_agents": ["product", "after_sales"],

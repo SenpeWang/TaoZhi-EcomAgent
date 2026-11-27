@@ -25,6 +25,11 @@ const documentationComments = {
   },
 }
 
+/**
+ * Web 端 ESLint 扁平配置。
+ * 全局限定源码说明只能使用 JSDoc 文档块；对 src 下的 TS 与 Vue 文件
+ * 要求导出函数具备完整中文 JSDoc，并约束命名规范与各层模块的依赖方向。
+ */
 export default ts.config(
   { ignores: ['dist/**', 'node_modules/**', '.build-*/**'] },
   js.configs.recommended,

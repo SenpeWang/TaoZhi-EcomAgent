@@ -107,11 +107,21 @@ async def events(
     initial = await asyncio.to_thread(task_output.read_stream_page, p, task_id, start, draft_visible=start > 0)
 
     def frame(event: str, data: dict) -> str:
+        """把事件记录编码为 SSE 帧。
+
+        Args:
+            event: 事件名；stage 为默认事件。
+            data: 事件数据，含可选整数 id。
+
+        Returns:
+            可直接写入响应流的 SSE 文本帧。
+        """
         event_id = f"id: {data['id']}\n" if isinstance(data.get("id"), int) else ""
         name = "" if event == "stage" else f"event: {event}\n"
         return f"{event_id}{name}data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     async def stream():
+        """持续读取并推送任务事件，处理断线重连、草稿撤回与终态回执。"""
         page = initial
         displayed = start > 0
         resuming = last_event_id is not None and start > 0

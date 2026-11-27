@@ -61,12 +61,25 @@ def test_pipeline_a_events_emitted_during_research():
     captured_stages = []
 
     def mock_emit(stage: str, progress: int):
+        """记录研究阶段进度事件。
+
+        Args:
+            stage: 阶段标识。
+            progress: 进度百分比。
+        """
         captured_stages.append(stage)
 
     mock_llm = MagicMock()
     orch_calls = {"n": 0}
 
     def fake_chat_json(*, prompt: str, schema=None, **kwargs):
+        """替身结构化对话模型，覆盖首轮规划与后续子任务决策。
+
+        Args:
+            kwargs: 关键字参数。
+            prompt: 提示词文本。
+            schema: 期望的结构化输出模式。
+        """
         if schema is _OrchestratorDecisionSchema:
             orch_calls["n"] += 1
             if orch_calls["n"] == 1:
@@ -108,6 +121,12 @@ def test_pipeline_a_events_emitted_during_research():
     report_model = MagicMock()
     deltas = []
     def report_stream(*args, **kwargs):
+        """替身流式输出：校验流式用量参数并输出含思考片段与最终报告的分块。
+
+        Args:
+            args: 位置参数。
+            kwargs: 关键字参数。
+        """
         assert kwargs == {"stream_usage": True}
         yield AIMessageChunk(content="<thi")
         yield AIMessageChunk(content="nk>内部草稿</th")

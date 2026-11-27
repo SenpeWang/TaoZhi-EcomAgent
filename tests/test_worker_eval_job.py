@@ -48,6 +48,7 @@ def _clean_eval_center():
 
 
 def _setup() -> None:
+    """动态加载数据库初始化脚本模块。"""
     spec = importlib.util.spec_from_file_location("worker_setup", PROJECT / "scripts/manage_database.py")
     setup = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(setup)
@@ -56,6 +57,7 @@ def _setup() -> None:
 
 
 def _register_dataset() -> None:
+    """向评测中心登记测试数据集。"""
     with database_connection() as conn:
         evaluation_repo.upsert_dataset(conn, {
             "dataset_id": DATASET_ID, "name": "agent_research", "eval_kind": "agent",
@@ -67,6 +69,7 @@ def _register_dataset() -> None:
 
 
 def _admin() -> TestClient:
+    """以管理员登录并返回测试客户端。"""
     client = TestClient(app)
     response = client.post("/api/auth/login", json={"username": "admin", "password": "123456"})
     assert response.status_code == 200, response.text
@@ -75,6 +78,11 @@ def _admin() -> TestClient:
 
 
 def _queue_job(client: TestClient) -> dict:
+    """触发一次评测运行并返回任务响应。
+
+    Args:
+        client: 测试客户端。
+    """
     response = client.post("/api/evaluations/runs/trigger", json={
         "eval_kind": "agent", "dataset_id": DATASET_ID, "scope": "full",
         "mode": "live", "note": "worker 任务测试",
@@ -84,6 +92,11 @@ def _queue_job(client: TestClient) -> dict:
 
 
 def _job_state(job_id: str) -> dict:
+    """读取任务当前状态。
+
+    Args:
+        job_id: 任务标识。
+    """
     with database_connection() as conn:
         return job_repo.get_job_by_id(conn, job_id)
 
@@ -95,6 +108,14 @@ def test_process_evaluation_job_reports_progress_and_publishes(monkeypatch) -> N
     job = _queue_job(_admin())
 
     def fake_runner(job, dataset, report_dir, progress_file):
+        """替身评测执行器，写出报告与进度文件。
+
+        Args:
+            job: 任务记录。
+            dataset: 数据集描述。
+            report_dir: 报告输出目录。
+            progress_file: 进度文件路径。
+        """
         script = (
             "import json, pathlib, sys\n"
             "report_dir = pathlib.Path(sys.argv[1]); progress = pathlib.Path(sys.argv[2])\n"
@@ -105,6 +126,12 @@ def test_process_evaluation_job_reports_progress_and_publishes(monkeypatch) -> N
         return [sys.executable, "-c", script, str(report_dir), str(progress_file)]
 
     def fake_publish(job, report_path):
+        """替身报告归档入口，返回固定回执。
+
+        Args:
+            job: 任务记录。
+            report_path: 报告文件路径。
+        """
         receipt = {"run_id": "run_fake_001", "created": True, "gate_passed": True, "dataset_id": DATASET_ID,
                    "eval_kind": "agent", "dataset_version": "v1_20261123", "scope": "full",
                    "mode": "live"}

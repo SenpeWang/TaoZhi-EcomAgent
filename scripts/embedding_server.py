@@ -132,6 +132,11 @@ _rerank_failed = False
 
 
 def load_model():
+    """加载本地嵌入模型与分词器，并记录向量维度。
+
+    Raises:
+        RuntimeError: 嵌入模型权重缺失时抛出。
+    """
     global _tokenizer, _model, _dim
     if _model is not None:
         return
@@ -144,6 +149,15 @@ def load_model():
 
 @torch.no_grad()
 def encode(texts: list[str], instruct: bool) -> list[list[float]]:
+    """分批编码文本并返回 L2 归一化向量。
+
+    Args:
+        texts: 待编码文本列表。
+        instruct: 是否为查询侧拼接检索指令前缀。
+
+    Returns:
+        与输入顺序一致的归一化向量列表。
+    """
     prepared = [(QUERY_INSTRUCTION + t) if instruct else t for t in texts]
     out = []
     for start in range(0, len(prepared), 32):
@@ -158,12 +172,19 @@ def encode(texts: list[str], instruct: bool) -> list[list[float]]:
 
 
 class EmbedRequest(BaseModel):
+    """嵌入接口请求体：待编码文本与查询指令开关。"""
+
     texts: list[str]
     instruct: bool = False
 
 
 @app.get("/health")
 def health():
+    """健康检查接口：返回模型名称、推理设备、向量维度与精排可用状态。
+
+    Returns:
+        健康状态字典。
+    """
     return {"status": "ok", "model": MODEL_PATH.name, "device": DEVICE, "dim": _dim,
             "rerank": RERANK_MODEL_PATH.name if _rerank_model is not None else None}
 
@@ -198,6 +219,8 @@ def rerank_scores(query: str, texts: list[str]) -> list[float]:
 
 
 class RerankRequest(BaseModel):
+    """精排接口请求体：查询文本、候选文本与可选截断数量。"""
+
     query: str
     texts: list[str]
     top_n: int | None = None
@@ -205,6 +228,17 @@ class RerankRequest(BaseModel):
 
 @app.post("/rerank")
 def rerank(req: RerankRequest):
+    """精排接口：校验输入后返回相关性分数或前 N 个结果。
+
+    Args:
+        req: 精排请求体。
+
+    Returns:
+        模型名称与分数（可选索引）组成的响应字典。
+
+    Raises:
+        HTTPException: 精排模型不可用或输入非法时抛出。
+    """
     load_reranker()
     if _rerank_model is None:
         raise HTTPException(status_code=503, detail="精排模型不可用")
@@ -222,6 +256,17 @@ def rerank(req: RerankRequest):
 
 @app.post("/embed")
 def embed(req: EmbedRequest):
+    """嵌入接口：校验文本数量与长度后返回向量。
+
+    Args:
+        req: 嵌入请求体。
+
+    Returns:
+        模型名称、向量与维度组成的响应字典。
+
+    Raises:
+        HTTPException: 文本为空、超量或单条超长时抛出。
+    """
     texts = req.texts
     if not texts or len(texts) > MAX_BATCH:
         raise HTTPException(status_code=400, detail="texts 须为 1 至 256 条")

@@ -29,6 +29,11 @@ HTTP_TIMEOUT = 60
 
 
 def load_cases() -> list:
+    """读取评测用例集。
+
+    Returns:
+        用例列表。
+    """
     if not CASES_PATH.is_file():
         sys.exit(f"找不到用例集：{CASES_PATH}\n先跑 `python -m evals.dataset.generate`。")
     return [json.loads(line) for line in CASES_PATH.read_text(encoding="utf-8").splitlines()
@@ -36,6 +41,11 @@ def load_cases() -> list:
 
 
 def latest_report() -> Path:
+    """返回报告目录中最新的报告路径。
+
+    Returns:
+        最新报告文件路径。
+    """
     files = sorted(REPORTS_DIR.glob("*.json"))
     if not files:
         sys.exit(f"{REPORTS_DIR} 下没有报告，先跑一次评估。")
@@ -79,6 +89,15 @@ def case_to_example(c: dict) -> dict:
 
 
 def slot(results: dict, cid: str) -> dict:
+    """取出或初始化某用例的 Phoenix 推送槽位。
+
+    Args:
+        results: 按用例编号索引的结果映射。
+        cid: 用例编号。
+
+    Returns:
+        用例槽位字典。
+    """
     return results.setdefault(cid, {"output": {}, "evaluations": []})
 
 
@@ -175,6 +194,16 @@ def sync_examples(client, examples: list, name: str, description: str, dry_run: 
 
 
 def _find_experiment(client, dataset_id: str, name: str):
+    """按名称查找 Phoenix 实验。
+
+    Args:
+        client: Phoenix 客户端。
+        dataset_id: 数据集编号。
+        name: 实验名。
+
+    Returns:
+        实验对象或 None。
+    """
     items = client.experiments.list(dataset_id=dataset_id, timeout=HTTP_TIMEOUT)
     for x in items:
         if x["name"] == name:
@@ -183,6 +212,17 @@ def _find_experiment(client, dataset_id: str, name: str):
 
 
 def _experiment_target(client, dataset_id: str, base: str, force: bool):
+    """解析可写入的实验名并返回已有实验。
+
+    Args:
+        client: Phoenix 客户端。
+        dataset_id: 数据集编号。
+        base: 实验名基名。
+        force: 是否强制新建修订版本。
+
+    Returns:
+        (实验名, 已有实验或 None)。
+    """
     name = base
     revision = 1
     while True:
@@ -247,6 +287,17 @@ def _logged_example_ids(client, exp_id: str) -> set:
 
 def sync_report(client, report_path: Path, report: dict, name: str,
                 url: str, force: bool, dry_run: bool) -> None:
+    """把一次评测报告同步为 Phoenix 实验与评估记录。
+
+    Args:
+        client: Phoenix 客户端。
+        report_path: 报告文件路径。
+        report: 报告对象。
+        name: 实验名。
+        url: Phoenix 访问地址。
+        force: 是否强制新建实验修订。
+        dry_run: 为 True 时只预演不写入。
+    """
     results = collect_results(report)
     if not results:
         print("[report] 该报告没有逐例数据（旧格式），无从同步")
@@ -446,6 +497,14 @@ def follow_live(client, live_path: Path, name: str, url: str,
 
 
 def _agent_payload(case: dict) -> dict:
+    """把单条逐例判定转换为 Phoenix 输出与评估结构。
+
+    Args:
+        case: 逐例判定记录。
+
+    Returns:
+        含 output 与 evaluations 的字典。
+    """
     labels = {"passed": "PASS", "failed": "FAIL", "unassessable": "UNASSESSABLE"}
     status = case["status"]
     verdicts = [{
@@ -508,6 +567,11 @@ def sync_agent_eval(client, report_path: Path, url: str, force: bool, dry_run: b
 
 
 def main() -> int:
+    """命令行入口：同步数据集与评估结果到 Phoenix。
+
+    Returns:
+        进程退出码。
+    """
     ap = argparse.ArgumentParser(description="同步评估集与评估结果到 Phoenix")
     ap.add_argument("--dataset", action="store_true", help="同步用例集到 Datasets")
     ap.add_argument("--report", nargs="?", const="latest", metavar="PATH",

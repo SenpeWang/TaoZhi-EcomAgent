@@ -8,6 +8,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """放宽审计动作约束，允许记录 migrate_dataset_versions 数据集版本迁移。"""
     op.execute("ALTER TABLE eval_audit_logs DROP CONSTRAINT IF EXISTS eval_audit_logs_action_check")
     op.execute("""
         ALTER TABLE eval_audit_logs ADD CONSTRAINT eval_audit_logs_action_check
@@ -17,6 +18,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """删除该动作的历史日志并还原审计动作约束。"""
     op.execute("DELETE FROM eval_audit_logs WHERE action='migrate_dataset_versions'")
     op.execute("ALTER TABLE eval_audit_logs DROP CONSTRAINT IF EXISTS eval_audit_logs_action_check")
     op.execute("""

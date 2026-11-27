@@ -11,6 +11,7 @@ from evals.center import datasets
 
 
 def record():
+    """构造一份通过校验的最小评测报告记录。"""
     return {
         "schema_version": REPORT_SCHEMA_VERSION, "run_id": "report_01", "timestamp": "20261120_131244_000001", "mode": "live",
         "dataset_sha256": "a" * 64, "judges_sha256": "b" * 64,
@@ -26,6 +27,7 @@ def record():
 
 
 def test_publish_projection_only_accepts_public_fields():
+    """验证发布投影只保留公开字段并剥离私有信息。"""
     raw = record()
     raw.update(owner_id="private-owner", tenant_id="private-tenant")
     raw["case_results"][0].update(
@@ -76,12 +78,14 @@ def test_verified_dataset_version_binds_registered_projection():
 
 
 def test_unverified_dataset_is_archived_and_incomparable():
+    """验证未校验数据集被标记为历史归档且不可比较。"""
     run, _ = project_report(record())
     assert run["metrics"]["provenance"]["comparable"] is False
     assert run["dataset_metadata"]["legacy"] is True
 
 
 def test_unobserved_steps_do_not_bind_a_synthetic_trace():
+    """验证合成回放模式下未观测步骤不绑定真实追踪。"""
     raw = record()
     raw.update(mode="synthetic_trace_regrade", transcript_sha256="0" * 64)
     raw["case_results"][0]["trace_id"] = "c" * 32
@@ -90,6 +94,7 @@ def test_unobserved_steps_do_not_bind_a_synthetic_trace():
 
 
 def test_registered_case_preserves_only_the_reported_versioned_notes():
+    """验证已登记用例只保留报告声明的版本化说明。"""
     raw = record()
     case = next(item for item in AGENT_BENCHMARK_CASES if item.get("reference_facts"))
     row = raw["case_results"][0]
@@ -102,6 +107,7 @@ def test_registered_case_preserves_only_the_reported_versioned_notes():
 
 
 def test_report_counts_and_ids_are_validated():
+    """验证报告用例计数与标识一致性会被校验。"""
     raw = record()
     raw["case_results"].append(raw["case_results"][0])
     raw["metrics"]["selected"] = 2
@@ -111,6 +117,11 @@ def test_report_counts_and_ids_are_validated():
 
 @pytest.mark.parametrize("field", ["expectation_notes", "expected_tools", "forbidden_tools", "expected_parameters", "steps", "steps_complete"])
 def test_incomplete_report_is_rejected(field):
+    """验证缺少必备字段的报告被拒绝。
+
+    Args:
+        field: ``field`` 参数化取值。
+    """
     raw = record()
     del raw["case_results"][0][field]
     with pytest.raises(ValueError):
@@ -118,6 +129,7 @@ def test_incomplete_report_is_rejected(field):
 
 
 def test_incorrect_counts_old_versions_and_mixed_sources_are_rejected():
+    """验证状态计数错误、旧版本与混合来源的报告被拒绝。"""
     raw = record()
     with pytest.raises(ValueError, match="状态数量"):
         project_report({**raw, "metrics": {**raw["metrics"], "failed": 0, "unassessable": 1}})
@@ -130,6 +142,7 @@ def test_incorrect_counts_old_versions_and_mixed_sources_are_rejected():
 
 
 def test_inconsistent_denominators_are_rejected():
+    """验证分子超过分母等不一致指标被拒绝。"""
     raw = record()
     raw["metrics"]["parameter_accuracy"] = {"numerator": 3, "denominator": 2}
     with pytest.raises(ValueError):
@@ -137,6 +150,7 @@ def test_inconsistent_denominators_are_rejected():
 
 
 def test_provenance_retains_only_validated_source_digests():
+    """验证来源信息只保留通过校验的摘要。"""
     raw = record()
     digests = {"transcript_sha256": "1" * 64, "counterexamples_sha256": "2" * 64, "model_config_sha256": "3" * 64}
     raw.update(digests, mode="synthetic_trace_regrade", raw_model_configuration="private-source")
@@ -147,5 +161,10 @@ def test_provenance_retains_only_validated_source_digests():
 
 @pytest.mark.parametrize("key", ["transcript_sha256", "counterexamples_sha256", "model_config_sha256"])
 def test_invalid_source_digest_rejects_report(key):
+    """验证非法来源摘要导致报告被拒绝。
+
+    Args:
+        key: ``key`` 参数化取值。
+    """
     with pytest.raises(ValueError):
         project_report({**record(), key: "private-source"})

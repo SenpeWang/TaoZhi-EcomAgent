@@ -21,6 +21,7 @@ from taozhi.schemas.task import Tool
 
 
 def test_membership_role_names_cannot_grant_undeclared_privileges():
+    """验证角色等级仅由已声明角色推导，未知角色不授予权限。"""
     assert derive_role_level(False, []) == 1
     assert derive_role_level(False, [{"role": "employee"}, {"role": "leader"}]) == 2
     assert derive_role_level(False, [{"role": "boss"}]) == 3
@@ -30,6 +31,7 @@ def test_membership_role_names_cannot_grant_undeclared_privileges():
 
 
 def test_knowledge_lookup_has_one_public_tool_name():
+    """验证知识检索只有一个公开工具名，旧名被拒绝。"""
     from pydantic import ValidationError
 
     assert Tool(name="search_knowledge", query="规格").name == "search_knowledge"
@@ -53,6 +55,8 @@ def test_url_guard_and_web_scraper_block_ssrf_and_internal_redirects():
         assert res["status"] == "error"
 
     class _FakeStream:
+        """模拟返回重定向的 HTTP 流响应桩。"""
+
         status_code = 302
         headers = {"location": "http://127.0.0.1:18080/api/health"}
 
@@ -63,6 +67,8 @@ def test_url_guard_and_web_scraper_block_ssrf_and_internal_redirects():
             return False
 
     class _FakeClient:
+        """模拟 httpx 客户端，返回预置重定向流。"""
+
         def __enter__(self):
             return self
 
@@ -70,6 +76,12 @@ def test_url_guard_and_web_scraper_block_ssrf_and_internal_redirects():
             return False
 
         def stream(self, *_args, **_kwargs):
+            """返回预置的重定向流响应。
+
+            Args:
+                _args: 被忽略的位置参数。
+                _kwargs: 被忽略的关键字参数。
+            """
             return _FakeStream()
 
     with (
@@ -121,6 +133,12 @@ def test_delete_research_conversation_cascades_children_and_checkpoints():
     executed_sqls: list[str] = []
 
     def _fake_exec(sql, params=None):
+        """替身 SQL 执行入口，记录语句。
+
+        Args:
+            sql: 要执行的 SQL 语句。
+            params: SQL 绑定参数。
+        """
         executed_sqls.append(sql)
         return MagicMock()
 
@@ -304,6 +322,11 @@ def test_concurrent_memory_updates_preserve_facts_and_stable_ids(tmp_path):
     from taozhi.core.memory.store import LongTermMemoryStore
 
     def store_fact(index):
+        """在临时目录中写入一条带来源的长期记忆事实。
+
+        Args:
+            index: 序号或下标。
+        """
         store = LongTermMemoryStore(storage_dir=tmp_path, tenant_id="tenant_a")
         return store.remember_fact(f"商品{index}", "价格", index, source="本轮调研")
 

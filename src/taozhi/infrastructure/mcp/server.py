@@ -126,6 +126,14 @@ def _build_search_handler(tool_name: str) -> Callable[[dict[str, Any]], Any]:
     module = _SEARCH_TOOL_MODULES[tool_name]
 
     def handle(arguments: dict[str, Any]) -> Any:
+        """调用预绑定采集器的同名工具函数。
+
+        Args:
+            arguments: 已校验的工具参数。
+
+        Returns:
+            采集器原始返回值。
+        """
         return getattr(module, tool_name)(**arguments)
 
     return handle
@@ -259,6 +267,7 @@ class EcommerceMcpServer:
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
+        """注册内置检索、网页抓取与当前时间工具。"""
         for name, desc, schema in self._SEARCH_TOOL_SPECS:
             self.register_tool(
                 McpToolDefinition(

@@ -33,6 +33,14 @@ class A(dict):
     """属性可访问的 dict：模板槽位用 product.title 写法，eval 时才能解析。"""
 
     def __getattr__(self, k):
+        """以属性方式读取占位符字典中的键。
+
+        Args:
+            k: 键名。
+
+        Returns:
+            对应取值。
+        """
         try:
             return self[k]
         except KeyError as e:
@@ -40,6 +48,14 @@ class A(dict):
 
 
 def _wrap(v):
+    """把嵌套字典与列表包装为支持属性访问的占位符对象。
+
+    Args:
+        v: 待包装的取值。
+
+    Returns:
+        包装后的对象。
+    """
     if isinstance(v, dict):
         return A({k: _wrap(x) for k, x in v.items()})
     if isinstance(v, list):
@@ -53,6 +69,14 @@ def render(text, ctx):
         return text
 
     def sub(m):
+        """解析并求值模板中的槽位表达式。
+
+        Args:
+            m: 槽位正则匹配对象。
+
+        Returns:
+            求值结果字符串。
+        """
         expr = m.group(1).strip()
         try:
             return str(eval(expr, {"__builtins__": {}}, ctx))
@@ -62,6 +86,11 @@ def render(text, ctx):
 
 
 def load_specs():
+    """读取 spec 目录下的组织、夹具、语料与模板 YAML。
+
+    Returns:
+        (org, fixtures, corpus, templates) 四元组。
+    """
     org = yaml.safe_load((SPEC / "org.yaml").read_text(encoding="utf-8"))
     fixtures = yaml.safe_load((SPEC / "fixtures.yaml").read_text(encoding="utf-8"))
     corpus = yaml.safe_load((SPEC / "corpus.yaml").read_text(encoding="utf-8"))
@@ -70,6 +99,16 @@ def load_specs():
 
 
 def build_context(org, fixtures, corpus):
+    """把夹具与语料组装为模板渲染上下文与文档清单。
+
+    Args:
+        org: 组织 spec。
+        fixtures: 夹具 spec。
+        corpus: 语料 spec。
+
+    Returns:
+        (渲染上下文, 文档清单)。
+    """
     raw = {}
     for d in fixtures.get("documents", []):
         raw[d["id"]] = dict(d, kind="fixture")
@@ -98,6 +137,14 @@ def build_context(org, fixtures, corpus):
 
 
 def product_body(p):
+    """渲染产品语料的正文。
+
+    Args:
+        p: 产品语料条目。
+
+    Returns:
+        产品正文文本。
+    """
     f = p["facts"]
     return (f"{p['title']}\n"
             f"一、产品参数\n功率：{f['power']}\n接口：{f['ports']}\n协议：{f['protocol']}\n"
@@ -152,6 +199,11 @@ _DEFAULT_DOMAIN_BY_CAT = {
 
 
 def generate():
+    """按 spec 生成 V2 评测用例并返回产物与规格。
+
+    Returns:
+        (用例列表, 数据集目录名, org, fixtures, corpus)。
+    """
     org, fixtures, corpus, templates = load_specs()
     ctx, docs = build_context(org, fixtures, corpus)
     version = "v2"
@@ -242,10 +294,23 @@ def parsing_docs():
 
 
 def sha256_file(p: Path) -> str:
+    """计算文件字节摘要。
+
+    Args:
+        p: 文件路径。
+
+    Returns:
+        十六进制 sha256。
+    """
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
 def main() -> int:
+    """命令行入口：从 spec 生成数据集并写盘。
+
+    Returns:
+        进程退出码。
+    """
     ap = argparse.ArgumentParser(description="从 spec 生成独立评测数据集")
     ap.add_argument("--out", default=str(ROOT / "evals/datasets/rag_v2_20261124"))
     args = ap.parse_args()

@@ -70,7 +70,7 @@ make evals-agent-replay
 
 ### 查看工作台评测结果
 
-评测中心要求 Agent 报告 `schema_version` ≥ 3；低于 3 的报告需重新运行评测生成。部署时应用 `023_eval_center_v3` 迁移（版本库与 RAG/Agent 双体系字段由 `022_eval_profiles_and_rag` 引入）。入库统一走 [`evals/center`](center/cli.py)；回填命令用于导入仓库中已有的历史报告与数据集，重复导入相同内容与归属的批次是幂等的。
+评测中心要求 Agent 报告 `schema_version` ≥ 3；低于 3 的报告需重新运行评测生成。部署时应用 `026_eval_dataset_snapshots` 迁移（版本库与 RAG/Agent 双体系字段由 `022_eval_profiles_and_rag` 引入，快照表与批次运行序号由 `026` 引入）。入库统一走 [`evals/center`](center/cli.py)；回填命令用于导入仓库中已有的历史报告与数据集，重复导入相同内容与归属的批次是幂等的。
 
 ```bash
 make evals-center-register                     # 登记当前 RAG/Agent 最新版本（幂等）
@@ -255,8 +255,9 @@ make evals-center-check                             # 数据集 sha / 基线唯�
 | `POST /api/evaluations/profiles` | 登记算法版本，同摘要复用、同名标签冲突 `409` | 老板/系统管理员 |
 | `GET /api/evaluations/baselines` | active 与历史基线，支持 `eval_kind`、`dataset_version`、`include_history` | 登录账号 |
 | `POST /api/evaluations/baselines` | 把批次设为 active 基线（`{run_id, note}`），旧基线转历史 | 老板/系统管理员 |
-| `GET /api/evaluations/runs` | 批次列表，支持 `eval_kind`、`mode`、`scope`、`gate_passed`、`dataset_id`、`profile_id`、`algorithm_version`、`baseline_only`、`owner_id`，时间游标分页 | 登录账号，按可见发起人范围 |
-| `GET /api/evaluations/runs/{run_id}` | 批次详情：主指标、原始报告可用性、报告自带基线对比 | 同上 |
+| `GET /api/evaluations/runs` | 批次列表，含 `run_seq`/`dataset_snapshot_id`/`parent_run_id`/`trigger_note`；支持 `eval_kind`、`mode`、`scope`、`gate_passed`、`dataset_id`、`profile_id`、`algorithm_version`、`baseline_only`、`owner_id`，时间游标分页 | 登录账号，按可见发起人范围 |
+| `GET /api/evaluations/runs/{run_id}` | 批次详情：主指标、原始报告可用性、报告自带基线对比、数据集快照摘要 | 同上 |
+| `GET /api/evaluations/runs/{run_id}/dataset-snapshot` | 该批次固化的数据集内容快照元信息与原始用例分页（`cursor`/`limit`） | 同上 |
 | `GET /api/evaluations/runs/{run_id}/report` | 下载原始报告 JSON，响应头 `X-Report-Sha256` 供校验 | 同上，需有原始报告 |
 | `GET /api/evaluations/runs/{run_id}/layers` | RAG 分层指标（检索/对抗/行为/六项工程指标）；Agent 批次返回空集 | 同上 |
 | `GET /api/evaluations/runs/{run_id}/comparison` | 与指定 `baseline_id` 逐例配对比较，口径/方式/判定器不一致时 `422` | 同上 |

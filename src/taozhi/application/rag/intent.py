@@ -22,6 +22,16 @@ _ROLE_TERMS = {
 
 
 def _select_specialists(question: str) -> list[str]:
+    """为知识问题选择至多三个专家角色。
+
+    结合规则关键词与决策引擎的语义候选去重排序；未命中任何规则时回退商品规格分析师。
+
+    Args:
+        question: 用户原始问题。
+
+    Returns:
+        专家角色编号列表，至少包含 product。
+    """
     options = {role_id: f"{title}：{guidance}" for role_id, (title, guidance) in SPECIALIST_AGENTS.items()}
     decision = get_decision_engine().choice(
         context=redact(question),

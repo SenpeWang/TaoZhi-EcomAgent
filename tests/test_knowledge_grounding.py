@@ -33,10 +33,19 @@ from taozhi.domain.rag_verification import supported_finding_text
     ("299 元退货应退多少？", "299 - 12 = 12", "退货需扣运费 12 元。", "退货需扣运费 12 元。"),
 ])
 def test_unsubstantiated_finding_is_rejected(question, claim, quote, document):
+    """验证引文不支持断言或与文档条件不符的发现被拒绝。
+
+    Args:
+        question: ``question`` 参数化取值。
+        claim: ``claim`` 参数化取值。
+        quote: ``quote`` 参数化取值。
+        document: ``document`` 参数化取值。
+    """
     assert supported_finding_text(question, claim, quote, document, "商品资料") is None
 
 
 def test_calculation_names_its_source_and_input_instead_of_promising_a_refund():
+    """验证计算类回答引用原政策并给出验算过程，而非承诺退款。"""
     quote = "退货需扣除运费 12 元及赠品折价 39 元。"
     formula = "299 - 39 - 12 = 248"
     answer = supported_finding_text("客户下单 299 元，退货应退多少？", formula, quote, quote, "售后政策")
@@ -45,6 +54,7 @@ def test_calculation_names_its_source_and_input_instead_of_promising_a_refund():
 
 
 def test_whole_context_can_support_a_definition_or_conditional_policy():
+    """验证完整上下文可支撑定义或带条件的政策结论。"""
     definition = "USB-C 是一种可以正反插的连接器。"
     assert supported_finding_text("USB-C 是什么？", definition, definition, definition, "术语") == definition
     policy = "提供保修。但仅限企业采购渠道。"
@@ -54,9 +64,20 @@ def test_whole_context_can_support_a_definition_or_conditional_policy():
 
 
 def test_quality_exposes_only_cited_facts_and_flags_the_unanswered_subject(monkeypatch):
+    """验证输出只暴露被引用的原文，并标注缺失的保修条件与机型依据。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     quote = "MC-500 切幅为 120mm。"
     evidence = [{"title": "规格表", "quote": quote}, {"title": "产品手册", "quote": quote}]
     def finding(index, claim):
+        """构造带证据下标的发现项字典。
+
+        Args:
+            index: 证据下标。
+            claim: 待核验的断言。
+        """
         return {"role": "product", "evidence_index": index, "claim": claim, "quote": quote}
     state = dict(question="MC-500 和 MC-501 的切幅和保修期是多少？", evidence=evidence, findings=[
         finding(0, quote), finding(1, quote), finding(1, "保修期 120 天。"), finding(-1, quote),
@@ -98,6 +119,14 @@ def published_question(monkeypatch, question, documents, chosen):
     ("A1 切幅是多少？", [("A1 规格表", "切幅为 100mm。"), ("A1 产品手册", "切幅为 120mm。")], [0]),
 ])
 def test_conflicting_internal_policy_is_withheld_before_streaming(monkeypatch, question, docs, chosen):
+    """验证内部资料冲突时在流式输出前拦截，并要求人工核对。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+        question: ``question`` 参数化取值。
+        docs: ``docs`` 参数化取值。
+        chosen: ``chosen`` 参数化取值。
+    """
     result, streamed = published_question(monkeypatch, question, docs, chosen)
     assert streamed == ""
     assert result["answer_basis"] == "insufficient_evidence"
@@ -119,6 +148,13 @@ def test_conflicting_internal_policy_is_withheld_before_streaming(monkeypatch, q
     ("A1 的保修期限是多久？", [("售后政策", "A1 保修期为1年。"), ("产品手册", "A1 质保期为12个月。")]),
 ])
 def test_different_scopes_and_equivalent_values_remain_publishable(monkeypatch, question, docs):
+    """验证不同范围或等价数值的并存资料仍可发布。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+        question: ``question`` 参数化取值。
+        docs: ``docs`` 参数化取值。
+    """
     result, streamed = published_question(monkeypatch, question, docs, [0, 1])
     assert result["answer_basis"] == "internal_evidence"
     assert all(quote in streamed and quote in result["answer"] for _, quote in docs)
@@ -126,6 +162,11 @@ def test_different_scopes_and_equivalent_values_remain_publishable(monkeypatch, 
 
 
 def test_conflict_does_not_hide_an_independently_supported_fact(monkeypatch):
+    """验证冲突不会掩盖可独立支撑的事实。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     docs = [("售后政策", "A1 保修期12个月。"), ("产品手册", "A1 保修期24个月。"), ("规格表", "A1 切幅100mm。")]
     result, streamed = published_question(monkeypatch, "A1 的保修期和切幅？", docs, [0, 1, 2])
     assert streamed == result["answer"] == "A1 切幅100mm。 [3]"

@@ -1,5 +1,8 @@
 import type { DiagnosticCategory, TraceActivity, TraceDiagnostic } from './types'
 
+/**
+ * 诊断分类的中文名称映射，用于时间线与详情展示。
+ */
 export const diagnosticCategoryLabels: Record<DiagnosticCategory, string> = {
   model_api: '模型 API',
   tool: '工具',
@@ -10,6 +13,9 @@ export const diagnosticCategoryLabels: Record<DiagnosticCategory, string> = {
   workflow: '工作流',
 }
 
+/**
+ * 诊断处理结果的中文名称映射，如失败、重试、降级处理与跳过。
+ */
 export const diagnosticOutcomeLabels: Record<TraceDiagnostic['outcome'], string> = {
   failed: '失败',
   retry: '重试',

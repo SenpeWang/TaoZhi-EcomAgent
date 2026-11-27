@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class _ProposedSubtaskSchema(BaseModel):
+    """协调员动态派发子任务的结构化规约。"""
     role: Literal[
         "research.market_intelligence", "research.sourcing",
         "research.amazon_benchmark", "research.generalist",
@@ -24,6 +25,7 @@ class _ProposedSubtaskSchema(BaseModel):
 
 
 class _OrchestratorDecisionSchema(BaseModel):
+    """协调员单轮调度决策的结构化输出。"""
     action: Literal["spawn_subagents", "quick_answer", "call_tool", "finish"] = Field(description="spawn_subagents 派发研究子智能体；quick_answer 派速答 Worker；call_tool 直接调用一个轻量工具；finish 收敛写研报")
     thought: str = Field(description="根据已有证据、信息缺口与更新要求做出的调度理由")
     outline: List[str] = Field(default_factory=list, description="3-4个核心研报章节维度")
@@ -47,6 +49,7 @@ class _QuickAnswerSchema(BaseModel):
 
 
 class _SubagentStepSchema(BaseModel):
+    """研究子智能体单步工具调用或交卷决策的结构化输出。"""
     action: Literal["call_tool", "finish"] = Field(description="call_tool 调用授权工具探索；finish 证据足够交卷")
     thought: str = Field(description="当前观察后的简短推理，说明为什么换词检索、深抓链接或可以结束")
     tool_name: str = Field(default="", description="当 action=call_tool 时的工具名")

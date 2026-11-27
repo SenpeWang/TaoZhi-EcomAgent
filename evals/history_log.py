@@ -59,14 +59,39 @@ def _append_markdown_block(log_path: Path, block: str) -> Path:
 
 
 def _fmt_pct(value: Any) -> str:
+    """把数值格式化为百分比文本。
+
+    Args:
+        value: 待格式化的取值。
+
+    Returns:
+        百分比文本；非数值返回 -。
+    """
     return f"{value:.1%}" if isinstance(value, (int, float)) else "-"
 
 
 def _fmt_num(value: Any, digits: int = 3) -> str:
+    """把数值格式化为固定小数位文本。
+
+    Args:
+        value: 待格式化的取值。
+        digits: 保留的小数位数。
+
+    Returns:
+        格式化文本；非数值返回 -。
+    """
     return f"{value:.{digits}f}" if isinstance(value, (int, float)) else "-"
 
 
 def _rel_path(path: Path) -> str:
+    """把路径转为相对仓库根的 POSIX 路径。
+
+    Args:
+        path: 文件路径。
+
+    Returns:
+        相对仓库根的路径，或文件名。
+    """
     root = Path(__file__).resolve().parents[1]
     try:
         return path.resolve().relative_to(root).as_posix()

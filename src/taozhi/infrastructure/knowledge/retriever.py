@@ -46,6 +46,14 @@ GATE_MARGIN = 0.06
 
 
 def _ranks(scores):
+    """把分值数组转换为从 1 起的排名数组（分值越高排名越靠前）。
+
+    Args:
+        scores: 各候选的分值数组。
+
+    Returns:
+        与输入等长、从 1 起的排名数组。
+    """
     order = np.argsort(-scores)
     ranks = np.empty(len(scores), dtype=np.int64)
     ranks[order] = np.arange(1, len(scores) + 1)
@@ -194,6 +202,14 @@ def _ann_gate(chunks, vecs, qv, max_dist):
     q = np.asarray(qv, dtype="float32").reshape(-1)
 
     def _d(v):
+        """计算候选向量与查询向量的余弦距离。
+
+        Args:
+            v: 候选向量。
+
+        Returns:
+            余弦距离；向量缺失或维度不符时返回 None。
+        """
         return None if (v is None or len(v) != SEMANTIC_DIM) else 1.0 - float(v @ q)
 
     dists = [_d(v) for v in vecs]
@@ -273,6 +289,20 @@ def search_documents(
 
 
 def _search_authorized_documents(conn, p, query, limit, hyde_vector, trace_out, doc_id_prefix):
+    """在授权文档集内执行混合召回、融合排序并回填追踪耗时。
+
+    Args:
+        conn: 数据库连接。
+        p: 当前主体。
+        query: 检索问题。
+        limit: 返回条数上限。
+        hyde_vector: HyDE 查询向量；None 表示不做语义扩展。
+        trace_out: 检索追踪字典，用于回填耗时与降级标记。
+        doc_id_prefix: 文档编号前缀过滤。
+
+    Returns:
+        精排后的授权证据列表。
+    """
     t_total = time.perf_counter()
     tr: Dict[str, Any] = {
         "embed_ms": 0,

@@ -22,6 +22,8 @@ def test_retry_can_replace_weak_evidence_when_the_first_round_is_full():
 
 
 class _Cfg:
+    """检索配置桩，提供精排与召回相关字段。"""
+
     def __init__(self, enabled=True, candidates=20, rerank_chars=1000,
                  max_chunks_per_doc=3, rerank_min_score=0.05, rerank_relative=0.15,
                  quote_max_chars=1200, ann_max_distance=0.45):
@@ -37,12 +39,22 @@ class _Cfg:
 
 
 def _fused_chunks(n=5):
+    """构造融合检索候选切片与分数。
+
+    Args:
+        n: 切片数量。
+    """
     chunks = [{"id": f"k{i}", "text": f"切片{i} 膜切机参数"} for i in range(n)]
     fused = np.linspace(0.01, 0.03, n)
     return chunks, fused
 
 
 def test_enterprise_rerank_reorders_candidates(monkeypatch):
+    """验证企业检索精排会重排候选并保持分数降序。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     chunks, fused = _fused_chunks()
     monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg())
     monkeypatch.setattr(ent_embedding, "rerank",
@@ -56,10 +68,21 @@ def test_enterprise_rerank_reorders_candidates(monkeypatch):
 
 
 def test_enterprise_rerank_failure_falls_back_to_fused(monkeypatch):
+    """验证精排失败时回退融合顺序且不标记分数。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     chunks, fused = _fused_chunks()
     monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg())
 
     def _boom(q, texts):
+        """模拟精排服务不可用。
+
+        Args:
+            q: 查询文本。
+            texts: 待处理文本列表。
+        """
         raise RuntimeError("服务不可用")
 
     monkeypatch.setattr(ent_embedding, "rerank", _boom)
@@ -69,10 +92,21 @@ def test_enterprise_rerank_failure_falls_back_to_fused(monkeypatch):
 
 
 def test_enterprise_rerank_disabled_keeps_fused_order(monkeypatch):
+    """验证关闭精排时保持融合顺序且不调用客户端。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     chunks, fused = _fused_chunks()
     monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg(enabled=False))
 
     def _unexpected(q, texts):
+        """断言关闭精排时不应被调用的替身。
+
+        Args:
+            q: 查询文本。
+            texts: 待处理文本列表。
+        """
         raise AssertionError("关闭精排时不应调用客户端")
 
     monkeypatch.setattr(ent_embedding, "rerank", _unexpected)
@@ -81,11 +115,22 @@ def test_enterprise_rerank_disabled_keeps_fused_order(monkeypatch):
 
 
 def test_enterprise_rerank_floor_and_candidates(monkeypatch):
+    """验证精排只处理配置数量的候选并按阈值过滤。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     chunks, fused = _fused_chunks()
     monkeypatch.setattr(ent_retriever, "load_config", lambda: _Cfg(candidates=2))
     seen = {}
 
     def _fake(q, texts):
+        """替身精排函数，记录文本并返回固定分数。
+
+        Args:
+            q: 查询文本。
+            texts: 待处理文本列表。
+        """
         seen["texts"] = texts
         return [0.9, 0.1]
 
@@ -100,6 +145,8 @@ def test_enterprise_rerank_floor_and_candidates(monkeypatch):
 
 
 class _P:
+    """检索权限主体桩，提供租户与老板标志。"""
+
     def __init__(self, boss=True):
         self.tenant_id = "t1"
         self.boss = boss
@@ -112,6 +159,11 @@ def _mk_chunks(specs):
 
 
 def _mk_allowed(ids):
+    """构造允许访问的文档映射。
+
+    Args:
+        ids: 标识集合。
+    """
     return {d: {"id": d, "acl_version": 1, "title": f"文档{d}", "level": 1,
                 "node_id": "n1", "ai_allowed": True} for d in ids}
 
@@ -166,6 +218,12 @@ def test_rerank_includes_document_title(monkeypatch):
     captured = {}
 
     def _fake_rerank(q, texts):
+        """替身精排函数，记录文本并返回固定分数。
+
+        Args:
+            q: 查询文本。
+            texts: 待处理文本列表。
+        """
         captured["texts"] = list(texts)
         return [0.9, 0.2]
 
@@ -222,12 +280,28 @@ def test_search_documents_fast_path_runs_hyde_pg_ann_and_title_rerank(monkeypatc
     monkeypatch.setattr(ent_embedding, "encode_query", lambda q: np.ones((1, 512), dtype="float32"))
 
     def _fake_pg_ann(conn, tid, allowed_ids, vec, size=200):
+        """替身 PG 向量检索，按向量首值决定是否返回 HyDE 命中。
+
+        Args:
+            conn: 数据库连接。
+            tid: 租户标识。
+            allowed_ids: 允许访问的文档标识集合。
+            vec: 查询向量。
+            size: 返回数量上限。
+        """
         ann_calls.append(float(vec[0]))
         return {"c_hyde": 1} if float(vec[0]) > 1.5 else {}
 
     monkeypatch.setattr(ent_retriever, "_pg_ann", _fake_pg_ann)
 
     def _fake_fetch_all(conn, sql, params=()):
+        """替身 SQL 查询，按语句返回切片或空结果。
+
+        Args:
+            conn: 数据库连接。
+            sql: 要执行的 SQL 语句。
+            params: SQL 绑定参数。
+        """
         if "FROM chunks" in sql:
             return chunks
         return []

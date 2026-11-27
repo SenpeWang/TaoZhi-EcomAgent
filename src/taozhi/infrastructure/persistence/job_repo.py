@@ -270,6 +270,14 @@ def expire_stale_reviews(conn: Any = None) -> int:
         return 0
 
     def _expire(c: Any) -> int:
+        """在给定连接内关闭超期未审核任务并补记事件。
+
+        Args:
+            c: 数据库连接。
+
+        Returns:
+            被关闭的任务数量。
+        """
         stale = fetch_all(
             c,
             "UPDATE jobs SET state='cancelled',error='审核等待超时，任务已自动关闭',stage='审核已超时关闭',finished_at=now(),lease_until=NULL "

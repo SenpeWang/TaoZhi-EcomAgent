@@ -18,6 +18,14 @@ _RAG_SUITES = ("rag_core", "rag_adversarial")
 
 
 def _read_json(path: Path) -> dict:
+    """读取报告 JSON 对象，结构非法时抛出 ValueError。
+
+    Args:
+        path: 报告文件路径。
+
+    Returns:
+        解析后的报告对象。
+    """
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"报告内容必须是 JSON 对象：{path.name}")

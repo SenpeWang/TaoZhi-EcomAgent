@@ -18,6 +18,13 @@ from evals.sync_phoenix import (
 @pytest.mark.parametrize(("version", "mode"), [(REPORT_SCHEMA_VERSION - 1, "live"),
                                                 (REPORT_SCHEMA_VERSION, "synthetic_trace_regrade")])
 def test_agent_export_rejects_unsupported_reports_before_writing(tmp_path, version, mode):
+    """验证不支持的报告格式在写入前被拒绝。
+
+    Args:
+        tmp_path: pytest 提供的临时目录路径夹具。
+        version: ``version`` 参数化取值。
+        mode: ``mode`` 参数化取值。
+    """
     path = tmp_path / "report.json"
     path.write_text(json.dumps({"schema_version": version, "mode": mode}))
     client = Mock()
@@ -27,7 +34,14 @@ def test_agent_export_rejects_unsupported_reports_before_writing(tmp_path, versi
 
 
 def test_agent_export_resumes_missing_annotations_without_creating_runs(tmp_path):
+    """验证导出补写缺失标注时不重复创建运行。
+
+    Args:
+        tmp_path: pytest 提供的临时目录路径夹具。
+    """
     class Dataset(list):
+        """模拟 Phoenix 数据集对象的桩类。"""
+
         id = "dataset"
 
     case_id = "AGENT-WEB-003"
@@ -52,6 +66,7 @@ def test_agent_export_resumes_missing_annotations_without_creating_runs(tmp_path
 
 
 def test_case_to_example_splits_three_parts():
+    """验证用例转换为输入、输出与元数据三部分。"""
     case = {
         "case_id": "GEN-X-001", "question": "LX-21 功率？", "turns": [],
         "test_identity": {"logical_id": "SYN_A_STAFF001"},
@@ -72,6 +87,7 @@ def test_case_to_example_splits_three_parts():
 
 
 def test_collect_results_merges_behavior_and_retrieval():
+    """验证结果收集合并行为与检索指标。"""
     report = {
         "behavior": {"detail": [{
             "id": "C1", "pass": True, "why": "有据",
@@ -98,6 +114,7 @@ def test_collect_results_merges_behavior_and_retrieval():
 
 
 def test_collect_results_failure_labels():
+    """验证失败结果映射为对应失败标签。"""
     report = {"behavior": {"detail": [{
         "id": "C2", "pass": False, "why": "答非所问",
         "verdict": {"pass": False, "faithful": False, "relevant": False, "abstain": True},
@@ -111,6 +128,7 @@ def test_collect_results_failure_labels():
 
 
 def test_collect_results_skips_entries_without_id():
+    """验证缺少标识的条目被跳过。"""
     report = {"behavior": {"detail": [{"pass": True}, {"id": "", "pass": True}]}}
     assert collect_results(report) == {}
 
@@ -127,6 +145,7 @@ def test_collect_results_ignores_adversarial_layer():
 
 
 def test_collect_results_on_empty_report():
+    """验证空报告返回空结果集。"""
     assert collect_results({}) == {}
 
 
@@ -159,6 +178,7 @@ def test_apply_behavior_and_retrieval_share_one_slot():
 
 
 def test_apply_helpers_ignore_records_without_id():
+    """验证缺少标识时辅助函数不写入。"""
     res: dict = {}
     apply_behavior(res, {"pass": True})
     apply_retrieval(res, {"metrics": {"hit@8": 1.0}})
@@ -181,14 +201,28 @@ def test_log_case_treats_409_as_already_logged():
     去重失败 → 重推 → 409 → 整个跟随进程退出，界面上不再更新。
     """
     class Conflict(Exception):
+        """模拟 Phoenix 服务端 409 冲突的异常。"""
+
         def __init__(self):
             self.response = type("R", (), {"status_code": 409})()
 
     class Experiments:
+        """模拟 Phoenix 实验接口，冲突时抛出异常。"""
+
         def log_run(self, **kw):
+            """记录运行前抛出 409 冲突。
+
+            Args:
+                kw: 附加关键字参数。
+            """
             raise Conflict()
 
         def log_evaluation(self, **kw):
+            """409 之后不应继续写评估，直接断言失败。
+
+            Args:
+                kw: 附加关键字参数。
+            """
             raise AssertionError("409 之后不该继续写 evaluation")
 
     client = type("C", (), {"experiments": Experiments()})()

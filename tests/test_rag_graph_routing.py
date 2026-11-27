@@ -15,6 +15,14 @@ from taozhi.infrastructure.persistence.database import database_connection
 
 
 def _document(chunk_id="primary", *, allowed=True, score=0.1, rerank_score=None):
+    """构造检索命中文档字典。
+
+    Args:
+        chunk_id: 切片标识。
+        allowed: 是否允许 AI 使用。
+        score: 融合检索分数。
+        rerank_score: 精排分数。
+    """
     return dict(kind="document", document_id=chunk_id, chunk_id=chunk_id, version=1, acl_version=1,
                 tenant_id="tenant", title="规格表", quote="型号甲", level=1, ai_allowed=allowed,
                 score=score, rerank_score=rerank_score, page=1)
@@ -41,6 +49,7 @@ def rag(monkeypatch):
     monkeypatch.setattr(retrieval, "extract_search_keyword", lambda query: query)
 
     def run():
+        """运行真实 RAG 编译图并收集状态更新。"""
         graph = workflow.build_rag_workflow(InMemorySaver())
         config = {"configurable": {"thread_id": "job:1"}}
         updates = list(graph.stream({"job_id": "job", "run_version": 1}, config, stream_mode="updates"))
@@ -50,6 +59,11 @@ def rag(monkeypatch):
 
 
 def test_sufficient_evidence_skips_retry_and_handles_missing_model(rag):
+    """验证证据充分时跳过补查，并在模型未配置时如实标注缺失。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+    """
     updates, state = rag.run()
     assert list(updates) == ["analyze_question", "retrieve_documents", "prepare_context", "extract_claims", "verify_claims", "compose_answer"]
     assert [change["phase"] for change in updates.values()] == [
@@ -69,6 +83,14 @@ def test_sufficient_evidence_skips_retry_and_handles_missing_model(rag):
     ("帮我上网看看本店保修多久？", True, "insufficient_evidence"),
 ])
 def test_empty_knowledge_base_keeps_public_definitions_separate(rag, question, allow, basis):
+    """验证空知识库下公开定义与内部结论分离，硬阻断状态正确。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+        question: ``question`` 参数化取值。
+        allow: ``allow`` 参数化取值。
+        basis: ``basis`` 参数化取值。
+    """
     rag.job.update(question=question, payload={"allow_public_reference": allow, "require_review": True})
     rag.search.return_value = []
     updates, state = rag.run()
@@ -81,6 +103,12 @@ def test_empty_knowledge_base_keeps_public_definitions_separate(rag, question, a
 
 
 def test_live_values_require_the_matching_business_field(rag, monkeypatch):
+    """验证实时库存与价格只回答对应业务字段，未授权字段列入缺失。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     rag.job.update(question="这个商品的实时库存和当前售价？", payload={"sku_id": "SKU-1"})
     source = {"kind": "business", "level": 1}
     record = {"sku_id": "SKU-1", "available": 0, "purchase_cost_minor": 120, "as_of": "2026-01-01"}
@@ -96,6 +124,11 @@ def test_live_values_require_the_matching_business_field(rag, monkeypatch):
 
 
 def test_current_order_status_without_identifier_never_uses_documents(rag):
+    """验证查询订单状态缺少编号时直接要求单号，不检索文档。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+    """
     rag.job.update(question="帮我查订单状态", payload={"allow_public_reference": True})
     _, state = rag.run()
     assert state["answer_basis"] == "insufficient_evidence" and "订单编号" in state["answer"]
@@ -113,6 +146,14 @@ def test_current_order_status_without_identifier_never_uses_documents(rag):
     ("这款商品的供应商报价为多少，采购价格是多少？", "报价单"),
 ])
 def test_current_snapshot_cannot_replace_historical_forecast_or_special_price(rag, monkeypatch, question, reason):
+    """验证当前业务快照不能替代历史、预测或报价类问题。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+        question: ``question`` 参数化取值。
+        reason: ``reason`` 参数化取值。
+    """
     rag.job.update(question=question, payload={"sku_id": "SKU-1", "allow_public_reference": True})
     lookup = Mock()
     monkeypatch.setattr(retrieval, "lookup", lookup)
@@ -131,6 +172,14 @@ def test_current_snapshot_cannot_replace_historical_forecast_or_special_price(ra
     ("售后政策如何？", ["售后政策"]),
 ])
 def test_live_price_reports_unanswered_policy_separately(rag, monkeypatch, policy, missing):
+    """验证实时价格回答单独标注未覆盖的售后政策问题。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+        policy: ``policy`` 参数化取值。
+        missing: ``missing`` 参数化取值。
+    """
     rag.job.update(question=f"这款商品现在卖多少钱？{policy}", payload={"sku_id": "SKU-1"})
     record = {"sku_id": "SKU-1", "price_minor": 0, "currency": "CNY", "available": 55}
     snapshot = {"available": True, "record": record, "source": {"kind": "business", "level": 1}}
@@ -148,6 +197,14 @@ def test_live_price_reports_unanswered_policy_separately(rag, monkeypatch, polic
     ("这个商品的保修条件具体有哪些？", {"available": 5}),
 ])
 def test_snapshot_without_responsive_fields_is_not_an_answer(rag, monkeypatch, question, record):
+    """验证快照缺少可回应字段时不当作答案，也不查询业务数据。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+        question: ``question`` 参数化取值。
+        record: ``record`` 参数化取值。
+    """
     rag.job.update(question=question, payload={"sku_id": "SKU-1"})
     rag.search.return_value = []
     snapshot = {"available": True, "record": record, "source": {"kind": "business", "level": 1}}
@@ -160,6 +217,11 @@ def test_snapshot_without_responsive_fields_is_not_an_answer(rag, monkeypatch, q
 
 
 def test_manual_excerpt_retains_late_eligibility_conditions(rag):
+    """验证人工原文摘录保留后置的适用条件。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+    """
     rag.job.update(question="保修条件是什么？", payload={"allow_external": False})
     text = "保修规定。" + "请核对购买凭证。" * 72 + "仅限直营渠道，第三方店铺除外。"
     rag.search.return_value = [{**_document(), "quote": text}]
@@ -172,13 +234,37 @@ def test_manual_excerpt_retains_late_eligibility_conditions(rag):
     (False, 0.01, 0.9, "retry_weak_evidence"),
 ])
 def test_retry_merges_new_evidence_and_accounts_for_hyde_once(rag, monkeypatch, adaptive, score, rerank, reason):
+    """验证低置信补查合并新证据，且 HyDE 只计一次用量。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+        adaptive: ``adaptive`` 参数化取值。
+        score: ``score`` 参数化取值。
+        rerank: ``rerank`` 参数化取值。
+        reason: ``reason`` 参数化取值。
+    """
     rag.config.adaptive_hyde = adaptive
     first = _document(score=score, rerank_score=rerank)
     hits = [[first], [first, _document("supplement")]]
     def search(*_, trace_out, **kwargs):
+        """替身检索函数，返回预设命中并写入检索计时。
+
+        Args:
+            _: 被忽略的位置参数。
+            kwargs: 关键字参数。
+            trace_out: 追踪计时输出字典。
+        """
         trace_out.update(embed_ms=3, pg_ann_ms=4, hyde_ann_ms=1, es_fallback=True)
         return hits.pop(0)
     def hyde(*_, trace_out, **kwargs):
+        """替身 HyDE 函数，写入改写耗时与 token 用量。
+
+        Args:
+            _: 被忽略的位置参数。
+            kwargs: 关键字参数。
+            trace_out: 追踪计时输出字典。
+        """
         trace_out.update(elapsed_ms=4, used=True, llm_attempts=1, total_tokens=11)
         return object()
     rag.search.side_effect = search
@@ -208,6 +294,17 @@ def test_retry_merges_new_evidence_and_accounts_for_hyde_once(rag, monkeypatch, 
     (True, True, "finance", "no_finance_evidence", True, False),
 ])
 def test_no_model_routes_keep_review_and_publish_contract(rag, has_evidence, allow_external, role, reason, hard, review):
+    """验证无模型路由仍保持复核、硬阻断与发布契约。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+        has_evidence: ``has_evidence`` 参数化取值。
+        allow_external: ``allow_external`` 参数化取值。
+        role: ``role`` 参数化取值。
+        reason: ``reason`` 参数化取值。
+        hard: ``hard`` 参数化取值。
+        review: ``review`` 参数化取值。
+    """
     rag.job["question"] = "商品背板颜色是什么？"
     rag.job["payload"].update(allow_external=allow_external, require_review=True)
     rag.search.return_value = [{**_document(), "quote": "商品背板颜色为黑色。"}] if has_evidence else []
@@ -228,6 +325,12 @@ def test_no_model_routes_keep_review_and_publish_contract(rag, has_evidence, all
 
 @pytest.mark.parametrize("allow_external", [True, False])
 def test_model_free_graph_shows_only_applicable_manual_excerpts(rag, allow_external):
+    """验证无模型图只展示适用的人工原文摘录并正确引用。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+        allow_external: ``allow_external`` 参数化取值。
+    """
     rag.job.update(question="MC-500 的切幅是多少？", payload={"allow_external": allow_external, "require_review": True})
     rag.search.return_value = [
         {**_document("other-model"), "quote": "MC-501 切幅为 220mm。"},
@@ -243,6 +346,12 @@ def test_model_free_graph_shows_only_applicable_manual_excerpts(rag, allow_exter
 
 
 def test_authorized_business_snapshot_is_evidence_with_no_documents(rag, monkeypatch):
+    """验证授权业务快照可作为证据，无需文档且不泄漏敏感字段。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     rag.job["payload"].update(sku_id="test-item", require_review=True)
     rag.search.return_value = []
     source = {"kind": "business", "level": 1}
@@ -257,6 +366,14 @@ def test_authorized_business_snapshot_is_evidence_with_no_documents(rag, monkeyp
 
 @pytest.mark.parametrize("allow_external,input_level", [(False, 1), (True, 3)])
 def test_followup_pins_previous_question_and_keeps_its_external_policy(rag, monkeypatch, allow_external, input_level):
+    """验证追问锁定上一问并沿用其外部处理策略。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+        allow_external: ``allow_external`` 参数化取值。
+        input_level: ``input_level`` 参数化取值。
+    """
     rag.job["question"] = "它的规格呢"
     previous = dict(id="prior", question="合成内部提问", allow_external=allow_external, input_level=input_level)
     references = Mock(return_value=previous)
@@ -270,6 +387,12 @@ def test_followup_pins_previous_question_and_keeps_its_external_policy(rag, monk
 
 
 def test_retained_conversation_source_checks_external_permission(rag, monkeypatch):
+    """验证沿用会话来源前重新校验外部处理权限。
+
+    Args:
+        rag: 运行真实编译图与检查点、仅替换数据库/检索/模型依赖的 RAG 工作流夹具。
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     previous = {"kind": "metric", "metric_id": "internal", "tenant_id": "tenant"}
     monkeypatch.setattr(retrieval, "get_followup_context", lambda *_, **kw: ([], [previous]))
     check = Mock(return_value=False)
@@ -309,6 +432,13 @@ def test_postgres_previous_question_respects_owner_tenant_conversation_and_order
 
         current_principal = SimpleNamespace(id="u", tenant_id="t", boss=False)
         def fetch_chunk(_conn, _sql, params):
+            """替身切片读取函数，返回合成切片内容。
+
+            Args:
+                _conn: 被忽略的数据库连接。
+                _sql: 被忽略的 SQL 语句。
+                params: SQL 绑定参数。
+            """
             chunk_id = params[1]
             return {**_document(chunk_id), "id": chunk_id, "text": "合成资料", "node_id": "team"}
         monkeypatch.setattr(memory_service, "fetch_one", fetch_chunk)

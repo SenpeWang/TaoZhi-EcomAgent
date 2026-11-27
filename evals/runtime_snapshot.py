@@ -84,6 +84,14 @@ def load_descriptor(version: str | None = None) -> dict:
 
 
 def _sha256_file(path: Path) -> str:
+    """计算文件字节摘要。
+
+    Args:
+        path: 文件路径。
+
+    Returns:
+        十六进制 sha256。
+    """
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 

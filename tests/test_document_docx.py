@@ -8,6 +8,7 @@ from taozhi.infrastructure.knowledge.docx_html import render_docx_html
 
 
 def _docx_bytes() -> bytes:
+    """构造含页眉与标题的 DOCX 字节，供文档解析测试使用。"""
     document = Document()
     document.sections[0].header.paragraphs[0].text = "内部资料"
     document.add_heading("售后政策", level=1)

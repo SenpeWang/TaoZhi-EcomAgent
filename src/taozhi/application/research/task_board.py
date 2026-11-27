@@ -81,6 +81,17 @@ class TaskBoard:
         result: dict[str, Any] | None = None,
         error: str = "",
     ) -> dict[str, Any] | None:
+        """查找任务行并按指定终态收尾。
+
+        Args:
+            task_key: 任务键。
+            status: 终态（done/failed/blocked）。
+            result: 任务结果。
+            error: 失败原因。
+
+        Returns:
+            更新后的任务行；任务不存在时返回 None。
+        """
         with database_connection() as conn:
             row = research_task_repo.find_task(
                 conn, job_id=self.job_id, run_version=self.run_version, task_key=task_key

@@ -42,6 +42,11 @@ def pick_node(conn, tenant: str, kind: str) -> str:
 
 
 def main() -> int:
+    """按账号蓝图创建或补齐管理员、组长与员工账号，并把凭据写入运行时目录。
+
+    Returns:
+        0 表示成功，1 表示未找到企业租户。
+    """
     ap = argparse.ArgumentParser(description="创建企业标准角色真实账号")
     ap.add_argument("--reset", action="store_true", help="已存在账号也重置口令")
     args = ap.parse_args()

@@ -59,6 +59,15 @@ def blind_sheet(path: Path, cases: list[dict]) -> dict:
 
 
 def _labels(value: object, dims: set[str]) -> dict:
+    """校验人工标注标签与用例适用维度一致。
+
+    Args:
+        value: 待校验的标签映射。
+        dims: 该用例适用的维度集合。
+
+    Returns:
+        校验通过的标签映射。
+    """
     if not isinstance(value, dict) or set(value) != dims:
         raise ValueError("标签必须与该用例的适用维度一致")
     if any(label is not None and type(label) is not bool for label in value.values()):
@@ -101,6 +110,15 @@ def model_sheet(sheet: dict, client) -> dict:
 
 
 def _review_rows(sheet: dict, kind: str) -> dict:
+    """读取评审表并按用例编号建立索引。
+
+    Args:
+        sheet: 评审表对象。
+        kind: 评审表类型。
+
+    Returns:
+        case_id 到评审行的映射。
+    """
     if not isinstance(sheet, dict) or sheet.get("kind") != kind or sheet.get("source") != "synthetic":
         raise ValueError("评审表类型或来源不匹配")
     if type(sheet.get("schema_version")) is not int or sheet["schema_version"] != 1:
@@ -186,6 +204,11 @@ def main(argv: list[str] | None = None) -> int:
             models = set()
 
             def record_model(event: dict) -> None:
+                """记录模型评审中实际成功调用的模型名。
+
+                Args:
+                    event: 模型调用事件。
+                """
                 if event.get("outcome") == "ok" and isinstance(event.get("model"), str):
                     models.add(event["model"])
 

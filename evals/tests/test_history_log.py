@@ -7,6 +7,11 @@ from evals.history_log import append_agent_eval_record, append_rag_eval_record
 
 
 def test_append_rag_eval_record_preserves_existing_content(tmp_path: Path) -> None:
+    """验证追加 RAG 评测记录保留原有内容并写入关键指标。
+
+    Args:
+        tmp_path: pytest 提供的临时目录路径夹具。
+    """
     log_file = tmp_path / "测评记录.md"
     original = "# 历史评测台账\n\n## 里程碑一：Base\n- 保留的历史数据\n"
     log_file.write_text(original, encoding="utf-8")
@@ -31,6 +36,11 @@ def test_append_rag_eval_record_preserves_existing_content(tmp_path: Path) -> No
 
 
 def test_append_agent_eval_record_accumulates_multiple_runs(tmp_path: Path) -> None:
+    """验证多次追加 Agent 评测记录会累积且保留历史。
+
+    Args:
+        tmp_path: pytest 提供的临时目录路径夹具。
+    """
     log_file = tmp_path / "agent_测评记录.md"
     log_file.write_text("# Agent 历史记录\n", encoding="utf-8")
 

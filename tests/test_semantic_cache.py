@@ -168,6 +168,11 @@ def test_cross_entity_query_does_not_collide(cache):
 
 
 def test_policy_cache_preserves_channel_and_time_conditions(cache):
+    """验证语义缓存区分渠道与时间条件，不跨条件命中。
+
+    Args:
+        cache: 语义缓存夹具，用固定向量模拟相似命中并暴露脱敏差异。
+    """
     source = [{"kind": "document", "document_id": "policy"}]
     cache.put("t1", "本店线上渠道的保修期？", "以所引线上条款为准", [], source, redacted=True)
     assert cache.get("t1", "本店线下渠道的保修期？") is None

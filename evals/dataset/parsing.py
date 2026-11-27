@@ -18,6 +18,16 @@ CJK = "china-s"
 
 def render_pdf(path: Path, title: str, rows, header: str = "", footer: str = "",
                pages: int = 1) -> None:
+    """渲染分页 PDF 解析夹具。
+
+    Args:
+        path: 文件路径。
+        title: 文档标题。
+        rows: 页面行内容（文本或表格行）。
+        header: 页眉文本。
+        footer: 页脚文本。
+        pages: 页数。
+    """
     import pymupdf
 
     doc = pymupdf.open()
@@ -41,6 +51,16 @@ def render_pdf(path: Path, title: str, rows, header: str = "", footer: str = "",
 
 def render_docx(path: Path, title: str, rows, header: str = "", footer: str = "",
                 pages: int = 1) -> None:
+    """渲染 DOCX 解析夹具。
+
+    Args:
+        path: 文件路径。
+        title: 文档标题。
+        rows: 页面行内容（文本或表格行）。
+        header: 页眉文本。
+        footer: 页脚文本。
+        pages: 页数。
+    """
     from docx import Document
 
     d = Document()

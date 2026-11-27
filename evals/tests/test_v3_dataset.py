@@ -25,10 +25,16 @@ ANTHROPIC_LINKS = (
 
 
 def sha256(path: Path) -> str:
+    """计算文件内容的 SHA-256 摘要。
+
+    Args:
+        path: 待计算的文件路径。
+    """
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def test_descriptors_are_split_by_system():
+    """验证数据集描述按 RAG 与 Agent 拆分且摘要一致。"""
     rag = json.loads((RAG / "dataset.json").read_text(encoding="utf-8"))
     agent = json.loads((AGENT / "dataset.json").read_text(encoding="utf-8"))
     assert rag["version"] == "rag_v3_20261124"
@@ -45,6 +51,7 @@ def test_descriptors_are_split_by_system():
 
 
 def test_rag_v3_counts_and_contracts():
+    """验证 RAG v3 用例数量、能力分布与契约。"""
     cases = [json.loads(line) for line in (RAG / "cases.jsonl").read_text(encoding="utf-8").splitlines()
              if line.strip()]
     assert len(cases) == 540
@@ -66,6 +73,7 @@ def test_rag_v3_counts_and_contracts():
 
 
 def test_rag_redteam_contract():
+    """验证 RAG 红队用例数量、能力与判定配置。"""
     cases = json.loads((RAG / "redteam.json").read_text(encoding="utf-8"))["cases"]
     assert len(cases) == 60
     for case in cases:
@@ -82,6 +90,7 @@ def test_rag_redteam_contract():
 
 
 def test_agent_v3_counts_and_contracts():
+    """验证 Agent v3 用例、观测与反例数量及能力契约。"""
     cases = json.loads((AGENT / "research_cases.json").read_text(encoding="utf-8"))["cases"]
     observations = json.loads((AGENT / "research_replay.json").read_text(encoding="utf-8"))["observations"]
     counterexamples = json.loads(
@@ -104,6 +113,7 @@ def test_agent_v3_counts_and_contracts():
 
 
 def test_readmes_carry_sources_and_naming_registry():
+    """验证 README 载明参考来源、子类登记与合成说明。"""
     for relative, capabilities, subcategories in (
             (RAG / "README.md", naming.RAG_CAPABILITIES, naming.RAG_SUBCATEGORIES),
             (AGENT / "README.md", naming.AGENT_CAPABILITIES, naming.AGENT_SUBCATEGORIES)):
@@ -121,6 +131,7 @@ def test_readmes_carry_sources_and_naming_registry():
 
 
 def test_readme_covers_every_registered_source_link():
+    """验证 README 覆盖全部登记来源链接。"""
     for readme, subcategories in ((RAG / "README.md", naming.RAG_SUBCATEGORIES),
                                   (AGENT / "README.md", naming.AGENT_SUBCATEGORIES)):
         text = readme.read_text(encoding="utf-8")
@@ -131,6 +142,7 @@ def test_readme_covers_every_registered_source_link():
 
 
 def test_rag_v3_generator_snapshot_matches_committed_files():
+    """验证 RAG v3 生成器快照与已提交文件一致。"""
     import os
     import subprocess
     import sys
@@ -145,6 +157,7 @@ def test_rag_v3_generator_snapshot_matches_committed_files():
 
 
 def test_agent_v3_generator_snapshot_matches_committed_files():
+    """验证 Agent v3 生成器快照与已提交文件一致。"""
     import os
     import subprocess
     import sys
@@ -162,6 +175,7 @@ def test_agent_v3_generator_snapshot_matches_committed_files():
 
 
 def test_statistics_helpers():
+    """验证 pass@k、置信区间等统计辅助函数。"""
     assert pass_at_k([1], [1], 1) == 1.0
     assert pass_at_k([0], [1], 1) == 0.0
     assert pass_pow_k_estimate([1, 0], [1, 1], 1) == 0.5
@@ -171,6 +185,7 @@ def test_statistics_helpers():
 
 
 def test_agent_reliability_pass_at_k_and_pass_pow_k():
+    """验证 Agent 可靠性汇总的 pass@k 与 pass^k 指标。"""
     from evals.agent_eval.runner import _reliability
 
     summary = _reliability({"a": [True, True], "b": [True, False], "c": [False, False]}, 2)
@@ -184,6 +199,11 @@ def test_agent_reliability_pass_at_k_and_pass_pow_k():
 
 
 def test_rag_heldout_is_excluded_unless_requested(monkeypatch):
+    """验证 RAG 留出集默认排除、显式开启才纳入。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     from evals.rag_eval import run as rag_run
 
     monkeypatch.setattr(rag_run, "INCLUDE_HELDOUT", False)
@@ -194,6 +214,7 @@ def test_rag_heldout_is_excluded_unless_requested(monkeypatch):
 
 
 def test_agent_heldout_is_excluded_by_default():
+    """验证 Agent 留出集默认排除。"""
     from evals.agent_eval.runner import filter_heldout
 
     cases = [{"id": "A", "track": "golden"}, {"id": "B", "track": "heldout"}]
@@ -202,6 +223,7 @@ def test_agent_heldout_is_excluded_by_default():
 
 
 def test_rag_descriptor_content_sha_matches_files():
+    """验证 RAG 描述中的内容摘要与文件一致。"""
     descriptor = json.loads((RAG / "dataset.json").read_text(encoding="utf-8"))
     core = descriptor["suites"]["rag_core"]
     adv = descriptor["suites"]["rag_adversarial"]
@@ -210,6 +232,7 @@ def test_rag_descriptor_content_sha_matches_files():
 
 
 def test_seed_spec_matches_dataset_version():
+    """验证数据集版本与种子规范目录对应。"""
     from evals.dataset import seed as seed_module
 
     assert seed_module.spec_dir("rag_v3_20261124").name == "spec_v3"

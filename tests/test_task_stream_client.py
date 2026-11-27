@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 def test_live_result_draft_follows_authorized_run():
+    """验证前端任务流只在授权运行内展示草稿，并正确拼接与回退。"""
     script = """
 import assert from 'node:assert/strict'
 import { openTaskEventStream } from './web/src/shared/taskStream.ts'

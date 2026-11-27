@@ -6,6 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_DIRECTORIES = {".venv", "node_modules", ".git"}
 
 def clean_project_cache():
+    """递归清理项目内的 __pycache__ 与 .pytest_cache 缓存目录。"""
     import os
     removed = 0
     for current, directories, _ in os.walk(PROJECT_ROOT, topdown=True):

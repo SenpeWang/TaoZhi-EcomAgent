@@ -55,6 +55,7 @@ def collect_candidates(pages: Iterable[dict]) -> dict:
 
 
 def main() -> None:
+    """命令行入口：汇总同租户活动页中的反馈候选并输出 JSON。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pages", type=Path, nargs="+", help="从同一租户授权导出的轨迹活动页 JSON 文件")
     args = parser.parse_args()

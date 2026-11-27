@@ -11,9 +11,8 @@ from taozhi.domain.entities import Principal
 from taozhi.config import ROOT
 from taozhi.domain import evaluation_metrics
 from taozhi.domain.errors import Denied
-
-REAL_EVAL_MODES: tuple[str, ...] = ("live",)
 from taozhi.domain.evaluation_comparison import pair_case_results
+from taozhi.domain.evaluation_modes import REAL_EVAL_MODES
 from taozhi.domain.roles import ROLE_LEVEL_BOSS
 from taozhi.infrastructure.knowledge.storage import get_blob_store
 from taozhi.infrastructure.persistence import evaluation_repo, job_repo
@@ -31,7 +30,20 @@ def _require_eval_writer(p: Principal) -> None:
 
 
 def _require_run(conn, p: Principal, run_id: str) -> dict:
-    row = evaluation_repo.run(conn, p.tenant_id, visible_owner_id(p), run_id=run_id)
+    """按可见范围读取批次，不存在时返回 404。
+
+    Args:
+        conn: 数据库连接。
+        p: 当前主体。
+        run_id: 批次编号。
+
+    Returns:
+        已补齐可比性标记与标准指标摘要的批次行。
+
+    Raises:
+        Denied: 批次不存在或不可见时抛出。
+    """
+    row = evaluation_repo.get_run(conn, p.tenant_id, visible_owner_id(p), run_id=run_id)
     if row is None:
         raise Denied("评测批次不存在", "NOT_FOUND", 404)
     return _decorate(row)
@@ -83,9 +95,9 @@ def list_runs(p: Principal, *, owner_id: str | None, eval_kind: str | None, mode
 
 def real_modes(metadata: dict | None) -> list[str]:
     """返回数据集可用于评测中心真实结果的执行方式（仅 live）。"""
-    declared = (metadata or {}).get("modes") or ["live"]
+    declared = (metadata or {}).get("modes") or list(REAL_EVAL_MODES)
     modes = [mode for mode in declared if mode in REAL_EVAL_MODES]
-    return modes or ["live"]
+    return modes or list(REAL_EVAL_MODES)
 
 
 def list_datasets(p: Principal, *, eval_kind: str | None = None, version: str | None = None,
@@ -158,7 +170,8 @@ def get_run(p: Principal, run_id: str) -> dict:
     with database_connection() as conn:
         current = _require_run(conn, p, run_id)
         digest = current["baseline_sha256"]
-        baseline = evaluation_repo.run(conn, p.tenant_id, visible_owner_id(p), report_digest=digest) if digest else None
+        baseline = evaluation_repo.get_run(conn, p.tenant_id, visible_owner_id(p),
+                                           report_digest=digest) if digest else None
         comparison = _compare(conn, p.tenant_id, current, _decorate(baseline) if baseline else None)
     snapshot = None
     if current.get("dataset_snapshot_id"):
@@ -173,15 +186,12 @@ def get_run(p: Principal, run_id: str) -> dict:
     }
 
 
-def _report_key(run: dict) -> str:
-    """原始报告在对象存储中的键：按租户、评测类型、数据集与批次隔离。"""
-    return (f"evaluations/{run['eval_kind']}/{run.get('dataset_id') or 'unknown'}/"
-            f"{run['run_id']}/report.json")
-
-
 def store_report(conn, tenant_id: str, run_id: str, *, eval_kind: str, dataset_id: str | None,
                  payload: bytes) -> bool:
-    """把原始报告写入对象存储并登记校验摘要；重复写入内容不一致时拒绝。"""
+    """把原始报告写入对象存储并登记校验摘要；重复写入内容不一致时拒绝。
+
+    对象键按租户、评测类型、数据集与批次隔离，同一批次报告内容不可覆盖。
+    """
     if len(payload) > REPORT_MAX_BYTES:
         raise ValueError("原始报告超过单份大小上限，拒绝入库")
     key = (f"evaluations/{eval_kind}/{dataset_id or 'unknown'}/{run_id}/report.json")
@@ -293,6 +303,19 @@ def list_cases(p: Principal, run_id: str, *, status: str | None, suite: str | No
 
 
 def get_case(p: Principal, run_id: str, case_id: str) -> dict:
+    """读取单个用例的判定详情、来源链路与快照用例原文。
+
+    Args:
+        p: 当前主体。
+        run_id: 批次编号。
+        case_id: 用例编号。
+
+    Returns:
+        含预期、观测、判定、trace 关联与数据集快照用例的详情。
+
+    Raises:
+        Denied: 批次或用例不存在时抛出。
+    """
     with database_connection() as conn:
         current = _require_run(conn, p, run_id)
         row = evaluation_repo.case_detail(conn, p.tenant_id, run_id, case_id)
@@ -354,7 +377,7 @@ def trigger(p: Principal, payload: dict) -> dict:
         snapshot = snapshots.ensure_snapshot(
             conn, p.tenant_id, payload["eval_kind"], dataset["version"],
             dataset["dataset_id"], p.id)
-        run_seq = snapshots.next_run_seq(
+        run_seq = evaluation_repo.next_run_seq(
             conn, p.tenant_id, dataset["dataset_id"], payload["eval_kind"],
             payload["scope"], payload["mode"])
         job_payload = {
@@ -379,6 +402,19 @@ def trigger(p: Principal, payload: dict) -> dict:
 
 
 def _require_job(p: Principal, conn, job_id: str) -> dict:
+    """读取当前主体有权查看的评测任务。
+
+    Args:
+        p: 当前主体。
+        conn: 数据库连接。
+        job_id: 任务编号。
+
+    Returns:
+        评测任务行。
+
+    Raises:
+        Denied: 任务不存在、类型不符或无权查看时抛出。
+    """
     job = job_repo.get_job(conn, p.tenant_id, job_id)
     if job is None or job["kind"] != "evaluation":
         raise Denied("评测任务不存在", "NOT_FOUND", 404)

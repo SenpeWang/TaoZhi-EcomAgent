@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import re
 import io
 import shutil
 import subprocess
@@ -128,6 +129,69 @@ def test_python_modules_have_docstrings():
     assert not missing, "Python 模块缺少 docstring：" + "、".join(missing)
 
 
+def _missing_docstrings(name: str, tree: ast.AST) -> list[str]:
+    """返回文件内缺 docstring 的类与函数位置。"""
+    missing = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("__") and node.name.endswith("__"):
+                continue
+            if not ast.get_docstring(node):
+                missing.append(f"{name}:{node.lineno}:{node.name}")
+        elif isinstance(node, ast.ClassDef):
+            if not ast.get_docstring(node):
+                missing.append(f"{name}:{node.lineno}:{node.name}")
+    return missing
+
+
+def test_python_class_and_function_docstrings():
+    """Python 类与函数必须写 docstring，禁止以行内注释代替说明。"""
+    tracked = subprocess.check_output(
+        ["git", "ls-files", "-z", "*.py"], cwd=PROJECT,
+    ).decode().split("\0")
+    missing = []
+    for name in tracked:
+        if not name or name.startswith("data/"):
+            continue
+        try:
+            tree = ast.parse((PROJECT / name).read_text(encoding="utf-8"))
+        except SyntaxError:
+            missing.append(f"{name}:语法错误")
+            continue
+        missing.extend(_missing_docstrings(name, tree))
+    assert not missing, "Python 类/函数缺少 docstring：" + "、".join(missing[:20])
+
+
+def _jsdoc_precedes(lines: list[str], index: int) -> bool:
+    """判断某行声明前最近的空行/属性之间是否有 JSDoc 结束标记。"""
+    cursor = index - 1
+    while cursor >= 0 and not lines[cursor].strip():
+        cursor -= 1
+    return cursor >= 0 and lines[cursor].strip().endswith("*/")
+
+
+def test_frontend_exports_have_jsdoc():
+    """前端导出的 interface/type/function/const 必须有 JSDoc 说明。"""
+    tracked = subprocess.check_output(
+        ["git", "ls-files", "-z", "--", "web/src", "web/*.ts", "web/*.js", "web/*.cjs"],
+        cwd=PROJECT,
+    ).decode().split("\0")
+    suffixes = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue")
+    pattern = re.compile(
+        r"^\s*export\s+(?:async\s+)?(?:default\s+)?(?:function|const|class|interface|type)\s+"
+        r"([A-Za-z0-9_$]+)")
+    missing = []
+    for name in tracked:
+        if not name or not name.endswith(suffixes):
+            continue
+        lines = (PROJECT / name).read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            match = pattern.match(line)
+            if match and not _jsdoc_precedes(lines, index):
+                missing.append(f"{name}:{index + 1}:{match.group(1)}")
+    assert not missing, "前端导出缺少 JSDoc：" + "、".join(missing[:20])
+
+
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
     """用独立合成仓库与真实锁定工具验证门禁，不触碰当前项目索引。"""
@@ -146,6 +210,11 @@ def workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(development, "ROOT", root)
     monkeypatch.setattr(development.repository, "ROOT", root)
     def git(*args):
+        """在合成仓库中执行 Git 命令并返回去空白的标准输出。
+
+        Args:
+            args: 位置参数。
+        """
         return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
     git("init", "-b", "main")
     git("config", "user.name", "Boundary Test")
@@ -163,6 +232,12 @@ def workspace(tmp_path, monkeypatch):
     "revert: 撤销错误的界面改动",
 ])
 def test_valid_messages(workspace, message):
+    """验证符合规范的提交信息能通过门禁检查。
+
+    Args:
+        workspace: 独立的合成 Git 仓库与门禁工具工作区夹具。
+        message: ``message`` 参数化取值。
+    """
     development.check_message(message)
 
 
@@ -171,11 +246,22 @@ def test_valid_messages(workspace, message):
     "feat: " + "中" * 96, "Merge branch main",
 ])
 def test_invalid_messages(workspace, message):
+    """验证缺少中文说明、未知类型或超长的提交信息会被拒绝。
+
+    Args:
+        workspace: 独立的合成 Git 仓库与门禁工具工作区夹具。
+        message: ``message`` 参数化取值。
+    """
     with pytest.raises(RuntimeError, match="中文说明"):
         development.check_message(message)
 
 
 def test_secret_in_message_is_not_echoed(workspace):
+    """验证提交信息中的密钥只报类别、不回显明文。
+
+    Args:
+        workspace: 独立的合成 Git 仓库与门禁工具工作区夹具。
+    """
     secret = "sk-" + "C" * 32
     with pytest.raises(RuntimeError) as error:
         development.check_message("chore: 更新配置\n\n" + secret)
@@ -206,6 +292,11 @@ def test_commit_message_file_remains_data(workspace, monkeypatch):
 
 
 def test_partial_stage_uses_index_and_cleans_snapshot(workspace):
+    """验证部分暂存时按索引内容检查、保留暂存快照并清理临时目录。
+
+    Args:
+        workspace: 独立的合成 Git 仓库与门禁工具工作区夹具。
+    """
     root, git = workspace
     source = root / "web/src/App.vue"
     source.write_text('<script setup lang="ts">const label="中文界面";</script><template><div>{{label}}</div></template>\n')
@@ -222,6 +313,11 @@ def test_partial_stage_uses_index_and_cleans_snapshot(workspace):
 
 
 def test_component_filename_and_declaration(workspace):
+    """验证 Vue 组件文件名须为 PascalCase 且声明方式符合规范。
+
+    Args:
+        workspace: 独立的合成 Git 仓库与门禁工具工作区夹具。
+    """
     root, _ = workspace
     bad = root / "web/src/wrong-name.vue"
     bad.write_text("<template>\n  <div>中文</div>\n</template>\n")
@@ -245,6 +341,12 @@ def test_component_filename_and_declaration(workspace):
     "/** 校验权限。 */\nexport function wrong_name() { return true }\n",
 ])
 def test_key_comment_and_function_naming(workspace, source):
+    """验证前端普通注释与未加 JSDoc 的非规范函数名会被 ESLint 拦截。
+
+    Args:
+        workspace: 独立的合成 Git 仓库与门禁工具工作区夹具。
+        source: ``source`` 参数化取值。
+    """
     root, _ = workspace
     (root / "web/src/permission.ts").write_text(source)
     with pytest.raises(RuntimeError, match="eslint"):
@@ -277,6 +379,11 @@ def test_frontend_modules_do_not_depend_on_their_callers(workspace, folder, depe
 
 
 def test_missing_dependencies_fail_without_install(workspace):
+    """验证缺少前端依赖时直接失败、不擅自安装。
+
+    Args:
+        workspace: 独立的合成 Git 仓库与门禁工具工作区夹具。
+    """
     root, _ = workspace
     (root / "web/node_modules").unlink()
     with pytest.raises(RuntimeError, match="npm ci"):
@@ -284,6 +391,11 @@ def test_missing_dependencies_fail_without_install(workspace):
 
 
 def test_unregistered_and_removed_directory(workspace):
+    """验证未在 STRUCTURE.md 登记的目录与被删除目录都能被检出。
+
+    Args:
+        workspace: 独立的合成 Git 仓库与门禁工具工作区夹具。
+    """
     root, git = workspace
     (root / "extra").mkdir()
     (root / "extra/tool.py").write_text("# 合成代码\n")
@@ -296,6 +408,11 @@ def test_unregistered_and_removed_directory(workspace):
 
 
 def test_private_data_is_blocked_even_when_forced_into_index(workspace):
+    """验证被强制加入索引的私有数据仍会被拦截。
+
+    Args:
+        workspace: 独立的合成 Git 仓库与门禁工具工作区夹具。
+    """
     root, git = workspace
     (root / "node_modules/pkg").mkdir(parents=True)
     (root / "node_modules/pkg/example.md").write_text("测试自行构造的依赖文件\n")
@@ -305,6 +422,11 @@ def test_private_data_is_blocked_even_when_forced_into_index(workspace):
 
 
 def test_range_scans_secret_deleted_in_later_commit(workspace):
+    """验证按提交范围扫描时，后续提交删除的密钥仍会被发现。
+
+    Args:
+        workspace: 独立的合成 Git 仓库与门禁工具工作区夹具。
+    """
     root, git = workspace
     git("commit", "-m", "chore: 初始化合成仓库")
     base = git("rev-parse", "HEAD")

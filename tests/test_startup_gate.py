@@ -34,7 +34,13 @@ def test_wait_retries_until_all_ready() -> None:
     attempts = {"数据库": 0, "向量服务": 0}
 
     def probe_of(name: str):
+        """构造记录尝试次数的就绪探针工厂。
+
+        Args:
+            name: 名称标识。
+        """
         def probe() -> None:
+            """按尝试次数对数据库探针先失败后成功。"""
             attempts[name] += 1
             if name == "数据库" and attempts[name] < 3:
                 raise gate.NotReady("数据库未就绪（OperationalError）")
@@ -44,6 +50,11 @@ def test_wait_retries_until_all_ready() -> None:
     logs: list[str] = []
 
     def sleep(seconds: float) -> None:
+        """推进假时钟。
+
+        Args:
+            seconds: 秒数。
+        """
         clock["now"] += seconds
 
     gate.wait(
@@ -66,9 +77,15 @@ def test_wait_times_out_with_pending_detail() -> None:
     clock = {"now": 0.0}
 
     def stuck() -> None:
+        """模拟 Elasticsearch 始终未就绪的探针。"""
         raise gate.NotReady("Elasticsearch 未就绪（集群 ping 失败）")
 
     def sleep(seconds: float) -> None:
+        """推进假时钟。
+
+        Args:
+            seconds: 秒数。
+        """
         clock["now"] += seconds
 
     try:

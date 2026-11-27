@@ -11,6 +11,7 @@ branch_labels=None
 depends_on=None
 
 def upgrade():
+    """创建商品、SKU、渠道、订单、售后与库存业务表，并写入表注释。"""
     op.execute("COMMENT ON TABLE metrics IS '指标语义层（生产级框架）'")
     op.execute("""CREATE TABLE products(
  id text PRIMARY KEY, tenant_id text NOT NULL, spu_code text NOT NULL,
@@ -65,5 +66,6 @@ def upgrade():
         op.execute(f"COMMENT ON TABLE {t} IS '{note}（scripts/seed_business_data.py 确定性生成，可复现）'")
 
 def downgrade():
+    """按依赖倒序删除全部业务数据表。"""
     for t in ("stock","after_sales","orders","channels","skus","products"):
         op.execute(f"DROP TABLE {t}")

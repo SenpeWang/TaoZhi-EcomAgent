@@ -21,6 +21,14 @@ def _render(template: Optional[str], values: Mapping[str, object]) -> Optional[s
     missing: set[str] = set()
 
     def replace(match: re.Match[str]) -> str:
+        """把单个 ``{{name}}`` 占位符替换为模板变量值。
+
+        Args:
+            match: 正则命中的占位符。
+
+        Returns:
+            变量值字符串；变量缺失时保留原占位符并登记缺失变量名。
+        """
         name = match.group(1)
         if name not in values:
             missing.add(name)

@@ -37,6 +37,14 @@ def rewrite_files(eval_kind: str, files: dict[str, Any]) -> dict[str, Any]:
 
 
 def _old_datasets(conn: Any) -> list[dict]:
+    """列出尚未带 rag_/agent_ 前缀的历史数据集。
+
+    Args:
+        conn: 数据库连接。
+
+    Returns:
+        待迁移的数据集行列表。
+    """
     return evaluation_repo.fetch_all(conn, """
         SELECT * FROM eval_datasets
         WHERE LEFT(version, 4) <> 'rag_' AND LEFT(version, 6) <> 'agent_'
@@ -45,6 +53,15 @@ def _old_datasets(conn: Any) -> list[dict]:
 
 
 def _children(conn: Any, dataset_id: str) -> dict[str, int]:
+    """统计数据集下的批次与基线引用数。
+
+    Args:
+        conn: 数据库连接。
+        dataset_id: 数据集编号。
+
+    Returns:
+        含 runs 与 baselines 计数的字典。
+    """
     runs = evaluation_repo.fetch_one(conn, "SELECT count(*) AS n FROM eval_runs WHERE dataset_id=%s",
                                      (dataset_id,))
     baselines = evaluation_repo.fetch_one(conn, "SELECT count(*) AS n FROM eval_baselines WHERE dataset_id=%s",

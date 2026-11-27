@@ -1,5 +1,8 @@
 import type { ActivityCategory, SpanKind, SpanStatus, TraceRun, TraceSpan } from './types'
 
+/**
+ * 调用节点状态的中文名称映射，用于瀑布图与节点详情展示。
+ */
 export const spanStatusLabels: Record<SpanStatus, string> = {
   running: '执行中',
   ok: '成功',
@@ -7,6 +10,9 @@ export const spanStatusLabels: Record<SpanStatus, string> = {
   interrupted: '已中断',
 }
 
+/**
+ * 调用节点类型的中文名称映射，如模型调用、工具调用、知识检索等。
+ */
 export const spanKindLabels: Record<SpanKind, string> = {
   LLM: '模型调用',
   TOOL: '工具调用',
@@ -18,6 +24,9 @@ export const spanKindLabels: Record<SpanKind, string> = {
   INTERNAL: '内部操作',
 }
 
+/**
+ * 行动分类的中文名称映射，包含上下文处理与权限校验等 SpanKind 之外的扩展分类。
+ */
 export const activityCategoryLabels: Record<ActivityCategory, string> = {
   TOOL: spanKindLabels.TOOL,
   CONTEXT: '上下文处理',
@@ -119,6 +128,9 @@ export interface WaterfallRow {
   duration: number | null
 }
 
+/**
+ * 轨迹分析视图：tree 为父子树，latency 为按耗时排序，issues 为异常节点筛除。
+ */
 export type SpanView = 'tree' | 'latency' | 'issues'
 
 /**

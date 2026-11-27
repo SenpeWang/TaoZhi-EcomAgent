@@ -10,6 +10,8 @@ from taozhi.infrastructure.mcp import remote_search as rs
 
 
 class _Resp:
+    """构造最小 httpx 响应桩。"""
+
     def __init__(self, status_code=200, text="", headers=None, payload=None):
         self.status_code = status_code
         self.text = text
@@ -17,14 +19,18 @@ class _Resp:
         self._payload = payload
 
     def raise_for_status(self):
+        """当状态码不小于 400 时抛出 HTTP 状态异常。"""
         if self.status_code >= 400:
             raise httpx.HTTPStatusError("boom", request=None, response=None)
 
     def json(self):
+        """返回预置的 JSON 载荷。"""
         return self._payload
 
 
 class _Client:
+    """按顺序返回预设响应的 httpx 客户端桩。"""
+
     def __init__(self, responses):
         self._responses = list(responses)
         self.calls = []
@@ -36,6 +42,13 @@ class _Client:
         return False
 
     def post(self, url, json=None, headers=None):
+        """记录请求并返回预设响应。
+
+        Args:
+            url: 请求地址。
+            json: 请求 JSON 载荷。
+            headers: 请求头。
+        """
         self.calls.append((url, json, headers))
         return self._responses.pop(0)
 
@@ -106,7 +119,16 @@ def test_duckduckgo_anti_bot_returns_empty(monkeypatch):
     sw = importlib.import_module("taozhi.core.tools.search_web")
 
     class _AntiBot(_Client):
+        """模拟返回反爬验证页的客户端桩。"""
+
         def post(self, url, data=None, **_kw):
+            """模拟返回反爬验证页的 POST 响应。
+
+            Args:
+                url: 请求地址。
+                data: 请求数据。
+                _kw: 被忽略的关键字参数。
+            """
             return _Resp(status_code=202, text="<html>anomaly</html>")
 
     monkeypatch.setattr(sw.httpx, "Client", lambda **_kw: _AntiBot([]))
@@ -135,6 +157,11 @@ def test_search_web_via_mcp_sends_initialized_notification(monkeypatch):
     holder = {}
 
     def factory(**_kwargs):
+        """替身 httpx.Client 工厂，记录并返回客户端桩。
+
+        Args:
+            _kwargs: 被忽略的关键字参数。
+        """
         client = _Client(responses)
         holder["client"] = client
         return client

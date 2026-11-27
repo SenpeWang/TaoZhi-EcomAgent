@@ -34,6 +34,10 @@ _RUN = """
     WHERE r.tenant_id=%s
 """
 _CASE = "case_id,name,category,suite,status,score,hard_failure"
+_SNAPSHOT_COLUMNS = (
+    "snapshot_id, tenant_id, eval_kind, dataset_version, primary_dataset_id, bundle_sha256, "
+    "case_count, files, metadata, created_at"
+)
 _DATASET_AGG = """
     count(r.run_id) AS batch_count, max(r.created_at) AS last_run_at,
     avg(r.pass_rate) AS avg_pass_rate, max(r.pass_rate) AS best_pass_rate,
@@ -46,6 +50,15 @@ _DATASET_COLUMNS = (
 
 
 def _scope(tenant_id: str, owner_id: str | None) -> tuple[list[str], list]:
+    """构造批次查询的公共 FROM/WHERE 片段与参数。
+
+    Args:
+        tenant_id: 租户编号。
+        owner_id: 发起人编号；None 表示不过滤发起人。
+
+    Returns:
+        (SQL 片段列表, 参数列表) 二元组。
+    """
     clauses, params = [_RUN], [tenant_id]
     if owner_id is not None:
         clauses.append("AND r.owner_id=%s")
@@ -386,8 +399,20 @@ def run_report(conn: Any, tenant_id: str, run_id: str) -> dict | None:
                            "WHERE tenant_id=%s AND run_id=%s", (tenant_id, run_id))
 
 
-def run(conn: Any, tenant_id: str, owner_id: str | None, *, run_id: str | None = None,
-        report_digest: str | None = None) -> dict | None:
+def get_run(conn: Any, tenant_id: str, owner_id: str | None, *, run_id: str | None = None,
+            report_digest: str | None = None) -> dict | None:
+    """按批次编号或报告摘要读取可见范围内的评测批次。
+
+    Args:
+        conn: 数据库连接。
+        tenant_id: 租户编号。
+        owner_id: 可见范围限定的发起人编号；为 None 表示租户内全量。
+        run_id: 批次编号；与 report_digest 二选一。
+        report_digest: 报告摘要，用于按批次自带基线摘要反查基线批次。
+
+    Returns:
+        批次行；未命中时返回 None。
+    """
     clauses, params = _scope(tenant_id, owner_id)
     if run_id is not None:
         clauses.append("AND r.run_id=%s")
@@ -419,6 +444,93 @@ def next_run_seq(conn: Any, tenant_id: str, dataset_id: str, eval_kind: str, sco
     return int(row["next_seq"])
 
 
+def dataset_snapshot_row(conn: Any, tenant_id: str, snapshot_id: str) -> dict | None:
+    """按主键读取租户内的数据集内容快照元信息。"""
+    return fetch_one(conn, f"SELECT {_SNAPSHOT_COLUMNS} FROM eval_dataset_snapshots "
+                           "WHERE tenant_id=%s AND snapshot_id=%s", (tenant_id, snapshot_id))
+
+
+def dataset_snapshot_by_bundle(conn: Any, tenant_id: str, eval_kind: str, dataset_version: str,
+                               bundle_sha256: str) -> dict | None:
+    """按内容摘要读取同一租户、类型与版本下已存在的快照，用于幂等复用。"""
+    return fetch_one(conn, f"SELECT {_SNAPSHOT_COLUMNS} FROM eval_dataset_snapshots "
+                           "WHERE tenant_id=%s AND eval_kind=%s AND dataset_version=%s "
+                           "AND bundle_sha256=%s",
+                     (tenant_id, eval_kind, dataset_version, bundle_sha256))
+
+
+def dataset_snapshot_cases(conn: Any, tenant_id: str, snapshot_id: str) -> list[dict]:
+    """读取快照下的全部原始用例（按套件与序号排序）。"""
+    return fetch_all(conn, """
+        SELECT c.suite, c.case_id, c.case_sha256, c.ordinal, c.case_payload
+        FROM eval_dataset_snapshot_cases c
+        JOIN eval_dataset_snapshots s ON s.snapshot_id=c.snapshot_id
+        WHERE s.tenant_id=%s AND c.snapshot_id=%s
+        ORDER BY c.suite, c.ordinal, c.case_id
+    """, (tenant_id, snapshot_id))
+
+
+def dataset_version_rows(conn: Any, eval_kind: str, dataset_version: str) -> list[dict]:
+    """读取某评测类型与版本下全部已登记数据集套件行。"""
+    return fetch_all(conn, """
+        SELECT dataset_id, suite, content_sha256, case_count, cases_payload, metadata, archived
+        FROM eval_datasets
+        WHERE eval_kind=%s AND version=%s
+        ORDER BY dataset_id
+    """, (eval_kind, dataset_version))
+
+
+def insert_dataset_snapshot(conn: Any, *, snapshot_id: str, tenant_id: str, eval_kind: str,
+                            dataset_version: str, primary_dataset_id: str, bundle_sha256: str,
+                            case_count: int, files: dict, metadata: dict, actor_id: str) -> None:
+    """写入数据集内容快照元信息（调用方负责事务与并发锁）。"""
+    conn.execute(
+        "INSERT INTO eval_dataset_snapshots"
+        "(snapshot_id, tenant_id, eval_kind, dataset_version, primary_dataset_id, bundle_sha256, "
+        "case_count, files, metadata, created_by) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (snapshot_id, tenant_id, eval_kind, dataset_version, primary_dataset_id, bundle_sha256,
+         case_count, Jsonb(files), Jsonb(metadata), actor_id),
+    )
+
+
+def insert_dataset_snapshot_cases(conn: Any, items: list[dict]) -> None:
+    """批量写入快照用例明细；重复用例按主键跳过。
+
+    Args:
+        conn: 数据库连接。
+        items: 用例明细，每项含 snapshot_id、suite、case_id、case_sha256、ordinal 与 case_payload。
+    """
+    if not items:
+        return
+    with conn.cursor() as cursor:
+        cursor.executemany(
+            "INSERT INTO eval_dataset_snapshot_cases"
+            "(snapshot_id, suite, case_id, case_sha256, ordinal, case_payload) "
+            "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+            [(item["snapshot_id"], item["suite"], item["case_id"], item["case_sha256"],
+              item["ordinal"], Jsonb(item["case_payload"])) for item in items],
+        )
+
+
+def runs_missing_snapshot(conn: Any, tenant_id: str) -> list[dict]:
+    """读取尚未关联数据集内容快照的存量批次，按分组与创建时间排序。"""
+    return fetch_all(conn, """
+        SELECT run_id, dataset_id, dataset_version, eval_kind, scope, mode, created_at
+        FROM eval_runs
+        WHERE tenant_id=%s AND dataset_snapshot_id IS NULL
+        ORDER BY dataset_id, eval_kind, scope, mode, created_at, run_id
+    """, (tenant_id,))
+
+
+def set_run_snapshot(conn: Any, tenant_id: str, run_id: str, snapshot_id: str, run_seq: int) -> None:
+    """把批次关联到数据集内容快照并写入分配到的运行序号。"""
+    conn.execute("""
+        UPDATE eval_runs SET dataset_snapshot_id=%s, run_seq=%s
+        WHERE tenant_id=%s AND run_id=%s
+    """, (snapshot_id, run_seq, tenant_id, run_id))
+
+
 def cases(conn: Any, tenant_id: str, run_id: str, *, status: str | None, suite: str | None,
           after: str | None, limit: int) -> list[dict]:
     """按状态与用例分组读取批次逐例判定，case_id 正序分页。"""
@@ -438,16 +550,48 @@ def cases(conn: Any, tenant_id: str, run_id: str, *, status: str | None, suite: 
 
 
 def case_detail(conn: Any, tenant_id: str, run_id: str, case_id: str) -> dict | None:
+    """读取单个用例的判定明细与来源链路标识。
+
+    Args:
+        conn: 数据库连接。
+        tenant_id: 租户编号。
+        run_id: 批次编号。
+        case_id: 用例编号。
+
+    Returns:
+        用例判定行；不存在时返回 None。
+    """
     return fetch_one(conn, f"SELECT {_CASE},expected,observed,steps_complete,verdicts,trace_id FROM eval_case_results "
                      "WHERE tenant_id=%s AND run_id=%s AND case_id=%s", (tenant_id, run_id, case_id))
 
 
 def comparison_rows(conn: Any, tenant_id: str, run_id: str) -> list[dict]:
+    """读取批次逐例状态与定义摘要，供两批次逐例配对比较。
+
+    Args:
+        conn: 数据库连接。
+        tenant_id: 租户编号。
+        run_id: 批次编号。
+
+    Returns:
+        按用例编号排序的逐例状态行。
+    """
     return fetch_all(conn, "SELECT case_id,case_sha256,suite,status FROM eval_case_results "
                      "WHERE tenant_id=%s AND run_id=%s ORDER BY case_id", (tenant_id, run_id))
 
 
 def trace_link(conn: Any, tenant_id: str, owner_id: str | None, trace_id: str) -> dict | None:
+    """按 trace 编号反查唯一关联的问答或调研任务。
+
+    Args:
+        conn: 数据库连接。
+        tenant_id: 租户编号。
+        owner_id: 可见范围限定的发起人编号；None 表示租户内全量。
+        trace_id: 执行链路编号。
+
+    Returns:
+        含 task_id 与 trace_id 的关联行；命中不唯一时返回 None。
+    """
     sql = ("SELECT DISTINCT j.id AS task_id, s.trace_id FROM task_spans s "
            "JOIN jobs j ON (j.tenant_id,j.id)=(s.tenant_id,s.job_id) "
            "WHERE s.tenant_id=%s AND s.trace_id=%s AND j.kind IN ('ask','research')")
@@ -522,7 +666,7 @@ def insert_report(conn: Any, tenant_id: str, owner_id: str, report: dict, rows: 
         ON CONFLICT (tenant_id,run_id) DO NOTHING RETURNING run_id
     """, target).fetchone()
     if inserted is None:
-        existing = run(conn, tenant_id, owner_id, run_id=report["run_id"])
+        existing = get_run(conn, tenant_id, owner_id, run_id=report["run_id"])
         if existing is None or existing["report_sha256"] != report["report_sha256"]:
             raise ValueError("同一批次编号已经归属于其他发起人或对应不同内容")
         conn.execute("""

@@ -6,6 +6,7 @@ from taozhi.domain.text_guard import detect_injection, sanitize
 
 
 def test_guard_zero_width_sanitization_and_detection():
+    """验证零宽字符被清洗，且越权指令、零宽载荷与伪造标记均被识别。"""
     dirty_text = "膜\u200b切\u200c机\u200dMC-500\ufeff"
     cleaned = sanitize(dirty_text)
     assert cleaned == "膜切机MC-500"

@@ -239,6 +239,14 @@ def list_metrics(conn, p):
 
 
 def _validate_template(m) -> None:
+    """校验指标 SQL 模板的租户占位符、禁用字符、LIMIT 与主表白名单。
+
+    Args:
+        m: 指标定义行。
+
+    Raises:
+        Denied: 模板不满足受控执行约束时抛出。
+    """
     t = m["sql_template"]
     if "%(tenant_id)s" not in t:
         raise Denied("指标口径缺少租户占位符，已拒绝执行", "METRIC_TEMPLATE", 500)
@@ -302,6 +310,14 @@ def jsonable_rows(rows):
     """指标行 JSON 化（Decimal→float、date/datetime→isoformat），供 API/前端图表消费。"""
     from decimal import Decimal
     def _one(v):
+        """把单个指标值归一为可 JSON 序列化的形式。
+
+        Args:
+            v: 原始单元格值。
+
+        Returns:
+            Decimal 转 float，日期时间转 ISO 字符串，其余原样或转字符串。
+        """
         if isinstance(v, Decimal):
             return float(v)
         if isinstance(v, bool):
@@ -315,6 +331,18 @@ def jsonable_rows(rows):
 
 
 def _iso(value, default_days):
+    """把意图中的时间值解析为 datetime；缺省时按天数回退。
+
+    Args:
+        value: 客户端传入的时间字符串。
+        default_days: 缺省回退天数；None 表示不生成默认值。
+
+    Returns:
+        解析后的时间；无值且无默认天数时返回 None。
+
+    Raises:
+        Denied: 时间格式非法时抛出。
+    """
     from datetime import datetime, timedelta, timezone
     if value:
         try:
@@ -327,5 +355,10 @@ def _iso(value, default_days):
 
 
 def _now_iso():
+    """返回带 UTC 时区的当前时间。
+
+    Returns:
+        当前 UTC 时间。
+    """
     from datetime import datetime, timezone
     return datetime.now(timezone.utc)

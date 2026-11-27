@@ -13,6 +13,11 @@ from taozhi.application.research.graph import execute_autonomous_agents
 
 @contextmanager
 def _patch_llm(mock_llm):
+    """替换研究编排与子智能体模型客户端为替身。
+
+    Args:
+        mock_llm: 替身模型客户端。
+    """
     with (
         patch("taozhi.application.research.planner.LLMClient", return_value=mock_llm),
         patch("taozhi.application.research.subagents.LLMClient", return_value=mock_llm),
@@ -81,6 +86,13 @@ def test_full_multi_agent_research_flow():
     orch_calls = {"n": 0}
 
     def fake_chat_json(*, prompt: str, schema=None, **kwargs):
+        """替身结构化对话模型，覆盖编排与子任务决策。
+
+        Args:
+            kwargs: 关键字参数。
+            prompt: 提示词文本。
+            schema: 期望的结构化输出模式。
+        """
         if schema is _OrchestratorDecisionSchema:
             orch_calls["n"] += 1
             if orch_calls["n"] == 1:
@@ -126,6 +138,12 @@ def test_full_multi_agent_research_flow():
     progress_stages = []
 
     def on_progress(stage: str, pct: int):
+        """记录子智能体进度回调。
+
+        Args:
+            stage: 阶段标识。
+            pct: 进度百分比。
+        """
         progress_stages.append((stage, pct))
 
     with _patch_llm(mock_llm):

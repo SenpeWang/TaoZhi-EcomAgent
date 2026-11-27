@@ -42,10 +42,16 @@ REQUIRED_CATEGORIES = {"product", "compatibility", "after_sales", "multi_documen
 
 
 def load_jsonl(path: Path) -> list:
+    """读取 JSONL 文件并返回记录列表。
+
+    Args:
+        path: JSONL 文件路径。
+    """
     return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
 def generated_cases() -> list:
+    """读取最新生成版本的评测用例。"""
     return load_jsonl(GEN_LATEST / "cases.jsonl")
 
 
@@ -98,11 +104,13 @@ def test_dimension_coverage_meets_floor():
 
 
 def test_committed_cases_pass_schema():
+    """验证已提交用例全部通过模式校验。"""
     errs = schema_mod.validate_cases(generated_cases())
     assert not errs, "契约问题:\n" + "\n".join(errs[:20])
 
 
 def test_manifest_matches_spec_and_snapshot():
+    """验证清单摘要、计数与规范及快照一致。"""
     manifest = json.loads((GEN_LATEST / "manifest.json").read_text(encoding="utf-8"))
     for f in sorted((ROOT / "evals/dataset/spec").glob("*.yaml")):
         assert manifest["spec_sha256"][f.name] == gen_mod.sha256_file(f), \
@@ -138,6 +146,7 @@ def test_identities_map_one_to_one():
 
 
 def test_every_category_has_cases():
+    """验证必需类别均有对应用例。"""
     cats = {c["category"] for c in generated_cases()}
     assert REQUIRED_CATEGORIES <= cats, f"缺少类别: {REQUIRED_CATEGORIES - cats}"
 
@@ -163,10 +172,13 @@ def test_eval_password_survives_production_policy():
 
 
 class _FakeResult:
+    """模拟数据库查询结果的桩对象。"""
+
     def __init__(self, row):
         self._row = row
 
     def fetchone(self):
+        """返回预置的结果行。"""
         return self._row
 
 
@@ -177,16 +189,24 @@ class _FakeConn:
         self._rows = list(rows)
 
     def execute(self, sql, params=()):
+        """依次返回预置的结果集。
+
+        Args:
+            sql: 要执行的 SQL 语句。
+            params: SQL 绑定参数。
+        """
         return _FakeResult(self._rows.pop(0) if self._rows else None)
 
 
 def _load_run_evals():
+    """动态导入 RAG 评测运行模块。"""
     sys.path.insert(0, str(ROOT))
     from evals.rag_eval import run as run_evals
     return run_evals
 
 
 def test_resolve_eval_node_returns_company_root():
+    """验证评测节点解析返回公司根节点。"""
     run_evals = _load_run_evals()
     conn = _FakeConn([{"id": "tenant_x"}, {"id": "org_root_x"}])
     assert run_evals.resolve_eval_node(conn) == "org_root_x"
@@ -226,6 +246,7 @@ GOLDEN = ROOT / "evals/datasets/rag_v3_20261124/redteam.json"
 
 
 def golden_cases() -> list:
+    """读取黄金评测集用例。"""
     return json.loads(GOLDEN.read_text(encoding="utf-8"))["cases"]
 
 

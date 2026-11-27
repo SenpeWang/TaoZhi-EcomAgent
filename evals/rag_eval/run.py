@@ -125,6 +125,14 @@ def api_base_url() -> str:
 
 
 def _make_http_client(timeout: float = 200.0) -> httpx.Client:
+    """创建指向被测 API 的 HTTP 客户端。
+
+    Args:
+        timeout: 请求超时秒数。
+
+    Returns:
+        HTTP 客户端。
+    """
     return httpx.Client(base_url=api_base_url(), trust_env=False, timeout=timeout)
 
 
@@ -254,6 +262,11 @@ def fetch_job_telemetry(job_id: str, client_e2e_s: float | None = None, result: 
 
 
 def git_sha():
+    """读取当前提交的短哈希，失败时返回 unknown。
+
+    Returns:
+        提交短哈希或 unknown。
+    """
     try:
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
                               capture_output=True, text=True, check=True).stdout.strip()
@@ -289,6 +302,11 @@ EVIDENCE_QUOTE_CHARS = 400
 
 
 def _judge_quote_cap() -> int:
+    """解析 judge 证据引用的字符上限。
+
+    Returns:
+        字符上限。
+    """
     try:
         return max(EVIDENCE_QUOTE_CHARS, int(load_config().quote_max_chars))
     except Exception:
@@ -371,6 +389,11 @@ def retrieval_evidence(case, rows, ranked, expected, *, ctx_rel=None, stage_timi
 
 
 def phase_retrieval():
+    """执行检索层评测并返回指标与逐例明细。
+
+    Returns:
+        检索层指标字典。
+    """
     from taozhi.application.rag.query_expansion import build_hyde_vector
     from taozhi.infrastructure.knowledge.retriever import search_documents
     cases = [json.loads(l) for l in CASES.read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -407,6 +430,14 @@ def phase_retrieval():
             c, "SELECT id FROM documents WHERE tenant_id=%s", (default_principal.tenant_id,))}
 
     def exp_of(case):
+        """解析用例的预期文档集合与未知文档。
+
+        Args:
+            case: 单条用例定义。
+
+        Returns:
+            (命中预期集合, 未知文档列表)。
+        """
         want = case.get("expected_documents") or []
         return {d for d in want if d in known_docs}, [d for d in want if d not in known_docs]
 
@@ -414,6 +445,11 @@ def phase_retrieval():
     cfg = load_config()
 
     def run():
+        """执行检索层全部用例并汇总指标。
+
+        Returns:
+            检索层指标字典。
+        """
         pairs, lat, skipped, per_case = [], [], 0, []
         ctx_rels, stage_records, degraded_records, hyde_sut_records = [], [], [], []
         tok_before = obs_metrics.token_usage()
@@ -656,6 +692,11 @@ def _sla_limit_s(case: dict) -> float:
 
 
 def phase_adversarial():
+    """执行对抗层规则判定并返回逐例结论与吞吐。
+
+    Returns:
+        对抗层结果字典。
+    """
     from concurrent.futures import ThreadPoolExecutor
 
     golden = load_golden()
@@ -672,6 +713,14 @@ def phase_adversarial():
         node = resolve_eval_node(c)
 
     def _run_one(case: dict) -> dict:
+        """以对抗身份提交单条对抗用例并判定泄漏与拒答。
+
+        Args:
+            case: 单条对抗用例定义。
+
+        Returns:
+            单条对抗判定字典。
+        """
         s, lcode = _login_session(ADVERSARIAL_IDENTITY["username"], EVAL_PASSWORD)
         if s is None:
             return {"id": case["id"], "pass": False, "note": f"登录失败 {lcode}", "rejected": True}
@@ -800,6 +849,11 @@ def _semantic_similarity(answer: str, reference: str) -> float | None:
 
 
 def phase_behavior():
+    """执行行为层评测并返回逐例结论与汇总指标。
+
+    Returns:
+        行为层结果字典。
+    """
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
@@ -823,6 +877,14 @@ def phase_behavior():
     tok_before = obs_metrics.token_usage()
 
     def _run_case(case: dict) -> dict:
+        """以用例指定身份提交单条行为用例并汇总判定。
+
+        Args:
+            case: 单条行为用例定义。
+
+        Returns:
+            单条行为结果字典。
+        """
         cat = case["category"]
         name = (case.get("test_identity") or {}).get("username") or ""
         if not name:
@@ -1304,9 +1366,26 @@ def six_metrics(result: dict) -> dict:
 def print_six(six: dict) -> None:
     """生产级六维评测看板人类可读输出。"""
     def f(v, nd=3):
+        """格式化浮点指标，空值显示为破折号。
+
+        Args:
+            v: 待格式化的指标值。
+            nd: 保留的小数位数。
+
+        Returns:
+            格式化文本。
+        """
         return "—" if v is None else (f"{v:.{nd}f}" if isinstance(v, float) else str(v))
 
     def fpct(v):
+        """把比率格式化为百分比文本。
+
+        Args:
+            v: 比率值。
+
+        Returns:
+            百分比文本；空值显示为破折号。
+        """
         return "—" if v is None else f"{v * 100:.1f}%"
 
     r, nd, pr = six["recall@k"], six["ndcg@k"], six["precision@k"]
@@ -1318,6 +1397,14 @@ def print_six(six: dict) -> None:
     qe = six.get("quality_extended") or {}
     ci = six.get("ci95") or {}
     def ci_s(key):
+        """格式化置信区间文本。
+
+        Args:
+            key: 指标键。
+
+        Returns:
+            置信区间文本；无数据时为空串。
+        """
         v = ci.get(key)
         return "" if not v or v[0] is None else f" [{v[0]:.2f}, {v[1]:.2f}]"
     print("\n=== 六项核心指标（RAGAS 口径）===")
@@ -1401,6 +1488,13 @@ def compare(current: dict, baseline: dict) -> list:
     rows = []
 
     def add(metric, base_vals, cur_vals):
+        """把一次指标对比加入配对检验结果。
+
+        Args:
+            metric: 指标名。
+            base_vals: 基线逐例取值。
+            cur_vals: 本次逐例取值。
+        """
         if len(base_vals) < 5 or len(cur_vals) < 5:
             return
         res = metrics.paired_delta(base_vals, cur_vals)
@@ -1437,6 +1531,11 @@ def compare(current: dict, baseline: dict) -> list:
 
 
 def print_compare(rows: list) -> None:
+    """打印运行间配对检验结果表。
+
+    Args:
+        rows: 配对检验结果行列表。
+    """
     if not rows:
         print("\n⚠ 无法做运行间对比：基线缺少逐例数据（旧格式）或两次运行用例集无交集。"
               "\n   跑一次 --full --save-baseline 即可让基线具备配对检验能力。")
@@ -1488,6 +1587,7 @@ def gate_check(six: dict) -> tuple:
 
 
 def main():
+    """命令行入口：按模式运行评测、对比基线并写报告。"""
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="快速冒烟（仅检索+对抗，跳过行为层）")
     ap.add_argument("--full", action="store_true", help="三层全跑（无特殊说明时的默认行为）")

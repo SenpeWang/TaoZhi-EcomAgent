@@ -195,6 +195,14 @@ def apply_recency_tiebreak(query: str, ranked: list, chunks: list, allowed: dict
         return ranked
 
     def _sort_key(pos_item):
+        """计算多版本偏好重排的排序键。
+
+        Args:
+            pos_item: （原始位置，(切片下标, 分数)）二元组。
+
+        Returns:
+            含版本偏好加权与原始位置倒序的排序键。
+        """
         pos, (idx, score) = pos_item
         base_score = score if score is not None else float(len(ranked) - pos) * 0.01
         did = chunks[int(idx)]["document_id"]

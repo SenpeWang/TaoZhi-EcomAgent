@@ -18,19 +18,41 @@ def process_research_job(job: dict[str, Any]) -> None:
     """运行多智能体市场调研主副协作图并回传终态报告。"""
 
     def emit(stage: str, progress: int) -> None:
+        """把调研阶段与进度写回任务表。
+
+        Args:
+            stage: 阶段名称。
+            progress: 进度百分比。
+        """
         with database_connection() as c:
             job_repo.update_job_stage(c, job["tenant_id"], job["id"], job["run_version"], stage, progress)
 
     def record_model_call(role: str, event: dict) -> None:
+        """登记一次调研模型端点调用。
+
+        Args:
+            role: 调用方角色。
+            event: 模型调用事件。
+        """
         with database_connection() as c:
             job_repo.record_research_model_call(c, job, role, event)
 
     def check_cancel() -> bool:
+        """检查任务是否已取消、被替换或已不在运行。
+
+        Returns:
+            True 表示应终止本次执行。
+        """
         with database_connection() as c:
             r = job_repo.get_job_by_id(c, job["id"])
             return not r or r["state"] != "running" or r["run_version"] != job["run_version"] or bool(r["cancel_requested"])
 
     def fetch_steering() -> list:
+        """读取任务载荷中累计的中途干预指令。
+
+        Returns:
+            干预指令列表。
+        """
         with database_connection() as c:
             r = job_repo.get_job_by_id(c, job["id"])
             return list(((r or {}).get("payload") or {}).get("steering_inputs") or [])

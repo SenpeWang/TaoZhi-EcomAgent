@@ -13,6 +13,11 @@ from taozhi.domain.research import SOURCE_TOOLS
 
 
 def _unknown_usage() -> dict:
+    """返回未计量调用的 Token 使用占位值。
+
+    Returns:
+        调用次数与 Token 全为空的统计字典。
+    """
     return {"model_calls": None, "measured_calls": 0, "prompt_tokens": None, "completion_tokens": None}
 
 
@@ -52,6 +57,11 @@ class _RunObservation:
     """收集并行节点的用量，在首个调研来源工具完成后交付干预。"""
 
     def __init__(self, steering: list[str]) -> None:
+        """初始化单次运行的观测状态与线程锁。
+
+        Args:
+            steering: 触发阶段预置的干预指令列表。
+        """
         self._lock = threading.Lock()
         self.steering = steering
         self.tool_finished = False
@@ -65,9 +75,20 @@ class _RunObservation:
         self.completion_tokens = 0
 
     def observe_trace(self, trace_id: str) -> None:
+        """记录本次运行的服务端轨迹编号。
+
+        Args:
+            trace_id: 轨迹编号。
+        """
         self.trace_id = trace_id
 
     def observe_progress(self, stage: str, progress: int) -> None:
+        """根据进度事件更新工具完成与干预接收状态。
+
+        Args:
+            stage: 进度事件文本。
+            progress: 进度百分比。
+        """
         with self._lock:
             completion = re.match(r"^\[tool_execution_end\] \[[^\]]+\] (\w+)\b", stage)
             if completion and completion[1] in SOURCE_TOOLS:
@@ -76,6 +97,11 @@ class _RunObservation:
                 self.received = True
 
     def fetch_steering(self) -> list[str]:
+        """在首个工具执行完成后一次性下发干预指令。
+
+        Returns:
+            干预指令列表；已下发或无指令时为空列表。
+        """
         with self._lock:
             if self.tool_finished and self.steering and not self.delivered:
                 self.delivered = True
@@ -95,6 +121,14 @@ class _RunObservation:
                 self.completion_tokens += completion
 
     def usage(self, reported_calls: int | None = None) -> dict:
+        """汇总模型调用次数与 Token 计量。
+
+        Args:
+            reported_calls: 服务端上报的模型调用次数。
+
+        Returns:
+            含调用次数与 Token 小计的统计字典。
+        """
         with self._lock:
             count = self.model_attempts or None
             if type(reported_calls) is int and reported_calls >= 0:
@@ -143,9 +177,22 @@ class AgentEvalHarness:
     """从真实调研入口执行评测，测试可注入相同调用契约的执行函数。"""
 
     def __init__(self, *, execute: Callable[..., dict] = _run_research) -> None:
+        """初始化评测挂架并注入被测执行函数。
+
+        Args:
+            execute: 执行单条用例并返回结果的可调用对象。
+        """
         self.execute = execute
 
     def run(self, case: dict) -> AgentRunResult:
+        """对单条用例执行一次调研并返回结构化结果。
+
+        Args:
+            case: 单条用例定义。
+
+        Returns:
+            含研报、工具轨迹与用量的运行结果。
+        """
         if case.get("execution_mode") == "synthetic_trace_regrade":
             raise ValueError("此用例需要合成执行记录，请使用回放入口")
         prompt = case["prompt"]
@@ -192,10 +239,26 @@ class AgentEvalHarness:
 
 
 def _nonnegative_integer(value: Any) -> bool:
+    """判断取值是否为非负整数。
+
+    Args:
+        value: 待判断的取值。
+
+    Returns:
+        是否非负整数。
+    """
     return type(value) is int and value >= 0
 
 
 def _transcript_usage(raw: dict | None) -> dict:
+    """解析回放记录中的 Token 使用并校验计量口径。
+
+    Args:
+        raw: 回放记录中的 token_usage 段。
+
+    Returns:
+        规整后的 Token 使用统计。
+    """
     if raw is None:
         return _unknown_usage()
     if not isinstance(raw, dict):

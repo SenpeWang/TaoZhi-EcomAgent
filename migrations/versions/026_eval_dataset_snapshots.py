@@ -12,6 +12,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """新增数据集内容快照表与快照用例表，并为批次记录快照关联、运行序号与重跑来源。"""
     op.execute("""
         CREATE TABLE IF NOT EXISTS eval_dataset_snapshots (
             snapshot_id text PRIMARY KEY,
@@ -56,6 +57,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """删除批次的快照列、运行序号索引与两张快照表。"""
     op.execute("DROP INDEX IF EXISTS uq_eval_runs_run_seq")
     op.execute("ALTER TABLE eval_runs DROP COLUMN IF EXISTS trigger_note")
     op.execute("ALTER TABLE eval_runs DROP COLUMN IF EXISTS parent_run_id")

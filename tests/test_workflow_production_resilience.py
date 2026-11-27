@@ -10,6 +10,7 @@ from taozhi.infrastructure.persistence.access_repo import load_principal
 
 
 def _get_client_and_job():
+    """以管理员登录并提交调研任务，返回客户端与任务标识。"""
     client = TestClient(app)
     login_res = client.post("/api/auth/login", json={"username": "admin", "password": "taozhi2026eval"})
     if login_res.status_code != 200:

@@ -60,16 +60,41 @@ LOW_STOCK = {
 
 
 def _id(prefix: str, seq: int) -> str:
+    """按前缀与序号生成确定性的业务主键。
+
+    Args:
+        prefix: 主键前缀。
+        seq: 序号。
+
+    Returns:
+        确定性的主键字符串。
+    """
     return prefix + "_" + hashlib.sha256(f"seed:{seq}".encode()).hexdigest()[:24]
 
 
 def bulk(c, sql: str, rows: list, batch: int = 500) -> None:
+    """按批执行 executemany 写入数据行。
+
+    Args:
+        c: 数据库连接。
+        sql: 插入语句。
+        rows: 待写入的数据行。
+        batch: 每批行数。
+    """
     with c.cursor() as cur:
         for i in range(0, len(rows), batch):
             cur.executemany(sql, rows[i:i + batch])
 
 
 def _promo_factor(day: datetime) -> float:
+    """返回指定日期的促销系数，覆盖周末与 618、国庆、双十一脉冲。
+
+    Args:
+        day: 待计算的日期。
+
+    Returns:
+        销量放大系数。
+    """
     md = (day.month, day.day)
     if (6, 12) <= md <= (6, 18):
         return 2.6
@@ -94,6 +119,14 @@ def _parse_anchor_date(argv: list[str] | None = None) -> datetime:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """生成确定性的订单、售后与库存合成数据，并打印规模与异常钩子。
+
+    Args:
+        argv: 可选的命令行参数列表。
+
+    Returns:
+        0 表示成功，1 表示缺少租户或组织数据。
+    """
     end_day = _parse_anchor_date(argv)
     now_utc = datetime.now(timezone.utc)
     anomaly_since = end_day - timedelta(days=int(ANOMALY["days"]))

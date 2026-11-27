@@ -14,6 +14,7 @@ depends_on=None
 DIM=512
 
 def upgrade():
+    """启用 pgvector 扩展，把 chunks.embedding 迁移为 vector(512) 并建立 HNSW 索引。"""
     op.execute("""
     DO $$ BEGIN
       IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname='vector') THEN
@@ -35,6 +36,7 @@ def upgrade():
     op.execute("CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw_idx ON chunks USING hnsw (embedding vector_cosine_ops) WITH (m=16, ef_construction=100)")
 
 def downgrade():
+    """删除 HNSW 索引，并把 embedding 退回 BYTEA 存储。"""
     op.execute("DROP INDEX IF EXISTS chunks_embedding_hnsw_idx")
     op.execute("ALTER TABLE chunks DROP COLUMN IF EXISTS embedding")
     op.execute("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS embedding BYTEA")

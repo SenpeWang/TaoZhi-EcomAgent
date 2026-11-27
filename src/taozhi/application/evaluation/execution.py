@@ -38,6 +38,11 @@ class EvaluationFailed(RuntimeError):
 
 
 def _python() -> str:
+    """返回当前解释器路径，缺失时回退 python3。
+
+    Returns:
+        可执行 Python 解释器路径。
+    """
     return sys.executable or "python3"
 
 
@@ -123,7 +128,8 @@ def _update_progress(tenant_id: str, job_id: str, run_version: int, stage: str, 
     try:
         with database_connection() as conn:
             job_repo.update_job_stage(conn, tenant_id, job_id, run_version, stage[:200], max(0, min(100, progress)))
-    except Exception:
+    except Exception as exc:
+        _LOG.warning("评测任务 %s 进度写回失败（%s）", job_id, type(exc).__name__)
         return
 
 

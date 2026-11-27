@@ -91,6 +91,15 @@ class McpClientAdapter:
         )
 
         def _invoke_mcp() -> Any:
+            """执行一次 MCP tools/call 并归一化返回内容。
+
+            Returns:
+                解析后的 JSON 结果；非 JSON 文本包装为 content 字段。
+
+            Raises:
+                TimeoutError: 工具返回超时错误时抛出。
+                _McpToolCallError: 工具返回其他错误时抛出。
+            """
             mcp_res = self.server.call_tool(tool_name, call_args)
             raw_text = mcp_res.content[0].text if mcp_res.content else ""
             if mcp_res.isError:

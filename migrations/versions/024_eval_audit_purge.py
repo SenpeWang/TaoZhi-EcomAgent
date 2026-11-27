@@ -8,6 +8,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """放宽审计动作约束，允许记录 purge_data 数据清理动作。"""
     op.execute("ALTER TABLE eval_audit_logs DROP CONSTRAINT IF EXISTS eval_audit_logs_action_check")
     op.execute("""
         ALTER TABLE eval_audit_logs ADD CONSTRAINT eval_audit_logs_action_check
@@ -16,6 +17,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """移除 purge_data 动作约束，恢复原有审计动作集合。"""
     op.execute("ALTER TABLE eval_audit_logs DROP CONSTRAINT IF EXISTS eval_audit_logs_action_check")
     op.execute("""
         ALTER TABLE eval_audit_logs ADD CONSTRAINT eval_audit_logs_action_check

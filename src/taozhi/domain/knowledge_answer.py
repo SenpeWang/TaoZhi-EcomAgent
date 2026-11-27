@@ -37,6 +37,7 @@ class EvidenceGapAnswer(TypedDict):
 
 @dataclass(frozen=True)
 class _Definition:
+    """内置通用术语释义：触发词、释义文本与公开出处。"""
     terms: tuple[str, ...]
     explanation: str
     source_title: str

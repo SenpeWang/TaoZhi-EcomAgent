@@ -8,6 +8,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """创建评测批次表 eval_runs、用例明细表 eval_case_results 及分页索引。"""
     op.execute("""
         CREATE TABLE IF NOT EXISTS eval_runs (
          tenant_id text NOT NULL, run_id text NOT NULL, owner_id text NOT NULL, created_at timestamptz NOT NULL,
@@ -41,5 +42,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """删除用例明细表与评测批次表。"""
     op.drop_table("eval_case_results")
     op.drop_table("eval_runs")

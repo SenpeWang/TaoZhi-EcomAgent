@@ -65,6 +65,11 @@ METRICS = [
 
 
 def main() -> int:
+    """把内置运营指标注册或更新到指标语义层。
+
+    Returns:
+        0 表示成功，1 表示缺少租户、老板账号或公司根节点。
+    """
     with database_connection() as c:
         tenant = fetch_one(c, "SELECT id FROM tenants ORDER BY created_at LIMIT 1")
         if not tenant:

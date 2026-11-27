@@ -103,6 +103,14 @@ def traced_node(name: str, func: Callable[[Any], Any], span_prefix: str = "pipel
 
     @functools.wraps(func)
     def wrapper(state: Mapping[str, Any]):
+        """在节点 span 内执行节点函数，累加节点耗时并回填追踪属性。
+
+        Args:
+            state: 图状态。
+
+        Returns:
+            节点函数返回值；字典结果会附加本次节点耗时。
+        """
         with node_span(f"{span_prefix}{name}", "CHAIN") as span:
             t0 = time.perf_counter()
             result = func(state)

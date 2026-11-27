@@ -11,7 +11,13 @@ TRANSCRIPT = {"case_id": CASE["id"], "system_status": "COMPLETED", "report": "�
 
 
 def test_live_observations_distinguish_tool_outcomes_and_missing_usage():
+    """验证实时观测区分工具执行结果并保留缺失的用量信息。"""
     def run(**hooks):
+        """把注入钩子交给评测装置执行并返回运行结果。
+
+        Args:
+            hooks: 测试注入的回调集合。
+        """
         hooks["observe_trace"]("trace1")
         observe = hooks["model_call_fn"]
         with ThreadPoolExecutor(max_workers=3) as executor:
@@ -53,7 +59,13 @@ def test_live_observations_distinguish_tool_outcomes_and_missing_usage():
 
 
 def test_parallel_workers_do_not_invent_global_order_or_acknowledgement():
+    """验证并行工作者不臆造全局顺序或干预确认，未知项如实标记。"""
     def run(**hooks):
+        """构造并返回含并行子智能体的执行结果。
+
+        Args:
+            hooks: 测试注入的回调集合。
+        """
         hooks["emit_event_fn"]("[tool_execution_end] [市场情报分析师] search_web 采集完成", 40)
         assert hooks["fetch_steering_fn"]() == CASE["steering"]
         return {"subagents": [
@@ -69,7 +81,13 @@ def test_parallel_workers_do_not_invent_global_order_or_acknowledgement():
 
 
 def test_failed_graph_retains_observed_usage_without_exception_body():
+    """验证图执行失败时保留已观测用量且不泄漏异常正文。"""
     def run(**hooks):
+        """记录已观测用量后抛出超时异常，模拟图执行失败。
+
+        Args:
+            hooks: 测试注入的回调集合。
+        """
         hooks["model_call_fn"]("agent", {"prompt_tokens": 7, "completion_tokens": 2})
         raise TimeoutError("上游返回的业务正文")
     result = AgentEvalHarness(execute=run).run(CASE)
@@ -80,6 +98,7 @@ def test_failed_graph_retains_observed_usage_without_exception_body():
 
 
 def test_missing_tool_collection_differs_from_an_observed_empty_trace():
+    """验证未采集工具轨迹与观测到空轨迹可以区分。"""
     unobserved = AgentEvalHarness(execute=lambda **kwargs: {"report": "回答"}).run(CASE)
     assert not unobserved.tool_trace_complete
     observed = AgentEvalHarness(execute=lambda **kwargs: {"subagents": []}).run(CASE)
@@ -88,6 +107,7 @@ def test_missing_tool_collection_differs_from_an_observed_empty_trace():
 
 
 def test_transcript_is_explicit_and_preserves_unknown_fields():
+    """验证回放记录显式声明字段并把未知项保留为未知。"""
     run = replay_transcript(CASE, TRANSCRIPT)
     assert run.subagents_count is None
     assert run.report == TRANSCRIPT["report"]
@@ -115,5 +135,10 @@ def test_transcript_is_explicit_and_preserves_unknown_fields():
     {"token_usage": {"model_calls": "1"}}, {"steering_applied": "false"},
 ])
 def test_malformed_transcript_fails_before_scoring(overrides):
+    """验证字段缺失或类型错误的回放记录在评分前即失败。
+
+    Args:
+        overrides: ``overrides`` 参数化取值。
+    """
     with pytest.raises(ValueError):
         replay_transcript(CASE, {**TRANSCRIPT, **overrides})

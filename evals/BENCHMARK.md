@@ -237,7 +237,8 @@ judge 模型名与温度、embedding 模型与维度、HNSW `ef_search`/`probes`
   `mode=facts` 须逐字命中 `must_contain_all`、同义组每组至少一条（`any_groups`）、
   正则断言全部命中（`must_match`）；两种模式通用负向规则 `must_not_contain` /
   `must_not_match` 防泄漏与编造（老板级标题、手机号、成本数字等）。规则缺项
-  （缺 mode / 缺规则 / 缺 basis）在数据集加载期即拒收。实现见 `run_evals.judge_adversarial`。
+  （缺 mode / 缺规则 / 缺 basis）在数据集加载期即拒收。当前实现见
+  `evals/rag_eval/run.py` 的 `judge_adversarial`。
 
 ---
 

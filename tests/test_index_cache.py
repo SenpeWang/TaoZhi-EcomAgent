@@ -14,6 +14,11 @@ DIM = 512
 
 @pytest.fixture(autouse=True)
 def _env(monkeypatch):
+    """自动应用测试模式校验与嵌入查询缓存重置的夹具。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     cfg = load_config()
     assert cfg.mode == "test" and cfg.dsn.endswith("/ecom_test")
     monkeypatch.setattr(embedding, "_query_cache", OrderedDict())
@@ -22,6 +27,12 @@ def _env(monkeypatch):
 def _stub(monkeypatch, calls):
     """替掉真实嵌入服务：记录每次请求，返回固定 512 维向量。"""
     def fake(texts, instruct=False):
+        """替身嵌入函数，记录调用文本并返回固定向量矩阵。
+
+        Args:
+            texts: 待嵌入文本列表。
+            instruct: 是否为查询侧添加检索指令。
+        """
         calls.append(list(texts))
         return np.tile(np.arange(DIM, dtype="float32"), (len(texts), 1))
     monkeypatch.setattr(index_cache, "model_signature", lambda: f"test-model:{DIM}")
@@ -35,6 +46,12 @@ def _stub_query(monkeypatch, calls, tag="test-model:512"):
     断言 `not allclose` 就成了假失败。
     """
     def fake_post(texts, instruct=False):
+        """替身嵌入请求函数，按文本内容生成可复现向量。
+
+        Args:
+            texts: 待嵌入文本列表。
+            instruct: 是否为查询侧添加检索指令。
+        """
         calls.append((list(texts), instruct))
         seed = float(abs(hash("|".join(texts))) % 900 + 1)
         return np.tile(np.arange(DIM, dtype="float32") + seed, (len(texts), 1))
@@ -43,6 +60,12 @@ def _stub_query(monkeypatch, calls, tag="test-model:512"):
 
 
 def _count(conn, tenant):
+    """统计指定租户的嵌入缓存条数。
+
+    Args:
+        conn: 数据库连接。
+        tenant: 租户标识。
+    """
     rows = fetch_all(conn, "SELECT count(*) AS n FROM embedding_cache WHERE tenant_id=%s",
                      (tenant,))
     return rows[0]["n"]
@@ -108,6 +131,7 @@ def test_encode_index_needs_embedding_service(monkeypatch):
 
 
 def test_encode_index_empty_pairs():
+    """验证空切片列表不写入向量并直接返回 None。"""
     with database_connection() as conn:
         assert index_cache.encode_index(conn, "tenant_index_cache_f", []) is None
 

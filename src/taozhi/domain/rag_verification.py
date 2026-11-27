@@ -73,6 +73,14 @@ _QUALIFIER = re.compile(r"渠道|订单|批次|适用|拆封|会员|范围|系�
 
 
 def _models(text: str) -> set[str]:
+    """提取文本中出现的手机机型与产品型号标识。
+
+    Args:
+        text: 待解析文本。
+
+    Returns:
+        规范化后的型号集合。
+    """
     family_models = _PHONE_MODEL.findall(text)
     product_codes = extract_entities(_PHONE_MODEL.sub(" ", text).upper())
     return {norm_text(item).upper() for item in [*product_codes, *family_models]}
@@ -84,6 +92,16 @@ def fact_subjects(text: str) -> set[str]:
 
 
 def _applicable_models(quote: str, document: str, title: str) -> set[str]:
+    """判断引文适用的机型范围。
+
+    Args:
+        quote: 引文原句。
+        document: 所在文档正文。
+        title: 文档标题。
+
+    Returns:
+        引文明确的机型集合；未明确时取文档唯一机型，无法确定则为空集。
+    """
     named = _models(quote)
     if named:
         return named
@@ -92,6 +110,17 @@ def _applicable_models(quote: str, document: str, title: str) -> set[str]:
 
 
 def _matches_scope(question: str, quote: str, document: str, title: str) -> bool:
+    """校验引文与问题在渠道、版本周期等适用范围上是否匹配。
+
+    Args:
+        question: 用户问题。
+        quote: 引文原句。
+        document: 所在文档正文。
+        title: 文档标题。
+
+    Returns:
+        True 表示引文适用范围覆盖问题限定。
+    """
     if _OUR_POLICY.search(question) and _OTHER_POLICY.search(quote + title) and not _OUR_POLICY.search(quote + title):
         return False
     for dimension in _CHANNELS:
@@ -113,6 +142,17 @@ def _matches_scope(question: str, quote: str, document: str, title: str) -> bool
 
 
 def _relevant_quote(question: str, quote: str, document: str, title: str) -> bool:
+    """判断单句引文能否作为回答问题的依据。
+
+    Args:
+        question: 用户问题。
+        quote: 引文原句。
+        document: 所在文档正文。
+        title: 文档标题。
+
+    Returns:
+        True 表示机型、适用范围与主题均匹配。
+    """
     models = _models(question)
     if models and models.isdisjoint(_applicable_models(quote, document, title)):
         return False
@@ -160,6 +200,14 @@ def missing_models(question: str, evidence: list[dict], findings: list[dict]) ->
 
 
 def _scope_text(text: str) -> str:
+    """剥离机型与文档标签，得到只含适用范围限定的文本。
+
+    Args:
+        text: 标题或原句。
+
+    Returns:
+        规范化并去除机型后的范围文本。
+    """
     text = norm_text(_PHONE_MODEL.sub("", text)).upper()
     for model in extract_entities(text):
         text = text.replace(model, "")

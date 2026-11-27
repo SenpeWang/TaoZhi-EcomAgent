@@ -17,17 +17,51 @@ class LocalBlobStore:
     def __init__(self, cfg):
         self.cfg = cfg
     def _path(self, tenant_id, name):
+        """解析租户私有目录下的附件路径并确保目录存在。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+
+        Returns:
+            附件的绝对路径。
+        """
         folder = self.cfg.private_dir / tenant_id
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
         return folder / name
     def put_blob(self, tenant_id, name, data: bytes):
+        """把字节写入本地私有目录，并收紧为仅属主可读写。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+            data: 附件字节内容。
+        """
         path = self._path(tenant_id, name)
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         path.write_bytes(data)
         path.chmod(0o600)
     def remove_blob(self, tenant_id, name):
+        """删除本地附件文件；文件不存在时忽略。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+        """
         self._path(tenant_id, name).unlink(missing_ok=True)
     def open_blob(self, tenant_id, name) -> bytes:
+        """读取本地附件字节。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+
+        Returns:
+            附件字节内容。
+
+        Raises:
+            FileNotFoundError: 附件不存在时抛出。
+        """
         path = self._path(tenant_id, name)
         if not path.is_file():
             raise FileNotFoundError(name)
@@ -53,10 +87,32 @@ class MinioBlobStore:
             self.client.make_bucket(cfg.minio_bucket)
             self.client.set_bucket_versioning(cfg.minio_bucket, VersioningConfig(ENABLED))
     def _key(self, tenant_id, name):
+        """拼接桶内对象键：租户编号即隔离前缀。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+
+        Returns:
+            桶内对象键。
+        """
         return f"{tenant_id}/{name}"
     def put_blob(self, tenant_id, name, data: bytes):
+        """把字节写入 MinIO 桶。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+            data: 附件字节内容。
+        """
         self.client.put_object(self.cfg.minio_bucket, self._key(tenant_id, name), io.BytesIO(data), len(data))
     def remove_blob(self, tenant_id, name):
+        """删除 MinIO 对象；对象本就不存在时忽略。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+        """
         from minio.error import S3Error
         try:
             self.client.remove_object(self.cfg.minio_bucket, self._key(tenant_id, name))
@@ -64,6 +120,15 @@ class MinioBlobStore:
             if exc.code not in {"NoSuchKey", "NoSuchObject"}:
                 _LOG.warning("附件对象清理失败（错误码=%s）", exc.code)
     def open_blob(self, tenant_id, name) -> bytes:
+        """读取 MinIO 对象字节后关闭响应。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+
+        Returns:
+            附件字节内容。
+        """
         resp = self.client.get_object(self.cfg.minio_bucket, self._key(tenant_id, name))
         try:
             return resp.read()
@@ -71,6 +136,16 @@ class MinioBlobStore:
             resp.close()
             resp.release_conn()
     def presign_url(self, tenant_id, name, ttl=None):
+        """签发短时效的附件下载直链。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+            ttl: 有效期秒数；缺省使用配置值。
+
+        Returns:
+            预签名 GET URL。
+        """
         from datetime import timedelta
         return self.client.presigned_get_object(self.cfg.minio_bucket, self._key(tenant_id, name), expires=timedelta(seconds=ttl or self.cfg.presign_ttl))
 
@@ -83,17 +158,50 @@ class DualBlobStore:
         self.primary = primary
         self.mirror = mirror
     def put_blob(self, tenant_id, name, data: bytes):
+        """主写与镜像写同时落盘，保证迁移期两侧一致。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+            data: 附件字节内容。
+        """
         self.primary.put_blob(tenant_id, name, data)
         self.mirror.put_blob(tenant_id, name, data)
     def remove_blob(self, tenant_id, name):
+        """同时删除主写与镜像对象。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+        """
         self.primary.remove_blob(tenant_id, name)
         self.mirror.remove_blob(tenant_id, name)
     def open_blob(self, tenant_id, name) -> bytes:
+        """优先读取主写对象，失败时回退本地镜像。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+
+        Returns:
+            附件字节内容。
+        """
         try:
             return self.primary.open_blob(tenant_id, name)
-        except Exception:
+        except Exception as exc:
+            _LOG.warning("MinIO 读取失败，回退本地镜像（%s）", type(exc).__name__)
             return self.mirror.open_blob(tenant_id, name)
     def presign_url(self, tenant_id, name, ttl=None):
+        """使用主写存储签发下载直链。
+
+        Args:
+            tenant_id: 租户编号。
+            name: 附件相对路径。
+            ttl: 有效期秒数。
+
+        Returns:
+            预签名 GET URL。
+        """
         return self.primary.presign_url(tenant_id, name, ttl)
 
 def get_blob_store():

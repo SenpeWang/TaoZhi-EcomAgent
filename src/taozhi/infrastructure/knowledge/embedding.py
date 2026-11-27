@@ -96,6 +96,15 @@ def to_vector(raw) -> Optional[np.ndarray]:
 
 
 def _post(texts: list[str], instruct: bool) -> np.ndarray:
+    """调用嵌入服务把文本批量编码为向量。
+
+    Args:
+        texts: 待编码文本列表。
+        instruct: True 表示查询侧指令编码，False 表示文档侧编码。
+
+    Returns:
+        形状为（文本数，维度）的 float32 向量矩阵。
+    """
     operation = "embedding.query" if instruct else "embedding.passages"
     with node_span(operation, "EMBEDDING") as span:
         response = httpx.post(load_config().embed_service_url.rstrip("/") + "/embed",

@@ -15,8 +15,28 @@ TEMPLATE=[
  ("商品产品部",["商品资料组","产品适配组"]),("电商运营部",["店铺运营组","内容营销组"]),
  ("客服售后部",["售前客服组","售后服务组"]),("采购供应链部",["采购组","仓储物流组"]),
  ("财务综合部",["财务组","行政组"])]
-def node_id(tenant,name):return "org_"+hashlib.sha256((tenant+":"+name).encode()).hexdigest()[:24]
+def node_id(tenant,name):
+    """按租户与节点名称生成稳定的组织节点标识。
+
+    Args:
+        tenant: 租户标识。
+        name: 组织节点名称。
+
+    Returns:
+        稳定的组织节点标识。
+    """
+    return "org_"+hashlib.sha256((tenant+":"+name).encode()).hexdigest()[:24]
 def organization(c,tenant,name):
+    """为公司建立部门与小组两级组织架构，并返回名称到节点的映射。
+
+    Args:
+        c: 数据库连接。
+        tenant: 租户标识。
+        name: 公司根节点名称。
+
+    Returns:
+        组织节点名称到标识的映射。
+    """
     root=node_id(tenant,"公司")
     c.execute("INSERT INTO org_nodes(id,tenant_id,name,kind) VALUES(%s,%s,%s,'company') ON CONFLICT(id) DO NOTHING",(root,tenant,name))
     nodes={"公司":root}
@@ -28,6 +48,21 @@ def organization(c,tenant,name):
             c.execute("INSERT INTO org_nodes(id,tenant_id,parent_id,name,kind) VALUES(%s,%s,%s,%s,'team') ON CONFLICT(id) DO NOTHING",(nid,tenant,dep,team))
     return nodes
 def add_doc(c,tenant,creator,did,title,body,node,scope="company",level=1,state="published",version=1):
+    """写入一篇文档及其版本、切片与提及索引。
+
+    Args:
+        c: 数据库连接。
+        tenant: 租户标识。
+        creator: 创建人标识。
+        did: 文档标识。
+        title: 文档标题。
+        body: 文档正文。
+        node: 归属组织节点。
+        scope: 可见范围。
+        level: 密级。
+        state: 文档状态。
+        version: 版本号。
+    """
     c.execute("INSERT INTO documents(id,tenant_id,node_id,creator_id,title,scope,level,ai_allowed,download_allowed,state,current_version) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING",(did,tenant,node,creator,title,scope,level,level<3,level==1,state,version))
     c.execute("INSERT INTO document_versions(tenant_id,document_id,version,title,body,content_hash,created_by,policy) VALUES(%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",(tenant,did,version,title,body,hashlib.sha256(body.encode()).hexdigest(),creator,as_jsonb(dict(node_id=node,scope=scope,level=level))))
     for ch in split([(0,body)],did,version):
@@ -35,6 +70,11 @@ def add_doc(c,tenant,creator,did,title,body,node,scope="company",level=1,state="
     from taozhi.infrastructure.persistence.document_repo import index_mentions
     index_mentions(c,tenant,did,version,split([(0,body)],did,version))
 def corpus():
+    """读取 data/index/chunks.json 并按文档分组。
+
+    Returns:
+        文档标识到切片列表的映射。
+    """
     path=ROOT/"data/index/chunks.json"
     groups={}
     for chunk in json.loads(path.read_text()) if path.exists() else []:
@@ -69,6 +109,7 @@ def seed_test():
     print("演示企业与四种现有正式账号已初始化")
 
 def bootstrap_owner():
+    """为缺少老板的租户创建 owner 账号，并把一次性口令写入运行时目录。"""
     with database_connection() as c:
         for tenant in fetch_all(c,"SELECT * FROM tenants"):
             if fetch_one(c,"SELECT m.user_id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=%s AND m.role='boss' AND m.active AND u.active",(tenant["id"],)):continue
@@ -83,6 +124,14 @@ def bootstrap_owner():
 
 
 def _load_cfg_for_env(env_path: Path):
+    """在临时切换 ECOM_ENV_FILE 的情况下加载配置。
+
+    Args:
+        env_path: 环境配置文件路径。
+
+    Returns:
+        解析后的配置对象。
+    """
     prev = os.environ.get("ECOM_ENV_FILE")
     os.environ["ECOM_ENV_FILE"] = str(env_path)
     try:

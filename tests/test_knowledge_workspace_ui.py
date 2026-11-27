@@ -14,6 +14,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 
 
 def test_knowledge_answer_presentation():
+    """验证前端知识答案的可见性、依据标签与引用分组逻辑。"""
     script = """
 import assert from 'node:assert/strict'
 import { answerBasisLabel, citationGroups, publicSourceUrl, visibleTaskResult } from './web/src/features/tasks/knowledgeAnswers.ts'

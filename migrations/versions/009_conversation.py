@@ -9,8 +9,10 @@ down_revision="008_business_tables"
 branch_labels=None
 depends_on=None
 def upgrade():
+    """为 jobs 增加会话标识列及按租户、归属人与会话检索的索引。"""
     op.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS conversation_id text NOT NULL DEFAULT ''")
     op.execute("CREATE INDEX IF NOT EXISTS idx_jobs_conversation ON jobs(tenant_id,owner_id,conversation_id,created_at DESC)")
 def downgrade():
+    """删除会话索引与 jobs.conversation_id 列。"""
     op.execute("DROP INDEX IF EXISTS idx_jobs_conversation")
     op.execute("ALTER TABLE jobs DROP COLUMN IF EXISTS conversation_id")

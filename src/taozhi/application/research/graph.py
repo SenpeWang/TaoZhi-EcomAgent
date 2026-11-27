@@ -27,6 +27,14 @@ def _traced_research_node(name: str, func: Callable) -> Callable:
     """在并行分支记录节点耗时，按实际运行实例关联调研结果。"""
     @wraps(func)
     def run(state):
+        """为调研图节点建立 span，执行节点并记录运行实例关键属性。
+
+        Args:
+            state: 调研图状态。
+
+        Returns:
+            节点函数返回的状态增量。
+        """
         operation = f"research.{name}"
         if name == "archive_research":
             with node_span(operation, "CHAIN"):

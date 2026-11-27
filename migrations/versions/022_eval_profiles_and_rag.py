@@ -8,6 +8,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """为数据集与批次补充 agent/rag 体系字段，新增不可变配置版本表与审计日志表。"""
     op.execute("""
         ALTER TABLE eval_datasets
          ADD COLUMN IF NOT EXISTS eval_kind text NOT NULL DEFAULT 'agent' CHECK (eval_kind IN ('agent', 'rag')),
@@ -55,6 +56,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """删除审计日志、配置版本表及新增的体系字段。"""
     op.execute("DROP TABLE IF EXISTS eval_audit_logs")
     op.execute("DROP INDEX IF EXISTS idx_eval_runs_kind_profile")
     op.execute("""

@@ -49,6 +49,8 @@ def test_gateway_missing_url_falls_back_to_duckduckgo(monkeypatch):
     monkeypatch.setattr(search_web, "search_web_via_mcp", lambda *_a, **_k: [])
 
     class _GatewayClient:
+        """模拟业务网关客户端，返回固定检索结果。"""
+
         def __enter__(self):
             return self
 
@@ -56,6 +58,12 @@ def test_gateway_missing_url_falls_back_to_duckduckgo(monkeypatch):
             return False
 
         def post(self, *_args, **_kwargs):
+            """返回缺少链接的搜索结果响应桩。
+
+            Args:
+                _args: 被忽略的位置参数。
+                _kwargs: 被忽略的关键字参数。
+            """
             response = Mock()
             response.raise_for_status = Mock()
             response.json = Mock(return_value={"results": [{"title": "缺链接"}]})
@@ -95,6 +103,11 @@ def test_cancellation_context_stops_running_tool():
     event = threading.Event()
 
     def tool(**_kwargs):
+        """可被取消的长耗时工具桩。
+
+        Args:
+            _kwargs: 被忽略的关键字参数。
+        """
         for _ in range(200):
             raise_if_cancelled()
             time.sleep(0.01)
@@ -114,6 +127,8 @@ def test_result_items_rejects_incomplete_items():
 
 
 class _Stream:
+    """构造可迭代字节流响应桩。"""
+
     encoding = "utf-8"
 
     def __init__(self, *, status_code, headers, chunks=()):
@@ -128,10 +143,13 @@ class _Stream:
         return False
 
     def iter_bytes(self):
+        """逐块产出预置字节。"""
         yield from self._chunks
 
 
 class _Client:
+    """返回预设流响应的 httpx 客户端桩。"""
+
     def __init__(self, stream):
         self._stream = stream
 
@@ -142,10 +160,24 @@ class _Client:
         return False
 
     def stream(self, *_args, **_kwargs):
+        """返回预设的流响应。
+
+        Args:
+            _args: 被忽略的位置参数。
+            _kwargs: 被忽略的关键字参数。
+        """
         return self._stream
 
 
 def _scrape_with(monkeypatch, stream, *, mcp=None, **kwargs):
+    """在替换网络与 MCP 依赖后执行网页抓取。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+        stream: 响应流桩对象。
+        kwargs: 关键字参数。
+        mcp: MCP 抓取替身函数。
+    """
     monkeypatch.setattr(web_scraper, "resolve_public_http_target", lambda url: (url, "93.184.216.34"))
     monkeypatch.setattr(web_scraper.httpx, "Client", lambda **_kw: _Client(stream))
     monkeypatch.setattr(web_scraper, "fetch_page_via_mcp", mcp or Mock(return_value=""))
@@ -172,7 +204,10 @@ def test_pinned_transport_fetches_through_validated_ip(monkeypatch):
     """域名连接固定到已校验 IP，仍能完成正常抓取。"""
 
     class Handler(BaseHTTPRequestHandler):
+        """本地 HTTP 服务器处理器，返回最小 HTML 页面。"""
+
         def do_GET(self):
+            """返回最小 HTML 页面。"""
             body = b"<html><head><title>hello</title></head><body><p>world</p></body></html>"
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -181,6 +216,11 @@ def test_pinned_transport_fetches_through_validated_ip(monkeypatch):
             self.wfile.write(body)
 
         def log_message(self, *_args):
+            """静默服务器访问日志。
+
+            Args:
+                _args: 被忽略的位置参数。
+            """
             pass
 
     server = HTTPServer(("127.0.0.1", 0), Handler)
@@ -204,6 +244,8 @@ def test_1688_local_scraper_uses_utf8_and_returns_stdout(monkeypatch):
     captured: dict = {}
 
     class FakeProcess:
+        """立即成功的子进程桩，记录启动参数。"""
+
         returncode = 0
 
         def __init__(self, args, **kwargs):
@@ -211,9 +253,11 @@ def test_1688_local_scraper_uses_utf8_and_returns_stdout(monkeypatch):
             captured["args"] = args
 
         def poll(self):
+            """返回成功退出码。"""
             return 0
 
         def communicate(self):
+            """返回预置的 JSON 输出。"""
             return ('{"state":"ok","items":[{"title":"东莞源头厂"}]}\n', "")
 
     monkeypatch.setattr(search_1688.subprocess, "Popen", FakeProcess)
@@ -229,18 +273,23 @@ def test_1688_local_scraper_kills_process_on_cancel(monkeypatch):
     killed = {"count": 0}
 
     class FakeProcess:
+        """可被终止的挂起子进程桩。"""
+
         returncode = None
 
         def __init__(self, *_args, **_kwargs):
             pass
 
         def poll(self):
+            """保持运行中状态。"""
             return None
 
         def kill(self):
+            """记录终止次数。"""
             killed["count"] += 1
 
         def communicate(self):
+            """返回空输出。"""
             return "", ""
 
     monkeypatch.setattr(search_1688.subprocess, "Popen", FakeProcess)

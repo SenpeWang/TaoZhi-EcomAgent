@@ -12,6 +12,7 @@ branch_labels=None
 depends_on=None
 
 def upgrade():
+    """创建指标语义层表 metrics、授权表 metric_grants 及租户索引。"""
     op.execute("""CREATE TABLE metrics(
  id text PRIMARY KEY, tenant_id text NOT NULL, metric_key text NOT NULL,
  name text NOT NULL, aliases text[] NOT NULL DEFAULT '{}', description text NOT NULL DEFAULT '',
@@ -35,5 +36,6 @@ def upgrade():
  FOREIGN KEY(tenant_id,user_id) REFERENCES users(tenant_id,id))""")
 
 def downgrade():
+    """删除 metric_grants 与 metrics 表。"""
     op.execute("DROP TABLE metric_grants")
     op.execute("DROP TABLE metrics")

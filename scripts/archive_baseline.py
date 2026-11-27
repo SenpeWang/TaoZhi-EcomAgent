@@ -39,6 +39,14 @@ HEADER = """# 基线快照（可修订）
 
 
 def md5_of(path: Path) -> str:
+    """计算文件的 MD5 摘要。
+
+    Args:
+        path: 待计算的文件路径。
+
+    Returns:
+        32 位十六进制摘要字符串。
+    """
     return hashlib.md5(path.read_bytes()).hexdigest()
 
 
@@ -160,6 +168,14 @@ def cmd_check() -> int:
 
 
 def main() -> int:
+    """按命令行参数分发 archive 或 check 子命令。
+
+    Returns:
+        子命令的退出码。
+
+    Raises:
+        SystemExit: 未知子命令时输出用法并退出。
+    """
     cmd = sys.argv[1] if len(sys.argv) > 1 else "archive"
     if cmd == "archive":
         return cmd_archive(sys.argv[2] if len(sys.argv) > 2 else "")

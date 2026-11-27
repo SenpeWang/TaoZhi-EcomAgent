@@ -15,6 +15,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """为数据集、批次与配置版本增加版本化字段，新增报告原文表、基线表与评测任务类型。"""
     op.execute("ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_kind_check")
     op.execute("""
         ALTER TABLE jobs ADD CONSTRAINT jobs_kind_check
@@ -99,6 +100,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """删除基线表、报告表、版本化索引与列，并还原 jobs 的任务类型约束。"""
     op.execute("DROP TABLE IF EXISTS eval_baselines")
     op.execute("DROP TABLE IF EXISTS eval_run_reports")
     op.execute("DROP INDEX IF EXISTS uq_eval_profiles_version_no")

@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _all_specs():
+    """汇总研究与 RAG 等各类提示词规格，供一致性断言使用。"""
     return (
         *RESEARCH_PROMPTS.all(),
         *RAG_PROMPTS.all(),

@@ -19,6 +19,13 @@ def test_snapshot_dump_and_signatures_share_one_transaction(monkeypatch, tmp_pat
     order = []
 
     def client(name, source, *args):
+        """伪造 pg_dump 调用入口，校验快照参数并记录导出顺序。
+
+        Args:
+            name: 名称标识。
+            source: 数据来源或原始文本。
+            args: 位置参数。
+        """
         assert source is conn and name == "pg_dump"
         assert args[args.index("--snapshot") + 1] == "snapshot-123"
         order.append("dump")
@@ -26,6 +33,11 @@ def test_snapshot_dump_and_signatures_share_one_transaction(monkeypatch, tmp_pat
     monkeypatch.setattr(backup, "_run_client", client)
     expected = {'"public"."task_events"': "hash", '"public"."task_spans"': "span-hash"}
     def checksum(source):
+        """伪造校验和查询函数，断言复用同一连接并返回期望摘要。
+
+        Args:
+            source: 数据来源或原始文本。
+        """
         assert source is conn
         order.append("signatures")
         return expected
@@ -46,6 +58,13 @@ def test_client_conninfo_keeps_sensitive_settings_out_of_argv(monkeypatch):
     connection = SimpleNamespace(info=info)
     seen = []
     def client(argv, *, env, check):
+        """伪造子进程执行入口，校验命令行与隔离环境变量不含明文口令。
+
+        Args:
+            argv: 命令行参数列表。
+            env: 子进程环境变量。
+            check: 是否启用子进程检查。
+        """
         assert check and "--dbname=service=backup" in argv
         assert "test-phrase" not in str(argv) and "environment-value" not in str(argv)
         assert env["PGDATABASE"] == "isolated database" and env["PGUSER"] == "backup_user"
@@ -103,6 +122,12 @@ def test_restore_checks_snapshot_and_drops_only_its_isolated_database(monkeypatc
     handles = iter((source, admin, restored))
     connections = []
     def connect(string, *, autocommit):
+        """伪造数据库连接入口，记录解析后的连接参数并断言自动提交。
+
+        Args:
+            string: 数据库连接串。
+            autocommit: 是否自动提交事务。
+        """
         from psycopg.conninfo import conninfo_to_dict
         assert autocommit
         connections.append(conninfo_to_dict(string))

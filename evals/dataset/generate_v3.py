@@ -26,10 +26,26 @@ DOC_ALIASES = {
 
 
 def load(name: str) -> dict:
+    """读取 spec_v3 目录下的 YAML 文件。
+
+    Args:
+        name: YAML 文件名（不含扩展名）。
+
+    Returns:
+        解析后的对象。
+    """
     return yaml.safe_load((SPEC / f"{name}.yaml").read_text(encoding="utf-8"))
 
 
 def product_body(product: dict) -> str:
+    """渲染 V3 产品语料正文。
+
+    Args:
+        product: 产品语料条目。
+
+    Returns:
+        产品正文文本。
+    """
     facts = product["facts"]
     return (f"{product['title']}\n一、产品参数\n功率：{facts['power']}\n接口：{facts['ports']}\n"
             f"协议：{facts['protocol']}\n重量：{facts['weight']}\n价格：{facts['price']} 元\n"
@@ -38,6 +54,14 @@ def product_body(product: dict) -> str:
 
 
 def table_body(table: dict) -> str:
+    """把表格数据渲染为 Markdown 表格。
+
+    Args:
+        table: 表格定义（列、行与标题）。
+
+    Returns:
+        Markdown 表格文本。
+    """
     head = "| " + " | ".join(str(column) for column in table["columns"]) + " |"
     sep = "|" + "---|" * len(table["columns"])
     rows = "\n".join("| " + " | ".join(str(cell) for cell in row) + " |" for row in table["rows"])
@@ -45,6 +69,16 @@ def table_body(table: dict) -> str:
 
 
 def build_docs(corpus: dict, fixtures: dict, parsing_entries: list) -> list[dict]:
+    """把语料与夹具合并为带编号的文档清单。
+
+    Args:
+        corpus: 语料 spec。
+        fixtures: 夹具 spec。
+        parsing_entries: 解析夹具条目列表。
+
+    Returns:
+        文档清单。
+    """
     docs = []
     for doc in fixtures.get("documents", []):
         item = dict(doc)
@@ -82,6 +116,15 @@ def build_docs(corpus: dict, fixtures: dict, parsing_entries: list) -> list[dict
 
 
 def build_pools(corpus: dict, scenarios: dict) -> dict:
+    """构建 V3 用例生成所需的题型与内容池。
+
+    Args:
+        corpus: 语料 spec。
+        scenarios: 场景 spec。
+
+    Returns:
+        内容池字典。
+    """
     pools = {key: list(value) for key, value in scenarios.get("pools", {}).items()}
     product_types = scenarios["product_types"]
     product_pool = []
@@ -168,6 +211,24 @@ def build_pools(corpus: dict, scenarios: dict) -> dict:
 def build_case(recipe: str, item: dict, frame: str, *, capability: str, sub: str,
                identity: dict, answerability: str, qtype: str, risk: str,
                track: str, seq: int) -> dict:
+    """按模板与内容池构造一条 V3 用例。
+
+    Args:
+        recipe: 用例配方名。
+        item: 配方内容项。
+        frame: 提问模板。
+        capability: 能力大类。
+        sub: 能力子类。
+        identity: 用例身份。
+        answerability: 可答性标记。
+        qtype: 问题类型。
+        risk: 风险标记。
+        track: 用例用途。
+        seq: 序号。
+
+    Returns:
+        用例定义字典。
+    """
     question = frame.format(q=item["q"])
     docs = [DOC_ALIASES.get(doc, doc) for doc in (item.get("docs") or [])]
     facts = [str(fact) for fact in item.get("facts") or []]
@@ -211,6 +272,17 @@ def build_case(recipe: str, item: dict, frame: str, *, capability: str, sub: str
 
 
 def build_cases(corpus: dict, fixtures: dict, scenarios: dict, docs: list[dict]) -> list[dict]:
+    """按能力与子类批量构造 V3 用例。
+
+    Args:
+        corpus: 语料 spec。
+        fixtures: 夹具 spec。
+        scenarios: 场景 spec。
+        docs: 文档清单。
+
+    Returns:
+        用例列表。
+    """
     from evals import naming
     pools = build_pools(corpus, scenarios)
     identities = {item["logical_id"]: item for item in load("org")["identities"]}
@@ -257,6 +329,14 @@ def build_cases(corpus: dict, fixtures: dict, scenarios: dict, docs: list[dict])
 
 
 def build_redteam(scenarios: dict) -> list[dict]:
+    """构造 V3 安全对抗用例。
+
+    Args:
+        scenarios: 场景 spec。
+
+    Returns:
+        对抗用例列表。
+    """
     from evals import naming
     pools = {key: list(value) for key, value in scenarios.get("pools", {}).items()}
     mapping = {
@@ -298,6 +378,14 @@ def build_redteam(scenarios: dict) -> list[dict]:
 
 
 def sha256_file(path: Path) -> str:
+    """计算文件字节摘要。
+
+    Args:
+        path: 文件路径。
+
+    Returns:
+        十六进制 sha256。
+    """
     return sha256(path.read_bytes()).hexdigest()
 
 
@@ -376,6 +464,11 @@ def validate_artifacts(cases: list[dict], redteam: list[dict]) -> list[str]:
 
 
 def main() -> int:
+    """命令行入口：生成 V3 数据集并自检或写盘。
+
+    Returns:
+        进程退出码。
+    """
     parser = argparse.ArgumentParser(description="生成 V3 RAG 评测数据集")
     parser.add_argument("--out", default=str(DEFAULT_OUT))
     parser.add_argument("--check", action="store_true", help="自检；已存在快照时逐字节比对（不写盘）")

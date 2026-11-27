@@ -17,6 +17,7 @@ depends_on = None
 
 
 def upgrade():
+    """创建嵌入缓存表 embedding_cache，按租户、模型与内容摘要去重存储向量。"""
     op.execute("""CREATE TABLE IF NOT EXISTS embedding_cache(
  tenant_id text NOT NULL, model_tag text NOT NULL, digest text NOT NULL,
  dim integer NOT NULL, embedding vector(512) NOT NULL,
@@ -26,4 +27,5 @@ def upgrade():
 
 
 def downgrade():
+    """删除 embedding_cache 嵌入缓存表。"""
     op.execute("DROP TABLE IF EXISTS embedding_cache")

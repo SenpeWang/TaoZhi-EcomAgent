@@ -11,6 +11,11 @@ from taozhi.server.api import app
 
 
 def _login(username: str) -> TestClient:
+    """以指定账号登录并返回带会话的测试客户端。
+
+    Args:
+        username: 登录用户名。
+    """
     client = TestClient(app)
     resp = client.post("/api/auth/login", json={"username": username, "password": "123456"})
     assert resp.status_code == 200, resp.text
@@ -19,6 +24,11 @@ def _login(username: str) -> TestClient:
 
 
 def test_evaluation_center_wide_read_narrow_write_and_immutable_profiles(monkeypatch) -> None:
+    """验证评测中心宽读窄写：员工只读，配置写入幂等且历史版本不可变。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     import importlib.util
     from pathlib import Path
     from taozhi.config import load_config

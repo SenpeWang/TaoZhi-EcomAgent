@@ -15,6 +15,18 @@ VERSION = "agent_v4_20261125"
 
 
 def _case(case_id: str, *, category: str, name: str, prompt: str, **extra) -> dict:
+    """构造一条 V4 Agent 用例定义并推断能力大类。
+
+    Args:
+        case_id: 用例编号。
+        category: 用例分类。
+        name: 名称。
+        prompt: 用例提问。
+        **extra: 附加用例字段。
+
+    Returns:
+        用例定义字典。
+    """
     return {
         "id": case_id,
         "capability": (
@@ -38,6 +50,14 @@ def _case(case_id: str, *, category: str, name: str, prompt: str, **extra) -> di
 
 
 def _quick(number: int) -> tuple[dict, dict]:
+    """构造速答路由用例及其观测。
+
+    Args:
+        number: 用例序号。
+
+    Returns:
+        (用例定义, 观测记录)。
+    """
     cid = f"AGENT-V4-QUICK-{number:03d}"
     case = _case(cid, category="task_completion", name=f"速答路由 {number}", prompt=f"简单问题 {number}：解释一个术语。", expected_quick_answer=True)
     return case, {
@@ -53,6 +73,14 @@ def _quick(number: int) -> tuple[dict, dict]:
 
 
 def _coord(number: int) -> tuple[dict, dict]:
+    """构造协调员直接调用工具用例及其观测。
+
+    Args:
+        number: 用例序号。
+
+    Returns:
+        (用例定义, 观测记录)。
+    """
     cid = f"AGENT-V4-COORD-{number:03d}"
     case = _case(
         cid,
@@ -83,6 +111,14 @@ def _coord(number: int) -> tuple[dict, dict]:
 
 
 def _tool(number: int) -> tuple[dict, dict]:
+    """构造工具自主选择用例及其观测。
+
+    Args:
+        number: 用例序号。
+
+    Returns:
+        (用例定义, 观测记录)。
+    """
     cid = f"AGENT-V4-TOOL-{number:03d}"
     case = _case(
         cid,
@@ -116,6 +152,14 @@ def _tool(number: int) -> tuple[dict, dict]:
 
 
 def _audit(number: int) -> tuple[dict, dict]:
+    """构造审计角色用例及其观测。
+
+    Args:
+        number: 用例序号。
+
+    Returns:
+        (用例定义, 观测记录)。
+    """
     cid = f"AGENT-V4-AUDIT-{number:03d}"
     case = _case(
         cid,
@@ -145,6 +189,11 @@ def _audit(number: int) -> tuple[dict, dict]:
 
 
 def build() -> tuple[list[dict], list[dict]]:
+    """按工厂函数批量构造 V4 用例与观测。
+
+    Returns:
+        (用例列表, 观测列表)。
+    """
     cases, observations = [], []
     for index in range(1, 7):
         for factory in (_quick, _coord, _tool, _audit):
@@ -155,10 +204,19 @@ def build() -> tuple[list[dict], list[dict]]:
 
 
 def sha256(path: Path) -> str:
+    """计算文件字节摘要。
+
+    Args:
+        path: 文件路径。
+
+    Returns:
+        十六进制 sha256。
+    """
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def main() -> None:
+    """命令行入口：生成 V4 用例与观测并写盘。"""
     cases, observations = build()
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "research_cases.json").write_text(

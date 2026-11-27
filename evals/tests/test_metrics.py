@@ -28,6 +28,7 @@ from metrics import (
 
 
 def test_hit_at_k_counts_only_relevant_hits():
+    """验证 Hit@k 只统计相关命中，空集合为 0。"""
     ranked = ["无关A", "相关X", "无关B"]
     assert hit_at_k(ranked, {"相关X"}, 1) == 0.0
     assert hit_at_k(ranked, {"相关X"}, 3) == 1.0
@@ -35,6 +36,7 @@ def test_hit_at_k_counts_only_relevant_hits():
 
 
 def test_precision_and_recall_are_not_the_same_number():
+    """验证精确率与召回率计算口径不同且分母正确。"""
     ranked = ["相关X", "无关A", "相关Y", "无关B"]
     relevant = {"相关X", "相关Y", "相关Z"}
     assert precision_at_k(ranked, relevant, 2) == pytest.approx(0.5)
@@ -44,11 +46,13 @@ def test_precision_and_recall_are_not_the_same_number():
 
 
 def test_reciprocal_rank_uses_first_hit_position():
+    """验证倒数排名取首个相关命中的位置。"""
     assert reciprocal_rank(["无关", "相关X", "相关Y"], {"相关X", "相关Y"}) == pytest.approx(0.5)
     assert reciprocal_rank(["无关", "无关2"], {"相关X"}) == 0.0
 
 
 def test_ndcg_rewards_earlier_hits():
+    """验证 NDCG 奖励更靠前的命中。"""
     relevant = {"相关X"}
     assert ndcg_at_k(["相关X", "无关"], relevant, 2) == pytest.approx(1.0)
     late = ndcg_at_k(["无关", "相关X"], relevant, 2)
@@ -68,17 +72,20 @@ def test_ndcg_full_recall_but_wrong_order_is_penalised():
 
 
 def test_pass_pow_k_requires_every_run_to_pass():
+    """验证 pass^k 要求每次运行都通过。"""
     assert pass_pow_k([True, True, True]) == 1.0
     assert pass_pow_k([True, False, True]) == 0.0
     assert pass_pow_k([]) == 0.0
 
 
 def test_summarize_empty_sample_reports_nothing():
+    """验证空样本汇总返回空统计而非伪造均值。"""
     stat = summarize([])
     assert stat == {"n": 0, "mean": None, "ci95_low": None, "ci95_high": None}
 
 
 def test_summarize_ci_brackets_mean_and_shrinks_with_sample_size():
+    """验证置信区间包含均值并随样本量增大而收窄。"""
     small = summarize([1.0, 0.0, 1.0, 0.0], bootstrap=500)
     large = summarize([1.0, 0.0] * 200, bootstrap=500)
     assert small["ci95_low"] <= small["mean"] <= small["ci95_high"]
@@ -86,6 +93,7 @@ def test_summarize_ci_brackets_mean_and_shrinks_with_sample_size():
 
 
 def test_retrieval_report_aggregates_all_ks():
+    """验证检索报告汇总各 k 值指标与平均倒数排名。"""
     cases = [
         (["相关X", "无关"], {"相关X"}),
         (["无关", "相关Y"], {"相关Y"}),
@@ -103,6 +111,7 @@ def test_retrieval_report_aggregates_all_ks():
 
 
 def test_retrieval_report_handles_empty_input():
+    """验证空输入时检索报告返回空结构。"""
     report = retrieval_report([], ks=(1,), bootstrap=0)
     assert report["n"] == 0
     assert report["per_k"] == {}
@@ -114,6 +123,7 @@ from metrics import accuracy_report, cohen_kappa, paired_delta
 
 
 def test_paired_delta_flags_uniform_drop():
+    """验证配对差值能识别显著下降并标记回归。"""
     base = [1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
     cur = [0.0] * 10
     res = paired_delta(base, cur)
@@ -134,6 +144,7 @@ def test_paired_delta_ignores_small_fluctuation():
 
 
 def test_paired_delta_requires_enough_pairs():
+    """验证配对数不足时判为数据不足。"""
     res = paired_delta([1.0, 0.0], [0.0, 0.0])
     assert res["verdict"] == "insufficient_data"
     assert res["delta"] is None
@@ -148,6 +159,7 @@ def test_paired_delta_supports_lower_is_better():
 
 
 def test_cohen_kappa_perfect_agreement():
+    """验证完全一致时 Cohen's kappa 为 1。"""
     human = [True] * 10 + [False] * 10
     res = cohen_kappa(human, human)
     assert res["kappa"] == pytest.approx(1.0)
@@ -165,12 +177,14 @@ def test_cohen_kappa_penalises_chance_agreement():
 
 
 def test_cohen_kappa_empty_input():
+    """验证空输入时 kappa 为空。"""
     res = cohen_kappa([], [])
     assert res["n"] == 0
     assert res["kappa"] is None
 
 
 def test_accuracy_report_carries_confidence_interval():
+    """验证准确率报告携带置信区间。"""
     verdicts = [{"pass": True, "faithful": True, "relevant": True, "abstain": False}] * 8 + \
                [{"pass": False, "faithful": False, "relevant": False, "abstain": False}] * 4
     rep = accuracy_report(verdicts)
@@ -192,6 +206,7 @@ from metrics import (
 
 
 def test_context_relevancy_and_fact_recall_and_citations():
+    """验证上下文相关度、事实召回与引用统计口径。"""
     assert context_relevancy(["doc1", "doc2", "doc1"], {"doc1"}) == pytest.approx(2 / 3)
     assert context_relevancy([], {"doc1"}) == 0.0
     assert fact_recall("支持 140W 与 USB-C，须使用 C1 口", ["140W", "usb-c", "5A"]) == pytest.approx(2 / 3)
@@ -205,6 +220,7 @@ def test_context_relevancy_and_fact_recall_and_citations():
 
 
 def test_refusal_breakdown_and_answer_correctness():
+    """验证拒答细分与答案正确性加权计算。"""
     cases = [
         {"answerability": "answerable", "abstain": True, "pass": False},
         {"answerability": "answerable", "abstain": False, "pass": True},
@@ -218,6 +234,7 @@ def test_refusal_breakdown_and_answer_correctness():
 
 
 def test_sut_token_slo_and_throughput_reports():
+    """验证被测系统 token、缓存、SLO 与吞吐报告。"""
     recs = [
         {
             "prompt_tokens": 200, "completion_tokens": 50, "total_tokens": 250, "cost_usd": 0.0001,
@@ -257,6 +274,7 @@ def test_sut_token_slo_and_throughput_reports():
 
 
 def test_recall_cutoff_format_matches_gate_before_and_after_archiving():
+    """验证 recall@k 格式在归档前后都能正确用于门禁。"""
     from evals.rag_eval.run import gate_check, six_metrics
 
     metrics = six_metrics({"retrieval": {"recall@8": 0.75}})

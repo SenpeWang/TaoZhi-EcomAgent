@@ -171,14 +171,43 @@ STEERING_FREE_REPORT = "已按最新指令重新整理检索结果，具体数�
 
 
 def _cid(prefix: str, index: int) -> str:
+    """按前缀与序号生成 V2 用例编号。
+
+    Args:
+        prefix: 用例分类前缀。
+        index: 序号。
+
+    Returns:
+        形如 AGENT-V2-<前缀>-<序号> 的用例编号。
+    """
     return f"AGENT-V2-{prefix}-{index:03d}"
 
 
 def _url(group: str, index: int, leaf: str) -> str:
+    """生成评测夹具内引用的证据链接。
+
+    Args:
+        group: 链接分组。
+        index: 序号。
+        leaf: 末级路径名。
+
+    Returns:
+        伪造的 https 证据链接。
+    """
     return f"https://research.invalid/{group}/{index:02d}/{leaf}"
 
 
 def _item(evidence_id: str, text: str, url: str | None = None) -> dict:
+    """构造一条工具返回的观测条目。
+
+    Args:
+        evidence_id: 证据编号。
+        text: 条目文本。
+        url: 访问地址。
+
+    Returns:
+        观测条目字典。
+    """
     item = {"evidence_id": evidence_id, "text": text}
     if url is not None:
         item["url"] = url
@@ -186,6 +215,18 @@ def _item(evidence_id: str, text: str, url: str | None = None) -> dict:
 
 
 def _call(sequence: int, tool_name: str, parameters: dict, items: list[dict], status: str = "ok") -> dict:
+    """构造一次工具调用记录，含数据条数与派发标记。
+
+    Args:
+        sequence: 调用序号。
+        tool_name: 工具名。
+        parameters: 工具调用参数。
+        items: 条目列表。
+        status: 状态。
+
+    Returns:
+        工具调用记录字典。
+    """
     return {
         "sequence": sequence,
         "tool_name": tool_name,
@@ -204,6 +245,18 @@ def _rule(
     min_data_count: int = 1,
     optional: bool = False,
 ) -> dict:
+    """构造一条工具期望规则。
+
+    Args:
+        tool_name: 工具名。
+        parameters: 工具调用参数。
+        status: 状态。
+        min_data_count: 最少数据条数。
+        optional: 是否为可选规则。
+
+    Returns:
+        工具期望规则字典。
+    """
     rule = {"tool_name": tool_name}
     if parameters is not None:
         rule["parameters"] = parameters
@@ -215,6 +268,16 @@ def _rule(
 
 
 def _fact(fact_id: str, any_of: list[str], evidence_ids: list[str] | None = None) -> dict:
+    """构造一条参考事实，任一措辞命中即视为覆盖。
+
+    Args:
+        fact_id: 事实编号。
+        any_of: 任一命中的措辞列表。
+        evidence_ids: 证据编号列表。
+
+    Returns:
+        参考事实字典。
+    """
     fact = {"id": fact_id, "any_of": list(any_of)}
     if evidence_ids:
         fact["evidence_ids"] = list(evidence_ids)
@@ -222,6 +285,15 @@ def _fact(fact_id: str, any_of: list[str], evidence_ids: list[str] | None = None
 
 
 def _report(paragraphs: list[str], min_chars: int) -> str:
+    """把段落拼成研报正文，并按需用填充段落补足最小字符数。
+
+    Args:
+        paragraphs: 正文段落列表。
+        min_chars: 最少字符数。
+
+    Returns:
+        研报正文文本。
+    """
     text = "\n\n".join(paragraph for paragraph in paragraphs if paragraph)
     while len(text) < min_chars:
         text += "\n\n" + FILLER
@@ -240,6 +312,22 @@ def _case(
     required_sections: tuple[str, ...] = (),
     **fields: object,
 ) -> dict:
+    """构造一条 V2 用例定义并补齐默认字段。
+
+    Args:
+        case_id: 用例编号。
+        category: 用例分类。
+        name: 名称。
+        prompt: 用例提问。
+        keyword: 报告必须覆盖的关键词。
+        suite: 用例所属套件。
+        min_chars: 最少字符数。
+        required_sections: 报告必须包含的小节。
+        **fields: 附加用例字段（如 allowed_tools、tool_expectations）。
+
+    Returns:
+        用例定义字典。
+    """
     case = {
         "id": case_id,
         "category": category,
@@ -257,6 +345,18 @@ def _case(
 
 
 def _record(case: dict, calls: list[dict], report: str, *, forbidden_example: str | None = None, **extra: object) -> dict:
+    """把用例、工具调用与研报组装成一条可回放观测记录。
+
+    Args:
+        case: 单条用例定义。
+        calls: 工具调用记录列表。
+        report: 报告对象。
+        forbidden_example: 禁止出现的示例结论。
+        **extra: 附加观测字段（如 steering 标记）。
+
+    Returns:
+        观测记录字典。
+    """
     evidence_ids = [item["evidence_id"] for call in calls for item in call["items"]]
     observation = {
         "case_id": case["id"],
@@ -274,11 +374,24 @@ def _record(case: dict, calls: list[dict], report: str, *, forbidden_example: st
 
 
 def _fact_paragraph(fact: dict) -> str:
+    """把参考事实渲染成带证据引用的研报段落。
+
+    Args:
+        fact: 参考事实字典。
+
+    Returns:
+        带引用的研报段落文本。
+    """
     citations = "".join(f"[{evidence_id}]" for evidence_id in fact.get("evidence_ids", []))
     return f"{fact['any_of'][0]}。{citations}"
 
 
 def _load_v1_records() -> list[dict]:
+    """读取 V1 用例、回放与反例并合并为保留记录。
+
+    Returns:
+        带 v1 标记的观测记录列表。
+    """
     cases = json.loads((V1_DIR / "research_cases.json").read_text(encoding="utf-8"))["cases"]
     observations = json.loads((V1_DIR / "research_replay.json").read_text(encoding="utf-8"))["observations"]
     counterexamples = json.loads((V1_DIR / "research_counterexamples.json").read_text(encoding="utf-8"))["counterexamples"]
@@ -311,6 +424,11 @@ _TOOL_SELECTION_ROWS = (
 
 
 def build_tool_selection() -> list[dict]:
+    """构造工具选择维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, phrase_a, text_a, phrase_b, text_b) in enumerate(_TOOL_SELECTION_ROWS, start=1):
         code = f"SYN-V2-TS-{index:02d}"
@@ -354,6 +472,11 @@ _ARGUMENT_ROWS = (
 
 
 def build_argument_correctness() -> list[dict]:
+    """构造参数正确性维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, price, moq, sample) in enumerate(_ARGUMENT_ROWS, start=1):
         code = f"SYN-V2-ARG-{index:02d}"
@@ -401,6 +524,11 @@ _MULTI_ROWS = (
 
 
 def build_multi_step_planning() -> list[dict]:
+    """构造多步规划维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, phrase, text, domestic, retail) in enumerate(_MULTI_ROWS, start=1):
         code = f"SYN-V2-STEP-{index:02d}"
@@ -458,6 +586,11 @@ _DEPENDENCY_ROWS = (
 
 
 def build_dependency_ordering() -> list[dict]:
+    """构造依赖顺序维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, attribute, detail) in enumerate(_DEPENDENCY_ROWS, start=1):
         code = f"SYN-V2-DEP-{index:02d}"
@@ -506,6 +639,11 @@ _ERROR_ROWS = (
 
 
 def build_error_recovery() -> list[dict]:
+    """构造错误恢复维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, price) in enumerate(_ERROR_ROWS, start=1):
         code = f"SYN-V2-ERR-{index:02d}"
@@ -552,6 +690,11 @@ _EMPTY_ROWS = (
 
 
 def build_empty_result() -> list[dict]:
+    """构造空结果处理维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, code) in enumerate(_EMPTY_ROWS, start=1):
         case = _case(
@@ -592,6 +735,11 @@ _AMBIGUITY_ROWS = (
 
 
 def build_ambiguity_clarification() -> list[dict]:
+    """构造歧义澄清维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, attribute, standard, pro) in enumerate(_AMBIGUITY_ROWS, start=1):
         code = f"SYN-V2-AMB-{index:02d}"
@@ -639,6 +787,11 @@ _BOUNDARY_ROWS = (
 
 
 def build_boundary_value() -> list[dict]:
+    """构造边界值维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, stock, moq, price) in enumerate(_BOUNDARY_ROWS, start=1):
         code = f"SYN-V2-BOUND-{index:02d}"
@@ -687,6 +840,11 @@ _REFUSAL_ROWS = (
 
 
 def build_refusal() -> list[dict]:
+    """构造超范围拒答维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (request, refusal) in enumerate(_REFUSAL_ROWS, start=1):
         case = _case(
@@ -721,6 +879,11 @@ _CONFLICT_ROWS = (
 
 
 def build_conflict_resolution() -> list[dict]:
+    """构造信息冲突消解维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, metric, value_a, value_b) in enumerate(_CONFLICT_ROWS, start=1):
         code = f"SYN-V2-CONFLICT-{index:02d}"
@@ -771,6 +934,11 @@ _STEERING_ROWS = (
 
 
 def build_dynamic_steering() -> list[dict]:
+    """构造动态干预维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, old_price, new_price) in enumerate(_STEERING_ROWS, start=1):
         old_code = f"SYN-V2-OLD-{index:02d}"
@@ -823,6 +991,11 @@ _ACCESS_ROWS = (
 
 
 def build_access_control() -> list[dict]:
+    """构造访问控制维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, capacity, price) in enumerate(_ACCESS_ROWS, start=1):
         code = f"SYN-V2-ACCESS-{index:02d}"
@@ -876,6 +1049,11 @@ _INJECTION_ROWS = (
 
 
 def build_prompt_injection() -> list[dict]:
+    """构造提示注入防御维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, spec, injection) in enumerate(_INJECTION_ROWS, start=1):
         code = f"SYN-V2-INJECT-{index:02d}"
@@ -922,6 +1100,11 @@ _HALLUCINATION_ROWS = (
 
 
 def build_hallucination_control() -> list[dict]:
+    """构造幻觉控制维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, price) in enumerate(_HALLUCINATION_ROWS, start=1):
         code = f"SYN-V2-HALLU-{index:02d}"
@@ -969,6 +1152,11 @@ _EVIDENCE_ROWS = (
 
 
 def build_evidence_attribution() -> list[dict]:
+    """构造证据归因维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, attribute, detail) in enumerate(_EVIDENCE_ROWS, start=1):
         code = f"SYN-V2-EVID-{index:02d}"
@@ -1022,6 +1210,11 @@ _TASK_ROWS = (
 
 
 def build_task_completion() -> list[dict]:
+    """构造任务完成维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, price) in enumerate(_TASK_ROWS, start=1):
         code = f"SYN-V2-TASK-{index:02d}"
@@ -1071,6 +1264,11 @@ _COST_ROWS = (
 
 
 def build_cost_efficiency() -> list[dict]:
+    """构造成本效率维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, phrase, text, price) in enumerate(_COST_ROWS, start=1):
         code = f"SYN-V2-COST-{index:02d}"
@@ -1131,6 +1329,11 @@ _TURN_ROWS = (
 
 
 def build_multi_turn() -> list[dict]:
+    """构造多轮交互维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, price, moq) in enumerate(_TURN_ROWS, start=1):
         code = f"SYN-V2-TURN-{index:02d}"
@@ -1165,6 +1368,11 @@ def build_multi_turn() -> list[dict]:
 
 
 def _build_numerical_tier() -> list[dict]:
+    """构造阶梯定价数值推理用例记录。
+
+    Returns:
+        数值推理用例记录列表。
+    """
     rows = (("折叠露营灯", 24, 20), ("硅胶折叠水杯", 13, 9))
     records = []
     for index, (product, first, second) in enumerate(rows, start=1):
@@ -1195,6 +1403,11 @@ def _build_numerical_tier() -> list[dict]:
 
 
 def _build_numerical_box() -> list[dict]:
+    """构造整箱换算数值推理用例记录。
+
+    Returns:
+        数值推理用例记录列表。
+    """
     rows = (("折叠收纳箱", 6, 9, 54, 324, 36), ("陶瓷马克杯", 6, 9, 54, 324, 36))
     records = []
     for index, (product, per_box, boxes, quantity, amount, box_price) in enumerate(rows, start=1):
@@ -1225,6 +1438,11 @@ def _build_numerical_box() -> list[dict]:
 
 
 def _build_numerical_fx() -> list[dict]:
+    """构造汇率换算数值推理用例记录。
+
+    Returns:
+        数值推理用例记录列表。
+    """
     rows = (("折叠露营灯", 28, 8, 56, 28), ("防泼水通勤双肩包", 45, 12, 84, 39))
     records = []
     for index, (product, domestic, usd, converted, spread) in enumerate(rows, start=1):
@@ -1268,6 +1486,11 @@ def _build_numerical_fx() -> list[dict]:
 
 
 def _build_numerical_ratio() -> list[dict]:
+    """构造占比换算数值推理用例记录。
+
+    Returns:
+        数值推理用例记录列表。
+    """
     rows = (("编织数据线", 16, 4, 25, "连接中断"), ("桌面收纳架", 25, 5, 20, "卡扣断裂"))
     records = []
     for index, (product, sample, mentions, percent, issue) in enumerate(rows, start=1):
@@ -1304,6 +1527,11 @@ def _build_numerical_ratio() -> list[dict]:
 
 
 def build_numerical_reasoning() -> list[dict]:
+    """汇总四类数值推理用例记录。
+
+    Returns:
+        数值推理用例记录列表。
+    """
     records = []
     records.extend(_build_numerical_tier())
     records.extend(_build_numerical_box())
@@ -1324,6 +1552,11 @@ _TEMPORAL_ROWS = (
 
 
 def build_temporal_reasoning() -> list[dict]:
+    """构造时效性推理维度用例记录。
+
+    Returns:
+        该维度的用例记录列表。
+    """
     records = []
     for index, (product, now, effective, term, old_effective, old_term) in enumerate(_TEMPORAL_ROWS, start=1):
         code = f"SYN-V2-TIME-{index:02d}"
@@ -1397,11 +1630,28 @@ class Infeasible(Exception):
 
 
 def _issues(case: dict, observation: dict) -> set[str]:
+    """对用例观测执行判定，返回命中的失败类型集合。
+
+    Args:
+        case: 单条用例定义。
+        observation: 运行观测记录。
+
+    Returns:
+        命中的失败类型集合。
+    """
     checks = evaluate_case(case, replay_transcript(case, observation))
     return {issue["failure_type"] for check in checks for issue in check.details["issues"]}
 
 
 def _required_tool_names(case: dict) -> set[str]:
+    """收集用例隐含的必需工具名（期望规则与依赖边）。
+
+    Args:
+        case: 单条用例定义。
+
+    Returns:
+        必需工具名集合。
+    """
     names = set(case.get("required_tools", []))
     names.update(rule["tool_name"] for rule in case.get("tool_expectations", []) if not rule.get("optional"))
     names.update(tool for edge in case.get("tool_order", []) for tool in edge)
@@ -1409,6 +1659,17 @@ def _required_tool_names(case: dict) -> set[str]:
 
 
 def _edit_candidates(failure: str, case: dict, observation: dict, forbidden_example: str | None):
+    """枚举可把正例改造成指定失败类型的观测变体。
+
+    Args:
+        failure: 目标失败类型。
+        case: 单条用例定义。
+        observation: 运行观测记录。
+        forbidden_example: 禁止出现的示例结论。
+
+    Yields:
+        (观测路径, 变形后的观测) 组合。
+    """
     calls = observation["tool_calls"]
     rules = case.get("tool_expectations", [])
     required = _required_tool_names(case)
@@ -1548,6 +1809,14 @@ def _edit_candidates(failure: str, case: dict, observation: dict, forbidden_exam
 
 
 def _feasible_failure_types(record: dict) -> dict[str, dict]:
+    """按失败类型筛选可由观测变形稳定触发的反例。
+
+    Args:
+        record: 正例观测记录。
+
+    Returns:
+        失败类型到反例摘要的映射。
+    """
     case = record["case"]
     observation = record["observation"]
     feasible: dict[str, dict] = {}
@@ -1571,6 +1840,14 @@ def _feasible_failure_types(record: dict) -> dict[str, dict]:
 
 
 def _assign_failure_types(records: list[dict]) -> dict[str, dict]:
+    """为新增用例分配互不冲突的失败类型并生成反例记录。
+
+    Args:
+        records: 用例观测记录列表。
+
+    Returns:
+        case_id 到反例记录的映射。
+    """
     new_records = [record for record in records if not record.get("v1")]
     new_ids = [record["case"]["id"] for record in new_records]
     feasible = {record["case"]["id"]: _feasible_failure_types(record) for record in new_records}
@@ -1620,6 +1897,11 @@ def _assign_failure_types(records: list[dict]) -> dict[str, dict]:
 
 
 def build_dataset() -> dict:
+    """生成 V2 全量用例、回放观测与反例数据集。
+
+    Returns:
+        含 cases、observations、counterexamples 的数据集字典。
+    """
     records = _load_v1_records()
     for builder in BUILDERS:
         records.extend(builder())
@@ -1637,6 +1919,12 @@ def build_dataset() -> dict:
 
 
 def _write_json(path: Path, payload: dict) -> None:
+    """以稳定缩进写入 UTF-8 JSON 文件。
+
+    Args:
+        path: 目标文件路径。
+        payload: 待写入的 JSON 对象。
+    """
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 
@@ -1653,6 +1941,16 @@ def write_dataset(out: Path, built: dict) -> None:
 
 
 def _load_json(path: Path, errors: list[str], expected_key: str) -> dict | None:
+    """读取并校验 JSON 文件，失败时记录错误并返回 None。
+
+    Args:
+        path: 待读取的文件路径。
+        errors: 错误信息收集列表。
+        expected_key: 期望存在的顶层键。
+
+    Returns:
+        解析后的 JSON 对象；读取或校验失败返回 None。
+    """
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -1674,9 +1972,21 @@ def _load_json(path: Path, errors: list[str], expected_key: str) -> dict | None:
 
 
 def _check_observation(case: dict, observation: dict, errors: list[str]) -> None:
+    """校验正例观测与用例契约一致。
+
+    Args:
+        case: 单条用例定义。
+        observation: 正例观测记录。
+        errors: 错误信息收集列表。
+    """
     case_id = case["id"]
 
     def fail(message: str) -> None:
+        """把校验失败信息按用例编号前缀记入错误列表。
+
+        Args:
+            message: 失败描述。
+        """
         errors.append(f"{case_id}: {message}")
 
     if observation.get("case_id") != case_id:
@@ -1771,6 +2081,14 @@ def _check_observation(case: dict, observation: dict, errors: list[str]) -> None
 
 
 def _check_counterexample(case: dict, observation: dict, variant: dict, errors: list[str]) -> None:
+    """校验反例确实触发预期失败类型且结构一致。
+
+    Args:
+        case: 单条用例定义。
+        observation: 正例观测记录。
+        variant: 反例记录。
+        errors: 错误信息收集列表。
+    """
     case_id = case["id"]
     if variant.get("case_id") != case_id:
         errors.append(f"{case_id}: 反例 case_id 与用例不一致")
@@ -1798,6 +2116,14 @@ def _check_counterexample(case: dict, observation: dict, variant: dict, errors: 
 
 def _check_preserved_v1(cases: dict[str, dict], observations: dict[str, dict], counterexamples: dict[str, dict],
                         errors: list[str]) -> None:
+    """校验 V2 数据集完整保留 V1 用例、观测与反例。
+
+    Args:
+        cases: case_id 到用例的映射。
+        observations: case_id 到观测的映射。
+        counterexamples: case_id 到反例的映射。
+        errors: 错误信息收集列表。
+    """
     v1_cases = json.loads((V1_DIR / "research_cases.json").read_text(encoding="utf-8"))["cases"]
     v1_observations = json.loads((V1_DIR / "research_replay.json").read_text(encoding="utf-8"))["observations"]
     v1_counterexamples = json.loads((V1_DIR / "research_counterexamples.json").read_text(encoding="utf-8"))["counterexamples"]
@@ -1818,6 +2144,14 @@ def _check_preserved_v1(cases: dict[str, dict], observations: dict[str, dict], c
 
 
 def _summary_lines(built: dict) -> list[str]:
+    """生成数据集分类与失败类型计数摘要行。
+
+    Args:
+        built: 生成结果汇总字典。
+
+    Returns:
+        摘要文本行列表。
+    """
     category_counts: dict[str, int] = {}
     for case in built["cases"]:
         category_counts[case["category"]] = category_counts.get(case["category"], 0) + 1
@@ -1833,6 +2167,13 @@ def _summary_lines(built: dict) -> list[str]:
 
 
 def _check_hashes(out: Path, built: dict, lines: list[str]) -> None:
+    """把产物文件摘要与用例目录指纹追加到自检输出。
+
+    Args:
+        out: 产物输出目录。
+        built: 生成结果汇总字典。
+        lines: 待追加的输出行。
+    """
     for name in ("research_cases.json", "research_replay.json", "research_counterexamples.json", "web_replay.json"):
         path = out / name
         if path.exists():
@@ -2153,33 +2494,103 @@ V3_FAMILY = {
 
 
 def _v3_product(serial: int) -> str:
+    """按序号轮转取 V3 合成产品名。
+
+    Args:
+        serial: 序号（从 1 开始）。
+
+    Returns:
+        产品名。
+    """
     return V3_PRODUCTS[(serial - 1) % len(V3_PRODUCTS)]
 
 
 def _v3_code(tag: str, serial: int) -> str:
+    """生成 V3 合成产品编号。
+
+    Args:
+        tag: 编号分类标记。
+        serial: 序号（从 1 开始）。
+
+    Returns:
+        形如 SYN-V3-<标记>-<序号> 的产品编号。
+    """
     return f"SYN-V3-{tag}-{serial:03d}"
 
 
 def _v3_price(serial: int) -> int:
+    """按序号稳定生成 V3 用例的产品价格。
+
+    Args:
+        serial: 序号（从 1 开始）。
+
+    Returns:
+        价格（元）。
+    """
     return 11 + (serial * 7) % 83
 
 
 def _v3_moq(serial: int) -> int:
+    """按序号稳定生成 V3 用例的起订量。
+
+    Args:
+        serial: 序号（从 1 开始）。
+
+    Returns:
+        起订量（件）。
+    """
     return 4 + (serial * 5) % 46
 
 
 def _v3_id(capability: str, track: str, seq: int) -> str:
+    """按能力、用途与序号生成 V3 用例编号。
+
+    Args:
+        capability: 能力大类。
+        track: 用例用途。
+        seq: 序号。
+
+    Returns:
+        用例编号。
+    """
     if track == "redteam":
         return f"AGENT-V3-SEC-RED-{seq:03d}"
     return f"AGENT-V3-{V3_CAPABILITY_ABBR[capability]}-{V3_TRACK_ABBR[track]}-{seq:03d}"
 
 
 def _v3_prompt(variants: dict[str, str], track: str) -> str:
+    """按用途取该用例的提问文案，缺失时回退挑战或黄金题。
+
+    Args:
+        variants: 用途到提问文案的映射。
+        track: 用例用途。
+
+    Returns:
+        提问文案。
+    """
     return variants.get(track, variants.get("challenge", variants["golden"]))
 
 
 def _v3_case(capability, category, track, case_id, name, prompt, keyword, *,
              topic, min_chars=60, required_sections=(), **fields: object) -> dict:
+    """构造一条 V3 用例定义并补齐默认字段。
+
+    Args:
+        capability: 能力大类。
+        category: 用例分类。
+        track: 用例用途。
+        case_id: 用例编号。
+        name: 名称。
+        prompt: 用例提问。
+        keyword: 报告必须覆盖的关键词。
+        topic: 用例主题。
+        min_chars: 最少字符数。
+        required_sections: 报告必须包含的小节。
+        **fields: 附加用例字段（如 allowed_tools、tool_expectations）。
+
+    Returns:
+        用例定义字典。
+    """
     case = {
         "id": case_id,
         "capability": capability,
@@ -3320,6 +3731,11 @@ V3_FAMILY_BUILDERS = {
 
 
 def _v3_track_sequence() -> tuple[str, ...]:
+    """生成覆盖各用途计数的轮转用途序列。
+
+    Returns:
+        用途序列元组。
+    """
     remaining = dict(V3_TRACK_COUNTS)
     sequence: list[str] = []
     while any(remaining.values()):
@@ -3331,6 +3747,14 @@ def _v3_track_sequence() -> tuple[str, ...]:
 
 
 def _v3_category_sequence(capability: str) -> tuple[str, ...]:
+    """生成某能力下覆盖各子类计数的轮转子类序列。
+
+    Args:
+        capability: 能力大类。
+
+    Returns:
+        子类序列元组。
+    """
     categories = tuple(naming.AGENT_SUBCATEGORIES[capability])
     base, extra = divmod(V3_PER_CAPABILITY, len(categories))
     remaining = {category: base + (1 if position < extra else 0)
@@ -3484,6 +3908,14 @@ def v3_payloads(built: dict) -> dict[str, dict]:
 
 
 def _v3_text(payload: dict) -> str:
+    """把数据集对象序列化为写入磁盘的 JSON 文本。
+
+    Args:
+        payload: 待序列化的数据集对象。
+
+    Returns:
+        带换行的 JSON 文本。
+    """
     return json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
 
 
@@ -3505,6 +3937,14 @@ def _v3_is_boundary(case: dict) -> bool:
 
 
 def _v3_matrix_lines(cases: list[dict]) -> list[str]:
+    """生成 V3 用例的大类与用途计数摘要行。
+
+    Args:
+        cases: 用例定义列表。
+
+    Returns:
+        摘要文本行列表。
+    """
     matrix: dict[tuple[str, str], int] = {}
     for case in cases:
         key = (case["capability"], case["track"])
@@ -3519,6 +3959,14 @@ def _v3_matrix_lines(cases: list[dict]) -> list[str]:
 
 
 def _v3_summary_lines(built: dict) -> list[str]:
+    """生成 V3 数据集的数量、能力与失败类型摘要行。
+
+    Args:
+        built: 生成结果汇总字典。
+
+    Returns:
+        摘要文本行列表。
+    """
     cases = built["cases"]
     failures: dict[str, int] = {}
     for variant in built["counterexamples"]:
@@ -3698,6 +4146,13 @@ def validate_on_disk_v3(out: Path, built: dict) -> tuple[list[str], list[str]]:
 
 
 def _check_hashes_v3(out: Path, built: dict, lines: list[str]) -> None:
+    """把 V3 产物文件摘要与用例目录指纹追加到自检输出。
+
+    Args:
+        out: 产物输出目录。
+        built: 生成结果汇总字典。
+        lines: 待追加的输出行。
+    """
     for name in ("research_cases.json", "research_replay.json", "research_counterexamples.json", "web_replay.json"):
         path = out / name
         if path.exists():

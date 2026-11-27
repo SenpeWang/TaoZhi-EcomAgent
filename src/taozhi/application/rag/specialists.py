@@ -28,6 +28,7 @@ from .prompts import RAG_PROMPTS
 from .state import State
 
 class _SpecialistFinding(BaseModel):
+    """单个核验结论：证据下标、逐字原句与可核验事实。"""
     evidence_index: int = Field(description="证据下标，从 0 开始，必须对应给定证据条目")
     quote: str = Field(min_length=1, max_length=4000, description="能直接回答子问的完整原句，逐字保留适用机型、条件、否定及例外")
     claim: str = Field(min_length=1, max_length=4000, description="普通事实填与 quote 相同的原句，金额或比例换算仅填四则算式及等号后的结果")
@@ -68,6 +69,14 @@ def extract_claims(state: State) -> dict:
     )
 
     def _run_specialist_agent(specialist_id: str) -> dict:
+        """运行单个专家智能体的完整核验流程并登记模型调用。
+
+        Args:
+            specialist_id: 专家角色编号。
+
+        Returns:
+            含 findings、missing 与本次调用用量统计的专家结果。
+        """
         agent_findings, agent_missing = [], []
         specialist_name = agent_display_name(specialist_id)
         indices = [i for i, e in enumerate(evidence) if specialist_id != "finance" or is_finance_evidence(e)]
@@ -156,6 +165,14 @@ def extract_claims(state: State) -> dict:
     parent_context = otel_context.get_current()
 
     def run_specialist(specialist_id: str) -> dict:
+        """在独立 span 内运行单个专家，并标注失败状态。
+
+        Args:
+            specialist_id: 专家角色编号。
+
+        Returns:
+            该专家的核验结果。
+        """
         attrs = {SpanAttributes.AGENT_NAME: specialist_id}
         with node_span("rag.specialist", "AGENT", attrs, context=parent_context) as span:
             result = _run_specialist_agent(specialist_id)

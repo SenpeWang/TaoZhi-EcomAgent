@@ -2,7 +2,8 @@
 
 快照按「评测类型 + 数据集版本」聚合该版本下全部已登记套件（RAG 全量因此同时覆盖
 ``rag_core`` 与 ``rag_adversarial``）。同一内容摘要复用同一快照；快照用例只读，
-供入库校验、结果详情与历史追溯使用。
+供入库校验、结果详情与历史追溯使用。本模块只做快照语义编排，SQL 全部委托
+:mod:`taozhi.infrastructure.persistence.evaluation_repo`。
 """
 from __future__ import annotations
 
@@ -10,14 +11,7 @@ from hashlib import sha256
 import json
 from typing import Any
 
-from psycopg.types.json import Jsonb
-
-from taozhi.infrastructure.persistence.database import fetch_all, fetch_one
-
-_SNAPSHOT_COLUMNS = (
-    "snapshot_id, tenant_id, eval_kind, dataset_version, primary_dataset_id, bundle_sha256, "
-    "case_count, files, metadata, created_at"
-)
+from taozhi.infrastructure.persistence import evaluation_repo
 
 _COVERAGE_SUITES: dict[tuple[str, str], tuple[str, ...]] = {
     ("agent", "full"): ("agent_research",),
@@ -47,29 +41,13 @@ def case_id_of(case: dict) -> str:
 
 
 def snapshot_row(conn: Any, tenant_id: str, snapshot_id: str) -> dict | None:
-    """按主键读取快照元信息。"""
-    return fetch_one(conn, f"SELECT {_SNAPSHOT_COLUMNS} FROM eval_dataset_snapshots "
-                           "WHERE tenant_id=%s AND snapshot_id=%s", (tenant_id, snapshot_id))
+    """按主键读取快照元信息（委托评测仓储）。"""
+    return evaluation_repo.dataset_snapshot_row(conn, tenant_id, snapshot_id)
 
 
 def snapshot_cases(conn: Any, tenant_id: str, snapshot_id: str) -> list[dict]:
-    """读取快照下的全部原始用例（按套件与序号排序）。"""
-    return fetch_all(conn, """
-        SELECT c.suite, c.case_id, c.case_sha256, c.ordinal, c.case_payload
-        FROM eval_dataset_snapshot_cases c
-        JOIN eval_dataset_snapshots s ON s.snapshot_id=c.snapshot_id
-        WHERE s.tenant_id=%s AND c.snapshot_id=%s
-        ORDER BY c.suite, c.ordinal, c.case_id
-    """, (tenant_id, snapshot_id))
-
-
-def _dataset_rows(conn: Any, eval_kind: str, dataset_version: str) -> list[dict]:
-    return fetch_all(conn, """
-        SELECT dataset_id, suite, content_sha256, case_count, cases_payload, metadata, archived
-        FROM eval_datasets
-        WHERE eval_kind=%s AND version=%s
-        ORDER BY dataset_id
-    """, (eval_kind, dataset_version))
+    """读取快照下的全部原始用例（委托评测仓储，按套件与序号排序）。"""
+    return evaluation_repo.dataset_snapshot_cases(conn, tenant_id, snapshot_id)
 
 
 def ensure_snapshot(conn: Any, tenant_id: str, eval_kind: str, dataset_version: str,
@@ -90,7 +68,7 @@ def ensure_snapshot(conn: Any, tenant_id: str, eval_kind: str, dataset_version: 
     Raises:
         ValueError: 版本下没有已登记数据集时抛出。
     """
-    rows = _dataset_rows(conn, eval_kind, dataset_version)
+    rows = evaluation_repo.dataset_version_rows(conn, eval_kind, dataset_version)
     if not rows:
         raise ValueError(f"数据集版本下没有已登记套件：{dataset_version}")
     if not any(row["dataset_id"] == primary_dataset_id for row in rows):
@@ -106,10 +84,8 @@ def ensure_snapshot(conn: Any, tenant_id: str, eval_kind: str, dataset_version: 
     ]
     bundle_sha256 = case_sha256({"eval_kind": eval_kind, "dataset_version": dataset_version,
                                  "suites": manifest})
-    existing = fetch_one(conn, f"SELECT {_SNAPSHOT_COLUMNS} FROM eval_dataset_snapshots "
-                               "WHERE tenant_id=%s AND eval_kind=%s AND dataset_version=%s "
-                               "AND bundle_sha256=%s",
-                         (tenant_id, eval_kind, dataset_version, bundle_sha256))
+    existing = evaluation_repo.dataset_snapshot_by_bundle(
+        conn, tenant_id, eval_kind, dataset_version, bundle_sha256)
     if existing is not None:
         return existing
 
@@ -118,25 +94,23 @@ def ensure_snapshot(conn: Any, tenant_id: str, eval_kind: str, dataset_version: 
         files.update((row["metadata"] or {}).get("files") or {})
     snapshot_id = "snap_" + case_sha256({"tenant_id": tenant_id,
                                          "bundle_sha256": bundle_sha256})[:16]
-    pending: list[tuple] = []
+    pending: list[dict] = []
     for row in rows:
-        cases = row["cases_payload"] or []
-        for ordinal, case in enumerate(cases):
-            pending.append((snapshot_id, row["suite"], case_id_of(case), case_sha256(case),
-                            ordinal, Jsonb(case)))
-    conn.execute(
-        "INSERT INTO eval_dataset_snapshots"
-        "(snapshot_id, tenant_id, eval_kind, dataset_version, primary_dataset_id, bundle_sha256, "
-        "case_count, files, metadata, created_by) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        (snapshot_id, tenant_id, eval_kind, dataset_version, primary_dataset_id, bundle_sha256,
-         len(pending), Jsonb(files), Jsonb({"suites": manifest}), actor_id),
-    )
-    for item in pending:
-        conn.execute(
-            "INSERT INTO eval_dataset_snapshot_cases"
-            "(snapshot_id, suite, case_id, case_sha256, ordinal, case_payload) "
-            "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING", item)
+        for ordinal, case in enumerate(row["cases_payload"] or []):
+            pending.append({
+                "snapshot_id": snapshot_id,
+                "suite": row["suite"],
+                "case_id": case_id_of(case),
+                "case_sha256": case_sha256(case),
+                "ordinal": ordinal,
+                "case_payload": case,
+            })
+    evaluation_repo.insert_dataset_snapshot(
+        conn, snapshot_id=snapshot_id, tenant_id=tenant_id, eval_kind=eval_kind,
+        dataset_version=dataset_version, primary_dataset_id=primary_dataset_id,
+        bundle_sha256=bundle_sha256, case_count=len(pending), files=files,
+        metadata={"suites": manifest}, actor_id=actor_id)
+    evaluation_repo.insert_dataset_snapshot_cases(conn, pending)
     return snapshot_row(conn, tenant_id, snapshot_id) or {}
 
 
@@ -162,13 +136,8 @@ def lookup_case(cases: list[dict], case_id: str) -> dict | None:
 
 def next_run_seq(conn: Any, tenant_id: str, dataset_id: str, eval_kind: str, scope: str,
                  mode: str) -> int:
-    """读取同一分组内下一个运行序号（调用方需保证事务与并发约束）。"""
-    row = fetch_one(conn, """
-        SELECT COALESCE(MAX(run_seq), 0) + 1 AS next_seq
-        FROM eval_runs
-        WHERE tenant_id=%s AND dataset_id=%s AND eval_kind=%s AND scope=%s AND mode=%s
-    """, (tenant_id, dataset_id, eval_kind, scope, mode))
-    return int(row["next_seq"])
+    """读取同一分组内下一个运行序号（委托评测仓储，调用方保证事务与并发约束）。"""
+    return evaluation_repo.next_run_seq(conn, tenant_id, dataset_id, eval_kind, scope, mode)
 
 
 def validate_report_cases(rows: list[dict], cases: list[dict], eval_kind: str,
@@ -180,6 +149,7 @@ def validate_report_cases(rows: list[dict], cases: list[dict], eval_kind: str,
         cases: 快照原始用例列表。
         eval_kind: 评测类型。
         scope: 评测口径。
+        mode: 执行方式，Agent 全量口径据此筛选应覆盖用例。
 
     Returns:
         覆盖统计：{"expected": n, "covered": m, "covered_case_ids": [...]}。
@@ -223,39 +193,35 @@ def backfill_snapshots(conn: Any, tenant_id: str, actor_id: str, *, dry_run: boo
         dry_run: 为 True 时只统计，不写入。
 
     Returns:
-        统计：{"runs": n, "snapshots": n, "skipped": n, "dry_run": bool}。
+        统计：{"runs": n, "snapshots": n, "skipped": n, "mismatched": n, "dry_run": bool}。
     """
-    from taozhi.infrastructure.persistence import evaluation_repo
-
-    rows = fetch_all(conn, """
-        SELECT run_id, dataset_id, dataset_version, eval_kind, scope, mode, created_at
-        FROM eval_runs
-        WHERE tenant_id=%s AND dataset_snapshot_id IS NULL
-        ORDER BY dataset_id, eval_kind, scope, mode, created_at, run_id
-    """, (tenant_id,))
-    stats = {"runs": len(rows), "snapshots": 0, "skipped": 0, "dry_run": dry_run}
+    rows = evaluation_repo.runs_missing_snapshot(conn, tenant_id)
+    stats = {"runs": len(rows), "snapshots": 0, "skipped": 0, "mismatched": 0,
+             "dry_run": dry_run}
     groups: dict[tuple, int] = {}
     for row in rows:
         dataset = evaluation_repo.dataset_row(conn, row["dataset_id"]) if row["dataset_id"] else None
         if dataset is None or not row["dataset_version"]:
             stats["skipped"] += 1
             continue
+        recorded_sha = row.get("dataset_sha256") or ""
+        current_sha = dataset.get("content_sha256") or ""
+        if not recorded_sha or not current_sha or recorded_sha != current_sha:
+            stats["mismatched"] += 1
+            print(f"跳过批次 {row['run_id']}：运行数据摘要与当前数据集不一致")
+            continue
         snapshot = ensure_snapshot(
             conn, tenant_id, row["eval_kind"], row["dataset_version"],
             row["dataset_id"], actor_id)
         key = (row["dataset_id"], row["eval_kind"], row["scope"], row["mode"])
         if key not in groups:
-            current = fetch_one(conn, """
-                SELECT COALESCE(MAX(run_seq), 0) AS seq FROM eval_runs
-                WHERE tenant_id=%s AND dataset_id=%s AND eval_kind=%s AND scope=%s AND mode=%s
-            """, (tenant_id, *key))
-            groups[key] = int(current["seq"])
-        groups[key] += 1
+            groups[key] = evaluation_repo.next_run_seq(
+                conn, tenant_id, row["dataset_id"], row["eval_kind"], row["scope"], row["mode"])
+        else:
+            groups[key] += 1
         if not dry_run:
-            conn.execute("""
-                UPDATE eval_runs SET dataset_snapshot_id=%s, run_seq=%s
-                WHERE tenant_id=%s AND run_id=%s
-            """, (snapshot["snapshot_id"], groups[key], tenant_id, row["run_id"]))
+            evaluation_repo.set_run_snapshot(
+                conn, tenant_id, row["run_id"], snapshot["snapshot_id"], groups[key])
             evaluation_repo.insert_audit_log(
                 conn, tenant_id, actor_id, "publish_run", row["run_id"],
                 {"backfill": "dataset_snapshot", "snapshot_id": snapshot["snapshot_id"],

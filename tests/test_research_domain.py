@@ -38,6 +38,11 @@ from taozhi.application.research.graph import (
 
 @contextmanager
 def _patch_llm(mock_llm):
+    """替换研究编排与子智能体使用的模型客户端为替身。
+
+    Args:
+        mock_llm: 替身模型客户端。
+    """
     with (
         patch("taozhi.application.research.planner.LLMClient", return_value=mock_llm),
         patch("taozhi.application.research.subagents.LLMClient", return_value=mock_llm),
@@ -129,6 +134,11 @@ def test_tool_outcome_distinguishes_empty_error_timeout_cancel():
     assert execute_tool_with_outcome("search_web", lambda query: [], {"query": "x"}).status == "empty"
 
     def boom(**_):
+        """模拟上游返回 502 的失败调用。
+
+        Args:
+            _: 被忽略的位置参数。
+        """
         raise RuntimeError("upstream 502")
 
     err = execute_tool_with_outcome("search_web", boom, {"query": "x"})
@@ -137,6 +147,11 @@ def test_tool_outcome_distinguishes_empty_error_timeout_cancel():
     assert "upstream 502" in err.error_reason
 
     def slow(**_):
+        """模拟慢调用，休眠后返回空结果。
+
+        Args:
+            _: 被忽略的位置参数。
+        """
         time.sleep(1.5)
         return []
 
@@ -154,6 +169,7 @@ def test_tool_outcome_distinguishes_empty_error_timeout_cancel():
 
 
 def test_tool_timeout_in_queue_is_not_dispatched():
+    """验证排队超时的工具被取消且未实际派发。"""
     queued = Future()
     tool = MagicMock()
     with patch("taozhi.core.tools.outcome._get_tool_pool") as pool:
@@ -177,11 +193,24 @@ def test_parallel_orchestrator_and_react_query_refinement():
     events = []
 
     def emit(stage: str, pct: int):
+        """记录研究阶段进度事件。
+
+        Args:
+            stage: 阶段标识。
+            pct: 进度百分比。
+        """
         events.append((stage, pct))
 
     web_queries_seen = []
 
     def fake_search_web(query: str, limit: int = 15, timeout: float = 12.0):
+        """替身网页检索：记录查询，首轮返回空、次轮返回结果。
+
+        Args:
+            query: 查询文本。
+            limit: 数量上限。
+            timeout: 请求超时秒数。
+        """
         web_queries_seen.append(query)
         if len(web_queries_seen) == 1:
             return []
@@ -191,6 +220,13 @@ def test_parallel_orchestrator_and_react_query_refinement():
     state_counters = {"orch": 0, "web_steps": 0, "sourcing_steps": 0}
 
     def fake_chat_json(*, prompt: str, schema=None, **kwargs):
+        """替身结构化对话模型，按提示词与模式返回编排或子任务决策。
+
+        Args:
+            kwargs: 关键字参数。
+            prompt: 提示词文本。
+            schema: 期望的结构化输出模式。
+        """
         if schema is _OrchestratorDecisionSchema:
             with lock:
                 state_counters["orch"] += 1
@@ -346,6 +382,7 @@ def test_live_cancel_and_mid_flight_steering():
     steer_calls = {"n": 0}
 
     def fetch_steering():
+        """依次返回空与补充核查指令，模拟用户中途干预。"""
         steer_calls["n"] += 1
         return [] if steer_calls["n"] == 1 else ["补充核查 1688 源头工厂出厂价"]
 
@@ -353,6 +390,13 @@ def test_live_cancel_and_mid_flight_steering():
     mock_llm_steer = MagicMock()
 
     def steer_chat_json(*, prompt: str, schema=None, **kwargs):
+        """替身结构化对话模型，模拟收到补充核查指令后的决策。
+
+        Args:
+            kwargs: 关键字参数。
+            prompt: 提示词文本。
+            schema: 期望的结构化输出模式。
+        """
         if schema is _OrchestratorDecisionSchema:
             if "补充核查 1688" not in prompt:
                 return _OrchestratorDecisionSchema(
@@ -472,16 +516,23 @@ def test_process_research_job_reads_budgets_from_settings():
 
     @contextmanager
     def _fake_db():
+        """提供假数据库连接的上下文管理器。"""
         yield fake_conn
 
     @contextmanager
     def _fake_saver():
+        """提供假检查点保存器的上下文管理器。"""
         saver = MagicMock()
         yield saver
 
     captured = {}
 
     def _fake_execute(**kwargs):
+        """替身调研执行入口，记录参数并返回固定报告。
+
+        Args:
+            kwargs: 关键字参数。
+        """
         captured.update(kwargs)
         return {"cancelled": False, "report": "# 报告", "platforms": []}
 
@@ -577,9 +628,19 @@ def test_sensenova_router_failover_circuit_and_compliance():
     called_urls = []
 
     def _make_fake_chat_openai(ep):
+        """构造按端点返回结果或触发限流的 OpenAI 兼容客户端工厂。
+
+        Args:
+            ep: 模型端点配置。
+        """
         bound = MagicMock()
 
         def _invoke(_msgs):
+            """记录所选端点并按端点注入限流异常或固定回复。
+
+            Args:
+                _msgs: 被忽略的消息列表。
+            """
             called_urls.append((ep.endpoint_id, ep.base_url, ep.model))
             if ep.endpoint_id == "sensenova_overseas":
                 raise RuntimeError("Error code: 429 - {'error': {'type': 'rate_limit_error'}}")
@@ -636,9 +697,19 @@ def test_sensenova_router_failover_circuit_and_compliance():
     strict_calls = []
 
     def _make_failing_domestic(ep):
+        """构造国内端点限流失败的 OpenAI 兼容客户端工厂。
+
+        Args:
+            ep: 模型端点配置。
+        """
         bound = MagicMock()
 
         def _invoke(_msgs):
+            """记录严格模式下的端点调用并抛出限流异常。
+
+            Args:
+                _msgs: 被忽略的消息列表。
+            """
             strict_calls.append(ep.endpoint_id)
             raise RuntimeError("429 rate_limit_error")
 
@@ -736,6 +807,11 @@ def test_usage_scope_isolates_concurrent_threads_and_tracks_json_retries():
     obs.reset()
 
     def _worker(tokens_pair: tuple[int, int]):
+        """在用量作用域内记录一次模型调用，模拟并发工作者。
+
+        Args:
+            tokens_pair: 提示与补全 token 数对。
+        """
         pt, ct = tokens_pair
         with obs.usage_scope() as u:
             obs.record_llm_call("fast", 0.05, pt, ct, failover=(pt > 100))
@@ -790,9 +866,19 @@ def test_llm_client_respects_explicit_small_max_tokens():
     client = LLMClient(settings=fake_settings, allow_overseas=False, registry=CircuitBreakerRegistry())
 
     def _fake_client(_ep):
+        """构造记录预算绑定的 OpenAI 兼容客户端桩。
+
+        Args:
+            _ep: 被忽略的模型端点配置。
+        """
         raw = MagicMock()
 
         def _bind(**kw):
+            """记录绑定的最大 token 数并返回可调用桩。
+
+            Args:
+                kw: 附加关键字参数。
+            """
             bound_budgets.append(kw.get("max_tokens"))
             b = MagicMock()
             b.invoke.return_value = AIMessage(content="ok", response_metadata={})

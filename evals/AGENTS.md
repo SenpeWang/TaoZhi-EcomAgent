@@ -6,7 +6,7 @@
 
 - 公开文档三份：`README.md` 讲怎么跑，`BENCHMARK.md` 是口径唯一来源，
   `dataset/README.md` 讲数据包。
-- 指标实现只有 `metrics.py`，运行器只有 `run_evals.py`；第二套实现与一次性探针
+- 指标实现只有 `metrics.py`，运行器当前实现只有 `rag_eval/run.py`；第二套实现与一次性探针一律删除。
 - **结果必须真实**：评测中心只接收真实执行（`live`）结果；合成回放/轨迹重评只用于本地与 CI 回归，不进入中心（`publish` 拒绝，触发接口返回 `REAL_MODE_ONLY`）。
 - 指标展示目录只有 `src/taozhi/domain/evaluation_metrics.py`：同一评测类型+口径的指标键固定，界面与接口按 `/api/evaluations/metrics/catalog` 渲染，禁止前端自拼或改名；数据集展示必须使用登记原始用例，不得裁剪字段。
   结论回写代码注释后删除，不留副本。

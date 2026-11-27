@@ -48,6 +48,7 @@ class _ResponseStream(httpx.SyncByteStream):
             yield chunk
 
     def close(self) -> None:
+        """关闭底层响应流；底层不支持关闭时忽略。"""
         close = getattr(self._stream, "close", None)
         if close is not None:
             close()

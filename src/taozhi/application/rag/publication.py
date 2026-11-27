@@ -39,6 +39,14 @@ _VERIFICATION_ACTIONS = {
 
 
 def _snapshot_text(snapshot: dict) -> str:
+    """把业务快照记录渲染为带中文字段名的实时数据文本。
+
+    Args:
+        snapshot: 业务快照，含 record 字段。
+
+    Returns:
+        逐行列出已知业务字段的实时数据说明文本。
+    """
     rows = [
         f"{_BUSINESS_FIELDS[key]}：{_BUSINESS_VALUES.get(str(value), value)}"
         for key, value in snapshot["record"].items() if key in _BUSINESS_FIELDS

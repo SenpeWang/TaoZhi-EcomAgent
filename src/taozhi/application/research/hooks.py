@@ -30,6 +30,11 @@ class RuntimeHooks:
     def model_call_observer(self, role: str) -> Callable[[Dict[str, Any]], None]:
         """绑定本次节点角色，供并行子任务分别登记端点调用。"""
         def observe(event: Dict[str, Any]) -> None:
+            """登记一次模型端点调用事件，并回传给运行时回调。
+
+            Args:
+                event: 模型调用事件。
+            """
             with self._lock:
                 self.model_calls += 1
             if self.model_call_fn is not None:
@@ -159,6 +164,11 @@ def make_failover_emitter(hooks: RuntimeHooks) -> Callable[[Dict[str, Any]], Non
     """构建脱敏故障转移事件实时推送回调（接入 SSE 事件流）。"""
 
     def _on_failover(ev: Dict[str, Any]) -> None:
+        """把脱敏的模型故障转移事件推送到进度事件流。
+
+        Args:
+            ev: 故障转移事件，含 outcome、label、region、model、reason。
+        """
         if ev.get("outcome") == "ok":
             emit_progress(hooks, f"[system] [模型容灾] 通道自适应切换至 {ev.get('label')} ({ev.get('region')} · {ev.get('model')})")
         else:

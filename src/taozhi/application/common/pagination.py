@@ -6,6 +6,17 @@ from taozhi.domain.errors import Denied
 
 
 def decode_time_cursor(cursor: str | None) -> tuple[datetime, str] | None:
+    """解析「创建时间|标识」格式的分页游标。
+
+    Args:
+        cursor: 客户端回传的游标字符串；None 表示首页。
+
+    Returns:
+        带时区的创建时间与标识二元组；首页返回 None。
+
+    Raises:
+        Denied: 游标格式非法或缺少时区时抛出。
+    """
     if cursor is None:
         return None
     timestamp, _, identifier = cursor.partition("|")

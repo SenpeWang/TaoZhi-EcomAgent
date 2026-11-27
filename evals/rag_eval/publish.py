@@ -12,6 +12,7 @@ DEFAULT_REPORTS_DIR = Path(__file__).resolve().parents[1] / "reports"
 
 
 def main() -> None:
+    """命令行入口：把 RAG 报告发布到评测中心。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path, help="单份 RAG 报告路径")
     parser.add_argument("--reports-dir", type=Path, help="批量导入目录，默认 evals/reports")

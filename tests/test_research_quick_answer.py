@@ -10,6 +10,11 @@ from taozhi.application.research.schemas import _OrchestratorDecisionSchema, _Qu
 
 @contextmanager
 def _patch_llm(mock_llm):
+    """替换研究编排与子智能体模型客户端为替身。
+
+    Args:
+        mock_llm: 替身模型客户端。
+    """
     with (
         patch("taozhi.application.research.planner.LLMClient", return_value=mock_llm),
         patch("taozhi.application.research.subagents.LLMClient", return_value=mock_llm),
@@ -20,11 +25,24 @@ def _patch_llm(mock_llm):
 
 
 def _quick_llm(quick_decision: _QuickAnswerSchema, answer_after_tool: str = "") -> MagicMock:
+    """构造快速回答模式的模型替身，记录提示词并按阶段返回决策。
+
+    Args:
+        quick_decision: 快速通道的编排决策。
+        answer_after_tool: 工具执行后的回答文本。
+    """
     mock = MagicMock()
     prompts = []
     mock.prompts = prompts
 
     def fake_chat_json(*, prompt: str, schema=None, **_kwargs):
+        """替身结构化对话模型，返回快速通道的编排决策。
+
+        Args:
+            _kwargs: 被忽略的关键字参数。
+            prompt: 提示词文本。
+            schema: 期望的结构化输出模式。
+        """
         prompts.append(prompt)
         if schema is _OrchestratorDecisionSchema:
             return _OrchestratorDecisionSchema(

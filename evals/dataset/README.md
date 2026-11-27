@@ -78,7 +78,7 @@ PYTHONPATH=src .venv/bin/python -m evals.dataset.seed --clean
 - **不编造标准答案**：资料写"未知"的题，预期行为是如实说明资料不足；`unanswerable`
   用例给的是"必须出现的说明性措辞"（如 `未标注`/`待确认`），不是编出来的数值。
 - **身份是数据不是代码**：逻辑身份→登录名在 org.yaml，seed 映射到现有正式业务账号（不新建测试账号）、
-  run_evals 解析；口令由 `ECOM_EVAL_PASSWORD`/`EVAL_PASSWORD` 统一（本地演示与快捷登录一致，正式环境 ≥12 位）。
+  当前实现 `evals/rag_eval/run.py` 解析；口令由 `ECOM_EVAL_PASSWORD`/`EVAL_PASSWORD` 统一（本地演示与快捷登录一致，正式环境 ≥12 位）。
 - **夹具可直接写 published**：绕过发布审批流——这是测试夹具，不是业务资料。
 - **`COMPANY_ROOT` 占位**：身份/文档可写 `node: COMPANY_ROOT`，seed 插入前解析为公司根节点。
 - **权限语义实测**：`seed --verify` 用 `can_read()` 跑 10 条矩阵

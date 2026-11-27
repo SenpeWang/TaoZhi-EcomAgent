@@ -14,6 +14,7 @@ from typing import Any
 
 from evals import runtime_snapshot
 from evals.center import baselines, datasets, profiles
+from taozhi.domain.evaluation_modes import REAL_EVAL_MODES
 from taozhi.application.evaluation import dataset_snapshots as snapshots
 from taozhi.infrastructure.persistence import evaluation_repo
 from taozhi.infrastructure.persistence.database import database_connection
@@ -22,7 +23,6 @@ AGENT_DATASET = "agent_research"
 AGENT_MIN_SCHEMA = 3
 SCOPE_VALUES = ("full", "quick", "retrieval", "adversarial", "behavior")
 MODE_VALUES = ("live", "synthetic_trace_regrade")
-REAL_EVAL_MODES: tuple[str, ...] = ("live",)
 _RAG_LAYERS = ("retrieval", "adversarial", "behavior", "six_metrics")
 _DROPPED_LAYER_KEYS = ("per_case", "detail")
 
@@ -88,12 +88,28 @@ def detect_kind(raw: dict, kind: str = "auto") -> str:
 
 
 def _number(value: Any) -> float | None:
+    """把取值规整为浮点数，非数值返回 None。
+
+    Args:
+        value: 待规整的取值。
+
+    Returns:
+        浮点数或 None。
+    """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
 
 
 def _score(value: Any) -> float | None:
+    """把取值裁剪到 0~1 并保留六位小数。
+
+    Args:
+        value: 原始分数。
+
+    Returns:
+        规整后的分数或 None。
+    """
     number = _number(value)
     if number is None:
         return None
@@ -101,6 +117,14 @@ def _score(value: Any) -> float | None:
 
 
 def _milliseconds(seconds: Any) -> int | None:
+    """把秒级时延换算为毫秒整数。
+
+    Args:
+        seconds: 秒级时延。
+
+    Returns:
+        毫秒整数或 None。
+    """
     number = _number(seconds)
     return None if number is None else int(round(number * 1000))
 
@@ -194,8 +218,16 @@ def _dataset_row_fields(row: dict, *, verified: bool, catalog_version: str) -> d
     }
 
 
-def _apply_dataset(run: dict, fields: dict) -> None:
-    """把数据集字段写入待入库批次。"""
+def apply_dataset_fields(run: dict, fields: dict) -> None:
+    """把数据集登记字段写入待入库批次。
+
+    Agent 与 RAG 两条报告链路共用同一份字段映射，避免两处各写一份逐字逻辑。
+
+    Args:
+        run: 待入库批次字段（原地更新）。
+        fields: 数据集登记字段，需含 dataset_id、name、version，可含 description、
+            suite、archived、content_sha256、case_count、cases_payload、metadata。
+    """
     run.update({
         "dataset_id": fields["dataset_id"],
         "dataset_name": fields["name"],
@@ -220,7 +252,7 @@ def _apply_agent_overrides(conn: Any, run: dict, *, dataset_id: str | None, data
     if legacy:
         fields = datasets.legacy_dataset_fields("agent", AGENT_DATASET, run.get("git_sha"),
                                                 source=report_mode)
-        _apply_dataset(run, fields)
+        apply_dataset_fields(run, fields)
         return
     if dataset_id:
         row = evaluation_repo.dataset_row(conn, dataset_id)
@@ -237,11 +269,11 @@ def _apply_agent_overrides(conn: Any, run: dict, *, dataset_id: str | None, data
         cases_payload = row.get("cases_payload") or run.get("cases_payload") or []
         fields = _dataset_row_fields(row, verified=bool(registered), catalog_version=row["version"])
         fields["cases_payload"] = cases_payload
-        _apply_dataset(run, fields)
+        apply_dataset_fields(run, fields)
         return
     if dataset_version and dataset_version != run.get("dataset_version"):
         fields = datasets.dataset_fields(dataset_version, AGENT_DATASET)
-        _apply_dataset(run, fields)
+        apply_dataset_fields(run, fields)
 
 
 def _resolve_rag_dataset(conn: Any, raw: dict, *, dataset_id: str | None, dataset_version: str | None,
@@ -294,6 +326,15 @@ def _resolve_rag_dataset(conn: Any, raw: dict, *, dataset_id: str | None, datase
 
 
 def _rag_retrieval_rows(raw: dict, cases_index: dict) -> list[dict]:
+    """把 RAG 检索层逐例结果投影为统一逐例判定。
+
+    Args:
+        raw: 报告对象。
+        cases_index: 用例定义索引。
+
+    Returns:
+        逐例判定列表。
+    """
     layer = raw.get("retrieval") if isinstance(raw.get("retrieval"), dict) else {}
     rows = []
     for item in layer.get("per_case") or []:
@@ -332,6 +373,15 @@ def _rag_retrieval_rows(raw: dict, cases_index: dict) -> list[dict]:
 
 
 def _rag_behavior_rows(raw: dict, cases_index: dict) -> list[dict]:
+    """把 RAG 行为层逐例结果投影为统一逐例判定。
+
+    Args:
+        raw: 报告对象。
+        cases_index: 用例定义索引。
+
+    Returns:
+        逐例判定列表。
+    """
     layer = raw.get("behavior") if isinstance(raw.get("behavior"), dict) else {}
     rows = []
     for item in layer.get("detail") or []:
@@ -363,6 +413,15 @@ def _rag_behavior_rows(raw: dict, cases_index: dict) -> list[dict]:
 
 
 def _rag_adversarial_rows(raw: dict, adv_index: dict) -> list[dict]:
+    """把 RAG 对抗层逐例结果投影为统一逐例判定。
+
+    Args:
+        raw: 报告对象。
+        adv_index: 对抗用例定义索引。
+
+    Returns:
+        逐例判定列表。
+    """
     layer = raw.get("adversarial") if isinstance(raw.get("adversarial"), dict) else {}
     rows = []
     for item in layer.get("detail") or []:
@@ -457,7 +516,7 @@ def _rag_report(raw: dict, payload_sha: str, dataset: dict, *, scope: str, mode:
         "scope": scope,
         "dataset_version": dataset["version"],
     }
-    _apply_dataset(run, dataset)
+    apply_dataset_fields(run, dataset)
     return run, rows
 
 
@@ -470,6 +529,19 @@ def _agent_report(raw: dict) -> tuple[dict, list[dict]]:
 
 def _store_report_object(conn: Any, tenant_id: str, run_id: str, *, eval_kind: str,
                          dataset_id: str | None, payload: bytes) -> bool:
+    """把原始报告字节写入对象存储。
+
+    Args:
+        conn: 数据库连接（调用方事务内）。
+        tenant_id: 租户编号。
+        run_id: 批次编号。
+        eval_kind: 评测类型。
+        dataset_id: 数据集编号。
+        payload: 原始报告字节。
+
+    Returns:
+        是否新写入报告对象。
+    """
     from taozhi.application.services import evaluation_service
 
     return evaluation_service.store_report(conn, tenant_id, run_id, eval_kind=eval_kind,
@@ -486,6 +558,140 @@ def ensure_report_object(conn: Any, tenant_id: str, run_id: str, *, eval_kind: s
         return False
     return _store_report_object(conn, tenant_id, run_id, eval_kind=eval_kind,
                                 dataset_id=dataset_id, payload=payload)
+
+
+def _snapshot_suite_metadata(snapshot: dict, dataset_id: str) -> dict:
+    """读取快照元数据中本次数据集所属套件的登记信息。
+
+    Args:
+        snapshot: 快照行。
+        dataset_id: 本次批次的数据集编号。
+
+    Returns:
+        该数据集的套件登记元数据；快照未覆盖该数据集时返回空字典。
+    """
+    suites = (snapshot.get("metadata") or {}).get("suites") or []
+    return next((item for item in suites if item.get("dataset_id") == dataset_id), {})
+
+
+def _resolve_report_snapshot(conn: Any, tenant_id: str, owner_id: str, run: dict, rows: list[dict],
+                             *, snapshot_id: str | None, run_seq: int | None) -> dict:
+    """解析并校验批次的数据集内容快照，无法关联快照时拒绝入库。
+
+    触发阶段已固化快照则直接复用；否则按该版本已登记数据集即时创建。快照必须存在、
+    覆盖本次数据集且带内容摘要，逐例结果还需与快照用例一致，任何一步不满足都拒绝入库。
+
+    Args:
+        conn: 数据库连接（调用方事务内）。
+        tenant_id: 租户编号。
+        owner_id: 批次发起人编号，作为即时创建快照的创建人。
+        run: 待入库批次字段（含 dataset_id、dataset_version、eval_kind、scope、mode）。
+        rows: 逐例判定列表，用于与快照用例比对。
+        snapshot_id: 触发阶段固化的快照编号。
+        run_seq: 触发阶段分配的运行序号；为空时在同一分组内顺延分配。
+
+    Returns:
+        含 dataset_snapshot_id 与 run_seq 的快照归属摘要。
+
+    Raises:
+        ValueError: 快照不存在、无法创建、缺少内容摘要，或逐例校验不通过时抛出。
+    """
+    if run.get("dataset_version") == datasets.LEGACY_VERSION:
+        return {"dataset_snapshot_id": None, "run_seq": run_seq}
+    if snapshot_id:
+        snapshot = snapshots.snapshot_row(conn, tenant_id, snapshot_id)
+        if snapshot is None:
+            raise ValueError(f"数据集内容快照不存在：{snapshot_id}")
+    else:
+        try:
+            snapshot = snapshots.ensure_snapshot(
+                conn, tenant_id, run["eval_kind"], run["dataset_version"],
+                run["dataset_id"], owner_id)
+        except ValueError as exc:
+            raise ValueError(
+                f"数据集版本 {run['dataset_version']} 无法固化内容快照，拒绝入库：{exc}") from exc
+    if not snapshot or not snapshot.get("snapshot_id"):
+        raise ValueError(f"数据集版本 {run['dataset_version']} 未能生成内容快照，拒绝入库")
+    expected_sha = _snapshot_suite_metadata(snapshot, run["dataset_id"]).get("content_sha256")
+    if not expected_sha:
+        raise ValueError(f"数据集快照缺少 {run['dataset_id']} 的内容摘要，无法校验批次归属")
+    if run.get("dataset_sha256") and run["dataset_sha256"] != expected_sha:
+        raise ValueError("报告数据集摘要与快照不一致，可能使用了不同版本的数据集内容")
+    snapshot_cases = snapshots.snapshot_cases(conn, tenant_id, snapshot["snapshot_id"])
+    snapshots.validate_report_cases(rows, snapshot_cases, run["eval_kind"],
+                                    run["scope"], run["mode"])
+    return {
+        "dataset_snapshot_id": snapshot["snapshot_id"],
+        "run_seq": run_seq or evaluation_repo.next_run_seq(
+            conn, tenant_id, run["dataset_id"], run["eval_kind"],
+            run["scope"], run["mode"]),
+    }
+
+
+def _ensure_run_profile(conn: Any, tenant_id: str, owner_id: str, run: dict, raw: dict, *,
+                        profile_id: str | None, notes: str) -> None:
+    """登记批次的算法版本：显式编号优先，否则按报告内嵌算法信息登记。
+
+    Args:
+        conn: 数据库连接（调用方事务内）。
+        tenant_id: 租户编号。
+        owner_id: 批次发起人编号。
+        run: 待入库批次字段（原地写入 profile_id）。
+        raw: 报告对象，用于读取可选的 algorithm 段。
+        profile_id: 显式指定的算法版本编号。
+        notes: 算法版本备注。
+    """
+    if profile_id:
+        run["profile_id"] = profiles.ensure_profile(
+            conn, tenant_id, owner_id, run["eval_kind"], run["dataset_version"],
+            explicit_profile_id=profile_id, notes=notes)
+        return
+    algorithm = raw.get("algorithm") if isinstance(raw.get("algorithm"), dict) else None
+    run["profile_id"] = profiles.ensure_profile(
+        conn, tenant_id, owner_id, run["eval_kind"], run["dataset_version"], notes=notes,
+        algorithm=algorithm)
+
+
+def _record_publish(conn: Any, tenant_id: str, owner_id: str, run: dict, rows: list[dict], *,
+                    payload: bytes, legacy: bool, mark_baseline: bool, notes: str) -> bool:
+    """原子写入批次、逐例判定、原始报告与审计，并按需锁定基线。
+
+    Args:
+        conn: 数据库连接（调用方事务内）。
+        tenant_id: 租户编号。
+        owner_id: 批次发起人编号。
+        run: 已完整的批次字段。
+        rows: 逐例判定列表。
+        payload: 原始报告字节，用于对象存储。
+        legacy: 是否为历史版本归档入库。
+        mark_baseline: 新建批次后是否锁定为基线。
+        notes: 入库与基线备注。
+
+    Returns:
+        新建批次返回 True，已存在同摘要批次返回 False。
+    """
+    created = evaluation_repo.insert_report(conn, tenant_id, owner_id, run, rows)
+    if not created:
+        return False
+    _store_report_object(conn, tenant_id, run["run_id"], eval_kind=run["eval_kind"],
+                         dataset_id=run["dataset_id"], payload=payload)
+    evaluation_repo.insert_audit_log(
+        conn, tenant_id, owner_id, "publish_run", run["run_id"],
+        {
+            "eval_kind": run["eval_kind"],
+            "dataset_id": run["dataset_id"],
+            "dataset_version": run["dataset_version"],
+            "scope": run["scope"],
+            "mode": run["mode"],
+            "report_sha256": run["report_sha256"],
+            "profile_id": run["profile_id"],
+            "legacy": bool(legacy),
+        },
+    )
+    if mark_baseline:
+        baselines.set_baseline(conn, tenant_id, owner_id, run["run_id"],
+                               notes or "报告入库时锁定基线")
+    return True
 
 
 def publish_report(path: Path, *, tenant_id: str, owner_id: str, kind: str = "auto",
@@ -507,7 +713,8 @@ def publish_report(path: Path, *, tenant_id: str, owner_id: str, kind: str = "au
         dataset_version: 显式指定的数据集版本。
         scope: 显式评测口径。
         mode: 显式执行方式。
-        legacy: 是否按历史版本归档（内容摘要无法验证）。
+        legacy: 是否按历史版本归档。legacy 报告内容摘要无法验证，豁免内容快照要求，
+            批次以无快照、可选运行序号归档；非 legacy 报告必须绑定可校验的数据集内容快照。
         notes: 入库/基线备注。
         snapshot_id: 触发阶段固化的数据集内容快照编号。
         run_seq: 触发阶段分配的运行序号。
@@ -519,7 +726,8 @@ def publish_report(path: Path, *, tenant_id: str, owner_id: str, kind: str = "au
         report_sha256 的入库摘要。
 
     Raises:
-        ValueError: 报告格式、数据集归属或内容摘要校验失败时抛出。
+        ValueError: 报告格式、数据集归属、内容摘要或数据集内容快照校验失败时抛出；
+            非 legacy 报告无法关联内容快照同样拒绝入库。
     """
     path = Path(path)
     payload = path.read_bytes()
@@ -551,76 +759,19 @@ def publish_report(path: Path, *, tenant_id: str, owner_id: str, kind: str = "au
                                     mode=resolved_mode, path=path)
         if run.get("mode") not in REAL_EVAL_MODES:
             raise ValueError("评测中心只接收真实执行（live）报告，合成/回放结果不进入评测中心")
-        if not legacy:
-            snapshot = None
-            if snapshot_id:
-                snapshot = snapshots.snapshot_row(conn, tenant_id, snapshot_id)
-                if snapshot is None:
-                    raise ValueError(f"数据集内容快照不存在：{snapshot_id}")
-            else:
-                try:
-                    snapshot = snapshots.ensure_snapshot(
-                        conn, tenant_id, run["eval_kind"], run["dataset_version"],
-                        run["dataset_id"], owner_id)
-                except ValueError:
-                    snapshot = None
-            if snapshot is not None:
-                primary_meta = next(
-                    (item for item in (snapshot.get("metadata") or {}).get("suites", [])
-                     if item.get("dataset_id") == run["dataset_id"]), None)
-                expected_meta_sha = (primary_meta or {}).get("content_sha256")
-                if not expected_meta_sha:
-                    snapshot = None
-                elif run.get("dataset_sha256") and run["dataset_sha256"] != expected_meta_sha:
-                    raise ValueError("报告数据集摘要与快照不一致，可能使用了不同版本的数据集内容")
-            snapshot_cases = snapshots.snapshot_cases(
-                conn, tenant_id, snapshot["snapshot_id"]) if snapshot else []
-            if snapshot is None:
-                run["dataset_snapshot_id"] = None
-                run["run_seq"] = run_seq
-            else:
-                primary = next((item for item in (snapshot.get("metadata") or {}).get("suites", [])
-                                if item.get("dataset_id") == run["dataset_id"]), None)
-                expected_sha = (primary or {}).get("content_sha256")
-                if expected_sha and run.get("dataset_sha256") and run["dataset_sha256"] != expected_sha:
-                    raise ValueError("报告数据集摘要与快照不一致，可能使用了不同版本的数据集内容")
-                snapshots.validate_report_cases(rows, snapshot_cases, run["eval_kind"],
-                                                run["scope"], run["mode"])
-                run["dataset_snapshot_id"] = snapshot["snapshot_id"]
-                run["run_seq"] = run_seq or snapshots.next_run_seq(
-                    conn, tenant_id, run["dataset_id"], run["eval_kind"],
-                    run["scope"], run["mode"])
+        if legacy:
+            run["dataset_snapshot_id"] = None
+            run["run_seq"] = run_seq
+        else:
+            run.update(_resolve_report_snapshot(
+                conn, tenant_id, owner_id, run, rows,
+                snapshot_id=snapshot_id, run_seq=run_seq))
             run["parent_run_id"] = parent_run_id or None
             run["trigger_note"] = trigger_note or None
-        if profile_id:
-            run["profile_id"] = profiles.ensure_profile(
-                conn, tenant_id, owner_id, run["eval_kind"], run["dataset_version"],
-                explicit_profile_id=profile_id, notes=notes)
-        else:
-            algorithm = raw.get("algorithm") if isinstance(raw.get("algorithm"), dict) else None
-            run["profile_id"] = profiles.ensure_profile(
-                conn, tenant_id, owner_id, run["eval_kind"], run["dataset_version"], notes=notes,
-                algorithm=algorithm)
-        created = evaluation_repo.insert_report(conn, tenant_id, owner_id, run, rows)
-        if created:
-            _store_report_object(conn, tenant_id, run["run_id"], eval_kind=run["eval_kind"],
-                                 dataset_id=run["dataset_id"], payload=payload)
-            evaluation_repo.insert_audit_log(
-                conn, tenant_id, owner_id, "publish_run", run["run_id"],
-                {
-                    "eval_kind": run["eval_kind"],
-                    "dataset_id": run["dataset_id"],
-                    "dataset_version": run["dataset_version"],
-                    "scope": run["scope"],
-                    "mode": run["mode"],
-                    "report_sha256": run["report_sha256"],
-                    "profile_id": run["profile_id"],
-                    "legacy": bool(legacy),
-                },
-            )
-            if mark_baseline:
-                baselines.set_baseline(conn, tenant_id, owner_id, run["run_id"],
-                                       notes or "报告入库时锁定基线")
+        _ensure_run_profile(conn, tenant_id, owner_id, run, raw,
+                            profile_id=profile_id, notes=notes)
+        created = _record_publish(conn, tenant_id, owner_id, run, rows, payload=payload,
+                                  legacy=legacy, mark_baseline=mark_baseline, notes=notes)
     return {
         "run_id": run["run_id"],
         "created": bool(created),

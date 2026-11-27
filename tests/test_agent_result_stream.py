@@ -23,6 +23,11 @@ def test_delivery_failure_does_not_retry_model():
     """持久化失败可能发生在提交后，直接终止本执行以避免重复正文或将端点熔断。"""
     client = LLMClient(registry=CircuitBreakerRegistry())
     def unavailable(_text):
+        """模拟结果写入失败的桩函数，抛出不带业务正文的写入异常。
+
+        Args:
+            _text: 待写入的文本片段。
+        """
         raise OSError("无法写入任务")
     try:
         with patch.object(client, "_client_for_endpoint") as provider, pytest.raises(OutputDeliveryError):
@@ -42,9 +47,21 @@ def test_report_failover_replaces_partial_output():
     ]
     events = []
     def first_stream(*args, **kwargs):
+        """模拟首轮流式输出：先给旧草稿，再以连接超时中断。
+
+        Args:
+            args: 位置参数。
+            kwargs: 关键字参数。
+        """
         yield AIMessageChunk(content="旧的草稿")
         raise TimeoutError("connect timeout")
     def second_stream(*args, **kwargs):
+        """模拟重试后的流式输出：断言旧草稿已回退，再输出含未闭合思考的新报告。
+
+        Args:
+            args: 位置参数。
+            kwargs: 关键字参数。
+        """
         assert events == ["旧的草稿", None]
         yield AIMessageChunk(content="新报告")
         yield AIMessageChunk(content="<thinking>不完整的思考")
@@ -90,6 +107,12 @@ def test_only_verified_answer_paragraphs_are_streamed(monkeypatch, review, hard,
     evidence = [{"title": "规格表", "quote": "型号为甲，交期三天。", "level": 1}]
     source = [{"document_id": "doc"}]
     def finding(claim, quote):
+        """构造带证据下标的发现项字典。
+
+        Args:
+            claim: 待核验的断言。
+            quote: 证据原文。
+        """
         return {"role": "product", "claim": claim, "quote": quote, "evidence_index": 0}
     findings = [finding("型号为甲", "型号为甲"), finding("无依据", "无依据"), finding("型号为甲", "型号为甲"), finding("交期三天", "交期三天")]
     state = dict(job_id="task", run_version=2, question="请注明出处", hard_block=hard, selected_agents=["product"],
@@ -97,6 +120,14 @@ def test_only_verified_answer_paragraphs_are_streamed(monkeypatch, review, hard,
     monkeypatch.setattr(specialists, "validate_task_execution", lambda *_: (None, {"payload": {"require_review": review}}))
     deltas = []
     def publish(job_id, version, text, sources):
+        """替身发布函数，记录增量文本并校验任务版本与来源。
+
+        Args:
+            job_id: 任务标识。
+            version: 版本号。
+            text: 文本内容。
+            sources: 来源列表。
+        """
         assert (job_id, version, sources) == ("task", 2, source)
         deltas.append(text)
     monkeypatch.setattr(specialists, "publish_answer_delta", publish)

@@ -51,6 +51,14 @@ def index_mapping(es=None) -> dict:
     }
 
 def _client():
+    """创建并连通 Elasticsearch 客户端。
+
+    Returns:
+        (Elasticsearch 客户端, 目标索引名) 二元组。
+
+    Raises:
+        RuntimeError: ES 无法连接时抛出。
+    """
     from elasticsearch import Elasticsearch
     cfg=load_config()
     es=Elasticsearch(cfg.es_url,request_timeout=10)
@@ -62,7 +70,9 @@ def available() -> bool:
     if not load_config().es_enabled:return False
     try:
         _client();return True
-    except Exception:return False
+    except Exception as exc:
+        _LOG.warning("Elasticsearch 不可用，检索回落本地链路（%s）", type(exc).__name__)
+        return False
 
 def ensure_index() -> None:
     """确保目标切片索引存在并等待主分片就绪。"""
@@ -77,6 +87,11 @@ def index_chunks(rows) -> int:
     from elasticsearch.helpers import bulk
     es,index=_client();ensure_index()
     def _gen():
+        """把 chunks 行转换为 ES bulk 写入动作。
+
+        Returns:
+            bulk 写入动作字典的生成器。
+        """
         for r in rows:
             yield {"_index":index,"_id":r["id"],"_source":{
                 "tenant_id":r["tenant_id"],"document_id":r["document_id"],"version":r["version"],

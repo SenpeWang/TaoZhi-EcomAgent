@@ -116,6 +116,14 @@ class LLMClient:
 
     @staticmethod
     def _to_messages(payload: Union[str, List[Message]]) -> List[BaseMessage]:
+        """把字符串或消息字典列表统一转换为 LangChain 消息对象。
+
+        Args:
+            payload: 纯文本提示词，或含 role/content 字段的消息字典、BaseMessage 列表。
+
+        Returns:
+            按输入顺序排列的 SystemMessage/AIMessage/HumanMessage 列表。
+        """
         if isinstance(payload, str):
             return [HumanMessage(content=payload)]
         msgs: List[BaseMessage] = []
@@ -136,6 +144,11 @@ class LLMClient:
         return msgs
 
     def _record_route(self, event: Dict[str, Any]) -> None:
+        """记录一次模型通道调用事件，并同步给审计收集器与外部回调。
+
+        Args:
+            event: 单次调用事件，含 endpoint_id、outcome、latency_ms 等字段。
+        """
         event["started_at"] = time.time() - event["latency_ms"] / 1000
         self.last_route_events.append(event)
         if len(self.last_route_events) > 20:
@@ -159,6 +172,16 @@ class LLMClient:
         failover: bool,
         reason: str,
     ) -> None:
+        """登记一次成功的模型调用：计入指标、恢复熔断状态并写入路由事件。
+
+        Args:
+            ep: 实际命中的模型端点。
+            tier: 本次请求使用的模型层级。
+            usage: 本次调用的 token 用量。
+            elapsed_s: 本次调用耗时（秒）。
+            failover: 是否由故障转移触发。
+            reason: 路由或转移原因。
+        """
         latency_ms = int(elapsed_s * 1000)
         record_llm_call(
             tier.value,

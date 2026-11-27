@@ -10,6 +10,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 
 
 def _node() -> str:
+    """返回可用的 Node 可执行文件路径，缺省回退为 node。"""
     return shutil.which("node") or "node"
 
 

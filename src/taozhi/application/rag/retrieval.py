@@ -46,16 +46,47 @@ def _query_context(conn, p: Principal, job: dict, state: State, retry: bool) -> 
 
 
 def _collect_documents(conn, principal, query, hyde_vector, search_trace) -> list[dict]:
+    """检索授权文档并过滤含提示词注入的片段。
+
+    Args:
+        conn: 数据库连接。
+        principal: 当前执行主体。
+        query: 检索问题。
+        hyde_vector: HyDE 查询向量；None 表示不做语义扩展。
+        search_trace: 检索追踪字典，用于回填耗时与降级标记。
+
+    Returns:
+        通过注入检测的候选证据列表。
+    """
     candidates = search_documents(conn, principal, query, _EVIDENCE_LIMIT, hyde_vector=hyde_vector, trace_out=search_trace)
     return [doc for doc in candidates if not detect_injection(doc["quote"])[0]]
 
 
 def _document_sources(evidence: list[dict]) -> list[dict]:
+    """从证据列表中提取可追溯的来源标识字段。
+
+    Args:
+        evidence: 证据列表。
+
+    Returns:
+        每项只保留 kind、document_id、version、acl_version、tenant_id 的来源列表。
+    """
     fields = ("kind", "document_id", "version", "acl_version", "tenant_id")
     return [{key: doc[key] for key in fields} for doc in evidence]
 
 
 def _retrieval_metrics(state: State, search: dict, hyde: dict, retry: bool) -> dict:
+    """累加检索耗时与降级标记，供图状态增量写回。
+
+    Args:
+        state: 当前图状态。
+        search: 本次检索追踪数据。
+        hyde: 本次 HyDE 追踪数据。
+        retry: 是否为补查轮次。
+
+    Returns:
+        含 timing、degraded，必要时含 token_usage 的状态增量。
+    """
     timing = state.get("timing", {})
     totals = {k: timing.get(k, 0) + search.get(k, 0) for k in ("embed_ms", "es_ms", "pg_ann_ms", "rerank_ms")}
     totals["pg_ann_ms"] += search.get("hyde_ann_ms", 0)
@@ -125,6 +156,17 @@ def refine_query(state: State) -> dict:
 
 
 def _business_record(principal, kind: str, identifier: str, fields: tuple[str, ...] | list[str]) -> dict:
+    """读取单条授权业务记录并按请求字段裁剪输出。
+
+    Args:
+        principal: 当前执行主体。
+        kind: 业务类型（stock/order）。
+        identifier: 商品或订单编号。
+        fields: 需要返回的业务字段。
+
+    Returns:
+        含 available 标志与裁剪后 record 的业务快照；缺编号或缺字段时说明原因。
+    """
     if not identifier:
         message = ("查询实时库存或现价需要商品编号；未接入业务系统时不能提供实时数据" if kind == "stock"
                    else "查询真实订单需要订单编号，并接入企业订单系统")

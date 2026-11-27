@@ -39,6 +39,11 @@ DIMS = ("pass", "faithful", "relevant")
 
 
 def latest_report() -> Path:
+    """返回报告目录中最新的 JSON 报告路径。
+
+    Returns:
+        最新报告文件路径。
+    """
     files = sorted(REPORTS.glob("*.json"))
     if not files:
         raise SystemExit(f"没有报告：{REPORTS} 为空，先跑一次 --full 或 --behavior-only")
@@ -46,6 +51,11 @@ def latest_report() -> Path:
 
 
 def load_cases() -> dict:
+    """读取用例集并按 case_id 建立索引。
+
+    Returns:
+        case_id 到用例的映射；文件缺失时为空映射。
+    """
     if not CASES.exists():
         return {}
     out = {}
@@ -106,6 +116,14 @@ def export(n: int, seed: int) -> Path:
 
 
 def score(path: Path) -> dict:
+    """对人工标注文件计算各维度的 Cohen's kappa。
+
+    Args:
+        path: 人工标注文件路径。
+
+    Returns:
+        含各维度一致性统计的结果字典。
+    """
     rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
     out = {"sheet": path.name, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
            "rows": len(rows), "dims": {}}
@@ -120,6 +138,11 @@ def score(path: Path) -> dict:
 
 
 def print_score(out: dict) -> None:
+    """把校准结果按维度打印为文本表格。
+
+    Args:
+        out: 校准统计结果。
+    """
     print(f"\n标注文件 {out['sheet']}（{out['rows']} 行）")
     print(f"\n{'维度':<10}{'n':>4}{'kappa':>8}{'95%CI':>18}{'一致率':>8}  结论")
     for dim in DIMS:
@@ -156,6 +179,7 @@ def print_score(out: dict) -> None:
 
 
 def main():
+    """命令行入口：导出待标注表或计算判定一致性。"""
     ap = argparse.ArgumentParser(description="judge 校准：人工标注 vs LLM 判定的一致性")
     ap.add_argument("--export", type=int, metavar="N", help="从最新报告抽 N 条生成待标注表")
     ap.add_argument("--score", metavar="FILE", help="对已标注的 sheet 计算 kappa")

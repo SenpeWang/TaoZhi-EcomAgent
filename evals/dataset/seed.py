@@ -59,12 +59,22 @@ SYN_PREFIX = "SYN_"
 
 
 def load_spec():
+    """读取 seed 所需的组织与夹具 YAML。
+
+    Returns:
+        (org, fixtures) 二元组。
+    """
     org = yaml.safe_load((SPEC / "org.yaml").read_text(encoding="utf-8"))
     fixtures = yaml.safe_load((SPEC / "fixtures.yaml").read_text(encoding="utf-8"))
     return org, fixtures
 
 
 def load_corpus_docs():
+    """读取生成的语料清单。
+
+    Returns:
+        文档列表。
+    """
     path = GEN / "corpus_docs.jsonl"
     if not path.exists():
         print(f"缺少语料清单 {path}，先运行 python -m evals.dataset.generate", file=sys.stderr)
@@ -73,6 +83,14 @@ def load_corpus_docs():
 
 
 def resolve_tenant(conn):
+    """选取可用租户并返回租户行。
+
+    Args:
+        conn: 数据库连接。
+
+    Returns:
+        租户行。
+    """
     row = fetch_one(conn, "SELECT * FROM tenants WHERE enabled ORDER BY created_at LIMIT 1")
     if not row:
         print("没有可用租户", file=sys.stderr)
@@ -92,6 +110,16 @@ def upsert(conn, table, keys, values, conflict_cols):
 
 
 def seed_nodes(conn, tenant_id, org):
+    """幂等写入组织节点并返回新建数量。
+
+    Args:
+        conn: 数据库连接。
+        tenant_id: 租户编号。
+        org: 组织 spec。
+
+    Returns:
+        新建节点数。
+    """
     created = 0
     for n in org["nodes"]:
         parent = n.get("parent_by_name")
@@ -243,6 +271,17 @@ def ensure_eval_metrics(conn, tenant_id, boss_id) -> int:
 
 
 def seed_grants(conn, tenant_id, fixtures, user_ids):
+    """重建 SYN_ 文档授权并返回写入条数。
+
+    Args:
+        conn: 数据库连接。
+        tenant_id: 租户编号。
+        fixtures: 夹具 spec。
+        user_ids: 逻辑身份到账号编号的映射。
+
+    Returns:
+        写入的授权条数。
+    """
     n = 0
     conn.execute("DELETE FROM document_grants WHERE tenant_id=%s AND left(document_id, 4)=%s",
                  (tenant_id, SYN_PREFIX))
@@ -302,6 +341,18 @@ def verify_matrix() -> list[tuple[str, str, bool, str]]:
 
 
 def verify(conn, tenant_id, org, fixtures, user_ids):
+    """校验夹具灌库结果与权限语义。
+
+    Args:
+        conn: 数据库连接。
+        tenant_id: 租户编号。
+        org: 组织 spec。
+        fixtures: 夹具 spec。
+        user_ids: 逻辑身份到账号编号的映射。
+
+    Returns:
+        问题描述列表；为空表示校验通过。
+    """
     problems = []
     for d in load_corpus_docs():
         row = fetch_one(conn, "SELECT scope,level,state,ai_allowed FROM documents WHERE tenant_id=%s AND id=%s", (tenant_id, d["doc_id"]))
@@ -361,6 +412,15 @@ def verify(conn, tenant_id, org, fixtures, user_ids):
 
 
 def clean(conn, tenant_id):
+    """清除全部 SYN_ 夹具数据。
+
+    Args:
+        conn: 数据库连接。
+        tenant_id: 租户编号。
+
+    Returns:
+        (删除文档数, 删除账号数)。
+    """
     from taozhi.infrastructure.knowledge import es_index
     conn.execute("DELETE FROM metrics WHERE tenant_id=%s AND left(id,11)=%s", (tenant_id, "SYN_METRIC_"))
     docs = [r["id"] for r in fetch_all(conn, "SELECT id FROM documents WHERE tenant_id=%s AND left(id,4)=%s", (tenant_id, "SYN_"))]
@@ -381,6 +441,11 @@ def clean(conn, tenant_id):
 
 
 def main() -> int:
+    """命令行入口：灌库、校验或清理评测夹具。
+
+    Returns:
+        进程退出码。
+    """
     ap = argparse.ArgumentParser(description="灌库/校验/清除评测夹具")
     ap.add_argument("--verify", action="store_true", help="只校验不写入")
     ap.add_argument("--clean", action="store_true", help="清除全部 SYN_ 夹具与账号")

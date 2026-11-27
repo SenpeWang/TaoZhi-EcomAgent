@@ -40,11 +40,39 @@ class MetricSpec:
 
 def _run(key: str, label: str, group: str, unit: str, field: str, *,
          direction: str = "higher", description: str = "") -> MetricSpec:
+    """构造取值来自批次主字段的指标定义。
+
+    Args:
+        key: 指标键。
+        label: 展示名。
+        group: 指标分组。
+        unit: 数值单位。
+        field: 批次主字段名。
+        direction: 优劣方向。
+        description: 口径说明。
+
+    Returns:
+        指标定义。
+    """
     return MetricSpec(key, label, group, unit, "run", (field,), direction, description)
 
 
 def _metric(key: str, label: str, group: str, unit: str, *path: str,
             direction: str = "higher", description: str = "") -> MetricSpec:
+    """构造取值来自原始报告指标的指标定义。
+
+    Args:
+        key: 指标键。
+        label: 展示名。
+        group: 指标分组。
+        unit: 数值单位。
+        path: 原始报告中的指标路径。
+        direction: 优劣方向。
+        description: 口径说明。
+
+    Returns:
+        指标定义。
+    """
     return MetricSpec(key, label, group, unit, "metrics", path, direction, description)
 
 
@@ -203,10 +231,27 @@ SCOPE_LABELS = {
 
 
 def _specs(eval_kind: str, scope: str) -> tuple[MetricSpec, ...]:
+    """返回（评测类型，口径）对应的指标定义元组；未定义时为空元组。
+
+    Args:
+        eval_kind: 评测类型。
+        scope: 评测口径。
+
+    Returns:
+        该组合的指标定义元组。
+    """
     return SCOPES.get(eval_kind, {}).get(scope, ())
 
 
 def _serialise(specs: Iterable[MetricSpec]) -> list[dict[str, Any]]:
+    """把指标定义序列化为接口返回的字典列表。
+
+    Args:
+        specs: 指标定义集合。
+
+    Returns:
+        含 key、label、group、unit、direction、description 的字典列表。
+    """
     return [
         {"key": spec.key, "label": spec.label, "group": spec.group, "unit": spec.unit,
          "direction": spec.direction, "description": spec.description}
@@ -252,6 +297,15 @@ def catalog() -> dict[str, Any]:
 
 
 def _dig(value: Any, path: tuple[str, ...]) -> Any:
+    """按路径逐层读取嵌套字典中的指标值。
+
+    Args:
+        value: 待读取的嵌套字典。
+        path: 字段路径。
+
+    Returns:
+        路径命中的值；任一层缺失时返回 None。
+    """
     current = value
     for key in path:
         if not isinstance(current, dict) or key not in current:
@@ -261,6 +315,14 @@ def _dig(value: Any, path: tuple[str, ...]) -> Any:
 
 
 def _number(value: Any) -> float | None:
+    """把指标值归一为 float；布尔与非数值返回 None。
+
+    Args:
+        value: 待归一的值。
+
+    Returns:
+        浮点数值或 None。
+    """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)

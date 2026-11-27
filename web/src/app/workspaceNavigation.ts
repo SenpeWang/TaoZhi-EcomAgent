@@ -11,6 +11,11 @@ interface WorkspacePageDefinition {
 
 const shieldIconPaths = ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z']
 
+/**
+ * 工作台页面定义表，键为页面名称，供导航、路由与权限判断共用。
+ * 每个页面的 group 为所属分组，description 为进入页面前的用途说明，
+ * iconPaths 为 SVG 路径，access 为访问所需的权限档位。
+ */
 const workspacePages = {
   工作概览: {
     group: '业务工作台',
@@ -118,9 +123,17 @@ const workspacePages = {
   },
 } satisfies Record<string, WorkspacePageDefinition>
 
+/**
+ * 工作台页面名称的联合类型，取值来自页面定义表的键。
+ */
 export type WorkspacePage = keyof typeof workspacePages
 export { workspacePages }
 
+/**
+ * 侧边导航分组。
+ * title 为分组标题；nested 表示渲染为可展开目录（测评中心）；
+ * items 为分组下当前身份可访问的页面及其图标与待办数量 badge。
+ */
 export interface NavigationGroup {
   title: string
   nested?: boolean

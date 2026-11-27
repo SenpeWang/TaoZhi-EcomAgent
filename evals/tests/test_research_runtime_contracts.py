@@ -14,6 +14,12 @@ from taozhi.domain.research import (
 
 
 def _scope(allowed, forbidden=()):
+    """构造研究范围对象。
+
+    Args:
+        allowed: 允许使用的工具。
+        forbidden: 禁止使用的工具。
+    """
     return ResearchScope(needs_sourcing=False, allowed_tools=tuple(allowed), forbidden_tools=tuple(forbidden))
 
 

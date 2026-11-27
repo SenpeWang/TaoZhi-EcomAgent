@@ -12,7 +12,18 @@ from taozhi.application.rag.execution import _build_question_result
 
 @pytest.fixture
 def knowledge_state(monkeypatch):
+    """构造核验降级场景的知识状态夹具，含三条合成证据与任务上下文。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+    """
     def document(identifier, quote):
+        """构造单条合成证据文档字典。
+
+        Args:
+            identifier: 证据标识。
+            quote: 证据原文。
+        """
         return {"document_id": identifier, "chunk_id": identifier, "version": 1, "page": 1,
                 "level": 1, "title": "合成售后政策", "quote": quote}
 
@@ -38,6 +49,16 @@ def knowledge_state(monkeypatch):
     ("failed", "model_unavailable", "模型服务恢复", 1),
 ])
 def test_unavailable_specialists_publish_only_relevant_excerpts(monkeypatch, knowledge_state, mode, issue, action, calls):
+    """验证模型不可用时只发布相关原文摘录，并按中断原因给出处理建议。
+
+    Args:
+        monkeypatch: pytest 提供的补丁夹具，用于替换属性或环境变量。
+        knowledge_state: 含三条合成证据与任务上下文的核验降级场景状态夹具。
+        mode: ``mode`` 参数化取值。
+        issue: ``issue`` 参数化取值。
+        action: ``action`` 参数化取值。
+        calls: ``calls`` 参数化取值。
+    """
     settings = specialists.taozhi_config.get_settings().model_copy(update={"api_key": "" if mode == "unconfigured" else "fixture"})
     config = replace(specialists.taozhi_config.load_config(), max_model_calls=1)
     monkeypatch.setattr(specialists.taozhi_config, "get_settings", lambda: settings)
@@ -74,6 +95,15 @@ def test_unavailable_specialists_publish_only_relevant_excerpts(monkeypatch, kno
     ("A1 线下门店保修多久？", False, False, "insufficient_evidence"),
 ])
 def test_unrelated_or_reviewed_candidates_remain_uncited(knowledge_state, question, blocked, issue, basis):
+    """验证无关候选或已复核证据不被引用，结论退回资料不足或公开参考。
+
+    Args:
+        knowledge_state: 含三条合成证据与任务上下文的核验降级场景状态夹具。
+        question: ``question`` 参数化取值。
+        blocked: ``blocked`` 参数化取值。
+        issue: ``issue`` 参数化取值。
+        basis: ``basis`` 参数化取值。
+    """
     state = knowledge_state
     state.update(question=question, external_blocked=blocked, findings=[], missing=[])
     if issue:
@@ -85,6 +115,11 @@ def test_unrelated_or_reviewed_candidates_remain_uncited(knowledge_state, questi
 
 
 def test_distinct_policy_rows_cannot_combine_into_a_manual_reference(knowledge_state):
+    """验证不同政策条款不能拼接成人工参考结论。
+
+    Args:
+        knowledge_state: 含三条合成证据与任务上下文的核验降级场景状态夹具。
+    """
     state = knowledge_state
     state.update(verification_issue="model_unavailable", findings=[], missing=[])
     state["evidence"][2]["quote"] = "A1 线下门店提供清洁服务。\nB2 线下门店保修三个月。"
@@ -93,6 +128,11 @@ def test_distinct_policy_rows_cannot_combine_into_a_manual_reference(knowledge_s
 
 
 def test_partial_specialist_failure_preserves_verified_findings(knowledge_state):
+    """验证部分专家失败时保留已核验发现并只引用对应原文。
+
+    Args:
+        knowledge_state: 含三条合成证据与任务上下文的核验降级场景状态夹具。
+    """
     state = knowledge_state
     quote = state["evidence"][2]["quote"]
     state.update(verification_issue="model_unavailable", missing=["另一个专业核验模型暂时不可用。"],

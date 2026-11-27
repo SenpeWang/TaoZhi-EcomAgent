@@ -8,6 +8,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """新增评测数据集登记表，并为批次补充通过率、时延、token 与判定明细列。"""
     op.execute("""
         CREATE TABLE IF NOT EXISTS eval_datasets (
          dataset_id text PRIMARY KEY,
@@ -36,6 +37,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """删除批次新增指标列、数据集索引与 eval_datasets 表。"""
     op.execute("DROP INDEX IF EXISTS idx_eval_runs_dataset")
     op.execute("""
         ALTER TABLE eval_runs

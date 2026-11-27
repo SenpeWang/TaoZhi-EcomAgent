@@ -77,6 +77,15 @@ def test_decision_uses_model_client_for_structured_choice(monkeypatch):
     from taozhi.ai.client import LLMClient, ModelTier
 
     def chat(_client, context, *, system, tier, max_tokens):
+        """伪造模型对话函数，校验上下文含商品信息、系统提示与快速档位。
+
+        Args:
+            _client: 被忽略的模型客户端。
+            context: 对话上下文文本。
+            system: 系统提示词。
+            tier: 模型档位。
+            max_tokens: 最大生成 token 数。
+        """
         assert "钢化膜" in context
         assert "product" in system
         assert tier is ModelTier.FAST

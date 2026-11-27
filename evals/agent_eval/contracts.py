@@ -44,6 +44,15 @@ CASE_FIELDS = {
 
 
 def _strings(values: object, field: str) -> set[str]:
+    """把配置中的字符串数组规整为非空、无重复的集合。
+
+    Args:
+        values: 待校验的原始数组。
+        field: 字段名，用于错误信息。
+
+    Returns:
+        去重后的字符串集合。
+    """
     if not isinstance(values, list) or any(not isinstance(s, str) or not s.strip() for s in values):
         raise ValueError(f"{field} 需要非空字符串组成的数组")
     if len(set(values)) != len(values):
@@ -78,6 +87,11 @@ def expectation_notes(case: dict) -> list[str]:
 
 
 def _validate_tools(case: dict) -> None:
+    """校验用例声明的必需/允许/禁止工具均已注册且依赖不成环。
+
+    Args:
+        case: 单条用例定义。
+    """
     registered = set(ALL_RESEARCH_TOOLS)
     required = _strings(case.get("required_tools", []), "required_tools")
     allowed = _strings(case.get("allowed_tools", list(ALL_RESEARCH_TOOLS)), "allowed_tools")
@@ -143,6 +157,11 @@ def _validate_tools(case: dict) -> None:
 
 
 def _validate_reference(case: dict) -> None:
+    """校验参考事实与禁止结论表达式的结构合法。
+
+    Args:
+        case: 单条用例定义。
+    """
     ids = set()
     facts = case.get("reference_facts", [])
     if not isinstance(facts, list):

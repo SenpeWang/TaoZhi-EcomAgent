@@ -15,6 +15,13 @@ from taozhi.domain.knowledge_answer import resolve_evidence_gap
     ("SKU 的定义是什么？", "货号", "help.shopify.com"),
 ])
 def test_standalone_definition_has_attributable_public_source(question, fact, publisher):
+    """验证独立概念问题返回可归属的公开来源与联网说明。
+
+    Args:
+        question: ``question`` 参数化取值。
+        fact: ``fact`` 参数化取值。
+        publisher: ``publisher`` 参数化取值。
+    """
     result = resolve_evidence_gap(question, allow_public_reference=True)
     assert result["answer_basis"] == "public_reference"
     assert fact in result["answer"] and "未实时联网" in result["guidance"]
@@ -38,6 +45,12 @@ def test_standalone_definition_has_attributable_public_source(question, fact, pu
     ("SKU 是什么协议？", "商品负责人"),
 ])
 def test_concrete_mixed_or_unknown_request_gets_evidence_guidance(question, required_detail):
+    """验证混入本店细节或未知事实的问题退回资料不足并给出所需凭证。
+
+    Args:
+        question: ``question`` 参数化取值。
+        required_detail: ``required_detail`` 参数化取值。
+    """
     result = resolve_evidence_gap(question, allow_public_reference=True)
     assert result["answer_basis"] == "insufficient_evidence"
     assert "没有足够的授权资料" in result["answer"] and required_detail in result["guidance"]
@@ -45,5 +58,6 @@ def test_concrete_mixed_or_unknown_request_gets_evidence_guidance(question, requ
 
 
 def test_internal_only_policy_takes_precedence_over_a_matching_definition():
+    """验证仅限内部资料时，即使存在公开定义也不引用外部来源。"""
     result = resolve_evidence_gap("什么是 USB PD？", allow_public_reference=False)
     assert result["answer_basis"] == "insufficient_evidence" and not result["public_sources"]

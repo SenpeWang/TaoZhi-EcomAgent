@@ -12,6 +12,7 @@ from evals.agent_eval.cases import AGENT_BENCHMARK_CASES
 
 
 def test_forbidden_dispatch_and_missing_source_are_reported_independently():
+    """验证禁用工具派发与必需来源缺失分别独立报告。"""
     result = AgentRunResult(
         report="概况 供应链 建议", system_status="COMPLETED",
         tool_calls=[{"tool_name": "search_amazon", "dispatched": True, "data_count": 5}],
@@ -21,6 +22,7 @@ def test_forbidden_dispatch_and_missing_source_are_reported_independently():
 
 
 def test_deliverable_judge():
+    """验证交付物判定按必需章节与最小字符数区分合格与不合格。"""
     judge = DeliverableJudge(required_sections=["市场", "供应链", "建议"], min_chars=50)
 
     good_report = "# 市场全景调研\n## 1. 市场概况\n需求旺盛...\n## 2. 供应链出厂价\n底价8元...\n## 3. 操盘建议\n打造差异化差异点。"
@@ -41,6 +43,7 @@ def test_deliverable_judge():
 
 
 def test_anti_hallucination_judge():
+    """验证反幻觉判定拦截虚假思考文案而放行干净报告。"""
     judge = AntiHallucinationJudge()
 
     fake_res = AgentRunResult(
@@ -58,6 +61,7 @@ def test_anti_hallucination_judge():
 
 
 def test_steering_judge():
+    """验证干预判定要求报告中体现用户追加的关键词。"""
     judge = SteeringJudge(steering_keyword="义乌")
 
     res_steered = AgentRunResult(
@@ -76,6 +80,7 @@ def test_steering_judge():
 
 
 def test_error_recovery_case():
+    """验证错误恢复用例声明必需工具且能通过恢复判定。"""
     err_case = next(c for c in AGENT_BENCHMARK_CASES if c["id"] == "AGENT-ERR-005")
     assert err_case["category"] == "error_recovery"
     assert "search_web" in err_case["required_tools"]

@@ -18,11 +18,17 @@ _last_warning = float("-inf")
 
 @dataclass
 class _Flush:
+    """后台批写栅栏：等待此前入队记录提交完成。"""
     done: threading.Event = field(default_factory=threading.Event)
     success: bool = False
 
 
 def _warn(reason: str) -> None:
+    """按 30 秒节流输出链路上报告警。
+
+    Args:
+        reason: 告警原因。
+    """
     global _last_warning
     now = time.monotonic()
     if now - _last_warning >= 30:
@@ -31,6 +37,14 @@ def _warn(reason: str) -> None:
 
 
 def _write(batch: list[dict]) -> bool:
+    """批量写入 span 记录，失败时重试一次。
+
+    Args:
+        batch: 待写入的 span 记录列表。
+
+    Returns:
+        True 表示写入成功。
+    """
     if not batch:
         return True
     for attempt in range(2):
@@ -48,6 +62,7 @@ def _write(batch: list[dict]) -> bool:
 
 
 def _consume() -> None:
+    """后台线程持续消费队列并批量写入，栅栏用于优雅关闭。"""
     success = True
     while True:
         entries = [_QUEUE.get()]

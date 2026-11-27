@@ -56,6 +56,11 @@ def _setup() -> None:
 
 
 def _login(username: str) -> TestClient:
+    """以指定账号登录并返回带会话的测试客户端。
+
+    Args:
+        username: 登录用户名。
+    """
     client = TestClient(app)
     response = client.post("/api/auth/login", json={"username": username, "password": "123456"})
     assert response.status_code == 200, response.text
@@ -64,6 +69,11 @@ def _login(username: str) -> TestClient:
 
 
 def _owner(username: str) -> dict:
+    """查询指定账号的用户与租户标识。
+
+    Args:
+        username: 登录用户名。
+    """
     with database_connection() as conn:
         return fetch_all(conn, "SELECT id, tenant_id FROM users WHERE username=%s", (username,))[0]
 
@@ -402,6 +412,12 @@ def test_rag_case_detail_accepts_colon_case_ids() -> None:
         "judges": [],
     }
     def case_row(case_id: str, corpus: str) -> dict:
+        """构造评测用例明细行。
+
+        Args:
+            case_id: 用例标识。
+            corpus: 用例依赖的语料数据。
+        """
         return {
             "case_id": case_id,
             "case_sha256": "f" * 64,

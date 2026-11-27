@@ -73,14 +73,40 @@ def fingerprint(value: object) -> str:
 
 
 def _rate(numerator: int, denominator: int) -> float | None:
+    """计算比率并保留四位小数，分母为零时返回 None。
+
+    Args:
+        numerator: 分子。
+        denominator: 分母。
+
+    Returns:
+        比率或 None。
+    """
     return round(numerator / denominator, 4) if denominator else None
 
 
 def _ratio(numerator: int, denominator: int) -> dict:
+    """构造分子、分母与比率的指标三元组。
+
+    Args:
+        numerator: 分子。
+        denominator: 分母。
+
+    Returns:
+        比率指标字典。
+    """
     return {"numerator": numerator, "denominator": denominator, "rate": _rate(numerator, denominator)}
 
 
 def _public_verdict(verdict: JudgeVerdict) -> dict:
+    """把判定结果投影为可对外展示的字典。
+
+    Args:
+        verdict: 单条判定结果。
+
+    Returns:
+        展示用判定字典。
+    """
     issues = []
     for issue in verdict.details.get("issues", ()):
         failure = issue.get("failure_type")
