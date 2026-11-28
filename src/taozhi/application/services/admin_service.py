@@ -1,6 +1,7 @@
 """账号、组织架构、审批工作流、系统状态与审计应用服务。"""
 from __future__ import annotations
 from taozhi.domain.roles import is_system_admin
+from taozhi import __version__ as APP_VERSION
 
 import json
 import logging
@@ -414,7 +415,7 @@ def get_health_status() -> dict[str, str]:
     with database_connection() as c:
         admin_repo.find_tenant_by_code(c, load_config().tenant_code)
         job_repo.count_running_workers(c)
-    return dict(status="ok", version="3.0", message="服务正常")
+    return dict(status="ok", version=APP_VERSION, message="服务正常")
 
 
 def list_audit_events_for_principal(p: Principal) -> list[dict[str, Any]]:
